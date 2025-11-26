@@ -32,7 +32,7 @@ import { formatCurrency } from '@/utils/formatters';
 import { useAutoSync } from '@/hooks/useAutoSync';
 import { buyerService, Purchase, PurchaseListResponse, StoreAvailabilityResponse } from '../services/buyerService';
 import PurchaseDetailsModal from '../components/PurchaseDetailsModal';
-import VendorSelectionModal from '../components/VendorSelectionModal';
+import MaterialVendorSelectionModal from '../components/MaterialVendorSelectionModal';
 import VendorEmailModal from '../components/VendorEmailModal';
 const PurchaseOrders: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'ongoing' | 'pending_approval' | 'completed'>('ongoing');
@@ -71,6 +71,45 @@ const PurchaseOrders: React.FC = () => {
     // ❌ REMOVED: refetchInterval - No more polling!
   });
 
+<<<<<<< HEAD
+  // Helper function to group sub-CRs under their parent CRs
+  const groupPurchasesWithSubCRs = (purchases: Purchase[]): Purchase[] => {
+    // Separate parent CRs and sub-CRs
+    const parentCRs = purchases.filter(p => !p.is_sub_cr);
+    const subCRs = purchases.filter(p => p.is_sub_cr);
+
+    // Create a map of parent_cr_id to sub-CRs
+    const subCRsByParent = new Map<number, Purchase[]>();
+    subCRs.forEach(subCR => {
+      if (subCR.parent_cr_id) {
+        const existing = subCRsByParent.get(subCR.parent_cr_id) || [];
+        existing.push(subCR);
+        subCRsByParent.set(subCR.parent_cr_id, existing);
+      }
+    });
+
+    // Attach sub-CRs to their parents and sort by suffix
+    const result = parentCRs.map(parent => ({
+      ...parent,
+      sub_crs: (subCRsByParent.get(parent.cr_id) || []).sort((a, b) => {
+        const suffixA = a.cr_number_suffix || '';
+        const suffixB = b.cr_number_suffix || '';
+        return suffixA.localeCompare(suffixB);
+      })
+    }));
+
+    // Also include orphan sub-CRs (whose parent is not in current list)
+    const orphanSubCRs = subCRs.filter(subCR =>
+      !subCR.parent_cr_id || !parentCRs.some(p => p.cr_id === subCR.parent_cr_id)
+    );
+
+    return [...result, ...orphanSubCRs];
+  };
+
+  // Raw purchases (not grouped) - for Pending Approval tab where sub-CRs show as separate cards
+  const rawPendingPurchases: Purchase[] = useMemo(() => {
+    return (pendingData?.pending_purchases || []).map(p => ({ ...p, status: 'pending' as const }));
+=======
   // Use the separated arrays from backend response
   const ongoingPurchases: Purchase[] = useMemo(() => {
     return (pendingData?.ongoing_purchases || []).map(p => ({ ...p, status: 'pending' as const }));
@@ -78,14 +117,37 @@ const PurchaseOrders: React.FC = () => {
 
   const pendingApprovalPurchases: Purchase[] = useMemo(() => {
     return (pendingData?.pending_approval_purchases || []).map(p => ({ ...p, status: 'pending' as const }));
+>>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
   }, [pendingData]);
 
+  // Grouped purchases (sub-CRs nested under parent) - for Ongoing tab
+  const pendingPurchases: Purchase[] = useMemo(() => {
+    return groupPurchasesWithSubCRs(rawPendingPurchases);
+  }, [rawPendingPurchases]);
+
   const completedPurchases: Purchase[] = useMemo(() => {
-    return (completedData?.completed_purchases || []).map(p => ({ ...p, status: 'completed' as const }));
+    const raw = (completedData?.completed_purchases || []).map(p => ({ ...p, status: 'completed' as const }));
+    return groupPurchasesWithSubCRs(raw);
   }, [completedData]);
 
   // Separate ongoing purchases by vendor approval status
   const pendingPurchaseItems = useMemo(() => {
+<<<<<<< HEAD
+    // No vendor selected yet - only show parent CRs (not sub-CRs, they go to Pending Approval)
+    return pendingPurchases.filter(p => !p.is_sub_cr && (!p.vendor_id || p.vendor_selection_pending_td_approval));
+  }, [pendingPurchases]);
+
+  const vendorApprovedItems = useMemo(() => {
+    // Vendor selected and approved by TD (no longer pending approval) - include both parent and sub-CRs
+    return rawPendingPurchases.filter(p => p.vendor_id && !p.vendor_selection_pending_td_approval);
+  }, [rawPendingPurchases]);
+
+  // Pending Approval tab: Show sub-CRs as SEPARATE cards (not grouped under parent)
+  const pendingApprovalPurchases = useMemo(() => {
+    // Filter from RAW data (not grouped) to show sub-CRs as individual cards
+    return rawPendingPurchases.filter(p => p.vendor_selection_pending_td_approval);
+  }, [rawPendingPurchases]);
+=======
     // No vendor selected yet
     return ongoingPurchases.filter(p => !p.vendor_id);
   }, [ongoingPurchases]);
@@ -94,6 +156,7 @@ const PurchaseOrders: React.FC = () => {
     // Vendor selected and approved by TD
     return ongoingPurchases.filter(p => p.vendor_id);
   }, [ongoingPurchases]);
+>>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
 
   // Determine which purchases to show based on active tab and sub-tab
   const currentPurchases = useMemo(() => {
@@ -447,9 +510,11 @@ const PurchaseOrders: React.FC = () => {
                           ? 'bg-green-100 text-green-800'
                           : purchase.vendor_selection_pending_td_approval
                             ? 'bg-amber-100 text-amber-800'
-                            : 'bg-red-100 text-red-800'
+                            : purchase.is_sub_cr
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-red-100 text-red-800'
                       } text-xs whitespace-nowrap`}>
-                        PO: CR-{purchase.cr_id}
+                        PO: {purchase.formatted_cr_id || `CR-${purchase.cr_id}`}
                       </Badge>
                     </div>
                     <div className="space-y-1 text-xs text-gray-600">
@@ -473,6 +538,22 @@ const PurchaseOrders: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* Vendor Info Banner - Show for sub-CRs or items with vendor pending approval */}
+                  {purchase.vendor_selection_pending_td_approval && purchase.vendor_name && (
+                    <div className="px-4 py-2 bg-amber-50 border-b border-amber-200">
+                      <div className="flex items-center gap-2">
+                        <Store className="w-4 h-4 text-amber-600" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs text-amber-600 font-medium">Selected Vendor</div>
+                          <div className="text-sm font-bold text-amber-900 truncate">{purchase.vendor_name}</div>
+                        </div>
+                        <Badge className="bg-amber-100 text-amber-800 text-[10px]">
+                          Awaiting TD
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Card Body */}
                   <div className="p-4 flex-1 flex flex-col">
@@ -668,6 +749,40 @@ const PurchaseOrders: React.FC = () => {
                       )}
                     </div>
                   </div>
+
+                  {/* Sub-CRs Display - Compact summary of sent vendor orders */}
+                  {purchase.sub_crs && purchase.sub_crs.length > 0 && (
+                    <div className="border-t border-gray-200 bg-gray-50/50 px-3 py-2">
+                      <div className="text-[10px] font-semibold text-gray-500 mb-1.5 flex items-center gap-1">
+                        <Package className="w-3 h-3" />
+                        Sent to TD ({purchase.sub_crs.length})
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {purchase.sub_crs.map((subCR) => (
+                          <div
+                            key={subCR.cr_id}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${
+                              subCR.vendor_selection_status === 'approved'
+                                ? 'bg-green-50 border-green-200 text-green-800'
+                                : subCR.vendor_selection_status === 'pending_td_approval'
+                                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                                  : 'bg-gray-50 border-gray-200 text-gray-600'
+                            }`}
+                            title={`${subCR.vendor_name || 'No vendor'} - ${subCR.materials_count} items`}
+                          >
+                            <span className="font-semibold">{subCR.cr_number_suffix}</span>
+                            <span className="truncate max-w-[80px]">{subCR.vendor_name || 'N/A'}</span>
+                            {subCR.vendor_selection_status === 'approved' && (
+                              <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />
+                            )}
+                            {subCR.vendor_selection_status === 'pending_td_approval' && (
+                              <Clock className="w-3 h-3 text-amber-600 flex-shrink-0" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </motion.div>
               ))}
             </div>
@@ -708,9 +823,11 @@ const PurchaseOrders: React.FC = () => {
                               ? 'bg-green-100 text-green-800'
                               : purchase.vendor_selection_pending_td_approval
                                 ? 'bg-amber-100 text-amber-800'
-                                : 'bg-red-100 text-red-800'
+                                : purchase.is_sub_cr
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-red-100 text-red-800'
                           } text-xs`}>
-                            #{purchase.cr_id}
+                            {purchase.formatted_cr_id || `CR-${purchase.cr_id}`}
                           </Badge>
                         </td>
                         <td className="px-3 py-3">
@@ -888,9 +1005,9 @@ const PurchaseOrders: React.FC = () => {
         />
       )}
 
-      {/* Vendor Selection Modal */}
+      {/* Material-Specific Vendor Selection Modal */}
       {selectedPurchase && (
-        <VendorSelectionModal
+        <MaterialVendorSelectionModal
           purchase={selectedPurchase}
           isOpen={isVendorSelectionModalOpen}
           onClose={() => {

@@ -2,6 +2,7 @@ from flask import Blueprint, g, jsonify
 from controllers.vendor_controller import (
     create_vendor,
     get_all_vendors,
+    get_all_vendors_with_products,
     get_vendor_by_id,
     update_vendor,
     delete_vendor,
@@ -54,6 +55,16 @@ def get_all_vendors_route():
     if access_check:
         return access_check
     return get_all_vendors()
+
+
+@vendor_routes.route('/all-with-products', methods=['GET'])
+@jwt_required
+def get_all_vendors_with_products_route():
+    """Get all vendors with their products in one call - optimized (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return get_all_vendors_with_products()
 
 
 @vendor_routes.route('/<int:vendor_id>', methods=['GET'])

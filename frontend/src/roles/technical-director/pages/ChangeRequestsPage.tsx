@@ -40,7 +40,7 @@ import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsM
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
-import VendorSelectionModal from '@/roles/buyer/components/VendorSelectionModal';
+import MaterialVendorSelectionModal from '@/roles/buyer/components/MaterialVendorSelectionModal';
 import { useAuthStore } from '@/store/authStore';
 import { permissions } from '@/utils/rolePermissions';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
@@ -129,23 +129,32 @@ const ChangeRequestsPage: React.FC = () => {
         console.log('📊 Total change requests:', response.data.length);
 
         // Filter for change requests with vendor selection pending TD approval
+        // Include both regular CRs (status='assigned_to_buyer') and sub-CRs (status='pending_td_approval', is_sub_cr=true)
         const pendingVendorApprovals = response.data.filter(
           (cr: ChangeRequestItem) => {
+<<<<<<< HEAD
             const status = cr.status?.trim(); // Trim to handle trailing spaces
-            const hasStatus = status === 'assigned_to_buyer' || status === 'send_to_buyer';
+            const isRegularCRPending = cr.status === 'assigned_to_buyer' && cr.vendor_selection_status === 'pending_td_approval';
+            const isSubCRPending = cr.is_sub_cr && cr.status === 'pending_td_approval' && vendor_selection_status === 'pending_td_approval';
+=======
+            const status = cr.status?.trim(); // Trim to handle trailing spaces
+            const hasStatus = status === 'assigned_to_buyer' || status === 'send_to_buyer' || status === 'send_to_buyer';
             const hasVendorPending = cr.vendor_selection_status === 'pending_td_approval';
+>>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
 
             console.log(`CR-${cr.cr_id}:`, {
               status: cr.status,
               trimmedStatus: status,
               vendor_selection_status: cr.vendor_selection_status,
               selected_vendor_name: cr.selected_vendor_name,
-              hasStatus,
-              hasVendorPending,
-              matches: hasStatus && hasVendorPending
+              is_sub_cr: cr.is_sub_cr,
+              formatted_cr_id: cr.formatted_cr_id,
+              isRegularCRPending,
+              isSubCRPending,
+              matches: isRegularCRPending || isSubCRPending
             });
 
-            return hasStatus && hasVendorPending;
+            return isRegularCRPending || isSubCRPending;
           }
         );
 
@@ -154,6 +163,10 @@ const ChangeRequestsPage: React.FC = () => {
         // Map to Purchase format for compatibility
         const mappedApprovals: Purchase[] = pendingVendorApprovals.map((cr: ChangeRequestItem) => ({
           cr_id: cr.cr_id,
+          formatted_cr_id: cr.formatted_cr_id || `CR-${cr.cr_id}`,  // Include formatted CR ID for sub-CRs
+          is_sub_cr: cr.is_sub_cr || false,
+          parent_cr_id: cr.parent_cr_id,
+          cr_number_suffix: cr.cr_number_suffix,
           project_id: cr.project_id,
           project_name: cr.project_name || cr.boq_name || 'Unknown Project',
           client: cr.project_client || '',
@@ -165,6 +178,7 @@ const ChangeRequestsPage: React.FC = () => {
           created_at: cr.created_at,
           status: cr.status,
           vendor_selection_pending_td_approval: true,
+          vendor_selection_status: cr.vendor_selection_status,
           // Map materials_data to materials array format expected by VendorSelectionModal
           materials: (cr.materials_data || []).map(mat => ({
             material_name: mat.material_name || '',
@@ -727,7 +741,13 @@ const ChangeRequestsPage: React.FC = () => {
                               </button>
                               <button
                                 onClick={() => handleEdit(request.cr_id)}
-                                className="bg-blue-600 hover:bg-blue-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
+                                disabled={request.status === 'pending_td_approval' || request.vendor_selection_status === 'pending_td_approval' || request.is_sub_cr}
+                                className={`text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold ${
+                                  request.status === 'pending_td_approval' || request.vendor_selection_status === 'pending_td_approval' || request.is_sub_cr
+                                    ? 'bg-gray-400 cursor-not-allowed'
+                                    : 'bg-blue-600 hover:bg-blue-700'
+                                }`}
+                                title={request.status === 'pending_td_approval' || request.vendor_selection_status === 'pending_td_approval' ? 'Cannot edit - Sent for approval' : 'Edit request'}
                               >
                                 <Pencil className="h-3 w-3" />
                                 <span>Edit</span>
@@ -781,8 +801,12 @@ const ChangeRequestsPage: React.FC = () => {
                         <div className="p-2">
                           <div className="flex items-start justify-between mb-1">
                             <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{purchase.project_name}</h3>
-                            <Badge className="bg-orange-100 text-orange-800 text-[9px] px-1 py-0">
-                              CR #{purchase.cr_id}
+                            <Badge className={`text-[9px] px-1 py-0 ${
+                              purchase.is_sub_cr
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-orange-100 text-orange-800'
+                            }`}>
+                              {purchase.formatted_cr_id || `CR-${purchase.cr_id}`}
                             </Badge>
                           </div>
 
@@ -1154,7 +1178,7 @@ const ChangeRequestsPage: React.FC = () => {
                       </div>
                       <div>
                         <h3 className="text-2xl font-bold text-gray-900">Vendor Details</h3>
-                        <p className="text-sm text-gray-600 mt-0.5">CR #{selectedVendorPurchase.cr_id} - {selectedVendorPurchase.project_name}</p>
+                        <p className="text-sm text-gray-600 mt-0.5">{selectedVendorPurchase.formatted_cr_id || `CR-${selectedVendorPurchase.cr_id}`} - {selectedVendorPurchase.project_name}</p>
                       </div>
                     </div>
                   </div>
@@ -1375,9 +1399,9 @@ const ChangeRequestsPage: React.FC = () => {
         </>
       )}
 
-      {/* Vendor Selection Modal - For changing vendor */}
+      {/* Material Vendor Selection Modal - For changing vendor per material */}
       {selectedVendorPurchase && (
-        <VendorSelectionModal
+        <MaterialVendorSelectionModal
           purchase={selectedVendorPurchase}
           isOpen={showVendorSelectionModal}
           onClose={() => setShowVendorSelectionModal(false)}

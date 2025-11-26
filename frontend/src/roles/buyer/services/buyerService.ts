@@ -2,6 +2,25 @@ import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
+export interface MaterialVendorSelection {
+  vendor_id: number;
+  vendor_name: string;
+  vendor_email?: string;
+  vendor_phone?: string;
+  vendor_phone_code?: string;
+  vendor_contact_person?: string;
+  selected_by_user_id: number;
+  selected_by_name: string;
+  selection_date: string;
+  selection_status: 'pending_td_approval' | 'approved' | 'rejected';
+  approved_by_td_id?: number | null;
+  approved_by_td_name?: string | null;
+  approval_date?: string | null;
+  rejection_reason?: string | null;
+  negotiated_price?: number | null;
+  save_price_for_future?: boolean;
+}
+
 export interface PurchaseMaterial {
   material_name: string;
   sub_item_name?: string;  // Sub-item/scope name like "Protection"
@@ -12,8 +31,34 @@ export interface PurchaseMaterial {
   master_material_id?: number | null;  // Null for NEW materials, number for existing BOQ materials
 }
 
+// Sub-CR type for tracking which materials have been sent to TD
+export interface SubCR {
+  cr_id: number;
+  formatted_cr_id: string;  // "CR-100.1", "CR-100.2", etc.
+  cr_number_suffix?: string | null;  // ".1", ".2", etc.
+  vendor_id?: number | null;
+  vendor_name?: string | null;
+  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
+  status?: string;
+  // Materials included in this sub-CR (used to determine which materials are locked)
+  materials?: Array<{
+    material_name: string;
+    quantity?: number;
+    unit?: string;
+    unit_price?: number;
+    total_price?: number;
+  }>;
+  // Optional - used when displaying sub-CRs in UI (from frontend grouping)
+  materials_count?: number;
+}
+
 export interface Purchase {
   cr_id: number;
+  formatted_cr_id?: string;  // "CR-100" or "CR-100.1" for sub-CRs
+  is_sub_cr?: boolean;  // True if this is a sub-CR (child)
+  parent_cr_id?: number | null;  // Parent CR ID for sub-CRs
+  cr_number_suffix?: string | null;  // ".1", ".2", etc.
+  submission_group_id?: string | null;  // UUID grouping related sub-CRs
   project_id: number;
   project_name: string;
   project_code?: string;
@@ -41,7 +86,10 @@ export interface Purchase {
   vendor_phone?: string | null;
   vendor_contact_person?: string | null;
   vendor_selection_pending_td_approval?: boolean;
+  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
   vendor_email_sent?: boolean;
+  use_per_material_vendors?: boolean;
+  material_vendor_selections?: Record<string, MaterialVendorSelection>;
   has_store_requests?: boolean;
   store_request_count?: number;
   all_store_requests_approved?: boolean;
@@ -58,6 +106,9 @@ export interface Purchase {
     balance_type: 'positive' | 'negative';
     balance_amount: number;
   };
+  // For hierarchical display - sub-CRs attached to parent with their materials
+  // Can be either SubCR (from backend API with materials tracking) or Purchase (from frontend grouping)
+  sub_crs?: (SubCR | Purchase)[];
 }
 
 export interface SelectVendorRequest {
@@ -256,7 +307,7 @@ class BuyerService {
     }
   }
 
-  // Select vendor for purchase (requires TD approval)
+  // Select vendor for purchase (requires TD approval) - Legacy: single vendor for all materials
   // Note: Backend endpoint needs to be implemented at /api/buyer/purchase/{cr_id}/select-vendor
   async selectVendor(data: SelectVendorRequest): Promise<SelectVendorResponse> {
     try {
@@ -279,6 +330,31 @@ class BuyerService {
         throw new Error('Backend endpoint not implemented yet. Please contact the development team.');
       }
       throw new Error(error.response?.data?.error || 'This feature requires backend implementation. Please contact support.');
+    }
+  }
+
+  // Select vendor for specific material(s) in purchase (NEW - per-material vendor selection)
+  async selectVendorForMaterial(
+    cr_id: number,
+    materialSelections: Array<{ material_name: string; vendor_id: number }>
+  ): Promise<SelectVendorResponse> {
+    try {
+      const response = await axios.post<SelectVendorResponse>(
+        `${API_URL}/buyer/purchase/${cr_id}/select-vendor-for-material`,
+        { material_selections: materialSelections },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to select vendor for material');
+    } catch (error: any) {
+      console.error('Error selecting vendor for material:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to select vendor for material');
     }
   }
 
@@ -565,6 +641,157 @@ class BuyerService {
         throw new Error(error.response?.data?.error || 'Some materials are not available in store');
       }
       throw new Error(error.response?.data?.error || 'Failed to complete from store');
+    }
+  }
+
+  // Get optimized vendor selection data (78% smaller payload)
+  async getVendorSelectionData(crId: number): Promise<{
+    success: boolean;
+    cr_id: number;
+    boq_id: number;
+    project_id: number;
+    status: string;
+    project_name: string | null;
+    boq_name: string | null;
+    item_name: string | null;
+    item_id: string | null;
+    materials: PurchaseMaterial[];
+    materials_count: number;
+    total_cost: number;
+    vendor: {
+      selected_vendor_id: number | null;
+      selected_vendor_name: string | null;
+      vendor_selection_status: string | null;
+      vendor_selected_by_buyer_id: number | null;
+      vendor_selected_by_buyer_name: string | null;
+      vendor_selection_date: string | null;
+      vendor_approved_by_td_id: number | null;
+      vendor_approved_by_td_name: string | null;
+      vendor_approval_date: string | null;
+      vendor_rejection_reason: string | null;
+      use_per_material_vendors: boolean;
+      material_vendor_selections: Record<string, MaterialVendorSelection>;
+    };
+    overhead_warning: {
+      original_allocated: number;
+      consumed_before_request: number;
+      remaining_after_approval: number;
+      percentage_consumed: number;
+      is_critical: boolean;
+      is_warning: boolean;
+    } | null;
+    created_at: string;
+  }> {
+    try {
+      const response = await axios.get(
+        `${API_URL}/buyer/purchase/${crId}/vendor-selection`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error('Failed to fetch vendor selection data');
+    } catch (error: any) {
+      console.error('Error fetching vendor selection data:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to fetch vendor selection data');
+    }
+  }
+
+  // Update vendor product price (for immediate price negotiation)
+  async updateVendorPrice(
+    vendorId: number,
+    materialName: string,
+    newPrice: number,
+    saveForFuture: boolean,
+    crId?: number
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await axios.post(
+        `${API_URL}/buyer/vendor/${vendorId}/update-price`,
+        {
+          material_name: materialName,
+          new_price: newPrice,
+          save_for_future: saveForFuture,
+          cr_id: crId  // Include cr_id to save negotiated price to the purchase
+        },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to update vendor price');
+    } catch (error: any) {
+      console.error('Error updating vendor price:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Vendor or product not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to update vendor price');
+    }
+  }
+
+  // Create separate sub-CRs for each vendor group
+  async createSubCRs(
+    crId: number,
+    vendorGroups: Array<{
+      vendor_id: number;
+      vendor_name: string;
+      materials: Array<{
+        material_name: string;
+        quantity: number;
+        unit: string;
+        negotiated_price?: number | null;
+        save_price_for_future?: boolean;
+      }>;
+    }>,
+    submissionGroupId: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    parent_cr_id: number;
+    submission_group_id: string;
+    sub_crs: Array<{
+      cr_id: number;
+      formatted_cr_id: string;
+      vendor_id: number;
+      vendor_name: string;
+      materials_count: number;
+      total_cost: number;
+    }>;
+  }> {
+    try {
+      const response = await axios.post(
+        `${API_URL}/buyer/purchase/${crId}/create-sub-crs`,
+        {
+          vendor_groups: vendorGroups,
+          submission_group_id: submissionGroupId
+        },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to create sub-CRs');
+    } catch (error: any) {
+      console.error('Error creating sub-CRs:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to create separate purchase orders');
     }
   }
 }

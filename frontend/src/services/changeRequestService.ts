@@ -126,6 +126,14 @@ export interface ChangeRequestItem {
   assigned_to_buyer_name?: string | null;
   assigned_to_buyer_date?: string | null;
   project_client?: string | null;
+  project_location?: string | null;
+
+  // Sub-CR Support (for separate vendor submissions)
+  is_sub_cr?: boolean;
+  parent_cr_id?: number | null;
+  cr_number_suffix?: string | null;  // ".1", ".2", etc.
+  submission_group_id?: string | null;
+  formatted_cr_id?: string;  // "CR-100" or "CR-100.1"
 }
 
 export interface CreateChangeRequestData {

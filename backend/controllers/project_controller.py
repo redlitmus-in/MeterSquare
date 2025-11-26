@@ -652,10 +652,10 @@ def get_assigned_projects():
                         print(f"Item {item_id} ({item.get('item_name', '')}): Found {len(approved_crs)} approved CRs")
 
                         for cr in approved_crs:
-                            # Sum up the overhead consumed from each approved change request
-                            cr_overhead = cr.overhead_consumed if cr.overhead_consumed else 0.0
-                            consumed_overhead += cr_overhead
-                            print(f"  CR#{cr.cr_id}: overhead={cr_overhead}, total={consumed_overhead}")
+                            # Sum up materials cost from each approved change request
+                            cr_cost = cr.materials_total_cost if cr.materials_total_cost else 0.0
+                            consumed_overhead += cr_cost
+                            print(f"  CR#{cr.cr_id}: cost={cr_cost}, total={consumed_overhead}")
                     # Calculate available overhead
                     available_overhead = item_overhead - consumed_overhead
 

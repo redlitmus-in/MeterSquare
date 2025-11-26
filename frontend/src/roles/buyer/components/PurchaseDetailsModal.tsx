@@ -49,11 +49,82 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
   const [isSelectingVendor, setIsSelectingVendor] = useState(false);
   const [loadingVendors, setLoadingVendors] = useState(false);
 
+  // Edit mode state
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editedMaterials, setEditedMaterials] = useState(purchase.materials);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Local purchase state to hold updated data
+  const [localPurchase, setLocalPurchase] = useState<Purchase>(purchase);
+
+  // Reset edited materials and local purchase when purchase changes or modal opens
+  useEffect(() => {
+    setLocalPurchase(purchase);
+    setEditedMaterials(purchase.materials);
+    setIsEditMode(false);
+  }, [purchase.cr_id, isOpen, purchase]);
+
   useEffect(() => {
     if (isOpen && purchase.status === 'pending') {
       loadVendors();
     }
   }, [isOpen, purchase.status]);
+
+  // Calculate total cost from edited materials
+  const calculateTotalCost = (materials: any[]) => {
+    return materials.reduce((sum, mat) => sum + (mat.total_price || 0), 0);
+  };
+
+  // Handle material field changes
+  const handleMaterialChange = (index: number, field: string, value: any) => {
+    const updated = [...editedMaterials];
+    updated[index] = { ...updated[index], [field]: value };
+
+    // Auto-calculate total_price when quantity or unit_price changes
+    if (field === 'quantity' || field === 'unit_price') {
+      const quantity = field === 'quantity' ? parseFloat(value) || 0 : updated[index].quantity;
+      const unitPrice = field === 'unit_price' ? parseFloat(value) || 0 : updated[index].unit_price;
+      updated[index].total_price = quantity * unitPrice;
+    }
+
+    setEditedMaterials(updated);
+  };
+
+  // Save edited purchase
+  const handleSavePurchase = async () => {
+    try {
+      setIsSaving(true);
+      const totalCost = calculateTotalCost(editedMaterials);
+
+      await buyerService.updatePurchaseOrder({
+        cr_id: purchase.cr_id,
+        materials: editedMaterials,
+        total_cost: totalCost
+      });
+
+      // Update local purchase state immediately to reflect changes
+      setLocalPurchase({
+        ...localPurchase,
+        materials: editedMaterials,
+        total_cost: totalCost
+      });
+
+      toast.success('Purchase amounts updated successfully!');
+      setIsEditMode(false);
+      onVendorSelected?.(); // Refresh the purchase list
+    } catch (error: any) {
+      console.error('Error saving purchase:', error);
+      toast.error(error.message || 'Failed to update purchase amounts');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Cancel edit mode
+  const handleCancelEdit = () => {
+    setEditedMaterials(localPurchase.materials);
+    setIsEditMode(false);
+  };
 
   const loadVendors = async () => {
     try {
@@ -190,7 +261,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <div>
                         <div className="text-sm text-gray-600">Total Cost</div>
                         <div className="text-2xl font-bold text-green-600">
-                          {formatCurrency(purchase.total_cost)}
+                          {formatCurrency(isEditMode ? calculateTotalCost(editedMaterials) : localPurchase.total_cost)}
                         </div>
                       </div>
                     </div>
@@ -297,6 +368,36 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <Package className="w-5 h-5" />
                       Materials Breakdown
                     </h3>
+                    {/* Edit button - only show for pending purchases that are NOT sent to TD for approval */}
+                    {purchase.status === 'pending' && !isEditMode && !purchase.vendor_selection_pending_td_approval && !purchase.is_sub_cr && (
+                      <Button
+                        onClick={() => setIsEditMode(true)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        <Edit className="w-4 h-4 mr-2" />
+                        Edit Amounts
+                      </Button>
+                    )}
+                    {/* Save/Cancel buttons when in edit mode */}
+                    {isEditMode && (
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={handleCancelEdit}
+                          variant="outline"
+                          disabled={isSaving}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={handleSavePurchase}
+                          disabled={isSaving}
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          <Save className="w-4 h-4 mr-2" />
+                          {isSaving ? 'Saving...' : 'Save Changes'}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   <div className="border rounded-xl overflow-hidden">
                     <Table>
@@ -313,11 +414,9 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {purchase.materials.map((material, idx) => {
+                        {(isEditMode ? editedMaterials : localPurchase.materials).map((material, idx) => {
                           // Check if material is NEW (only show badge for truly new materials, not BOQ materials)
-                          // Don't show NEW badge if master_material_id is just missing from backend response
-                          const isNewMaterial = (material.master_material_id === null || material.master_material_id === undefined) &&
-                                                 material.is_new === true;
+                          const isNewMaterial = material.master_material_id === null || material.master_material_id === undefined;
                           return (
                           <TableRow key={idx} className="hover:bg-gray-50">
                             <TableCell className="font-medium text-sm">
@@ -337,11 +436,35 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                                 </span>
                               )}
                             </TableCell>
-                            <TableCell className="text-sm">{material.brand || '-'}</TableCell>
-                            <TableCell className="text-sm">{material.specification || '-'}</TableCell>
-                            <TableCell className="text-sm">{material.quantity}</TableCell>
+                            <TableCell className="text-sm">{(material as any).brand || '-'}</TableCell>
+                            <TableCell className="text-sm">{(material as any).specification || '-'}</TableCell>
+                            <TableCell className="text-sm">
+                              {isEditMode ? (
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={material.quantity}
+                                  onChange={(e) => handleMaterialChange(idx, 'quantity', e.target.value)}
+                                  className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                              ) : (
+                                material.quantity
+                              )}
+                            </TableCell>
                             <TableCell className="text-sm">{material.unit}</TableCell>
-                            <TableCell className="text-sm">{formatCurrency(material.unit_price)}</TableCell>
+                            <TableCell className="text-sm">
+                              {isEditMode ? (
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={material.unit_price}
+                                  onChange={(e) => handleMaterialChange(idx, 'unit_price', e.target.value)}
+                                  className="w-24 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                              ) : (
+                                formatCurrency(material.unit_price)
+                              )}
+                            </TableCell>
                             <TableCell className="text-right font-bold text-green-600 text-sm">
                               {formatCurrency(material.total_price)}
                             </TableCell>
@@ -351,7 +474,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         <TableRow className="bg-blue-50 font-bold">
                           <TableCell colSpan={7} className="text-right text-sm">Total Cost:</TableCell>
                           <TableCell className="text-right text-green-700 text-base">
-                            {formatCurrency(purchase.total_cost)}
+                            {formatCurrency(isEditMode ? calculateTotalCost(editedMaterials) : localPurchase.total_cost)}
                           </TableCell>
                         </TableRow>
                       </TableBody>
@@ -360,7 +483,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                 </div>
 
                 {/* Negotiable Price Summary - Show if has new materials */}
-                {purchase.materials.some(mat => mat.master_material_id === null || mat.master_material_id === undefined) && purchase.overhead_analysis && (
+                {localPurchase.materials.some(mat => mat.master_material_id === null || mat.master_material_id === undefined) && localPurchase.overhead_analysis && (
                   <div className="mt-6 p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border border-purple-200">
                     <h3 className="text-base font-bold text-purple-900 mb-3 flex items-center gap-2">
                       <DollarSign className="w-5 h-5" />
@@ -370,25 +493,25 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <div>
                         <span className="text-purple-700 text-xs font-medium">Original Allocated:</span>
                         <p className="font-bold text-purple-900 mt-1">
-                          {formatCurrency(purchase.overhead_analysis.original_allocated || 0)}
+                          {formatCurrency(localPurchase.overhead_analysis.original_allocated || 0)}
                         </p>
                       </div>
                       <div>
                         <span className="text-purple-700 text-xs font-medium">Already Consumed:</span>
                         <p className="font-bold text-orange-600 mt-1">
-                          {formatCurrency(purchase.overhead_analysis.consumed_before_request || 0)}
+                          {formatCurrency(localPurchase.overhead_analysis.consumed_before_request || 0)}
                         </p>
                       </div>
                       <div>
                         <span className="text-purple-700 text-xs font-medium">This Purchase:</span>
                         <p className="font-bold text-blue-600 mt-1">
-                          {formatCurrency(purchase.total_cost || 0)}
+                          {formatCurrency(localPurchase.total_cost || 0)}
                         </p>
                       </div>
                       <div>
                         <span className="text-purple-700 text-xs font-medium">Remaining After:</span>
-                        <p className={`font-bold mt-1 ${purchase.overhead_analysis.remaining_after_approval < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                          {formatCurrency(purchase.overhead_analysis.remaining_after_approval || 0)}
+                        <p className={`font-bold mt-1 ${localPurchase.overhead_analysis.remaining_after_approval < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          {formatCurrency(localPurchase.overhead_analysis.remaining_after_approval || 0)}
                         </p>
                       </div>
                     </div>
@@ -396,18 +519,18 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-purple-700 font-medium">Total Negotiable Price Consumption:</span>
                         <span className={`text-lg font-bold ${
-                          ((purchase.overhead_analysis.consumed_before_request + purchase.total_cost) / purchase.overhead_analysis.original_allocated * 100) > 40
+                          ((localPurchase.overhead_analysis.consumed_before_request + localPurchase.total_cost) / localPurchase.overhead_analysis.original_allocated * 100) > 40
                             ? 'text-red-600'
                             : 'text-green-600'
                         }`}>
-                          {purchase.overhead_analysis.original_allocated > 0
-                            ? (((purchase.overhead_analysis.consumed_before_request + purchase.total_cost) / purchase.overhead_analysis.original_allocated) * 100).toFixed(1)
+                          {localPurchase.overhead_analysis.original_allocated > 0
+                            ? (((localPurchase.overhead_analysis.consumed_before_request + localPurchase.total_cost) / localPurchase.overhead_analysis.original_allocated) * 100).toFixed(1)
                             : '0.0'
                           }%
                         </span>
                       </div>
-                      {purchase.overhead_analysis.original_allocated > 0 &&
-                       ((purchase.overhead_analysis.consumed_before_request + purchase.total_cost) / purchase.overhead_analysis.original_allocated * 100) > 40 && (
+                      {localPurchase.overhead_analysis.original_allocated > 0 &&
+                       ((localPurchase.overhead_analysis.consumed_before_request + localPurchase.total_cost) / localPurchase.overhead_analysis.original_allocated * 100) > 40 && (
                         <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
                           <AlertCircle className="w-4 h-4" />
                           <span>Exceeds 40% threshold - TD approval was required</span>

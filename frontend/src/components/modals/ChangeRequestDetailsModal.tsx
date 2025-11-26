@@ -60,15 +60,20 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
   const getStatusLabel = (status: string) => {
     if (!status) return 'UNKNOWN';
-    const labels = {
+    const labels: Record<string, string> = {
       pending: 'PENDING',
       under_review: 'UNDER REVIEW',
       approved_by_pm: 'APPROVED BY PM',
       approved_by_td: 'APPROVED BY TD',
       approved: 'APPROVED & MERGED',
-      rejected: 'REJECTED'
+      rejected: 'REJECTED',
+      assigned_to_buyer: 'ASSIGNED TO BUYER',
+      purchase_completed: 'PURCHASE COMPLETED',
+      pending_td_approval: 'PENDING TD APPROVAL',
+      vendor_approved: 'VENDOR APPROVED',
+      split_to_sub_crs: 'SPLIT TO SUB-CRs'
     };
-    return labels[status as keyof typeof labels] || status.toUpperCase();
+    return labels[status] || status.toUpperCase().replace(/_/g, ' ');
   };
 
   // Handler for updating unit price
@@ -100,7 +105,14 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const userIsBuyer = user?.role?.toLowerCase() === 'buyer' || user?.role_name?.toLowerCase() === 'buyer';
 
   // Final statuses where no actions should be allowed
+<<<<<<< HEAD
+  const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'purchase_completed', 'approved', 'rejected', 'pending_td_approval', 'vendor_approved'].includes(changeRequest.status);
+
+  // Check if vendor selection is pending TD approval (no edits allowed)
+  const isVendorPendingApproval = changeRequest.vendor_selection_status === 'pending_td_approval';
+=======
   const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'purchase_completed', 'approved', 'rejected'].includes(changeRequest.status);
+>>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
 
   // Estimator/TD can approve if request needs their approval
   const canApproveReject = canApproveFromParent !== undefined
@@ -110,9 +122,12 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       !isFinalStatus;
 
   // Determine if estimator can edit prices (estimator viewing under_review status)
+  // DISABLED once sent to TD for vendor approval
   const canEditPrices = userIsEstimator &&
                         changeRequest.status === 'under_review' &&
-                        changeRequest.approval_required_from === 'estimator';
+                        changeRequest.approval_required_from === 'estimator' &&
+                        !isVendorPendingApproval &&
+                        !isFinalStatus;
 
   // Check if there are any new materials (determines if pricing columns should be shown)
   const hasNewMaterials = materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined);
@@ -319,6 +334,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <>
                             <th className="px-1.5 py-1.5 text-right text-[11px] font-semibold text-gray-600 w-[14%]">Unit Price</th>
                             <th className="px-1.5 py-1.5 text-right text-[11px] font-semibold text-gray-600 w-[14%]">Total</th>
+                            <th className="px-1.5 py-1.5 text-right text-[11px] font-semibold text-gray-600 w-[14%]">Cost Change</th>
                           </>
                         )}
                       </tr>
@@ -386,20 +402,93 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                               <td className="px-1.5 py-1.5 text-[11px] font-semibold text-gray-900 text-right whitespace-nowrap">
                                 {formatCurrency(material.total_price || (material.quantity * material.unit_price) || 0)}
                               </td>
+                              <td className="px-1.5 py-1.5 text-[11px] text-right whitespace-nowrap">
+                                {material.cost_difference !== undefined && material.cost_difference !== 0 ? (
+                                  <div className="flex flex-col items-end">
+                                    <span className={`font-semibold ${material.cost_difference > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                      {material.cost_difference > 0 ? '+' : ''}{formatCurrency(material.cost_difference)}
+                                    </span>
+                                    {material.is_extra_cost && (
+                                      <span className="text-[9px] px-1 py-0.5 bg-red-100 text-red-700 rounded font-medium">
+                                        EXTRA
+                                      </span>
+                                    )}
+                                    {material.original_total_price !== undefined && (
+                                      <span className="text-[9px] text-gray-500">
+                                        was {formatCurrency(material.original_total_price)}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </td>
                             </>
                           )}
                         </tr>
                         );
                       })}
                       {shouldShowPricing && (
-                        <tr className="bg-purple-50 font-bold">
-                          <td colSpan={6} className="px-1.5 py-1.5 text-[11px] text-purple-900 text-right">
-                            Total Cost:
-                          </td>
-                          <td className="px-1.5 py-1.5 text-xs font-bold text-purple-900 text-right whitespace-nowrap">
-                            {formatCurrency(totalMaterialsCost)}
-                          </td>
-                        </tr>
+                        <>
+                          <tr className="bg-purple-50 font-bold">
+                            <td colSpan={7} className="px-1.5 py-1.5 text-[11px] text-purple-900 text-right">
+                              Total Cost:
+                            </td>
+                            <td className="px-1.5 py-1.5 text-xs font-bold text-purple-900 text-right whitespace-nowrap">
+                              {formatCurrency(totalMaterialsCost)}
+                            </td>
+                            <td className="px-1.5 py-1.5 text-[11px] text-right whitespace-nowrap">
+                              {(() => {
+                                const totalCostDiff = materialsData.reduce((sum: number, mat: any) =>
+                                  sum + (mat.cost_difference || 0), 0
+                                );
+                                if (totalCostDiff !== 0) {
+                                  return (
+                                    <span className={`font-bold ${totalCostDiff > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                      {totalCostDiff > 0 ? '+' : ''}{formatCurrency(totalCostDiff)}
+                                    </span>
+                                  );
+                                }
+                                return null;
+                              })()}
+                            </td>
+                          </tr>
+                          {/* Show original vs new cost comparison if there are changes */}
+                          {materialsData.some((mat: any) => mat.cost_difference !== undefined && mat.cost_difference !== 0) && (
+                            <tr className="bg-amber-50">
+                              <td colSpan={9} className="px-1.5 py-2">
+                                <div className="flex items-center justify-end gap-4 text-[11px]">
+                                  <span className="text-gray-600">
+                                    Original: <span className="font-semibold text-gray-800">
+                                      {formatCurrency(materialsData.reduce((sum: number, mat: any) =>
+                                        sum + (mat.original_total_price || mat.total_price || 0), 0
+                                      ))}
+                                    </span>
+                                  </span>
+                                  <span className="text-gray-400">→</span>
+                                  <span className="text-gray-600">
+                                    Current: <span className="font-semibold text-gray-800">
+                                      {formatCurrency(totalMaterialsCost)}
+                                    </span>
+                                  </span>
+                                  {(() => {
+                                    const totalIncrease = materialsData.reduce((sum: number, mat: any) =>
+                                      sum + (mat.cost_difference > 0 ? mat.cost_difference : 0), 0
+                                    );
+                                    if (totalIncrease > 0) {
+                                      return (
+                                        <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded font-semibold">
+                                          Extra Cost: +{formatCurrency(totalIncrease)}
+                                        </span>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
                       )}
                     </tbody>
                   </table>

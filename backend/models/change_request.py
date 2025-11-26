@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 class ChangeRequest(db.Model):
     """
     Change Request Model for tracking extra materials/items requested by PM/SE
-    Includes overhead budget tracking and approval workflow
+    Includes approval workflow for material procurement
     """
     __tablename__ = "change_requests"
 
@@ -30,11 +30,6 @@ class ChangeRequest(db.Model):
     item_name = db.Column(db.String(255), nullable=True)  # e.g., "Concrete Work"
     sub_item_id = db.Column(db.Integer, nullable=True)  # Primary sub-item ID for easier querying
 
-    # Item Overhead Tracking (snapshot at request time)
-    item_overhead_allocated = db.Column(db.Float, default=0.0)  # Total overhead for this item
-    item_overhead_consumed_before = db.Column(db.Float, default=0.0)  # Already consumed
-    item_overhead_available = db.Column(db.Float, default=0.0)  # Available before this request
-
     # Sub-Items requested (stored as JSONB array)
     sub_items_data = db.Column(JSONB, nullable=False)
     """
@@ -56,34 +51,11 @@ class ChangeRequest(db.Model):
     has_new_sub_items = db.Column(db.Boolean, default=False)  # Flag if adding new sub-items
     new_sub_item_reason = db.Column(db.Text, nullable=True)  # Overall reason for new sub-items
 
-    # Percentage Calculation (for routing logic)
-    percentage_of_item_overhead = db.Column(db.Float, default=0.0)  # % of item overhead consumed
-
     # Legacy field for backward compatibility (renamed from materials_data)
     materials_data = db.Column(JSONB, nullable=True)  # Keep for old records
 
     # Financial tracking - Request impact
     materials_total_cost = db.Column(db.Float, default=0.0)  # Sum of all materials
-    overhead_consumed = db.Column(db.Float, default=0.0)  # Overhead used by these materials
-    overhead_balance_impact = db.Column(db.Float, default=0.0)  # Impact on overhead (negative means exceeds)
-    profit_impact = db.Column(db.Float, default=0.0)  # Impact on profit margin
-
-    # Original BOQ financials (snapshot at request time)
-    original_overhead_allocated = db.Column(db.Float, default=0.0)  # Total overhead from original BOQ
-    original_overhead_used = db.Column(db.Float, default=0.0)  # Overhead already consumed
-    original_overhead_remaining = db.Column(db.Float, default=0.0)  # Available overhead before this request
-    original_overhead_percentage = db.Column(db.Float, default=0.0)  # Overhead % from BOQ
-    original_profit_percentage = db.Column(db.Float, default=0.0)  # Profit % from BOQ
-
-    # New totals after this request (if approved)
-    new_overhead_remaining = db.Column(db.Float, default=0.0)  # Can be negative if over budget
-    new_base_cost = db.Column(db.Float, default=0.0)  # Original + new materials
-    new_total_cost = db.Column(db.Float, default=0.0)  # New BOQ total if approved
-    is_over_budget = db.Column(db.Boolean, default=False)  # True if overhead_balance_impact is negative
-
-    # Cost comparison
-    cost_increase_amount = db.Column(db.Float, default=0.0)  # How much BOQ increases
-    cost_increase_percentage = db.Column(db.Float, default=0.0)  # Percentage increase
 
     # Approval workflow - Multi-stage
     approval_required_from = db.Column(db.String(50), nullable=True)  # Current stage: 'project_manager', 'estimator', 'technical_director'
@@ -144,6 +116,16 @@ class ChangeRequest(db.Model):
     notification_sent = db.Column(db.Boolean, default=False)
     notification_sent_at = db.Column(db.DateTime, nullable=True)
 
+    # Per-Material Vendor Selection
+    material_vendor_selections = db.Column(JSONB, nullable=True, default=dict)
+    use_per_material_vendors = db.Column(db.Boolean, default=False)
+
+    # Parent-Child CR Relationship (for separate vendor submissions)
+    parent_cr_id = db.Column(db.Integer, db.ForeignKey('change_requests.cr_id'), nullable=True)
+    cr_number_suffix = db.Column(db.String(10), nullable=True)  # ".1", ".2", ".3", etc.
+    is_sub_cr = db.Column(db.Boolean, default=False)  # True if this is a sub-CR
+    submission_group_id = db.Column(db.String(50), nullable=True)  # UUID to group related sub-CRs
+
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
@@ -153,6 +135,18 @@ class ChangeRequest(db.Model):
     boq = db.relationship("BOQ", backref=db.backref("change_requests", lazy=True))
     project = db.relationship("Project", backref=db.backref("change_requests", lazy=True))
     vendor = db.relationship("Vendor", backref=db.backref("change_requests", lazy=True))
+
+    # Self-referential relationship for parent-child CRs
+    parent_cr = db.relationship("ChangeRequest", remote_side=[cr_id], backref="sub_crs", foreign_keys=[parent_cr_id])
+
+    def get_formatted_cr_id(self):
+        """
+        Get formatted CR ID with suffix for display
+        Returns: "CR-123" for parent, "CR-123.1" for sub-CRs
+        """
+        if self.is_sub_cr and self.cr_number_suffix:
+            return f"CR-{self.parent_cr_id}{self.cr_number_suffix}"
+        return f"CR-{self.cr_id}"
 
     def calculate_recommended_routing(self):
         """
@@ -207,43 +201,14 @@ class ChangeRequest(db.Model):
             'item_name': self.item_name,
             'sub_item_id': self.sub_item_id,
 
-            # Item Overhead
-            'item_overhead': {
-                'allocated': round(self.item_overhead_allocated, 2) if self.item_overhead_allocated else 0,
-                'consumed_before': round(self.item_overhead_consumed_before, 2) if self.item_overhead_consumed_before else 0,
-                'available': round(self.item_overhead_available, 2) if self.item_overhead_available else 0
-            },
-
             # Sub-Items
             'sub_items_data': self.sub_items_data,
             'has_new_sub_items': self.has_new_sub_items,
             'new_sub_item_reason': self.new_sub_item_reason,
-            'percentage_of_item_overhead': round(self.percentage_of_item_overhead, 2) if self.percentage_of_item_overhead else 0,
 
             # Legacy Materials (backward compatibility)
             'materials_data': self.materials_data,
             'materials_total_cost': round(self.materials_total_cost, 2) if self.materials_total_cost else 0,
-
-            # Overhead analysis
-            'overhead_analysis': {
-                'original_allocated': round(self.original_overhead_allocated, 2) if self.original_overhead_allocated else 0,
-                'overhead_percentage': round(self.original_overhead_percentage, 2) if self.original_overhead_percentage else 0,
-                'consumed_before_request': round(self.original_overhead_used, 2) if self.original_overhead_used else 0,
-                'available_before_request': round(self.original_overhead_remaining, 2) if self.original_overhead_remaining else 0,
-                'consumed_by_this_request': round(self.overhead_consumed, 2) if self.overhead_consumed else 0,
-                'remaining_after_approval': round(self.new_overhead_remaining, 2) if self.new_overhead_remaining else 0,
-                'is_within_budget': not self.is_over_budget,
-                'balance_type': 'negative' if self.is_over_budget else 'positive',
-                'balance_amount': abs(round(self.new_overhead_remaining, 2)) if self.new_overhead_remaining else 0
-            },
-
-            # Budget impact
-            'budget_impact': {
-                'original_total': round(self.new_base_cost, 2) if self.new_base_cost else 0,
-                'new_total_if_approved': round(self.new_total_cost, 2) if self.new_total_cost else 0,
-                'increase_amount': round(self.cost_increase_amount, 2) if self.cost_increase_amount else 0,
-                'increase_percentage': round(self.cost_increase_percentage, 2) if self.cost_increase_percentage else 0
-            },
 
             # Approval - Multi-stage
             'approval_required_from': self.approval_required_from,
@@ -280,7 +245,7 @@ class ChangeRequest(db.Model):
             # File uploads
             'file_path': self.file_path,
 
-            # Vendor Selection
+            # Vendor Selection (Legacy - single vendor for all materials)
             'selected_vendor_id': self.selected_vendor_id,
             'selected_vendor_name': self.selected_vendor_name,
             'vendor_selected_by_buyer_id': self.vendor_selected_by_buyer_id,
@@ -291,6 +256,17 @@ class ChangeRequest(db.Model):
             'vendor_approved_by_td_name': self.vendor_approved_by_td_name,
             'vendor_approval_date': self.vendor_approval_date.isoformat() if self.vendor_approval_date else None,
             'vendor_rejection_reason': self.vendor_rejection_reason,
+
+            # Per-Material Vendor Selection (New)
+            'use_per_material_vendors': self.use_per_material_vendors,
+            'material_vendor_selections': self.material_vendor_selections if self.material_vendor_selections else {},
+
+            # Sub-CR Support (for separate vendor submissions)
+            'parent_cr_id': self.parent_cr_id,
+            'cr_number_suffix': self.cr_number_suffix,
+            'is_sub_cr': self.is_sub_cr,
+            'submission_group_id': self.submission_group_id,
+            'formatted_cr_id': self.get_formatted_cr_id(),  # "CR-123" or "CR-123.1"
 
             # Rejection
             'rejection_reason': self.rejection_reason,

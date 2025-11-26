@@ -151,6 +151,9 @@ def create_change_request():
                     if not specification:
                         specification = boq_mat.get('specification')
 
+            # Determine if this is a new material (doesn't exist in BOQ masters)
+            is_new_material = master_material_id is None
+
             materials_data.append({
                 'material_name': mat.get('material_name'),
                 'quantity': quantity,
@@ -158,10 +161,17 @@ def create_change_request():
                 'unit_price': unit_price,
                 'total_price': total_price,
                 'master_material_id': master_material_id,  # Optional
+                'is_new_material': is_new_material,  # True only if material doesn't exist in system
+                'is_extra_cost': False,  # Will be True if PM increases the amount later
+                'original_quantity': quantity,  # Store original for comparison
+                'original_unit_price': unit_price,  # Store original for comparison
+                'original_total_price': total_price,  # Store original for comparison
+                'cost_difference': 0.0,  # Difference from original (positive = increased)
                 'justification': mat.get('justification', ''),  # Per-material justification
                 'reason': mat.get('reason', ''),  # Reason for new material (used in routing logic)
                 'brand': brand,  # Brand for materials (from request or BOQ)
-                'specification': specification,  # Specification for materials (from request or BOQ)
+                'specification': specification,,  # Specification for materials (from request or BOQ)
+                'size': mat.get('size')  # Size for materials
                 'size': mat.get('size')  # Size for materials
             })
 
@@ -214,16 +224,25 @@ def create_change_request():
                         if not specification:
                             specification = boq_mat.get('specification')
 
+                quantity = float(mat.get('quantity', 0))
+                unit_price = float(mat.get('unit_price', 0))
+                total_price = quantity * unit_price
+
                 sub_items_data.append({
                     'sub_item_id': mat.get('sub_item_id'),  # Sub-item ID (INTEGER from boq_sub_items table)
                     'sub_item_name': mat.get('sub_item_name'),  # Sub-item name (e.g., "Protection")
                     'material_name': mat.get('material_name'),  # Material name (e.g., "Bubble Wrap")
-                    'quantity': mat.get('quantity'),
+                    'quantity': quantity,
                     'unit': mat.get('unit', 'nos'),
-                    'unit_price': mat.get('unit_price'),
-                    'total_price': mat.get('quantity', 0) * mat.get('unit_price', 0),
+                    'unit_price': unit_price,
+                    'total_price': total_price,
                     'master_material_id': master_material_id,  # Include material ID from BOQ
-                    'is_new': mat.get('master_material_id') is None,
+                    'is_new_material': mat.get('master_material_id') is None,  # True only if material doesn't exist in system
+                    'is_extra_cost': False,  # Will be True if PM increases the amount
+                    'original_quantity': quantity,  # Store original for comparison
+                    'original_unit_price': unit_price,  # Store original for comparison
+                    'original_total_price': total_price,  # Store original for comparison
+                    'cost_difference': 0.0,  # Difference from original (positive = increased)
                     'reason': mat.get('reason'),
                     'brand': brand,  # Brand for materials (from request or BOQ)
                     'specification': specification,  # Specification for materials (from request or BOQ)
@@ -1169,7 +1188,10 @@ def get_all_change_requests():
             # 1. Requests pending buyer review (status='under_review' AND approval_required_from='buyer')
             # 2. Requests assigned to buyer (status='assigned_to_buyer')
             # 3. Requests buyer has completed (status='purchase_complete')
+            # 4. Sub-CRs pending TD approval (vendor_selection_status='pending_td_approval')
+            # 5. Sub-CRs that are vendor approved (vendor_selection_status='approved')
             from sqlalchemy import or_, and_
+            log.info(f"🔍 BUYER FILTER: user_id={user_id}, applying sub-CR filter with vendor_selection_status.in_(['pending_td_approval', 'approved'])")
             query = query.filter(
                 or_(
                     and_(
@@ -1177,7 +1199,12 @@ def get_all_change_requests():
                         ChangeRequest.approval_required_from == 'buyer'
                     ),
                     ChangeRequest.status == CR_CONFIG.STATUS_ASSIGNED_TO_BUYER,
-                    ChangeRequest.status == CR_CONFIG.STATUS_PURCHASE_COMPLETE
+                    ChangeRequest.status == CR_CONFIG.STATUS_PURCHASE_COMPLETE,
+                    and_(
+                        ChangeRequest.is_sub_cr == True,
+                        ChangeRequest.assigned_to_buyer_user_id == user_id,
+                        ChangeRequest.vendor_selection_status.in_(['pending_td_approval', 'approved'])
+                    )
                 )
             )
         elif user_role == 'admin':
@@ -1190,33 +1217,16 @@ def get_all_change_requests():
         # Execute query
         change_requests = query.order_by(ChangeRequest.created_at.desc()).all()
 
-        # ✅ PERFORMANCE FIX: Calculate ALL overhead consumed values in ONE query
-        # Instead of querying in loop (N queries), we calculate all at once (1 query)
-        # For each CR, we need SUM of overhead_consumed from earlier CRs in the same BOQ
-        if change_requests:
-            # Get all unique BOQ IDs
-            boq_ids = list(set(cr.boq_id for cr in change_requests if cr.boq_id))
+        # 🔍 DEBUG: Log what we're returning for buyer role
+        if user_role == 'buyer':
+            log.info(f"=== BUYER QUERY DEBUG ===")
+            log.info(f"Total CRs returned: {len(change_requests)}")
+            sub_crs = [cr for cr in change_requests if cr.is_sub_cr]
+            log.info(f"Sub-CRs in results: {len(sub_crs)}")
+            for cr in sub_crs:
+                log.info(f"  Sub-CR {cr.get_formatted_cr_id()}: status={cr.status}, vendor_selection_status={cr.vendor_selection_status}, assigned_to_buyer={cr.assigned_to_buyer_user_id}")
 
-            # Calculate consumed amounts for all BOQs in ONE query
-            # This replaces the N queries in the loop below
-            overhead_consumed_map = {}
-            if boq_ids:
-                from sqlalchemy import and_
-
-                # For each CR, calculate consumed amount from earlier approved CRs
-                for cr in change_requests:
-                    if cr.boq_id:
-                        # Query once per CR, but using pre-filtered data
-                        consumed = db.session.query(
-                            func.coalesce(func.sum(ChangeRequest.overhead_consumed), 0)
-                        ).filter(
-                            ChangeRequest.boq_id == cr.boq_id,
-                            ChangeRequest.is_deleted == False,
-                            ChangeRequest.created_at < cr.created_at,
-                            ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
-                        ).scalar() or 0
-
-                        overhead_consumed_map[(cr.boq_id, cr.cr_id)] = consumed
+        # Overhead tracking columns removed - negotiable margin calculated on-the-fly
 
         # Convert to dict with project and BOQ info
         result = []
@@ -1236,26 +1246,8 @@ def get_all_change_requests():
                 cr_dict['boq_name'] = cr.boq.boq_name
                 cr_dict['boq_status'] = cr.boq.status
 
-            # Get pre-calculated consumed amount (no query - looked up from map)
-            current_consumed = overhead_consumed_map.get((cr.boq_id, cr.cr_id), 0)
-
-            # Recalculate values based on current consumption
-            original_allocated = cr.original_overhead_allocated or 0
-            current_available = original_allocated - current_consumed
-            remaining_after = current_available - (cr.overhead_consumed or 0)
-
-            # Update overhead analysis with CURRENT values
-            cr_dict['overhead_analysis'] = {
-                'original_allocated': original_allocated,
-                'overhead_percentage': cr.original_overhead_percentage,
-                'consumed_before_request': current_consumed,
-                'available_before_request': current_available,
-                'consumed_by_this_request': cr.overhead_consumed,
-                'remaining_after_approval': remaining_after,
-                'is_within_budget': remaining_after >= 0,
-                'balance_type': 'negative' if remaining_after < 0 else 'positive',
-                'balance_amount': remaining_after
-            }
+            # Overhead analysis removed - columns dropped from database
+            # Negotiable margin is now calculated on-the-fly by negotiable_profit_calculator
 
             # Skip material lookup - master_material_id values like 'mat_198_1_2'
             # are not database IDs but sub_item identifiers
@@ -2449,13 +2441,7 @@ def get_boq_change_requests(boq_id):
                     enriched_sub_items.append(sub_item)
                 request_data['sub_items_data'] = enriched_sub_items
 
-            # Add budget impact
-            request_data['budget_impact'] = {
-                'original_total': cr.new_base_cost if cr.new_base_cost else 0,
-                'new_total_if_approved': cr.new_total_cost if cr.new_total_cost else 0,
-                'increase_amount': cr.cost_increase_amount if cr.cost_increase_amount else 0,
-                'increase_percentage': cr.cost_increase_percentage if cr.cost_increase_percentage else 0
-            }
+            # Budget impact removed - columns dropped from database
 
             requests_data.append(request_data)
 
@@ -2528,16 +2514,91 @@ def update_change_request(cr_id):
         if not materials or len(materials) == 0:
             return jsonify({"error": "At least one material is required"}), 400
 
-        # Calculate new materials total cost
+        # Build lookup of original amounts from existing sub_items_data
+        # Key by multiple identifiers to ensure we find matches
+        original_lookup = {}
+        existing_sub_items = change_request.sub_items_data or []
+        for orig_mat in existing_sub_items:
+            mat_name = orig_mat.get('material_name', '').lower().strip()
+            sub_item_id = orig_mat.get('sub_item_id')
+            master_material_id = orig_mat.get('master_material_id')
+
+            # Determine if this was originally a new material or existing
+            # Priority: is_new_material flag > is_new flag > check master_material_id
+            was_new_material = orig_mat.get('is_new_material')
+            if was_new_material is None:
+                was_new_material = orig_mat.get('is_new')
+            if was_new_material is None:
+                # Fallback: if it has a valid master_material_id, it's existing
+                was_new_material = master_material_id is None
+
+            original_data = {
+                'original_quantity': orig_mat.get('original_quantity', orig_mat.get('quantity', 0)),
+                'original_unit_price': orig_mat.get('original_unit_price', orig_mat.get('unit_price', 0)),
+                'original_total_price': orig_mat.get('original_total_price', orig_mat.get('total_price', 0)),
+                'is_new_material': was_new_material,  # Preserve original new/existing status
+                'master_material_id': master_material_id
+            }
+
+            # Store with multiple keys for better matching
+            if mat_name:
+                original_lookup[f"name:{mat_name}"] = original_data
+            if sub_item_id:
+                original_lookup[f"id:{sub_item_id}"] = original_data
+            if master_material_id:
+                original_lookup[f"mat_id:{master_material_id}"] = original_data
+
+        # Calculate new materials total cost with cost comparison
         materials_total_cost = 0.0
+        original_total_cost = 0.0
         materials_data = []
         sub_items_data = []
+        total_cost_increase = 0.0
 
         for mat in materials:
             quantity = float(mat.get('quantity', 0))
             unit_price = float(mat.get('unit_price', 0))
             total_price = quantity * unit_price
             materials_total_cost += total_price
+
+            # Find original values for this material using multiple lookup keys
+            mat_name = mat.get('material_name', '').lower().strip()
+            sub_item_id = mat.get('sub_item_id')
+            master_material_id = mat.get('master_material_id')
+
+            original_data = None
+            # Try multiple lookup keys in priority order
+            if master_material_id and f"mat_id:{master_material_id}" in original_lookup:
+                original_data = original_lookup[f"mat_id:{master_material_id}"]
+            elif mat_name and f"name:{mat_name}" in original_lookup:
+                original_data = original_lookup[f"name:{mat_name}"]
+            elif sub_item_id and f"id:{sub_item_id}" in original_lookup:
+                original_data = original_lookup[f"id:{sub_item_id}"]
+
+            # Get original values (if exists) or use current as original (new material)
+            if original_data:
+                # EXISTING material - preserve its original status
+                orig_quantity = float(original_data.get('original_quantity', 0))
+                orig_unit_price = float(original_data.get('original_unit_price', 0))
+                orig_total_price = float(original_data.get('original_total_price', 0))
+                # IMPORTANT: Preserve the original is_new_material status - DO NOT change it
+                is_new_material = original_data.get('is_new_material', False)
+            else:
+                # NEW material added during edit - current values ARE the originals
+                orig_quantity = quantity
+                orig_unit_price = unit_price
+                orig_total_price = total_price
+                # Only mark as new material if it doesn't have a master_material_id
+                is_new_material = master_material_id is None
+
+            original_total_cost += orig_total_price
+
+            # Calculate cost difference (positive = cost increased)
+            cost_difference = total_price - orig_total_price
+            is_extra_cost = cost_difference > 0  # Only mark as extra if cost INCREASED
+
+            if cost_difference > 0:
+                total_cost_increase += cost_difference
 
             materials_data.append({
                 'material_name': mat.get('material_name'),
@@ -2546,6 +2607,17 @@ def update_change_request(cr_id):
                 'unit_price': unit_price,
                 'total_price': total_price,
                 'master_material_id': mat.get('master_material_id'),
+<<<<<<< HEAD
+                'justification': mat.get('justification', ''),
+                'brand': mat.get('brand'),
+                'specification': mat.get('specification'),
+                # Cost tracking
+                'original_quantity': orig_quantity,
+                'original_unit_price': orig_unit_price,
+                'original_total_price': orig_total_price,
+                'cost_difference': round(cost_difference, 2),
+                'is_extra_cost': is_extra_cost
+=======
                 'justification': mat.get('justification', ''),  # Per-material justification
                 'brand': mat.get('brand'),  # Brand for new materials
                 'size': mat.get('size'),  # Size for materials
@@ -2553,13 +2625,27 @@ def update_change_request(cr_id):
             })
 
             sub_items_data.append({
-                'sub_item_id': mat.get('sub_item_id'),  # Sub-item ID
-                'sub_item_name': mat.get('sub_item_name'),  # Sub-item name (e.g., "Protection")
-                'material_name': mat.get('material_name'),  # Material name (e.g., "Bubble Wrap")
+                'sub_item_id': mat.get('sub_item_id'),
+                'sub_item_name': mat.get('sub_item_name'),
+                'material_name': mat.get('material_name'),
                 'quantity': quantity,
                 'unit': mat.get('unit', 'nos'),
                 'unit_price': unit_price,
                 'total_price': total_price,
+<<<<<<< HEAD
+                'master_material_id': mat.get('master_material_id'),
+                'is_new_material': is_new_material,  # True ONLY if material doesn't exist in system
+                'is_extra_cost': is_extra_cost,  # True ONLY if cost INCREASED from original
+                'original_quantity': orig_quantity,
+                'original_unit_price': orig_unit_price,
+                'original_total_price': orig_total_price,
+                'cost_difference': round(cost_difference, 2),
+                'reason': mat.get('reason'),
+                'justification': mat.get('justification', ''),
+                'brand': mat.get('brand'),
+                'specification': mat.get('specification'),
+                'size': mat.get('size')
+=======
                 'is_new': mat.get('master_material_id') is None,
                 'master_material_id': mat.get('master_material_id'),  # Master material ID for existing materials
                 'reason': mat.get('reason'),
@@ -2576,15 +2662,25 @@ def update_change_request(cr_id):
         change_request.materials_total_cost = materials_total_cost
         change_request.updated_at = datetime.utcnow()
 
+        # Cost tracking columns removed - calculated on-the-fly if needed
+
         db.session.commit()
 
-        log.info(f"Change request {cr_id} updated by user {user_id}")
+        log.info(f"Change request {cr_id} updated by user {user_id}. Original cost: {original_total_cost}, New cost: {materials_total_cost}, Increase: {total_cost_increase}")
 
         return jsonify({
             "success": True,
             "message": "Change request updated successfully",
             "cr_id": cr_id,
-            "materials_total_cost": round(materials_total_cost, 2)
+            "materials_total_cost": round(materials_total_cost, 2),
+            "original_total_cost": round(original_total_cost, 2),
+            "cost_increase": round(total_cost_increase, 2),
+            "cost_comparison": {
+                "original": round(original_total_cost, 2),
+                "new": round(materials_total_cost, 2),
+                "difference": round(materials_total_cost - original_total_cost, 2),
+                "has_increase": total_cost_increase > 0
+            }
         }), 200
 
     except SQLAlchemyError as e:

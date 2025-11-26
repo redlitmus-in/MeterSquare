@@ -150,6 +150,26 @@ def select_vendor_for_purchase_route(cr_id):
     return select_vendor_for_purchase(cr_id)
 
 
+@buyer_routes.route('/purchase/<int:cr_id>/select-vendor-for-material', methods=['POST'])
+@jwt_required
+def select_vendor_for_material_route(cr_id):
+    """Select vendor for specific material(s) in purchase (Buyer, TD, or Admin)"""
+    access_check = check_buyer_td_or_admin_access()
+    if access_check:
+        return access_check
+    return select_vendor_for_material(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/create-sub-crs', methods=['POST'])
+@jwt_required
+def create_sub_crs_route(cr_id):
+    """Create separate sub-CRs for each vendor group (Buyer, TD, or Admin)"""
+    access_check = check_buyer_td_or_admin_access()
+    if access_check:
+        return access_check
+    return create_sub_crs_for_vendor_groups(cr_id)
+
+
 @buyer_routes.route('/purchase/<int:cr_id>/update', methods=['PUT'])
 @jwt_required
 def update_purchase_order_route(cr_id):
@@ -375,4 +395,40 @@ def get_store_request_status_route(cr_id):
     if access_check:
         return access_check
     return get_store_request_status(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/vendor-selection', methods=['GET'])
+@jwt_required
+def get_vendor_selection_data_route(cr_id):
+    """Get optimized vendor selection data (Buyer, TD, or Admin) - 78% smaller payload"""
+    access_check = check_buyer_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_vendor_selection_data(cr_id)
+
+
+@buyer_routes.route('/vendor/<int:vendor_id>/update-price', methods=['POST'])
+@jwt_required
+def update_vendor_price_route(vendor_id):
+    """Update vendor product price for a material (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return update_vendor_price(vendor_id)
+
+
+@buyer_routes.route('/debug/cr/<int:cr_id>/material-selections', methods=['GET'])
+@jwt_required
+def debug_material_selections(cr_id):
+    """Debug endpoint to check material_vendor_selections"""
+    from models.change_request import ChangeRequest
+    cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+    if cr:
+        return jsonify({
+            "cr_id": cr.cr_id,
+            "material_vendor_selections": cr.material_vendor_selections,
+            "use_per_material_vendors": cr.use_per_material_vendors
+        }), 200
+    else:
+        return jsonify({"error": "CR not found"}), 404
 

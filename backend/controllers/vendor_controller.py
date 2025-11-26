@@ -171,6 +171,104 @@ def get_all_vendors():
         return jsonify({"success": False, "error": f"Failed to fetch vendors: {str(e)}"}), 500
 
 
+def get_all_vendors_with_products():
+    """Get all vendors with their products in a single request - optimized for frontend"""
+    try:
+        current_user = g.user
+
+        # Get query parameters
+        category = request.args.get('category')
+        status = request.args.get('status')
+        search = request.args.get('search')
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 100, type=int)
+        include_deleted = request.args.get('include_deleted', 'false').lower() == 'true'
+
+        # Build query
+        query = Vendor.query
+
+        # Filter by deletion status
+        if not include_deleted:
+            query = query.filter_by(is_deleted=False)
+
+        # Filter by category
+        if category:
+            query = query.filter_by(category=category)
+
+        # Filter by status
+        if status:
+            query = query.filter_by(status=status)
+
+        # Search functionality
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    Vendor.company_name.like(search_term),
+                    Vendor.contact_person_name.like(search_term),
+                    Vendor.email.like(search_term),
+                    Vendor.phone.like(search_term),
+                    Vendor.city.like(search_term)
+                )
+            )
+
+        # Order by most recent first
+        query = query.order_by(Vendor.created_at.desc())
+
+        # Paginate results
+        paginated_vendors = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        # Get all vendor IDs from this page
+        vendor_ids = [v.vendor_id for v in paginated_vendors.items]
+
+        # Fetch all products for these vendors in a single query
+        products_query = VendorProduct.query.filter(
+            VendorProduct.vendor_id.in_(vendor_ids),
+            VendorProduct.is_deleted == False
+        ).all()
+
+        # Group products by vendor_id
+        products_by_vendor = {}
+        for product in products_query:
+            if product.vendor_id not in products_by_vendor:
+                products_by_vendor[product.vendor_id] = []
+            products_by_vendor[product.vendor_id].append(product.to_dict())
+
+        # Build vendor list with products
+        vendors_list = []
+        for vendor in paginated_vendors.items:
+            vendor_data = vendor.to_dict()
+            vendor_data['products'] = products_by_vendor.get(vendor.vendor_id, [])
+            vendor_data['products_count'] = len(vendor_data['products'])
+            vendors_list.append(vendor_data)
+
+        # Get statistics
+        total_active = Vendor.query.filter_by(status='active', is_deleted=False).count()
+        total_inactive = Vendor.query.filter_by(status='inactive', is_deleted=False).count()
+
+        return jsonify({
+            "success": True,
+            "vendors": vendors_list,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": paginated_vendors.total,
+                "pages": paginated_vendors.pages,
+                "has_next": paginated_vendors.has_next,
+                "has_prev": paginated_vendors.has_prev
+            },
+            "statistics": {
+                "total_active": total_active,
+                "total_inactive": total_inactive,
+                "total_vendors": total_active + total_inactive
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching vendors with products: {str(e)}")
+        return jsonify({"success": False, "error": f"Failed to fetch vendors with products: {str(e)}"}), 500
+
+
 def get_vendor_by_id(vendor_id):
     """Get vendor by ID with products"""
     try:

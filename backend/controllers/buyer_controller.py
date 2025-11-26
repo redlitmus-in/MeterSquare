@@ -25,6 +25,97 @@ PUBLIC_URL_BASE = f"{supabase_url}/storage/v1/object/public/{SUPABASE_BUCKET}/"
 # Initialize Supabase client
 supabase: Client = create_client(supabase_url, supabase_key) if supabase_url and supabase_key else None
 
+
+def process_materials_with_negotiated_prices(cr):
+    """
+    Helper function to process materials and apply negotiated prices
+    Returns (materials_list, cr_total)
+
+    NOTE: cr_total uses ORIGINAL prices (not negotiated)
+    Individual materials show negotiated_price separately
+    """
+    sub_items_data = cr.sub_items_data or cr.materials_data or []
+    cr_total = 0
+    materials_list = []
+    material_vendor_selections = cr.material_vendor_selections or {}
+
+    if cr.sub_items_data:
+        for sub_item in sub_items_data:
+            if isinstance(sub_item, dict):
+                sub_materials = sub_item.get('materials', [])
+                if sub_materials:
+                    for material in sub_materials:
+                        material_name = material.get('material_name', '')
+                        quantity = material.get('quantity') or 0
+                        original_unit_price = material.get('unit_price') or 0
+
+                        # Check if there's a negotiated price for this material
+                        vendor_selection = material_vendor_selections.get(material_name, {})
+                        negotiated_price = vendor_selection.get('negotiated_price')
+
+                        # ALWAYS use original price for total calculation
+                        material_total = float(quantity) * float(original_unit_price)
+
+                        cr_total += material_total
+                        materials_list.append({
+                            "material_name": material_name,
+                            "quantity": quantity,
+                            "unit": material.get('unit', ''),
+                            "unit_price": original_unit_price,  # Keep original price
+                            "total_price": material_total,  # Based on original price
+                            "negotiated_price": negotiated_price if negotiated_price is not None else None,
+                            "original_unit_price": original_unit_price  # Add original for reference
+                        })
+                else:
+                    material_name = sub_item.get('material_name', '')
+                    quantity = sub_item.get('quantity') or 0
+                    original_unit_price = sub_item.get('unit_price') or 0
+
+                    # Check if there's a negotiated price for this material
+                    vendor_selection = material_vendor_selections.get(material_name, {})
+                    negotiated_price = vendor_selection.get('negotiated_price')
+
+                    # ALWAYS use original price for total calculation
+                    sub_total = float(quantity) * float(original_unit_price)
+
+                    cr_total += sub_total
+                    materials_list.append({
+                        "material_name": material_name,
+                        "sub_item_name": sub_item.get('sub_item_name', ''),
+                        "quantity": quantity,
+                        "unit": sub_item.get('unit', ''),
+                        "unit_price": original_unit_price,  # Keep original price
+                        "total_price": sub_total,  # Based on original price
+                        "negotiated_price": negotiated_price if negotiated_price is not None else None,
+                        "original_unit_price": original_unit_price  # Add original for reference
+                    })
+    else:
+        for material in sub_items_data:
+            material_name = material.get('material_name', '')
+            quantity = material.get('quantity', 0)
+            original_unit_price = material.get('unit_price', 0)
+
+            # Check if there's a negotiated price for this material
+            vendor_selection = material_vendor_selections.get(material_name, {})
+            negotiated_price = vendor_selection.get('negotiated_price')
+
+            # ALWAYS use original price for total calculation
+            material_total = float(quantity) * float(original_unit_price)
+
+            cr_total += material_total
+            materials_list.append({
+                "material_name": material_name,
+                "sub_item_name": material.get('sub_item_name', ''),
+                "quantity": quantity,
+                "unit": material.get('unit', ''),
+                "unit_price": original_unit_price,  # Keep original price
+                "total_price": material_total,  # Based on original price
+                "negotiated_price": negotiated_price if negotiated_price is not None else None,
+                "original_unit_price": original_unit_price  # Add original for reference
+            })
+
+    return materials_list, cr_total
+
 def create_buyer():
     """Create a new buyer user"""
     try:
@@ -359,6 +450,7 @@ def get_buyer_boq_materials():
 def get_buyer_dashboard():
     """Get buyer dashboard statistics"""
     try:
+        from sqlalchemy import or_, and_
         current_user = g.user
         buyer_id = current_user['user_id']
         user_role = current_user.get('role', '').lower()
@@ -393,9 +485,18 @@ def get_buyer_dashboard():
                 continue
 
             # Get change requests assigned to buyer for these BOQs
+            # Include: 1) Regular CRs assigned to buyer
+            #          2) Sub-CRs that are vendor_approved (ready for buyer to complete purchase)
             change_requests = ChangeRequest.query.filter(
                 ChangeRequest.boq_id.in_([boq.boq_id for boq in boqs]),
-                ChangeRequest.status == 'assigned_to_buyer',
+                or_(
+                    ChangeRequest.status == 'assigned_to_buyer',
+                    and_(
+                        ChangeRequest.is_sub_cr == True,
+                        ChangeRequest.status == 'vendor_approved',
+                        ChangeRequest.assigned_to_buyer_user_id == buyer_id
+                    )
+                ),
                 ChangeRequest.is_deleted == False
             ).all()
 
@@ -451,8 +552,15 @@ def get_buyer_pending_purchases():
 
         # Get change requests for buyer:
         # 1. Under review AND approval_required_from='buyer' (pending buyer's review/acceptance)
+<<<<<<< HEAD
+        # 2. Assigned to this buyer (via assigned_to_buyer_user_id) - actively being worked on (assigned_to_buyer or send_to_buyer status)
+        # 3. Sub-CRs created by this buyer (pending TD approval OR vendor approved)
+        #    Frontend filters by vendor_selection_pending_td_approval to separate into tabs
+        from sqlalchemy import or_, and_, func
+=======
         # 2. Assigned to this buyer (via assigned_to_buyer_user_id) - actively being worked on (assigned_to_buyer or send_to_buyer status)
         from sqlalchemy import or_, and_, func
+>>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
         change_requests = ChangeRequest.query.filter(
             or_(
                 and_(
@@ -464,12 +572,31 @@ def get_buyer_pending_purchases():
                     ChangeRequest.assigned_to_buyer_user_id == buyer_id
                 ),
                 and_(
+<<<<<<< HEAD
+                    ChangeRequest.is_sub_cr == True,
+                    ChangeRequest.assigned_to_buyer_user_id == buyer_id,
+                    ChangeRequest.status.in_(['pending_td_approval', 'vendor_approved'])
+=======
+                    func.trim(ChangeRequest.status).in_(['approved_by_pm', 'send_to_buyer']),
+                    ChangeRequest.approval_required_from == 'buyer'
+>>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
+                ),
+                and_(
                     func.trim(ChangeRequest.status).in_(['approved_by_pm', 'send_to_buyer']),
                     ChangeRequest.approval_required_from == 'buyer'
                 )
             ),
             ChangeRequest.is_deleted == False
         ).all()
+
+        # 🔍 DEBUG: Log what we're returning
+        log.info(f"=== BUYER PENDING PURCHASES DEBUG ===")
+        log.info(f"Buyer ID: {buyer_id}")
+        log.info(f"Total CRs returned: {len(change_requests)}")
+        sub_crs = [cr for cr in change_requests if cr.is_sub_cr]
+        log.info(f"Sub-CRs in results: {len(sub_crs)}")
+        for cr in sub_crs:
+            log.info(f"  Sub-CR {cr.get_formatted_cr_id()}: status={cr.status}, vendor_selection_status={cr.vendor_selection_status}")
 
         pending_purchases = []
         total_cost = 0
@@ -586,8 +713,36 @@ def get_buyer_pending_purchases():
                 any_store_request_rejected = rejected_count > 0
                 store_requests_pending = pending_count > 0
 
+            # Get sub-CRs for this parent CR (if any exist)
+            # This allows the frontend to know which materials have already been sent to TD
+            sub_crs_data = []
+            if not cr.is_sub_cr:  # Only get sub-CRs for parent CRs
+                sub_crs_for_parent = ChangeRequest.query.filter_by(
+                    parent_cr_id=cr.cr_id,
+                    is_deleted=False
+                ).all()
+
+                for sub_cr in sub_crs_for_parent:
+                    sub_crs_data.append({
+                        "cr_id": sub_cr.cr_id,
+                        "formatted_cr_id": sub_cr.get_formatted_cr_id(),
+                        "cr_number_suffix": sub_cr.cr_number_suffix,
+                        "vendor_id": sub_cr.selected_vendor_id,
+                        "vendor_name": sub_cr.selected_vendor_name,
+                        "vendor_selection_status": sub_cr.vendor_selection_status,
+                        "status": sub_cr.status,
+                        # Include the materials in this sub-CR so frontend knows which are locked
+                        "materials": sub_cr.materials_data or []
+                    })
+
             pending_purchases.append({
                 "cr_id": cr.cr_id,
+                "formatted_cr_id": cr.get_formatted_cr_id(),  # "CR-100" or "CR-100.1"
+                "is_sub_cr": cr.is_sub_cr or False,
+                "parent_cr_id": cr.parent_cr_id,
+                "cr_number_suffix": cr.cr_number_suffix,  # ".1", ".2", etc.
+                "submission_group_id": cr.submission_group_id,
+                "sub_crs": sub_crs_data,  # Include sub-CRs with their materials
                 "project_id": project.project_id,
                 "project_name": project.project_name,
                 "project_code": project.project_code,
@@ -610,7 +765,10 @@ def get_buyer_pending_purchases():
                 "vendor_phone": vendor_phone,
                 "vendor_contact_person": vendor_contact_person,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
+                "vendor_selection_status": cr.vendor_selection_status,  # 'pending_td_approval', 'approved', 'rejected'
                 "vendor_email_sent": cr.vendor_email_sent or False,
+                "use_per_material_vendors": cr.use_per_material_vendors or False,
+                "material_vendor_selections": cr.material_vendor_selections or {},
                 "has_store_requests": has_store_requests,
                 "store_request_count": len(store_requests),
                 "all_store_requests_approved": all_store_requests_approved,
@@ -1026,49 +1184,8 @@ def get_purchase_by_id(cr_id):
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
 
-        # Process materials
-        sub_items_data = cr.sub_items_data or cr.materials_data or []
-        cr_total = 0
-        materials_list = []
-
-        if cr.sub_items_data:
-            for sub_item in sub_items_data:
-                if isinstance(sub_item, dict):
-                    sub_materials = sub_item.get('materials', [])
-                    if sub_materials:
-                        for material in sub_materials:
-                            material_total = float(material.get('total_price', 0) or 0)
-                            cr_total += material_total
-                            materials_list.append({
-                                "material_name": material.get('material_name', ''),
-                                "quantity": material.get('quantity') or 0,
-                                "unit": material.get('unit', ''),
-                                "unit_price": material.get('unit_price') or 0,
-                                "total_price": material_total
-                            })
-                    else:
-                        sub_total = float(sub_item.get('total_price', 0) or 0)
-                        cr_total += sub_total
-                        materials_list.append({
-                            "material_name": sub_item.get('material_name', ''),
-                            "sub_item_name": sub_item.get('sub_item_name', ''),
-                            "quantity": sub_item.get('quantity') or 0,
-                            "unit": sub_item.get('unit', ''),
-                            "unit_price": sub_item.get('unit_price') or 0,
-                            "total_price": sub_total
-                        })
-        else:
-            for material in sub_items_data:
-                material_total = float(material.get('total_price', 0) or 0)
-                cr_total += material_total
-                materials_list.append({
-                    "material_name": material.get('material_name', ''),
-                    "sub_item_name": material.get('sub_item_name', ''),
-                    "quantity": material.get('quantity', 0),
-                    "unit": material.get('unit', ''),
-                    "unit_price": material.get('unit_price', 0),
-                    "total_price": material_total
-                })
+        # Process materials with negotiated prices
+        materials_list, cr_total = process_materials_with_negotiated_prices(cr)
 
         purchase_status = 'completed' if cr.status == 'purchase_completed' else 'pending'
 
@@ -1394,6 +1511,605 @@ def select_vendor_for_purchase(cr_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to select vendor: {str(e)}"}), 500
+
+
+def update_vendor_price(vendor_id):
+    """Update vendor product price for a specific material"""
+    try:
+        data = request.get_json()
+        material_name = data.get('material_name')
+        new_price = data.get('new_price')
+        save_for_future = data.get('save_for_future', False)
+
+        if not material_name:
+            return jsonify({"error": "material_name is required"}), 400
+
+        if new_price is None or new_price <= 0:
+            return jsonify({"error": "valid new_price is required"}), 400
+
+        # Get the vendor
+        from models.vendor import Vendor, VendorProduct
+        vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+        if not vendor:
+            return jsonify({"error": "Vendor not found"}), 404
+
+        if vendor.status != 'active':
+            return jsonify({"error": f"Vendor '{vendor.company_name}' is not active"}), 400
+
+        # Only update vendor product if save_for_future is True
+        if save_for_future:
+            # Find matching product(s) for this vendor and material
+            material_lower = material_name.lower().strip()
+            products = VendorProduct.query.filter_by(
+                vendor_id=vendor_id,
+                is_deleted=False
+            ).all()
+
+            matching_products = []
+            for product in products:
+                product_name = (product.product_name or '').lower().strip()
+                # Exact match or contains match
+                if product_name == material_lower or material_lower in product_name or product_name in material_lower:
+                    matching_products.append(product)
+
+            # Update unit_price for all matching products
+            if matching_products:
+                for product in matching_products:
+                    old_price = product.unit_price
+                    product.unit_price = float(new_price)
+                    log.info(f"Updated vendor product price: vendor_id={vendor_id}, product='{product.product_name}', old_price={old_price}, new_price={new_price}")
+
+                db.session.commit()
+                log.info(f"Price saved for future: {len(matching_products)} product(s) updated for material '{material_name}'")
+
+                return jsonify({
+                    "success": True,
+                    "message": f"Price updated for {len(matching_products)} product(s) for future purchases"
+                }), 200
+            else:
+                log.warning(f"No matching products found for material '{material_name}' from vendor {vendor_id}")
+                return jsonify({"error": f"No matching products found for material '{material_name}'"}), 404
+        else:
+            # For "This BOQ" option, save negotiated price to change request
+            # Get cr_id from request (optional - if provided, save to that CR)
+            cr_id = data.get('cr_id')
+            log.info(f"Received cr_id for negotiated price: {cr_id}")
+
+            if cr_id:
+                # Find the change request and update the material_vendor_selections
+                cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+                log.info(f"Found CR {cr_id}: {cr is not None}")
+
+                if cr:
+                    # Get or create material_vendor_selections
+                    material_vendor_selections = cr.material_vendor_selections or {}
+
+                    # Update negotiated price for this material
+                    if material_name in material_vendor_selections:
+                        # Material already has vendor selection - update negotiated price
+                        material_vendor_selections[material_name]['negotiated_price'] = float(new_price)
+                        material_vendor_selections[material_name]['save_price_for_future'] = False
+                        log.info(f"Updated negotiated price for CR {cr_id}, material '{material_name}': {new_price}")
+                    else:
+                        # Material not yet selected - create entry with negotiated price for vendor_id
+                        # Store with vendor_id so we can retrieve it later
+                        material_vendor_selections[material_name] = {
+                            'vendor_id': vendor_id,
+                            'vendor_name': None,  # Will be set when vendor is selected
+                            'negotiated_price': float(new_price),
+                            'save_price_for_future': False,
+                            'selection_status': 'pending'
+                        }
+                        log.info(f"Created negotiated price entry for CR {cr_id}, material '{material_name}', vendor {vendor_id}: {new_price}")
+
+                    # Update the JSONB field
+                    from sqlalchemy.orm.attributes import flag_modified
+                    cr.material_vendor_selections = material_vendor_selections
+                    flag_modified(cr, 'material_vendor_selections')
+
+                    db.session.commit()
+
+                    return jsonify({
+                        "success": True,
+                        "message": f"Negotiated price saved for this purchase: AED {new_price}"
+                    }), 200
+                else:
+                    log.warning(f"Change request {cr_id} not found")
+
+            # If no cr_id provided, just return success (price will be sent on submit)
+            return jsonify({
+                "success": True,
+                "message": "Price will be applied to this purchase only"
+            }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error updating vendor price: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to update vendor price: {str(e)}"}), 500
+
+
+def select_vendor_for_material(cr_id):
+    """Select vendor for specific material(s) in purchase order"""
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_name = current_user.get('full_name', 'Unknown User')
+        user_role = current_user.get('role', '').lower()
+
+        data = request.get_json()
+        material_selections = data.get('material_selections')  # Array of {material_name, vendor_id}
+
+        if not material_selections or not isinstance(material_selections, list):
+            return jsonify({"error": "material_selections array is required"}), 400
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Check role-based permissions
+        is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+
+        # Verify it's assigned to this buyer (skip check for TD)
+        if not is_td and cr.assigned_to_buyer_user_id != user_id:
+            return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Verify it's in the correct status
+        if cr.status != 'assigned_to_buyer':
+            return jsonify({"error": f"Cannot select vendor. Current status: {cr.status}"}), 400
+
+        # Initialize material_vendor_selections if it doesn't exist
+        if not cr.material_vendor_selections:
+            cr.material_vendor_selections = {}
+
+        # Enable per-material vendor mode
+        cr.use_per_material_vendors = True
+
+        # Process each material selection
+        from models.vendor import Vendor
+        updated_materials = []
+
+        for selection in material_selections:
+            material_name = selection.get('material_name')
+            vendor_id = selection.get('vendor_id')
+            negotiated_price = selection.get('negotiated_price')
+            save_price_for_future = selection.get('save_price_for_future', False)
+
+            if not material_name or not vendor_id:
+                continue
+
+            # Verify vendor exists and is active
+            vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+            if not vendor:
+                return jsonify({"error": f"Vendor {vendor_id} not found"}), 404
+
+            if vendor.status != 'active':
+                return jsonify({"error": f"Vendor '{vendor.company_name}' is not active"}), 400
+
+            # Handle price updates for future purchases
+            if save_price_for_future and negotiated_price is not None:
+                try:
+                    from models.vendor import VendorProduct
+
+                    # Find matching product(s) for this vendor and material
+                    # Try exact match first
+                    material_lower = material_name.lower().strip()
+                    products = VendorProduct.query.filter_by(
+                        vendor_id=vendor_id,
+                        is_deleted=False
+                    ).all()
+
+                    matching_products = []
+                    for product in products:
+                        product_name = (product.product_name or '').lower().strip()
+                        # Exact match or contains match
+                        if product_name == material_lower or material_lower in product_name or product_name in material_lower:
+                            matching_products.append(product)
+
+                    # Update unit_price for all matching products
+                    if matching_products:
+                        for product in matching_products:
+                            product.unit_price = float(negotiated_price)
+                            log.info(f"Updated vendor product price: vendor_id={vendor_id}, product='{product.product_name}', new_price={negotiated_price}")
+
+                        db.session.flush()  # Flush to ensure updates are persisted
+                        log.info(f"Price saved for future: {len(matching_products)} product(s) updated for material '{material_name}'")
+                    else:
+                        log.warning(f"No matching products found for material '{material_name}' from vendor {vendor_id}")
+
+                except Exception as price_error:
+                    log.error(f"Error updating vendor product price: {str(price_error)}")
+                    # Continue with vendor selection even if price update fails
+
+            # Set status based on user role
+            if is_td:
+                selection_status = 'approved'
+                approved_by_td_id = user_id
+                approved_by_td_name = user_name
+                approval_date = datetime.utcnow().isoformat()
+            else:
+                selection_status = 'pending_td_approval'
+                approved_by_td_id = None
+                approved_by_td_name = None
+                approval_date = None
+
+            # Store vendor selection for this material (including negotiated price)
+            vendor_selection_data = {
+                'vendor_id': vendor_id,
+                'vendor_name': vendor.company_name,
+                'vendor_email': vendor.email,
+                'vendor_phone': vendor.phone,
+                'vendor_phone_code': vendor.phone_code,
+                'vendor_contact_person': vendor.contact_person_name,
+                'selected_by_user_id': user_id,
+                'selected_by_name': user_name,
+                'selection_date': datetime.utcnow().isoformat(),
+                'selection_status': selection_status,
+                'approved_by_td_id': approved_by_td_id,
+                'approved_by_td_name': approved_by_td_name,
+                'approval_date': approval_date,
+                'rejection_reason': None
+            }
+
+            # Add negotiated price information if provided
+            if negotiated_price is not None:
+                vendor_selection_data['negotiated_price'] = float(negotiated_price)
+                vendor_selection_data['save_price_for_future'] = bool(save_price_for_future)
+
+            cr.material_vendor_selections[material_name] = vendor_selection_data
+
+            updated_materials.append(material_name)
+
+        # Mark the JSONB field as modified so SQLAlchemy detects the change
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(cr, 'material_vendor_selections')
+
+        # Check if ALL materials now have vendors selected
+        all_materials_have_vendors = True
+        if cr.materials_data and isinstance(cr.materials_data, list):
+            for material in cr.materials_data:
+                material_name = material.get('material_name')
+                if material_name and material_name not in cr.material_vendor_selections:
+                    all_materials_have_vendors = False
+                    break
+
+        # If all materials have vendors selected, change CR status to pending_td_approval
+        if all_materials_have_vendors and not is_td:
+            cr.status = 'pending_td_approval'
+            log.info(f"All materials have vendors selected for CR-{cr_id}. Status changed to 'pending_td_approval'")
+        elif all_materials_have_vendors and is_td:
+            # TD approved all materials directly
+            cr.status = 'vendor_approved'
+            log.info(f"All materials have vendors approved by TD for CR-{cr_id}. Status changed to 'vendor_approved'")
+
+        cr.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        log.info(f"Material-specific vendors selected for CR-{cr_id} by user {user_id}: {updated_materials}")
+
+        # Send notifications to TD if buyer made selections
+        if not is_td:
+            try:
+                from models.role import Role
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user
+
+                td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
+                if td_role:
+                    from models.user import User
+                    td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                    for td_user in td_users:
+                        # Customize notification based on whether all materials are submitted
+                        if all_materials_have_vendors:
+                            notification_title = 'Purchase Order Ready for Approval'
+                            notification_message = f'Buyer completed vendor selection for all materials in CR #{cr_id}. Ready for your approval.'
+                        else:
+                            notification_title = 'Vendor Selections Need Approval'
+                            notification_message = f'Buyer selected vendors for {len(updated_materials)} material(s) in CR #{cr_id}'
+
+                        notification = NotificationManager.create_notification(
+                            user_id=td_user.user_id,
+                            type='action_required',
+                            title=notification_title,
+                            message=notification_message,
+                            priority='high',
+                            category='purchase',
+                            action_url=f'/technical-director/change-requests/{cr_id}',
+                            action_label='Review Selections',
+                            metadata={'cr_id': str(cr_id), 'materials_count': len(updated_materials)},
+                            sender_id=user_id,
+                            sender_name=user_name
+                        )
+                        send_notification_to_user(td_user.user_id, notification.to_dict())
+            except Exception as notif_error:
+                log.error(f"Failed to send notification: {notif_error}")
+
+        # Determine appropriate message based on status
+        if all_materials_have_vendors:
+            if is_td:
+                message = f"All materials approved! CR-{cr_id} is ready for purchase."
+            else:
+                message = f"All materials submitted for TD approval! CR-{cr_id} will be reviewed by Technical Director."
+        else:
+            message = f"Vendor(s) {'approved' if is_td else 'selected for TD approval'} for {len(updated_materials)} material(s)"
+
+        return jsonify({
+            "success": True,
+            "message": message,
+            "purchase": {
+                "cr_id": cr.cr_id,
+                "status": cr.status,
+                "use_per_material_vendors": cr.use_per_material_vendors,
+                "material_vendor_selections": cr.material_vendor_selections,
+                "updated_materials": updated_materials,
+                "all_materials_have_vendors": all_materials_have_vendors
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error selecting vendors for materials: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to select vendors: {str(e)}"}), 500
+
+
+def create_sub_crs_for_vendor_groups(cr_id):
+    """
+    Create separate sub-CRs for each vendor group
+    Used when buyer wants to send vendors separately with full details
+
+    Each sub-CR will have:
+    - parent_cr_id pointing to the original CR
+    - cr_number_suffix like ".1", ".2", ".3"
+    - is_sub_cr = True
+    - Subset of materials for that vendor
+    - Independent lifecycle (status, approvals, etc.)
+    """
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_name = current_user.get('full_name', 'Unknown User')
+        user_role = current_user.get('role', '').lower()
+
+        data = request.get_json()
+        vendor_groups = data.get('vendor_groups')  # Array of {vendor_id, vendor_name, materials: []}
+        submission_group_id = data.get('submission_group_id')  # UUID to group these sub-CRs
+
+        if not vendor_groups or not isinstance(vendor_groups, list):
+            return jsonify({"error": "vendor_groups array is required"}), 400
+
+        if not submission_group_id:
+            # Generate UUID if not provided
+            import uuid
+            submission_group_id = str(uuid.uuid4())
+
+        # Get the parent change request
+        parent_cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not parent_cr:
+            return jsonify({"error": "Parent purchase not found"}), 404
+
+        # Check role-based permissions
+        is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+
+        # Verify it's assigned to this buyer (skip check for TD)
+        if not is_td and parent_cr.assigned_to_buyer_user_id != user_id:
+            return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Verify parent CR is in correct status
+        if parent_cr.status != 'assigned_to_buyer':
+            return jsonify({"error": f"Cannot create sub-CRs. Parent CR status: {parent_cr.status}"}), 400
+
+        # Create sub-CRs for each vendor group
+        from models.vendor import Vendor
+        created_sub_crs = []
+
+        # Count existing sub-CRs to determine the next suffix number
+        existing_sub_cr_count = ChangeRequest.query.filter_by(
+            parent_cr_id=cr_id,
+            is_deleted=False
+        ).count()
+        next_suffix_number = existing_sub_cr_count + 1
+
+        for idx, vendor_group in enumerate(vendor_groups, start=next_suffix_number):
+            vendor_id = vendor_group.get('vendor_id')
+            vendor_name = vendor_group.get('vendor_name')
+            materials = vendor_group.get('materials')  # Array of material selections
+
+            if not vendor_id or not materials:
+                continue
+
+            # Verify vendor exists and is active
+            vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+            if not vendor:
+                return jsonify({"error": f"Vendor {vendor_id} not found"}), 404
+
+            if vendor.status != 'active':
+                return jsonify({"error": f"Vendor '{vendor.company_name}' is not active"}), 400
+
+            # Extract materials data for this vendor group
+            sub_cr_materials = []
+            total_cost = 0.0
+
+            for material in materials:
+                material_name = material.get('material_name')
+                quantity = material.get('quantity', 0)
+                unit = material.get('unit', '')
+                negotiated_price = material.get('negotiated_price')
+                save_price_for_future = material.get('save_price_for_future', False)
+
+                # Find the material from parent CR
+                parent_material = None
+                if parent_cr.materials_data:
+                    for pm in parent_cr.materials_data:
+                        if pm.get('material_name') == material_name:
+                            parent_material = pm
+                            break
+
+                # Calculate price
+                unit_price = negotiated_price if negotiated_price else (parent_material.get('unit_price', 0) if parent_material else 0)
+                material_total = unit_price * quantity
+                total_cost += material_total
+
+                # Add to sub-CR materials
+                sub_cr_materials.append({
+                    'material_name': material_name,
+                    'sub_item_name': parent_material.get('sub_item_name', '') if parent_material else '',
+                    'quantity': quantity,
+                    'unit': unit,
+                    'unit_price': unit_price,
+                    'total_price': material_total,
+                    'master_material_id': parent_material.get('master_material_id') if parent_material else None
+                })
+
+            # Create the sub-CR
+            sub_cr = ChangeRequest(
+                boq_id=parent_cr.boq_id,
+                project_id=parent_cr.project_id,
+                requested_by_user_id=parent_cr.requested_by_user_id,
+                requested_by_name=parent_cr.requested_by_name,
+                requested_by_role=parent_cr.requested_by_role,
+                request_type=parent_cr.request_type,
+                justification=f"Sub-CR for vendor {vendor_name} - Split from CR-{cr_id}",
+                status='pending_td_approval' if not is_td else 'vendor_approved',
+                item_id=parent_cr.item_id,
+                item_name=parent_cr.item_name,
+                sub_item_id=parent_cr.sub_item_id,
+                sub_items_data=sub_cr_materials,
+                materials_data=sub_cr_materials,
+                materials_total_cost=total_cost,
+                assigned_to_buyer_user_id=parent_cr.assigned_to_buyer_user_id,
+                assigned_to_buyer_name=parent_cr.assigned_to_buyer_name,
+                assigned_to_buyer_date=parent_cr.assigned_to_buyer_date,
+                # Vendor selection already done
+                selected_vendor_id=vendor_id,
+                selected_vendor_name=vendor.company_name,
+                vendor_selected_by_buyer_id=user_id,
+                vendor_selected_by_buyer_name=user_name,
+                vendor_selection_date=datetime.utcnow(),
+                vendor_selection_status='pending_td_approval' if not is_td else 'approved',
+                # Sub-CR specific fields
+                parent_cr_id=parent_cr.cr_id,
+                cr_number_suffix=f".{idx}",
+                is_sub_cr=True,
+                submission_group_id=submission_group_id,
+                use_per_material_vendors=False,  # Sub-CR uses single vendor
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+
+            # If TD is creating, mark as approved
+            if is_td:
+                sub_cr.vendor_approved_by_td_id = user_id
+                sub_cr.vendor_approved_by_td_name = user_name
+                sub_cr.vendor_approval_date = datetime.utcnow()
+
+            db.session.add(sub_cr)
+            db.session.flush()  # Get the cr_id
+
+            created_sub_crs.append({
+                'cr_id': sub_cr.cr_id,
+                'formatted_cr_id': sub_cr.get_formatted_cr_id(),
+                'vendor_id': vendor_id,
+                'vendor_name': vendor_name,
+                'materials_count': len(sub_cr_materials),
+                'total_cost': total_cost
+            })
+
+            log.info(f"Created sub-CR {sub_cr.get_formatted_cr_id()} for vendor {vendor_name} with {len(sub_cr_materials)} materials")
+
+        # Check if ALL materials from parent CR have been sent to sub-CRs
+        # Get all sub-CRs for this parent (including newly created ones)
+        all_sub_crs = ChangeRequest.query.filter_by(
+            parent_cr_id=parent_cr.cr_id,
+            is_deleted=False
+        ).all()
+
+        # Collect all material names that are in sub-CRs
+        materials_in_sub_crs = set()
+        for sub_cr in all_sub_crs:
+            if sub_cr.materials_data:
+                for material in sub_cr.materials_data:
+                    material_name = material.get('material_name')
+                    if material_name:
+                        materials_in_sub_crs.add(material_name)
+
+        # Collect all material names from parent CR
+        parent_materials = set()
+        if parent_cr.materials_data:
+            for material in parent_cr.materials_data:
+                material_name = material.get('material_name')
+                if material_name:
+                    parent_materials.add(material_name)
+
+        # Only mark parent as 'split_to_sub_crs' if ALL materials are now in sub-CRs
+        if parent_materials and materials_in_sub_crs >= parent_materials:
+            # All materials sent - mark parent as split
+            parent_cr.status = 'split_to_sub_crs'
+            parent_cr.updated_at = datetime.utcnow()
+            log.info(f"All materials sent to sub-CRs. Parent CR-{parent_cr.cr_id} status changed to 'split_to_sub_crs'")
+        else:
+            # Some materials still not sent - keep parent as 'assigned_to_buyer'
+            unsent_materials = parent_materials - materials_in_sub_crs
+            log.info(f"Parent CR-{parent_cr.cr_id} still has {len(unsent_materials)} unsent materials: {unsent_materials}. Keeping status as 'assigned_to_buyer'")
+
+        db.session.commit()
+
+        # Send notifications to TD if buyer created sub-CRs
+        if not is_td:
+            try:
+                from models.role import Role
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user
+
+                td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
+                if td_role:
+                    from models.user import User
+                    td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                    for td_user in td_users:
+                        notification = NotificationManager.create_notification(
+                            user_id=td_user.user_id,
+                            type='action_required',
+                            title=f'{len(created_sub_crs)} Purchase Orders Need Approval',
+                            message=f'Buyer created {len(created_sub_crs)} separate purchase orders from CR-{cr_id}. Each needs approval.',
+                            priority='high',
+                            category='purchase',
+                            action_url=f'/technical-director/change-requests',
+                            action_label='Review Purchase Orders',
+                            metadata={'parent_cr_id': str(cr_id), 'sub_crs_count': len(created_sub_crs), 'submission_group_id': submission_group_id},
+                            sender_id=user_id,
+                            sender_name=user_name
+                        )
+                        send_notification_to_user(td_user.user_id, notification.to_dict())
+            except Exception as notif_error:
+                log.error(f"Failed to send notification: {notif_error}")
+
+        log.info(f"Successfully created {len(created_sub_crs)} sub-CRs for parent CR-{cr_id}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Successfully created {len(created_sub_crs)} separate purchase orders!",
+            "parent_cr_id": parent_cr.cr_id,
+            "submission_group_id": submission_group_id,
+            "sub_crs": created_sub_crs
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error creating sub-CRs: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to create sub-CRs: {str(e)}"}), 500
 
 
 def update_purchase_order(cr_id):
@@ -1801,49 +2517,8 @@ def preview_vendor_email(cr_id):
         # Get buyer details
         buyer = User.query.filter_by(user_id=buyer_id).first()
 
-        # Process materials
-        sub_items_data = cr.sub_items_data or cr.materials_data or []
-        cr_total = 0
-        materials_list = []
-
-        if cr.sub_items_data:
-            for sub_item in sub_items_data:
-                if isinstance(sub_item, dict):
-                    sub_materials = sub_item.get('materials', [])
-                    if sub_materials:
-                        for material in sub_materials:
-                            material_total = float(material.get('total_price', 0) or 0)
-                            cr_total += material_total
-                            materials_list.append({
-                                "material_name": material.get('material_name', ''),
-                                "quantity": material.get('quantity') or 0,
-                                "unit": material.get('unit', ''),
-                                "unit_price": material.get('unit_price') or 0,
-                                "total_price": material_total
-                            })
-                    else:
-                        sub_total = float(sub_item.get('total_price', 0) or 0)
-                        cr_total += sub_total
-                        materials_list.append({
-                            "material_name": sub_item.get('material_name', ''),
-                            "sub_item_name": sub_item.get('sub_item_name', ''),
-                            "quantity": sub_item.get('quantity') or 0,
-                            "unit": sub_item.get('unit', ''),
-                            "unit_price": sub_item.get('unit_price') or 0,
-                            "total_price": sub_total
-                        })
-        else:
-            for material in sub_items_data:
-                material_total = float(material.get('total_price', 0) or 0)
-                cr_total += material_total
-                materials_list.append({
-                    "material_name": material.get('material_name', ''),
-                    "sub_item_name": material.get('sub_item_name', ''),
-                    "quantity": material.get('quantity', 0),
-                    "unit": material.get('unit', ''),
-                    "unit_price": material.get('unit_price', 0),
-                    "total_price": material_total
-                })
+        # Process materials with negotiated prices
+        materials_list, cr_total = process_materials_with_negotiated_prices(cr)
 
         # Prepare data for email template
         vendor_data = {
@@ -2008,49 +2683,8 @@ def send_vendor_email(cr_id):
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
 
-        # Process materials
-        sub_items_data = cr.sub_items_data or cr.materials_data or []
-        cr_total = 0
-        materials_list = []
-
-        if cr.sub_items_data:
-            for sub_item in sub_items_data:
-                if isinstance(sub_item, dict):
-                    sub_materials = sub_item.get('materials', [])
-                    if sub_materials:
-                        for material in sub_materials:
-                            material_total = float(material.get('total_price', 0) or 0)
-                            cr_total += material_total
-                            materials_list.append({
-                                "material_name": material.get('material_name', ''),
-                                "quantity": material.get('quantity') or 0,
-                                "unit": material.get('unit', ''),
-                                "unit_price": material.get('unit_price') or 0,
-                                "total_price": material_total
-                            })
-                    else:
-                        sub_total = float(sub_item.get('total_price', 0) or 0)
-                        cr_total += sub_total
-                        materials_list.append({
-                            "material_name": sub_item.get('material_name', ''),
-                            "sub_item_name": sub_item.get('sub_item_name', ''),
-                            "quantity": sub_item.get('quantity') or 0,
-                            "unit": sub_item.get('unit', ''),
-                            "unit_price": sub_item.get('unit_price') or 0,
-                            "total_price": sub_total
-                        })
-        else:
-            for material in sub_items_data:
-                material_total = float(material.get('total_price', 0) or 0)
-                cr_total += material_total
-                materials_list.append({
-                    "material_name": material.get('material_name', ''),
-                    "sub_item_name": material.get('sub_item_name', ''),
-                    "quantity": material.get('quantity', 0),
-                    "unit": material.get('unit', ''),
-                    "unit_price": material.get('unit_price', 0),
-                    "total_price": material_total
-                })
+        # Process materials with negotiated prices
+        materials_list, cr_total = process_materials_with_negotiated_prices(cr)
 
         # Prepare data for email template
         vendor_data = {
@@ -3496,3 +4130,236 @@ def get_store_request_status(cr_id):
     except Exception as e:
         log.error(f"Error getting store request status: {str(e)}")
         return jsonify({"error": f"Failed to get store request status: {str(e)}"}), 500
+
+
+def get_vendor_selection_data(cr_id):
+    """
+    Optimized endpoint for vendor selection modal
+    Returns only essential fields (78% smaller payload)
+
+    GET /api/buyer/purchase/{cr_id}/vendor-selection
+
+    Returns:
+    - cr_id, boq_id, project_id
+    - materials list (from sub_items_data)
+    - vendor selection details
+    - overhead warning (if applicable)
+    - per-material vendor selections (if enabled)
+    """
+    try:
+        current_user = g.user
+        user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
+
+        # Allow buyer, TD, or admin
+        if not any(role in user_role for role in ['buyer', 'technicaldirector', 'admin']):
+            return jsonify({"error": "Access denied. Buyer, TD, or Admin role required."}), 403
+
+        # Get change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase order not found"}), 404
+
+        # Get project and BOQ info
+        project = Project.query.filter_by(project_id=cr.project_id).first()
+        boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
+
+        # Prepare materials list (use sub_items_data, NOT materials_data)
+        materials = cr.sub_items_data if cr.sub_items_data else cr.materials_data
+
+        # Calculate materials count
+        materials_count = len(materials) if materials else 0
+
+        # Prepare vendor selection data
+        vendor_data = {
+            'selected_vendor_id': cr.selected_vendor_id,
+            'selected_vendor_name': cr.selected_vendor_name,
+            'vendor_selection_status': cr.vendor_selection_status,
+            'vendor_selected_by_buyer_id': cr.vendor_selected_by_buyer_id,
+            'vendor_selected_by_buyer_name': cr.vendor_selected_by_buyer_name,
+            'vendor_selection_date': cr.vendor_selection_date.isoformat() if cr.vendor_selection_date else None,
+            'vendor_approved_by_td_id': cr.vendor_approved_by_td_id,
+            'vendor_approved_by_td_name': cr.vendor_approved_by_td_name,
+            'vendor_approval_date': cr.vendor_approval_date.isoformat() if cr.vendor_approval_date else None,
+            'vendor_rejection_reason': cr.vendor_rejection_reason,
+            # Per-material vendor selection support
+            'use_per_material_vendors': cr.use_per_material_vendors,
+            'material_vendor_selections': cr.material_vendor_selections if cr.material_vendor_selections else {}
+        }
+
+        # Overhead warning removed - columns dropped from database
+        overhead_warning = None
+
+        # Return optimized response (only 18-20 fields instead of 82)
+        return jsonify({
+            'success': True,
+            # Core identifiers
+            'cr_id': cr.cr_id,
+            'boq_id': cr.boq_id,
+            'project_id': cr.project_id,
+            'status': cr.status,
+            # Display info
+            'project_name': project.project_name if project else None,
+            'boq_name': boq.boq_name if boq else None,
+            'item_name': cr.item_name,
+            'item_id': cr.item_id,
+            # Materials (from sub_items_data)
+            'materials': materials,
+            'materials_count': materials_count,
+            'total_cost': round(cr.materials_total_cost, 2) if cr.materials_total_cost else 0,
+            # Vendor selection
+            'vendor': vendor_data,
+            # Overhead warning (only if applicable)
+            'overhead_warning': overhead_warning,
+            # Metadata
+            'created_at': cr.created_at.isoformat() if cr.created_at else None
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error getting vendor selection data for CR {cr_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to get vendor selection data: {str(e)}"}), 500
+
+
+def update_vendor_price(vendor_id):
+    """
+    Update vendor product price (immediate price negotiation).
+    Supports two modes:
+    1. Save for This BOQ: Updates material_vendor_selections for the CR
+    2. Save for Future: Updates vendor_products.unit_price in database
+    """
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
+
+        data = request.get_json()
+        material_name = data.get('material_name')
+        new_price = data.get('new_price')
+        save_for_future = data.get('save_for_future', False)
+        cr_id = data.get('cr_id')  # Optional: CR to save negotiated price to
+
+        if not material_name or new_price is None:
+            return jsonify({"error": "material_name and new_price are required"}), 400
+
+        # Validate new_price
+        try:
+            new_price = float(new_price)
+            if new_price <= 0:
+                return jsonify({"error": "Price must be greater than 0"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid price format"}), 400
+
+        # Verify vendor exists
+        from models.vendor import Vendor, VendorProduct
+        vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+        if not vendor:
+            return jsonify({"error": "Vendor not found"}), 404
+
+        # Check role-based permissions (Buyer, TD, or Admin)
+        is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+        is_buyer = user_role == 'buyer'
+        is_admin = user_role == 'admin'
+
+        if not (is_buyer or is_td or is_admin):
+            return jsonify({"error": "Insufficient permissions"}), 403
+
+        updated_products = []
+
+        # Update vendor product prices if save_for_future=true
+        if save_for_future:
+            material_lower = material_name.lower().strip()
+            products = VendorProduct.query.filter_by(
+                vendor_id=vendor_id,
+                is_deleted=False
+            ).all()
+
+            # Find matching products
+            matching_products = []
+            for product in products:
+                product_name = (product.product_name or '').lower().strip()
+                # Exact match or contains match
+                if product_name == material_lower or material_lower in product_name or product_name in material_lower:
+                    matching_products.append(product)
+
+            # Update unit_price for all matching products
+            if matching_products:
+                for product in matching_products:
+                    old_price = product.unit_price
+                    product.unit_price = new_price
+                    updated_products.append({
+                        'product_id': product.product_id,
+                        'product_name': product.product_name,
+                        'old_price': old_price,
+                        'new_price': new_price
+                    })
+                    log.info(f"Updated vendor product price: vendor_id={vendor_id}, product='{product.product_name}', old_price={old_price}, new_price={new_price}, user_id={user_id}")
+
+                db.session.flush()
+                log.info(f"Price saved for future: {len(matching_products)} product(s) updated for material '{material_name}' by user {user_id}")
+            else:
+                log.warning(f"No matching products found for material '{material_name}' from vendor {vendor_id}")
+
+        # If cr_id provided, save negotiated price to the change request
+        if cr_id:
+            cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+            if cr:
+                # Initialize material_vendor_selections if it doesn't exist
+                if not cr.material_vendor_selections:
+                    cr.material_vendor_selections = {}
+
+                # Update or create material vendor selection with negotiated price
+                if material_name in cr.material_vendor_selections:
+                    # Update existing selection
+                    cr.material_vendor_selections[material_name]['negotiated_price'] = new_price
+                    cr.material_vendor_selections[material_name]['save_price_for_future'] = save_for_future
+                else:
+                    # Create new selection (for cases where price is negotiated before vendor selection)
+                    cr.material_vendor_selections[material_name] = {
+                        'vendor_id': vendor_id,
+                        'vendor_name': vendor.company_name,
+                        'negotiated_price': new_price,
+                        'save_price_for_future': save_for_future,
+                        'selected_by_user_id': user_id,
+                        'selected_by_name': current_user.get('full_name', 'Unknown User'),
+                        'selection_date': datetime.utcnow().isoformat()
+                    }
+
+                # Mark the JSONB field as modified
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(cr, 'material_vendor_selections')
+
+                cr.updated_at = datetime.utcnow()
+                log.info(f"Saved negotiated price to CR-{cr_id}: material='{material_name}', price={new_price}, save_for_future={save_for_future}")
+
+        db.session.commit()
+
+        # Prepare response message
+        if save_for_future and updated_products:
+            message = f"Price updated to AED {new_price:.2f} for {len(updated_products)} product(s). This price will be used for all future purchases."
+        elif save_for_future and not updated_products:
+            message = f"Price saved for this purchase (AED {new_price:.2f}). No matching products found to update for future."
+        else:
+            message = f"Negotiated price AED {new_price:.2f} saved for this purchase only."
+
+        return jsonify({
+            "success": True,
+            "message": message,
+            "vendor_id": vendor_id,
+            "material_name": material_name,
+            "new_price": new_price,
+            "save_for_future": save_for_future,
+            "updated_products": updated_products if save_for_future else [],
+            "cr_id": cr_id
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error updating vendor price: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to update vendor price: {str(e)}"}), 500

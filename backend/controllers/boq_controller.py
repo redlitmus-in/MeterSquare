@@ -1767,7 +1767,6 @@ def get_boq(boq_id):
             if approved_change_requests:
                 change_request_items = []
                 total_cr_materials_cost = 0
-                total_cr_overhead_consumed = 0
 
                 # Build material lookup map from BOQ for enrichment
                 material_lookup = {}
@@ -1804,34 +1803,17 @@ def get_boq(boq_id):
                         'approval_date': cr.approval_date.isoformat() if cr.approval_date else None,
                         'justification': cr.justification,
                         'materials': enriched_materials,
-                        'materials_cost': cr.materials_total_cost,
-                        'overhead_consumed': cr.overhead_consumed,
-                        'is_over_budget': cr.is_over_budget
+                        'materials_cost': cr.materials_total_cost
                     })
 
                     total_cr_materials_cost += cr.materials_total_cost or 0
-                    total_cr_overhead_consumed += cr.overhead_consumed or 0
-
-                # Calculate overhead budget tracking
-                original_overhead_allocated = (existing_total_cost * overhead_percentage) / (100 + overhead_percentage + profit_margin) * overhead_percentage if overhead_percentage > 0 else 0
-                overhead_remaining = original_overhead_allocated - total_cr_overhead_consumed
 
                 response_data['change_requests'] = {
                     'items': change_request_items,
                     'summary': {
                         'total_requests': len(approved_change_requests),
-                        'total_materials_cost': round(total_cr_materials_cost, 2),
-                        'total_overhead_consumed': round(total_cr_overhead_consumed, 2)
+                        'total_materials_cost': round(total_cr_materials_cost, 2)
                     }
-                }
-
-                response_data['overhead_tracking'] = {
-                    'original_allocated': round(original_overhead_allocated, 2),
-                    'consumed_by_extra_materials': round(total_cr_overhead_consumed, 2),
-                    'remaining': round(overhead_remaining, 2),
-                    'is_over_budget': overhead_remaining < 0,
-                    'balance_type': 'negative' if overhead_remaining < 0 else 'positive',
-                    'percentage': round(overhead_percentage, 2)
                 }
         except Exception as e:
             # Don't fail the entire request if change request data fails

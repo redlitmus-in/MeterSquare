@@ -145,6 +145,44 @@ class BuyerVendorService {
     }
   }
 
+  // Get all vendors with their products in a single request - optimized
+  async getAllVendorsWithProducts(params?: {
+    category?: string;
+    status?: string;
+    search?: string;
+    page?: number;
+    per_page?: number;
+  }): Promise<VendorListResponse> {
+    try {
+      const queryParams = new URLSearchParams();
+
+      if (params?.category) queryParams.append('category', params.category);
+      if (params?.status) queryParams.append('status', params.status);
+      if (params?.search) queryParams.append('search', params.search);
+      if (params?.page) queryParams.append('page', params.page.toString());
+      if (params?.per_page) queryParams.append('per_page', params.per_page.toString());
+
+      const response = await axios.get<VendorListResponse>(
+        `${API_URL}/vendor/all-with-products?${queryParams.toString()}`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error('Failed to fetch vendors with products');
+    } catch (error: any) {
+      console.error('Error fetching vendors with products:', error);
+      if (!error.response) {
+        throw new Error('Unable to connect to server. Please check if the backend is running.');
+      }
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to fetch vendors with products');
+    }
+  }
+
   // Get vendor by ID
   async getVendorById(vendorId: number): Promise<Vendor> {
     try {
