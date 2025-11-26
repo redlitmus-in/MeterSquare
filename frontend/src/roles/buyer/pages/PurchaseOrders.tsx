@@ -71,7 +71,6 @@ const PurchaseOrders: React.FC = () => {
     // ❌ REMOVED: refetchInterval - No more polling!
   });
 
-<<<<<<< HEAD
   // Helper function to group sub-CRs under their parent CRs
   const groupPurchasesWithSubCRs = (purchases: Purchase[]): Purchase[] => {
     // Separate parent CRs and sub-CRs
@@ -109,15 +108,6 @@ const PurchaseOrders: React.FC = () => {
   // Raw purchases (not grouped) - for Pending Approval tab where sub-CRs show as separate cards
   const rawPendingPurchases: Purchase[] = useMemo(() => {
     return (pendingData?.pending_purchases || []).map(p => ({ ...p, status: 'pending' as const }));
-=======
-  // Use the separated arrays from backend response
-  const ongoingPurchases: Purchase[] = useMemo(() => {
-    return (pendingData?.ongoing_purchases || []).map(p => ({ ...p, status: 'pending' as const }));
-  }, [pendingData]);
-
-  const pendingApprovalPurchases: Purchase[] = useMemo(() => {
-    return (pendingData?.pending_approval_purchases || []).map(p => ({ ...p, status: 'pending' as const }));
->>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
   }, [pendingData]);
 
   // Grouped purchases (sub-CRs nested under parent) - for Ongoing tab
@@ -132,7 +122,6 @@ const PurchaseOrders: React.FC = () => {
 
   // Separate ongoing purchases by vendor approval status
   const pendingPurchaseItems = useMemo(() => {
-<<<<<<< HEAD
     // No vendor selected yet - only show parent CRs (not sub-CRs, they go to Pending Approval)
     return pendingPurchases.filter(p => !p.is_sub_cr && (!p.vendor_id || p.vendor_selection_pending_td_approval));
   }, [pendingPurchases]);
@@ -147,16 +136,6 @@ const PurchaseOrders: React.FC = () => {
     // Filter from RAW data (not grouped) to show sub-CRs as individual cards
     return rawPendingPurchases.filter(p => p.vendor_selection_pending_td_approval);
   }, [rawPendingPurchases]);
-=======
-    // No vendor selected yet
-    return ongoingPurchases.filter(p => !p.vendor_id);
-  }, [ongoingPurchases]);
-
-  const vendorApprovedItems = useMemo(() => {
-    // Vendor selected and approved by TD
-    return ongoingPurchases.filter(p => p.vendor_id);
-  }, [ongoingPurchases]);
->>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
 
   // Determine which purchases to show based on active tab and sub-tab
   const currentPurchases = useMemo(() => {

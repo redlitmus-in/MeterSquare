@@ -1038,12 +1038,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                           )}
                                         </div>
                                       ))}
-                                      {selectionStatus === 'pending_td_approval' && (
+                                      {/* Only show Pending TD Approval if material is ACTUALLY in a pending sub-CR */}
+                                      {isMaterialInPendingSubCR && (
                                         <Badge className="bg-orange-100 text-orange-800 text-xs">
                                           Pending TD Approval
                                         </Badge>
                                       )}
-                                      {selectionStatus === 'approved' && (
+                                      {/* Show Approved only if material is in an approved sub-CR */}
+                                      {purchase.sub_crs?.some(subCR =>
+                                        subCR.vendor_selection_status === 'approved' &&
+                                        subCR.materials?.some(m => m.material_name === material.material_name)
+                                      ) && (
                                         <Badge className="bg-green-100 text-green-800 text-xs">
                                           Approved
                                         </Badge>

@@ -552,15 +552,10 @@ def get_buyer_pending_purchases():
 
         # Get change requests for buyer:
         # 1. Under review AND approval_required_from='buyer' (pending buyer's review/acceptance)
-<<<<<<< HEAD
         # 2. Assigned to this buyer (via assigned_to_buyer_user_id) - actively being worked on (assigned_to_buyer or send_to_buyer status)
         # 3. Sub-CRs created by this buyer (pending TD approval OR vendor approved)
         #    Frontend filters by vendor_selection_pending_td_approval to separate into tabs
         from sqlalchemy import or_, and_, func
-=======
-        # 2. Assigned to this buyer (via assigned_to_buyer_user_id) - actively being worked on (assigned_to_buyer or send_to_buyer status)
-        from sqlalchemy import or_, and_, func
->>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
         change_requests = ChangeRequest.query.filter(
             or_(
                 and_(
@@ -572,14 +567,9 @@ def get_buyer_pending_purchases():
                     ChangeRequest.assigned_to_buyer_user_id == buyer_id
                 ),
                 and_(
-<<<<<<< HEAD
                     ChangeRequest.is_sub_cr == True,
                     ChangeRequest.assigned_to_buyer_user_id == buyer_id,
                     ChangeRequest.status.in_(['pending_td_approval', 'vendor_approved'])
-=======
-                    func.trim(ChangeRequest.status).in_(['approved_by_pm', 'send_to_buyer']),
-                    ChangeRequest.approval_required_from == 'buyer'
->>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
                 ),
                 and_(
                     func.trim(ChangeRequest.status).in_(['approved_by_pm', 'send_to_buyer']),

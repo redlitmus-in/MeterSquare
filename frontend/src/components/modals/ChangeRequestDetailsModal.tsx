@@ -105,14 +105,10 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const userIsBuyer = user?.role?.toLowerCase() === 'buyer' || user?.role_name?.toLowerCase() === 'buyer';
 
   // Final statuses where no actions should be allowed
-<<<<<<< HEAD
   const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'purchase_completed', 'approved', 'rejected', 'pending_td_approval', 'vendor_approved'].includes(changeRequest.status);
 
   // Check if vendor selection is pending TD approval (no edits allowed)
   const isVendorPendingApproval = changeRequest.vendor_selection_status === 'pending_td_approval';
-=======
-  const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'purchase_completed', 'approved', 'rejected'].includes(changeRequest.status);
->>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
 
   // Estimator/TD can approve if request needs their approval
   const canApproveReject = canApproveFromParent !== undefined

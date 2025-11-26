@@ -170,8 +170,7 @@ def create_change_request():
                 'justification': mat.get('justification', ''),  # Per-material justification
                 'reason': mat.get('reason', ''),  # Reason for new material (used in routing logic)
                 'brand': brand,  # Brand for materials (from request or BOQ)
-                'specification': specification,,  # Specification for materials (from request or BOQ)
-                'size': mat.get('size')  # Size for materials
+                'specification': specification,  # Specification for materials (from request or BOQ)
                 'size': mat.get('size')  # Size for materials
             })
 
@@ -2607,21 +2606,16 @@ def update_change_request(cr_id):
                 'unit_price': unit_price,
                 'total_price': total_price,
                 'master_material_id': mat.get('master_material_id'),
-<<<<<<< HEAD
                 'justification': mat.get('justification', ''),
                 'brand': mat.get('brand'),
                 'specification': mat.get('specification'),
+                'size': mat.get('size'),
                 # Cost tracking
                 'original_quantity': orig_quantity,
                 'original_unit_price': orig_unit_price,
                 'original_total_price': orig_total_price,
                 'cost_difference': round(cost_difference, 2),
                 'is_extra_cost': is_extra_cost
-=======
-                'justification': mat.get('justification', ''),  # Per-material justification
-                'brand': mat.get('brand'),  # Brand for new materials
-                'size': mat.get('size'),  # Size for materials
-                'specification': mat.get('specification'),  # Specification for materials
             })
 
             sub_items_data.append({
@@ -2632,7 +2626,6 @@ def update_change_request(cr_id):
                 'unit': mat.get('unit', 'nos'),
                 'unit_price': unit_price,
                 'total_price': total_price,
-<<<<<<< HEAD
                 'master_material_id': mat.get('master_material_id'),
                 'is_new_material': is_new_material,  # True ONLY if material doesn't exist in system
                 'is_extra_cost': is_extra_cost,  # True ONLY if cost INCREASED from original
@@ -2645,14 +2638,6 @@ def update_change_request(cr_id):
                 'brand': mat.get('brand'),
                 'specification': mat.get('specification'),
                 'size': mat.get('size')
-=======
-                'is_new': mat.get('master_material_id') is None,
-                'master_material_id': mat.get('master_material_id'),  # Master material ID for existing materials
-                'reason': mat.get('reason'),
-                'justification': mat.get('justification', ''),  # Per-material justification
-                'brand': mat.get('brand'),  # Brand for new materials
-                'size': mat.get('size'),  # Size for materials
-                'specification': mat.get('specification'),  # Specification for materials
             })
 
         # Update change request

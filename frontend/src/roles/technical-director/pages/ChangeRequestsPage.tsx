@@ -132,15 +132,9 @@ const ChangeRequestsPage: React.FC = () => {
         // Include both regular CRs (status='assigned_to_buyer') and sub-CRs (status='pending_td_approval', is_sub_cr=true)
         const pendingVendorApprovals = response.data.filter(
           (cr: ChangeRequestItem) => {
-<<<<<<< HEAD
             const status = cr.status?.trim(); // Trim to handle trailing spaces
-            const isRegularCRPending = cr.status === 'assigned_to_buyer' && cr.vendor_selection_status === 'pending_td_approval';
-            const isSubCRPending = cr.is_sub_cr && cr.status === 'pending_td_approval' && vendor_selection_status === 'pending_td_approval';
-=======
-            const status = cr.status?.trim(); // Trim to handle trailing spaces
-            const hasStatus = status === 'assigned_to_buyer' || status === 'send_to_buyer' || status === 'send_to_buyer';
-            const hasVendorPending = cr.vendor_selection_status === 'pending_td_approval';
->>>>>>> 2fc9424dab306cbac4c709fa79541efdefba0387
+            const isRegularCRPending = status === 'assigned_to_buyer' && cr.vendor_selection_status === 'pending_td_approval';
+            const isSubCRPending = cr.is_sub_cr && cr.status === 'pending_td_approval' && cr.vendor_selection_status === 'pending_td_approval';
 
             console.log(`CR-${cr.cr_id}:`, {
               status: cr.status,
