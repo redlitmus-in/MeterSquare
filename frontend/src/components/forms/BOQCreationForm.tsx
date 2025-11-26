@@ -3271,10 +3271,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                     type="text"
                     value={boqName}
                     onChange={(e) => setBoqName(e.target.value)}
+                    maxLength={BOQ_CONFIG.FIELD_LIMITS.BOQ_NAME}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="Enter BOQ name"
                     disabled={isSubmitting}
                   />
+                  <div className="flex justify-end mt-1">
+                    <span className={`text-xs ${boqName.length >= BOQ_CONFIG.FIELD_LIMITS.BOQ_NAME ? 'text-red-500' : 'text-gray-400'}`}>
+                      {boqName.length}/{BOQ_CONFIG.FIELD_LIMITS.BOQ_NAME}
+                    </span>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -3286,13 +3292,26 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                       <span className="text-sm text-gray-500">Loading projects...</span>
                     </div>
                   ) : selectedProject ? (
-                    // Static display when project is pre-selected
+                    // Static display when project is pre-selected via prop
                     <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 cursor-not-allowed">
                       <div className="flex items-center justify-between">
                         <span className="text-gray-700 font-medium">
                           {selectedProject.project_name} - {selectedProject.client || 'No Client'}
                         </span>
                         <ChevronDown className="w-4 h-4 text-gray-400" />
+                      </div>
+                    </div>
+                  ) : editMode && selectedProjectId ? (
+                    // Static display in edit mode - project cannot be changed
+                    <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 cursor-not-allowed">
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-700 font-medium">
+                          {(() => {
+                            const project = projects.find(p => p.id.toString() === selectedProjectId.toString());
+                            return project ? `${project.name} - ${project.client}` : 'Loading...';
+                          })()}
+                        </span>
+                        <span className="text-xs text-gray-400">Cannot change project</span>
                       </div>
                     </div>
                   ) : (
@@ -3683,11 +3702,17 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                     <textarea
                       value={preliminaryNotes}
                       onChange={(e) => setPreliminaryNotes(e.target.value)}
+                      maxLength={BOQ_CONFIG.FIELD_LIMITS.PRELIMINARY_NOTES}
                       rows={3}
                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
                       placeholder="Add any special conditions or notes..."
                       disabled={isSubmitting}
                     />
+                    <div className="flex justify-end mt-1">
+                      <span className={`text-xs ${preliminaryNotes.length >= BOQ_CONFIG.FIELD_LIMITS.PRELIMINARY_NOTES ? 'text-red-500' : 'text-gray-400'}`}>
+                        {preliminaryNotes.length}/{BOQ_CONFIG.FIELD_LIMITS.PRELIMINARY_NOTES}
+                      </span>
+                    </div>
                   </div>
                 </motion.div>
               )}
@@ -3774,6 +3799,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       type="text"
                                       value={itemSearchTerms[item.id] || item.item_name}
                                       onChange={(e) => handleItemNameChange(item.id, e.target.value)}
+                                      maxLength={BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME}
                                       className="w-full px-3 py-2 pr-8 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                                       placeholder="Search or type item name"
                                       disabled={isSubmitting || loadingItemData[item.id]}
@@ -3784,6 +3810,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     ) : (
                                       <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                     )}
+                                  </div>
+                                  <div className="flex justify-end mt-1">
+                                    <span className={`text-xs ${(itemSearchTerms[item.id] || item.item_name).length >= BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME ? 'text-red-500' : 'text-gray-400'}`}>
+                                      {(itemSearchTerms[item.id] || item.item_name).length}/{BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME}
+                                    </span>
                                   </div>
                                   {itemDropdownOpen[item.id] && (
                                     <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
@@ -3905,26 +3936,49 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       type="text"
                                       value={subItem.sub_item_name}
                                       onChange={(e) => updateSubItem(item.id, subItem.id, 'sub_item_name', e.target.value)}
+                                      maxLength={BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME}
                                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                                       placeholder="e.g., Flooring Work"
                                       required
                                       disabled={isSubmitting}
                                     />
+                                    <div className="flex justify-end mt-1">
+                                      <span className={`text-xs ${subItem.sub_item_name.length >= BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME ? 'text-red-500' : 'text-gray-400'}`}>
+                                        {subItem.sub_item_name.length}/{BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME}
+                                      </span>
+                                    </div>
                                   </div>
 
                                   <div>
                                     <label className="block text-xs font-medium text-gray-700 mb-1">
                                       Scope <span className="text-red-500">*</span>
                                     </label>
-                                    <input
-                                      type="text"
+                                    <textarea
                                       value={subItem.scope}
-                                      onChange={(e) => updateSubItem(item.id, subItem.id, 'scope', e.target.value)}
-                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                                      placeholder="e.g., Tile flooring"
+                                      onChange={(e) => {
+                                        updateSubItem(item.id, subItem.id, 'scope', e.target.value);
+                                        // Auto-resize textarea
+                                        e.target.style.height = 'auto';
+                                        e.target.style.height = e.target.scrollHeight + 'px';
+                                      }}
+                                      onFocus={(e) => {
+                                        // Auto-resize on focus
+                                        e.target.style.height = 'auto';
+                                        e.target.style.height = e.target.scrollHeight + 'px';
+                                      }}
+                                      maxLength={BOQ_CONFIG.FIELD_LIMITS.SCOPE}
+                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 resize-none overflow-hidden"
+                                      placeholder="e.g., Tile flooring with detailed scope description..."
                                       required
                                       disabled={isSubmitting}
+                                      rows={1}
+                                      style={{ minHeight: '38px' }}
                                     />
+                                    <div className="flex justify-end mt-1">
+                                      <span className={`text-xs ${subItem.scope.length >= BOQ_CONFIG.FIELD_LIMITS.SCOPE ? 'text-red-500' : 'text-gray-400'}`}>
+                                        {subItem.scope.length}/{BOQ_CONFIG.FIELD_LIMITS.SCOPE}
+                                      </span>
+                                    </div>
                                   </div>
 
                                   <div className="grid grid-cols-2 gap-3">
@@ -3936,10 +3990,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                         type="text"
                                         value={subItem.size || ''}
                                         onChange={(e) => updateSubItem(item.id, subItem.id, 'size', e.target.value)}
+                                        maxLength={BOQ_CONFIG.FIELD_LIMITS.SIZE}
                                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                                         placeholder="e.g., 120 cm X 60 cm"
                                         disabled={isSubmitting}
                                       />
+                                      <div className="flex justify-end mt-1">
+                                        <span className={`text-xs ${(subItem.size || '').length >= BOQ_CONFIG.FIELD_LIMITS.SIZE ? 'text-red-500' : 'text-gray-400'}`}>
+                                          {(subItem.size || '').length}/{BOQ_CONFIG.FIELD_LIMITS.SIZE}
+                                        </span>
+                                      </div>
                                     </div>
 
                                     <div>
@@ -3950,10 +4010,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                         type="text"
                                         value={subItem.location || ''}
                                         onChange={(e) => updateSubItem(item.id, subItem.id, 'location', e.target.value)}
+                                        maxLength={BOQ_CONFIG.FIELD_LIMITS.LOCATION}
                                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                                         placeholder="e.g., Living room"
                                         disabled={isSubmitting}
                                       />
+                                      <div className="flex justify-end mt-1">
+                                        <span className={`text-xs ${(subItem.location || '').length >= BOQ_CONFIG.FIELD_LIMITS.LOCATION ? 'text-red-500' : 'text-gray-400'}`}>
+                                          {(subItem.location || '').length}/{BOQ_CONFIG.FIELD_LIMITS.LOCATION}
+                                        </span>
+                                      </div>
                                     </div>
                                   </div>
 
@@ -3965,10 +4031,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       type="text"
                                       value={subItem.brand || ''}
                                       onChange={(e) => updateSubItem(item.id, subItem.id, 'brand', e.target.value)}
+                                      maxLength={BOQ_CONFIG.FIELD_LIMITS.BRAND}
                                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                                       placeholder="e.g., RAK / Equivalent"
                                       disabled={isSubmitting}
                                     />
+                                    <div className="flex justify-end mt-1">
+                                      <span className={`text-xs ${(subItem.brand || '').length >= BOQ_CONFIG.FIELD_LIMITS.BRAND ? 'text-red-500' : 'text-gray-400'}`}>
+                                        {(subItem.brand || '').length}/{BOQ_CONFIG.FIELD_LIMITS.BRAND}
+                                      </span>
+                                    </div>
                                   </div>
 
                                   {/* Image Upload Section */}
@@ -4295,6 +4367,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                       setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
                                                     }
                                                   }}
+                                                  maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME}
                                                   className={`w-full px-3 py-1.5 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
                                                     material.is_from_master
                                                       ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
@@ -4307,6 +4380,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 {availableMaterials.length > 0 && (
                                                   <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
                                                 )}
+                                                <div className="flex justify-end mt-0.5">
+                                                  <span className={`text-xs ${(materialSearchTerms[materialDropdownId] || material.material_name).length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME ? 'text-red-500' : 'text-gray-400'}`}>
+                                                    {(materialSearchTerms[materialDropdownId] || material.material_name).length}/{BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME}
+                                                  </span>
+                                                </div>
 
                                                 {materialDropdownOpen[materialDropdownId] && availableMaterials.length > 0 && (
                                                   <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-32 overflow-y-auto">
@@ -4400,14 +4478,31 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             {/* Description field */}
                                             <div className="ml-0">
                                               <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
-                                              <input
-                                                type="text"
+                                              <textarea
                                                 value={material.description || ''}
-                                                onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'description', e.target.value)}
-                                                className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50"
+                                                onChange={(e) => {
+                                                  updateSubItemMaterial(item.id, subItem.id, material.id, 'description', e.target.value);
+                                                  // Auto-resize textarea
+                                                  e.target.style.height = 'auto';
+                                                  e.target.style.height = e.target.scrollHeight + 'px';
+                                                }}
+                                                onFocus={(e) => {
+                                                  // Auto-resize on focus
+                                                  e.target.style.height = 'auto';
+                                                  e.target.style.height = e.target.scrollHeight + 'px';
+                                                }}
+                                                maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_DESCRIPTION}
+                                                className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50 resize-none overflow-hidden"
                                                 placeholder="Description (optional)"
                                                 disabled={isSubmitting}
+                                                rows={1}
+                                                style={{ minHeight: '30px' }}
                                               />
+                                              <div className="flex justify-end mt-0.5">
+                                                <span className={`text-xs ${(material.description || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_DESCRIPTION ? 'text-red-500' : 'text-gray-400'}`}>
+                                                  {(material.description || '').length}/{BOQ_CONFIG.FIELD_LIMITS.MATERIAL_DESCRIPTION}
+                                                </span>
+                                              </div>
                                             </div>
 
                                             {/* Material Detail Fields - Brand, Size, Specification */}
@@ -4418,10 +4513,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   type="text"
                                                   value={material.brand || ''}
                                                   onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'brand', e.target.value)}
+                                                  maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_BRAND}
                                                   className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50"
                                                   placeholder="Brand (optional)"
                                                   disabled={isSubmitting}
                                                 />
+                                                <div className="flex justify-end mt-0.5">
+                                                  <span className={`text-xs ${(material.brand || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_BRAND ? 'text-red-500' : 'text-gray-400'}`}>
+                                                    {(material.brand || '').length}/{BOQ_CONFIG.FIELD_LIMITS.MATERIAL_BRAND}
+                                                  </span>
+                                                </div>
                                               </div>
                                               <div>
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">Size</label>
@@ -4429,21 +4530,44 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   type="text"
                                                   value={material.size || ''}
                                                   onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'size', e.target.value)}
+                                                  maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SIZE}
                                                   className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50"
                                                   placeholder="Size (optional)"
                                                   disabled={isSubmitting}
                                                 />
+                                                <div className="flex justify-end mt-0.5">
+                                                  <span className={`text-xs ${(material.size || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SIZE ? 'text-red-500' : 'text-gray-400'}`}>
+                                                    {(material.size || '').length}/{BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SIZE}
+                                                  </span>
+                                                </div>
                                               </div>
                                               <div className="col-span-2">
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">Specification</label>
                                                 <textarea
                                                   value={material.specification || ''}
-                                                  onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'specification', e.target.value)}
-                                                  className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50 resize-none"
+                                                  onChange={(e) => {
+                                                    updateSubItemMaterial(item.id, subItem.id, material.id, 'specification', e.target.value);
+                                                    // Auto-resize textarea
+                                                    e.target.style.height = 'auto';
+                                                    e.target.style.height = e.target.scrollHeight + 'px';
+                                                  }}
+                                                  onFocus={(e) => {
+                                                    // Auto-resize on focus
+                                                    e.target.style.height = 'auto';
+                                                    e.target.style.height = e.target.scrollHeight + 'px';
+                                                  }}
+                                                  maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SPECIFICATION}
+                                                  className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50 resize-none overflow-hidden"
                                                   placeholder="Specification (optional)"
-                                                  rows={2}
+                                                  rows={1}
                                                   disabled={isSubmitting}
+                                                  style={{ minHeight: '30px' }}
                                                 />
+                                                <div className="flex justify-end mt-0.5">
+                                                  <span className={`text-xs ${(material.specification || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SPECIFICATION ? 'text-red-500' : 'text-gray-400'}`}>
+                                                    {(material.specification || '').length}/{BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SPECIFICATION}
+                                                  </span>
+                                                </div>
                                               </div>
                                             </div>
                                           </div>
@@ -4511,32 +4635,40 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             <div className="w-10 flex items-center justify-center text-xs font-medium text-gray-600">
                                               {labourIndex + 1}
                                             </div>
-                                            <input
-                                              type="text"
-                                              value={labour.labour_role}
-                                              onChange={(e) => {
-                                                setItems(items.map(itm =>
-                                                  itm.id === item.id
-                                                    ? {
-                                                        ...itm,
-                                                        sub_items: itm.sub_items.map(si =>
-                                                          si.id === subItem.id
-                                                            ? {
-                                                                ...si,
-                                                                labour: si.labour.map(l =>
-                                                                  l.id === labour.id ? { ...l, labour_role: e.target.value } : l
-                                                                )
-                                                              }
-                                                            : si
-                                                        )
-                                                      }
-                                                    : itm
-                                                ));
-                                              }}
-                                              className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                              placeholder="Labour role (e.g., Fabricator, Installer)"
-                                              disabled={isSubmitting}
-                                            />
+                                            <div className="flex-1 flex flex-col">
+                                              <input
+                                                type="text"
+                                                value={labour.labour_role}
+                                                onChange={(e) => {
+                                                  setItems(items.map(itm =>
+                                                    itm.id === item.id
+                                                      ? {
+                                                          ...itm,
+                                                          sub_items: itm.sub_items.map(si =>
+                                                            si.id === subItem.id
+                                                              ? {
+                                                                  ...si,
+                                                                  labour: si.labour.map(l =>
+                                                                    l.id === labour.id ? { ...l, labour_role: e.target.value } : l
+                                                                  )
+                                                                }
+                                                              : si
+                                                          )
+                                                        }
+                                                      : itm
+                                                  ));
+                                                }}
+                                                maxLength={BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE}
+                                                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                                                placeholder="Labour role (e.g., Fabricator, Installer)"
+                                                disabled={isSubmitting}
+                                              />
+                                              <div className="flex justify-end">
+                                                <span className={`text-xs ${labour.labour_role.length >= BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE ? 'text-red-500' : 'text-gray-400'}`}>
+                                                  {labour.labour_role.length}/{BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE}
+                                                </span>
+                                              </div>
+                                            </div>
                                             <select
                                               value={labour.work_type || 'daily_wages'}
                                               onChange={(e) => {
@@ -5475,77 +5607,30 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           disabled={isSubmitting}
                         />
                         {editingTermId === term.id ? (
-                          <div className="flex-1 flex items-center gap-2">
-                            <textarea
-                              value={term.terms_text}
-                              onChange={(e) => {
-                                updateTermText(term.id, e.target.value);
-                                // Auto-resize textarea
-                                e.target.style.height = 'auto';
-                                e.target.style.height = e.target.scrollHeight + 'px';
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              onFocus={(e) => {
-                                // Auto-resize on focus
-                                e.target.style.height = 'auto';
-                                e.target.style.height = e.target.scrollHeight + 'px';
-                              }}
-                              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-hidden"
-                              placeholder="Enter term text..."
-                              rows={1}
-                              disabled={isSubmitting}
-                              autoFocus={true}
-                              style={{ minHeight: '38px' }}
-                            />
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                saveTermEdit(term);
-                              }}
-                              className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                              disabled={isSubmitting || !term.terms_text.trim()}
-                              title="Save changes"
-                            >
-                              <Check className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                setEditingTermId(null);
-                                await removeTerm(term.id);
-                              }}
-                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                              disabled={isSubmitting}
-                              title="Delete term"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ) : term.isCustom ? (
-                          <div className="flex-1 flex items-start gap-2">
-                            <textarea
-                              value={term.terms_text}
-                              onChange={(e) => {
-                                updateTermText(term.id, e.target.value);
-                                // Auto-resize textarea
-                                e.target.style.height = 'auto';
-                                e.target.style.height = e.target.scrollHeight + 'px';
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              onFocus={(e) => {
-                                // Auto-resize on focus
-                                e.target.style.height = 'auto';
-                                e.target.style.height = e.target.scrollHeight + 'px';
-                              }}
-                              className="flex-1 px-3 py-2 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-hidden bg-blue-50"
-                              placeholder="Enter custom term..."
-                              rows={1}
-                              disabled={isSubmitting}
-                              style={{ minHeight: '38px' }}
-                            />
-                            <div className="flex items-center gap-1 flex-shrink-0">
+                          <div className="flex-1 flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <textarea
+                                value={term.terms_text}
+                                onChange={(e) => {
+                                  updateTermText(term.id, e.target.value);
+                                  // Auto-resize textarea
+                                  e.target.style.height = 'auto';
+                                  e.target.style.height = e.target.scrollHeight + 'px';
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                onFocus={(e) => {
+                                  // Auto-resize on focus
+                                  e.target.style.height = 'auto';
+                                  e.target.style.height = e.target.scrollHeight + 'px';
+                                }}
+                                maxLength={BOQ_CONFIG.FIELD_LIMITS.TERMS_TEXT}
+                                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-hidden"
+                                placeholder="Enter term text..."
+                                rows={1}
+                                disabled={isSubmitting}
+                                autoFocus={true}
+                                style={{ minHeight: '38px' }}
+                              />
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -5554,7 +5639,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 }}
                                 className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
                                 disabled={isSubmitting || !term.terms_text.trim()}
-                                title="Save term"
+                                title="Save changes"
                               >
                                 <Check className="w-4 h-4" />
                               </button>
@@ -5562,14 +5647,77 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 type="button"
                                 onClick={async (e) => {
                                   e.stopPropagation();
+                                  setEditingTermId(null);
                                   await removeTerm(term.id);
                                 }}
                                 className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                                 disabled={isSubmitting}
-                                title="Remove term"
+                                title="Delete term"
                               >
-                                <X className="w-4 h-4" />
+                                <Trash2 className="w-4 h-4" />
                               </button>
+                            </div>
+                            <div className="flex justify-end">
+                              <span className={`text-xs ${term.terms_text.length >= BOQ_CONFIG.FIELD_LIMITS.TERMS_TEXT ? 'text-red-500' : 'text-gray-400'}`}>
+                                {term.terms_text.length}/{BOQ_CONFIG.FIELD_LIMITS.TERMS_TEXT}
+                              </span>
+                            </div>
+                          </div>
+                        ) : term.isCustom ? (
+                          <div className="flex-1 flex flex-col gap-1">
+                            <div className="flex items-start gap-2">
+                              <textarea
+                                value={term.terms_text}
+                                onChange={(e) => {
+                                  updateTermText(term.id, e.target.value);
+                                  // Auto-resize textarea
+                                  e.target.style.height = 'auto';
+                                  e.target.style.height = e.target.scrollHeight + 'px';
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                onFocus={(e) => {
+                                  // Auto-resize on focus
+                                  e.target.style.height = 'auto';
+                                  e.target.style.height = e.target.scrollHeight + 'px';
+                                }}
+                                maxLength={BOQ_CONFIG.FIELD_LIMITS.TERMS_TEXT}
+                                className="flex-1 px-3 py-2 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-hidden bg-blue-50"
+                                placeholder="Enter custom term..."
+                                rows={1}
+                                disabled={isSubmitting}
+                                style={{ minHeight: '38px' }}
+                              />
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    saveTermEdit(term);
+                                  }}
+                                  className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                  disabled={isSubmitting || !term.terms_text.trim()}
+                                  title="Save term"
+                                >
+                                  <Check className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await removeTerm(term.id);
+                                  }}
+                                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                  disabled={isSubmitting}
+                                  title="Remove term"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="flex justify-end">
+                              <span className={`text-xs ${term.terms_text.length >= BOQ_CONFIG.FIELD_LIMITS.TERMS_TEXT ? 'text-red-500' : 'text-gray-400'}`}>
+                                {term.terms_text.length}/{BOQ_CONFIG.FIELD_LIMITS.TERMS_TEXT}
+                              </span>
                             </div>
                           </div>
                         ) : (
