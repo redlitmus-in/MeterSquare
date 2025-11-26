@@ -131,11 +131,13 @@ const ChangeRequestsPage: React.FC = () => {
         // Filter for change requests with vendor selection pending TD approval
         const pendingVendorApprovals = response.data.filter(
           (cr: ChangeRequestItem) => {
-            const hasStatus = cr.status === 'assigned_to_buyer';
+            const status = cr.status?.trim(); // Trim to handle trailing spaces
+            const hasStatus = status === 'assigned_to_buyer' || status === 'send_to_buyer';
             const hasVendorPending = cr.vendor_selection_status === 'pending_td_approval';
 
             console.log(`CR-${cr.cr_id}:`, {
               status: cr.status,
+              trimmedStatus: status,
               vendor_selection_status: cr.vendor_selection_status,
               selected_vendor_name: cr.selected_vendor_name,
               hasStatus,
@@ -336,25 +338,26 @@ const ChangeRequestsPage: React.FC = () => {
                          req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
 
     let matchesTab = false;
+    const status = req.status?.trim(); // Trim to handle trailing spaces
 
     if (activeTab === 'pending') {
-      matchesTab = ['under_review', 'approved_by_pm', 'pending'].includes(req.status);
+      matchesTab = ['under_review', 'approved_by_pm', 'pending'].includes(status);
     } else if (activeTab === 'approved') {
       // Filter by sub-tab when in approved tab
       if (approvedSubTab === 'purchase_approved') {
         // Purchase approved: TD approved purchase, buyer needs to select vendor
-        matchesTab = req.status === 'assigned_to_buyer' && !req.selected_vendor_id;
+        matchesTab = (status === 'assigned_to_buyer' || status === 'send_to_buyer') && !req.selected_vendor_id;
       } else if (approvedSubTab === 'vendor_approved') {
         // Vendor approved: TD approved vendor selection, buyer hasn't completed purchase yet
         // Once purchase is completed (status = purchase_completed), it moves to Completed tab
-        matchesTab = req.status === 'assigned_to_buyer' &&
+        matchesTab = (status === 'assigned_to_buyer' || status === 'send_to_buyer') &&
                      !!req.selected_vendor_id && (!!req.vendor_approval_date || !!req.vendor_approved_by_td_id);
       }
     } else if (activeTab === 'completed') {
       // Only show truly completed purchases (purchase_completed status)
-      matchesTab = req.status === 'purchase_completed';
+      matchesTab = status === 'purchase_completed';
     } else if (activeTab === 'rejected') {
-      matchesTab = req.status === 'rejected';
+      matchesTab = status === 'rejected';
     }
 
     return matchesSearch && matchesTab;
@@ -438,17 +441,17 @@ const ChangeRequestsPage: React.FC = () => {
   };
 
   const stats = {
-    pending: changeRequests.filter(r => ['under_review', 'approved_by_pm', 'pending'].includes(r.status)).length,
+    pending: changeRequests.filter(r => ['under_review', 'approved_by_pm', 'pending'].includes(r.status?.trim())).length,
     approved: changeRequests.filter(r =>
-      r.status === 'assigned_to_buyer' // Only count items still in assigned_to_buyer status
+      (r.status?.trim() === 'assigned_to_buyer' || r.status?.trim() === 'send_to_buyer') // Count items in assigned_to_buyer or send_to_buyer status
     ).length,
-    purchaseApproved: changeRequests.filter(r => r.status === 'assigned_to_buyer' && !r.selected_vendor_id).length,
+    purchaseApproved: changeRequests.filter(r => (r.status?.trim() === 'assigned_to_buyer' || r.status?.trim() === 'send_to_buyer') && !r.selected_vendor_id).length,
     vendorApproved: changeRequests.filter(r =>
-      r.status === 'assigned_to_buyer' && // Must still be assigned_to_buyer, not purchase_completed
+      (r.status?.trim() === 'assigned_to_buyer' || r.status?.trim() === 'send_to_buyer') && // Must be assigned_to_buyer or send_to_buyer, not purchase_completed
       !!r.selected_vendor_id && (!!r.vendor_approval_date || !!r.vendor_approved_by_td_id)
     ).length,
-    completed: changeRequests.filter(r => r.status === 'purchase_completed').length,
-    rejected: changeRequests.filter(r => r.status === 'rejected').length,
+    completed: changeRequests.filter(r => r.status?.trim() === 'purchase_completed').length,
+    rejected: changeRequests.filter(r => r.status?.trim() === 'rejected').length,
     vendorApprovals: vendorApprovals.length
   };
 

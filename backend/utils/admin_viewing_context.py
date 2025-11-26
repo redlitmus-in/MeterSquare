@@ -4,6 +4,9 @@ Allows admin to view data as if they were a different role
 """
 
 from flask import request, g
+from config.logging import get_logger
+
+log = get_logger()
 
 def get_effective_user_context():
     """
@@ -14,7 +17,8 @@ def get_effective_user_context():
         dict: User context with effective role and id
     """
     current_user = g.get('user', {})
-    user_role = current_user.get('role', '').lower()
+    # Check both 'role' and 'role_name' fields as they may differ
+    user_role = (current_user.get('role_name', '') or current_user.get('role', '')).lower()
     user_id = current_user.get('user_id')
 
     # Check if admin is viewing as another role
@@ -23,9 +27,12 @@ def get_effective_user_context():
         viewing_as_role_id = request.headers.get('X-Viewing-As-Role-Id')
         viewing_as_user_id = request.headers.get('X-Viewing-As-User-Id')
 
+        log.info(f"Admin context check - viewing_as_role header: '{viewing_as_role}', viewing_as_role_id: '{viewing_as_role_id}'")
+
         if viewing_as_role and viewing_as_role != 'admin':
             # Admin is viewing as another role
             # Return context that indicates admin wants to see data for that role
+            log.info(f"Admin IS viewing as another role: {viewing_as_role}")
             return {
                 'actual_role': 'admin',
                 'actual_user_id': user_id,
@@ -34,6 +41,8 @@ def get_effective_user_context():
                 'effective_user_id': int(viewing_as_user_id) if viewing_as_user_id else None,
                 'is_admin_viewing': True
             }
+        else:
+            log.info(f"Admin NOT viewing as another role (header missing or admin)")
 
     # Regular user or admin not viewing as another role
     return {

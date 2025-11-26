@@ -161,7 +161,8 @@ def create_change_request():
                 'justification': mat.get('justification', ''),  # Per-material justification
                 'reason': mat.get('reason', ''),  # Reason for new material (used in routing logic)
                 'brand': brand,  # Brand for materials (from request or BOQ)
-                'specification': specification  # Specification for materials (from request or BOQ)
+                'specification': specification,  # Specification for materials (from request or BOQ)
+                'size': mat.get('size')  # Size for materials
             })
 
         # Calculate already consumed from previous approved change requests (NEW materials only)
@@ -300,8 +301,27 @@ def create_change_request():
                     "note": "Duplicate request prevented. Using existing request."
                 }), 200
 
-        # Create change request with status 'pending'
+        # Determine status based on user role
+        role_lower = user_role.lower() if user_role else ''
+        if role_lower in ['projectmanager', 'project_manager', 'pm']:
+            initial_status = 'pending'
+        elif role_lower in ['sitesupervisor', 'site_supervisor', 'ss', 'siteengineer', 'site_engineer', 'se']:
+            initial_status = 'pending'
+        elif role_lower in ['mep', 'mepsupervisor', 'mep_supervisor']:
+            initial_status = 'pending'
+        elif role_lower == 'admin':
+            initial_status = 'pending'
+
+        log.info(f"Creating change request with status '{initial_status}' for role '{user_role}'")
+
+        # Create change request with role-based status
         # No auto-routing - user must explicitly send for review
+        # If admin is viewing as another role, store that role for filtering
+        admin_viewing_as = None
+        if actual_role.lower() == 'admin' and effective_role.lower() != 'admin':
+            admin_viewing_as = effective_role.lower()
+            log.info(f"Admin creating request while viewing as {admin_viewing_as}")
+
         change_request = ChangeRequest(
             boq_id=boq_id,
             project_id=boq.project_id,
@@ -310,7 +330,7 @@ def create_change_request():
             requested_by_role=user_role,
             request_type='EXTRA_MATERIALS',
             justification=justification,
-            status='pending',  # User hasn't sent it yet
+            status=initial_status,  # Role-based status
             current_approver_role=None,  # Will be set when sent for review
             approval_required_from=None,  # Will be set when sent for review
             item_id=item_id,
@@ -464,7 +484,13 @@ def send_for_review(cr_id):
         user_role = current_user.get('role_name', '') or current_user.get('role', '')
         user_role_lower = user_role.lower() if user_role else ''
 
-        log.info(f"User {user_id} attempting to send change request. Role: '{user_role}' (lowercase: '{user_role_lower}')")
+        # Check if admin is viewing as another role - use effective role for workflow
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing_as = user_context.get('is_admin_viewing', False)
+        effective_role_for_workflow = user_context.get('effective_role', user_role_lower)
+
+        log.info(f"User {user_id} attempting to send change request. Role: '{user_role}' (lowercase: '{user_role_lower}'), effective_role: '{effective_role_for_workflow}', is_admin_viewing_as: {is_admin_viewing_as}")
 
         # --- Get Change Request ---
         change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
@@ -486,7 +512,9 @@ def send_for_review(cr_id):
         data = request.get_json() or {}
         route_to = data.get('route_to')
         buyer_id = data.get('buyer_id')
-        normalized_role = workflow_service.normalize_role(user_role_lower)
+        # Use effective role for workflow when admin is viewing as another role
+        normalized_role = workflow_service.normalize_role(effective_role_for_workflow if is_admin_viewing_as else user_role_lower)
+        log.info(f"send_for_review: normalized_role='{normalized_role}', is_admin_viewing_as={is_admin_viewing_as}, effective_role_for_workflow='{effective_role_for_workflow}'")
 
         # --- Determine next approver ---
         next_approver = None
@@ -517,7 +545,7 @@ def send_for_review(cr_id):
             next_approver_id = assigned_pm_user.user_id
             log.info(f"Routing CR {cr_id} to PM: {next_approver} (user_id={next_approver_id})")
 
-        elif normalized_role in ['projectmanager', 'project_manager', 'mep', 'mepsupervisor']:
+        elif normalized_role in ['projectmanager', 'project_manager', 'mep', 'mepsupervisor', 'admin']:
             # PM/MEP routing logic:
             # - Can send to Estimator or Buyer based on route_to parameter
             # - If not specified, defaults based on material type:
@@ -691,10 +719,14 @@ def send_for_review(cr_id):
         change_request.approval_required_from = next_role
         change_request.current_approver_role = next_role
 
-        # Set appropriate status based on next role
+        # Set appropriate status based on sender role and next role
         if next_role == CR_CONFIG.ROLE_BUYER and next_approver_id:
             # When routing to specific buyer, set status to assigned_to_buyer
             change_request.status = CR_CONFIG.STATUS_ASSIGNED_TO_BUYER
+        elif next_role == CR_CONFIG.ROLE_PROJECT_MANAGER and normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
+            # SS/SE sending to PM - set status to send_to_pm
+            change_request.status = 'send_to_pm'
+            log.info(f"SS/SE sending CR {cr_id} to PM - status set to 'send_to_pm'")
         else:
             change_request.status = CR_CONFIG.STATUS_UNDER_REVIEW
 
@@ -828,179 +860,252 @@ def get_all_change_requests():
         ).filter_by(is_deleted=False)
 
         # Role-based filtering
-        if user_role in ['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']:
+        # Check if actual role is admin (direct login or viewing as another role)
+        # Check both 'role' and 'role_name' fields as they may differ
+        actual_user_role = current_user.get('role_name', '').lower() or current_user.get('role', '').lower()
+
+        # Admin viewing as another role should use that role's filters, not admin filters
+        # Only direct admin login (not viewing as another role) sees everything
+        if actual_user_role == 'admin' and not is_admin_viewing:
+            log.info(f"Admin user (direct login) - showing ALL requests (no filtering). actual_role: {actual_user_role}")
+            # No filtering applied - admin sees everything
+            pass
+        elif user_role in ['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']:
             # NEW FLOW: SE sees requests from projects with item-level assignments via pm_assign_ss
             # OR their own requests (to see pending drafts before items are assigned)
-
-            if is_admin_viewing:
-                # Admin viewing as SE: Show ALL SE-related requests
-                log.info(f"Admin viewing as SE - showing ALL SE-related requests")
-                query = query.filter(
-                    ChangeRequest.requested_by_role.in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])
-                )
-            else:
-                # NEW FLOW: Get projects where SE has item assignments via pm_assign_ss
-                from models.pm_assign_ss import PMAssignSS
-
-                # Get unique project IDs where SE has item assignments
-                se_assigned_project_ids = db.session.query(PMAssignSS.project_id).filter(
-                    PMAssignSS.assigned_to_se_id == user_id,
-                    PMAssignSS.is_deleted == False
-                ).distinct().all()
-                se_assigned_project_ids = [p[0] for p in se_assigned_project_ids] if se_assigned_project_ids else []
-
-                log.info(f"Regular SE {user_id} - has item assignments in {len(se_assigned_project_ids)} projects")
-
-                # SE sees:
-                # 1. All requests from projects where they have item assignments
-                # 2. Their own requests (to see pending drafts)
-                from sqlalchemy import or_
-
-                if se_assigned_project_ids:
-                    query = query.filter(
-                        or_(
-                            ChangeRequest.project_id.in_(se_assigned_project_ids),  # Requests from assigned projects
-                            ChangeRequest.requested_by_user_id == user_id  # Own requests
-                        )
-                    )
-                else:
-                    # No item assignments found - show only own requests
-                    log.info(f"SE {user_id} has no item assignments, showing only own requests")
-                    query = query.filter_by(requested_by_user_id=user_id)
-        elif user_role in ['projectmanager', 'project_manager']:
-            # PM sees:
-            # 1. Their own requests from their projects
-            # 2. SE requests from SEs they specifically assigned (via PMAssignSS.assigned_by_pm_id)
-            from sqlalchemy import or_, and_
-            from utils.admin_viewing_context import should_apply_role_filter
+            # PURCHASE LIST VIEW: SE only sees requests where requested_by_role is 'siteengineer' and status is 'pending'
+            # NEW FLOW: Get projects where SE has item assignments via pm_assign_ss
             from models.pm_assign_ss import PMAssignSS
 
-            # Check if admin is viewing as PM (should see ALL PM data, not user-specific)
+            # Get unique project IDs where SE has item assignments
+            se_assigned_project_ids = db.session.query(PMAssignSS.project_id).filter(
+                PMAssignSS.assigned_to_se_id == user_id,
+                PMAssignSS.is_deleted == False
+            ).distinct().all()
+            se_assigned_project_ids = [p[0] for p in se_assigned_project_ids] if se_assigned_project_ids else []
+
+            log.info(f"Regular SE {user_id} - has item assignments in {len(se_assigned_project_ids)} projects")
+
+            # SE sees:
+            # 1. Requests where requested_by_role is 'siteengineer'/'sitesupervisor' and status is 'pending'
+            # 2. Their own requests (to see pending drafts)
+            from sqlalchemy import or_, and_
+
+            # Filter for SE: only show pending requests from site engineers
+            se_role_filter = and_(
+                ChangeRequest.requested_by_role.in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']),
+                ChangeRequest.status == 'pending'
+            )
+
+            # Filter for approved/completed requests (to show in Accepted/Completed tabs)
+            # SE should ONLY see their own approved requests, NOT PM/MEP created requests
+            se_approved_status_filter = and_(
+                ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer']),
+                ChangeRequest.requested_by_role.in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])  # Only SE created requests
+            )
+
+            # Admin raised requests as SE role - show to SE assigned to that project
+            admin_as_se_filter = and_(
+                ChangeRequest.requested_by_role == 'admin',
+            )
+
             if is_admin_viewing:
-                # Admin viewing as PM: Show ALL requests that ANY PM would see
-                log.info(f"Admin viewing as PM - showing ALL PM-related requests (not user-specific)")
+                # Admin viewing as SE - show ALL requests (no filtering)
+                # Admin should see everything when viewing as any role
+                log.info(f"Admin viewing as SE - showing ALL requests (no filtering)")
+                pass  # No additional filtering - admin sees everything
+            elif se_assigned_project_ids:
+                # Regular SE - sees pending requests from SEs in their assigned projects + own requests
                 query = query.filter(
                     or_(
-                        ChangeRequest.requested_by_role.in_(['projectmanager', 'project_manager']),  # All PM-created requests
-                        ChangeRequest.approval_required_from == 'project_manager',  # All SE requests needing PM approval
-                        ChangeRequest.pm_approved_by_user_id.isnot(None)  # All requests approved by any PM
+                        and_(
+                            ChangeRequest.project_id.in_(se_assigned_project_ids),  # Requests from assigned projects
+                            se_role_filter  # Only pending requests from site engineers
+                        ),
+                        and_(
+                            ChangeRequest.project_id.in_(se_assigned_project_ids),  # Requests from assigned projects
+                            admin_as_se_filter  # Admin raised as SE role
+                        ),
+                        and_(
+                            ChangeRequest.project_id.in_(se_assigned_project_ids),  # Requests from assigned projects
+                            se_approved_status_filter  # Approved/completed/rejected requests (SE created only)
+                        ),
+                        ChangeRequest.requested_by_user_id == user_id  # Own requests
                     )
                 )
             else:
-                # Regular PM: Filter by SEs they assigned and their own requests
-                # Get all SEs that this PM has assigned (via PMAssignSS.assigned_by_pm_id)
-                pm_assigned_se_ids = db.session.query(PMAssignSS.assigned_to_se_id).filter(
-                    PMAssignSS.assigned_by_pm_id == user_id,
-                    PMAssignSS.is_deleted == False
-                ).distinct().all()
-                pm_assigned_se_ids = [se[0] for se in pm_assigned_se_ids] if pm_assigned_se_ids else []
+                # No item assignments found - show only own requests
+                log.info(f"SE {user_id} has no item assignments, showing only own requests")
+                query = query.filter(ChangeRequest.requested_by_user_id == user_id)
+        elif user_role in ['projectmanager', 'project_manager']:
+            log.info(f"Entering PM block - user_role: {user_role}, is_admin_viewing: {is_admin_viewing}")
+            # PM sees:
+            # 1. Requests where requested_by_role is 'projectmanager' and status is 'pending' or 'pm_request'
+            # 2. Requests with status 'send_to_pm' (sent by SS/SE for PM approval)
+            # 3. Their own requests
+            # 4. Admin raised requests as PM role
+            from sqlalchemy import or_, and_
 
-                # Get projects where this PM is assigned (for their own requests)
-                pm_projects = Project.query.filter(
-                    Project.user_id.contains([user_id]),
+            # Get projects where this PM is assigned
+            pm_projects = Project.query.filter(
+                Project.user_id.contains([user_id]),
+                Project.is_deleted == False
+            ).all()
+            pm_project_ids = [p.project_id for p in pm_projects]
+
+            log.info(f"PM {user_id} - has {len(pm_project_ids)} projects, is_admin_viewing: {is_admin_viewing}")
+
+            # Filter for PM: show pending/pm_request requests from project managers
+            pm_role_filter = and_(
+                ChangeRequest.requested_by_role.in_(['projectmanager', 'project_manager', 'pm']),
+                ChangeRequest.status.in_(['pending', 'pm_request'])
+            )
+
+            # Filter for SS/SE requests sent to PM (status = 'send_to_pm')
+            send_to_pm_filter = ChangeRequest.status == 'send_to_pm'
+
+            # Filter for approved/completed requests (to show in Accepted/Completed tabs)
+            approved_status_filter = ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer'])
+
+            # Admin raised requests as PM role - show to PM assigned to that project
+            admin_as_pm_filter = and_(
+                ChangeRequest.requested_by_role == 'admin',
+            )
+
+            if is_admin_viewing:
+                # Admin viewing as PM - show requests only from projects where a PM is assigned
+                # This simulates what a PM would see - only their assigned projects
+                from sqlalchemy import not_, and_, or_
+
+                # Get ALL projects that have a PM assigned (any PM)
+                all_pm_projects = Project.query.filter(
+                    Project.user_id.isnot(None),
                     Project.is_deleted == False
                 ).all()
-                pm_project_ids = [p.project_id for p in pm_projects]
+                all_pm_project_ids = [p.project_id for p in all_pm_projects]
 
-                log.info(f"Regular PM {user_id} - assigned {len(pm_assigned_se_ids)} SEs, has {len(pm_project_ids)} projects")
+                log.info(f"Admin viewing as PM - found {len(all_pm_project_ids)} projects with PM assigned")
 
-                if pm_assigned_se_ids or pm_project_ids:
-                    # PM sees:
-                    # 1. Their own requests from their assigned projects
-                    # 2. Requests from SEs they assigned
-                    filters = []
+                # SS/SE pending drafts (not yet sent to PM) - these should be EXCLUDED
+                # Use lower() for case-insensitive comparison (DB has 'siteEngineer', 'SiteEngineer', etc.)
+                is_ss_se_pending_draft = and_(
+                    func.lower(ChangeRequest.requested_by_role).in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']),
+                    ChangeRequest.status == 'pending'
+                )
 
-                    # Own requests from assigned projects
-                    if pm_project_ids:
-                        filters.append(
-                            and_(
-                                ChangeRequest.requested_by_user_id == user_id,
-                                ChangeRequest.project_id.in_(pm_project_ids)
+                # Admin/PM created requests (any status) - these should be INCLUDED
+                is_admin_or_pm_created = func.lower(ChangeRequest.requested_by_role).in_(['admin', 'projectmanager', 'project_manager', 'pm'])
+
+                # SS/SE requests that are NOT pending (sent for approval) - these should be INCLUDED
+                is_ss_se_sent_for_review = and_(
+                    func.lower(ChangeRequest.requested_by_role).in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']),
+                    ChangeRequest.status != 'pending'
+                )
+
+                log.info(f"Admin viewing as PM - showing PM-relevant requests. is_admin_viewing={is_admin_viewing}, effective_role={effective_role}")
+
+                # Filter: only show requests from projects with PM assigned
+                # Include: admin/PM created (any status) OR SS/SE created but sent for review (not pending)
+                if all_pm_project_ids:
+                    query = query.filter(
+                        and_(
+                            ChangeRequest.project_id.in_(all_pm_project_ids),
+                            or_(
+                                is_admin_or_pm_created,  # Admin/PM created requests
+                                is_ss_se_sent_for_review  # SS/SE requests sent for review
                             )
                         )
-
-                    # Requests from assigned SEs
-                    if pm_assigned_se_ids:
-                        filters.append(
-                            ChangeRequest.requested_by_user_id.in_(pm_assigned_se_ids)
-                        )
-
-                    if filters:
-                        query = query.filter(or_(*filters))
-                    else:
-                        # No assignments found
-                        query = query.filter_by(requested_by_user_id=user_id)
+                    )
                 else:
-                    # No assignments or projects, show only own requests
-                    log.warning(f"PM {user_id} has no assigned SEs or projects")
-                    query = query.filter_by(requested_by_user_id=user_id)
+                    # No projects with PM, show nothing
+                    query = query.filter(ChangeRequest.cr_id == -1)
 
-        elif user_role in ['mep', 'mepsupervisor']:
-            # MEP sees ONLY requests from Site Engineers assigned to their projects:
-            # 1. Their own requests from their projects
-            # 2. SE requests from SEs assigned to MEP's projects (via PMAssignSS)
-            from sqlalchemy import or_, and_
-            from models.pm_assign_ss import PMAssignSS
+                log.info(f"Applied filter: include admin/PM created + SS/SE sent for review, from PM-assigned projects")
+            elif pm_project_ids:
+                # Regular PM - sees all requests from their assigned projects
+                # Admin-created requests (any status) from PM's projects
+                admin_created_filter = func.lower(ChangeRequest.requested_by_role) == 'admin'
 
-            # Check if admin is viewing as MEP (should see ALL MEP data, not user-specific)
-            if is_admin_viewing:
-                # Admin viewing as MEP: Show ALL requests that ANY MEP would see
-                log.info(f"Admin viewing as MEP - showing ALL MEP-related requests (not user-specific)")
                 query = query.filter(
                     or_(
-                        ChangeRequest.requested_by_role.in_(['mep', 'mepsupervisor']),  # All MEP-created requests
-                        ChangeRequest.approval_required_from == 'mep',  # All SE requests needing MEP approval
-                        ChangeRequest.pm_approved_by_user_id.isnot(None)  # All requests approved by any MEP
+                        and_(
+                            ChangeRequest.project_id.in_(pm_project_ids),  # Requests from assigned projects
+                            pm_role_filter  # Pending requests from project managers
+                        ),
+                        and_(
+                            ChangeRequest.project_id.in_(pm_project_ids),  # Requests from assigned projects
+                            admin_created_filter  # Admin created requests (any status)
+                        ),
+                        and_(
+                            ChangeRequest.project_id.in_(pm_project_ids),  # Requests from assigned projects
+                            send_to_pm_filter  # SS/SE requests sent to PM
+                        ),
+                        and_(
+                            ChangeRequest.project_id.in_(pm_project_ids),  # Requests from assigned projects
+                            approved_status_filter  # Approved/completed/rejected requests
+                        ),
+                        ChangeRequest.requested_by_user_id == user_id  # Own requests
                     )
                 )
             else:
-                # Regular MEP: Filter by SEs assigned to MEP's projects
-                # Get projects where this user is the MEP supervisor (mep_supervisor_id field in Project table)
-                # Use JSONB contains operator since mep_supervisor_id is a JSONB array
-                mep_projects = Project.query.filter(
-                    Project.mep_supervisor_id.contains([user_id]),
-                    Project.is_deleted == False
-                ).all()
-                mep_project_ids = [p.project_id for p in mep_projects]
+                # No projects assigned, show only own requests
+                log.warning(f"PM {user_id} has no assigned projects")
+                query = query.filter(ChangeRequest.requested_by_user_id == user_id)
 
-                log.info(f"Regular MEP {user_id} - has {len(mep_project_ids)} assigned projects")
+        elif user_role in ['mep', 'mepsupervisor']:
+            # MEP sees:
+            # 1. Requests where requested_by_role is 'mep'/'mepsupervisor' and status is 'pending'
+            # 2. Admin raised requests as MEP role
+            # 3. Their own requests
+            from sqlalchemy import or_, and_
 
-                if mep_project_ids:
-                    # Get all SEs assigned to MEP's projects (via PMAssignSS)
-                    mep_assigned_se_ids = db.session.query(PMAssignSS.assigned_to_se_id).filter(
-                        PMAssignSS.project_id.in_(mep_project_ids),
-                        PMAssignSS.is_deleted == False
-                    ).distinct().all()
-                    mep_assigned_se_ids = [se[0] for se in mep_assigned_se_ids] if mep_assigned_se_ids else []
+            # Get projects where this user is the MEP supervisor (mep_supervisor_id field in Project table)
+            # Use JSONB contains operator since mep_supervisor_id is a JSONB array
+            mep_projects = Project.query.filter(
+                Project.mep_supervisor_id.contains([user_id]),
+                Project.is_deleted == False
+            ).all()
+            mep_project_ids = [p.project_id for p in mep_projects]
 
-                    log.info(f"Regular MEP {user_id} - found {len(mep_assigned_se_ids)} SEs assigned to their projects")
+            log.info(f"Regular MEP {user_id} - has {len(mep_project_ids)} assigned projects")
 
-                    # MEP sees:
-                    # 1. Their own requests from their assigned projects
-                    # 2. Requests from SEs assigned to their projects
-                    filters = []
+            # Filter for MEP: only show pending requests from MEP
+            mep_role_filter = and_(
+                ChangeRequest.requested_by_role.in_(['mep', 'mepsupervisor']),
+                ChangeRequest.status == 'pending'
+            )
 
-                    # Own requests from assigned projects
-                    filters.append(
+            # Admin raised requests as MEP role - show to MEP assigned to that project
+            admin_as_mep_filter = and_(
+                ChangeRequest.requested_by_role == 'admin',
+            )
+
+            if is_admin_viewing:
+                # Admin viewing as MEP - show ALL requests (no filtering)
+                # Admin should see everything when viewing as any role
+                log.info(f"Admin viewing as MEP - showing ALL requests (no filtering)")
+                pass  # No additional filtering - admin sees everything
+            elif mep_project_ids:
+                # Regular MEP - sees pending requests from MEPs in their assigned projects + admin raised as MEP + own requests
+                query = query.filter(
+                    or_(
                         and_(
-                            ChangeRequest.requested_by_user_id == user_id,
-                            ChangeRequest.project_id.in_(mep_project_ids)
-                        )
+                            ChangeRequest.project_id.in_(mep_project_ids),  # Requests from assigned projects
+                            mep_role_filter  # Only pending requests from MEP
+                        ),
+                        and_(
+                            ChangeRequest.project_id.in_(mep_project_ids),  # Requests from assigned projects
+                            admin_as_mep_filter  # Admin raised as MEP role
+                        ),
+                        ChangeRequest.requested_by_user_id == user_id  # Own requests
                     )
-
-                    # Requests from assigned SEs
-                    if mep_assigned_se_ids:
-                        filters.append(
-                            ChangeRequest.requested_by_user_id.in_(mep_assigned_se_ids)
-                        )
-
-                    query = query.filter(or_(*filters))
-                else:
-                    # If MEP has no assigned projects, show only their own requests
-                    log.warning(f"MEP {user_id} has no assigned projects, showing only their own requests")
-                    query = query.filter(
-                        ChangeRequest.requested_by_user_id == user_id  # MEP's own requests only
-                    )
+                )
+            else:
+                # If MEP has no assigned projects, show only their own requests
+                log.warning(f"MEP {user_id} has no assigned projects, showing only their own requests")
+                query = query.filter(
+                    ChangeRequest.requested_by_user_id == user_id  # MEP's own requests only
+                )
 
         elif user_role == 'estimator':
             # Estimator sees:
@@ -1009,49 +1114,39 @@ def get_all_change_requests():
             # 3. Completed purchases from their projects (to see pricing history)
             from sqlalchemy import or_, and_
 
-            log.info(f"Estimator filter - user_id: {user_id}, is_admin_viewing: {is_admin_viewing}")
+            log.info(f"Estimator filter - user_id: {user_id}")
 
-            if is_admin_viewing:
-                # Admin viewing as estimator sees ALL estimator-related requests
+            # Regular estimator: filter by assigned projects
+            estimator_projects = Project.query.filter_by(estimator_id=user_id, is_deleted=False).all()
+            estimator_project_ids = [p.project_id for p in estimator_projects]
+
+            log.info(f"Regular Estimator {user_id} - has {len(estimator_project_ids)} assigned projects: {estimator_project_ids}")
+
+            if estimator_project_ids:
+                # Estimator sees requests from their assigned projects only
                 query = query.filter(
                     or_(
-                        ChangeRequest.approval_required_from == 'estimator',
+                        and_(
+                            ChangeRequest.approval_required_from == 'estimator',
+                            ChangeRequest.project_id.in_(estimator_project_ids)
+                        ),
                         ChangeRequest.approved_by_user_id == user_id,
-                        ChangeRequest.status == 'purchase_completed'
+                        and_(
+                            ChangeRequest.status == 'purchase_completed',
+                            ChangeRequest.project_id.in_(estimator_project_ids)
+                        )
                     )
                 )
             else:
-                # Regular estimator: filter by assigned projects
-                estimator_projects = Project.query.filter_by(estimator_id=user_id, is_deleted=False).all()
-                estimator_project_ids = [p.project_id for p in estimator_projects]
-
-                log.info(f"Regular Estimator {user_id} - has {len(estimator_project_ids)} assigned projects: {estimator_project_ids}")
-
-                if estimator_project_ids:
-                    # Estimator sees requests from their assigned projects only
-                    query = query.filter(
-                        or_(
-                            and_(
-                                ChangeRequest.approval_required_from == 'estimator',
-                                ChangeRequest.project_id.in_(estimator_project_ids)
-                            ),
-                            ChangeRequest.approved_by_user_id == user_id,
-                            and_(
-                                ChangeRequest.status == 'purchase_completed',
-                                ChangeRequest.project_id.in_(estimator_project_ids)
-                            )
-                        )
-                    )
-                else:
-                    # If estimator has no assigned projects, show only their own requests
-                    log.warning(f"Estimator {user_id} has no assigned projects, showing only their own requests")
-                    query = query.filter(
-                        ChangeRequest.requested_by_user_id == user_id
-                    )
+                # If estimator has no assigned projects, show only their own requests
+                log.warning(f"Estimator {user_id} has no assigned projects, showing only their own requests")
+                query = query.filter(
+                    ChangeRequest.requested_by_user_id == user_id
+                )
         elif user_role in ['technical_director', 'technicaldirector']:
             # TD sees:
             # 1. Requests where approval_required_from = 'technical_director' (pending TD approval)
-            # 2. Requests approved by TD that are assigned_to_buyer (approved tab)
+            # 2. Requests approved by TD that are assigned_to_buyer or send_to_buyer (approved tab)
             # 3. ALL requests that are purchase_completed (completed tab) - regardless of who approved
             # 4. Requests with vendor selection pending TD approval (vendor_selection_status = 'pending_td_approval')
             # 5. Requests with vendor approved by TD (vendor_selection_status = 'approved')
@@ -1064,6 +1159,7 @@ def get_all_change_requests():
                     ChangeRequest.approval_required_from == 'technical_director',  # Pending requests
                     ChangeRequest.td_approved_by_user_id.isnot(None),  # Approved by TD
                     ChangeRequest.status == 'purchase_completed',  # All completed purchases (actual DB value)
+                    ChangeRequest.status == 'send_to_buyer',  # Send to buyer status
                     ChangeRequest.vendor_selection_status == 'pending_td_approval',  # Vendor approval pending
                     ChangeRequest.vendor_approved_by_td_id.isnot(None)  # Vendor approved by TD
                 )
@@ -1265,6 +1361,11 @@ def approve_change_request(cr_id):
         approver_name = current_user.get('full_name') or current_user.get('username') or 'User'
         approver_role = current_user.get('role_name', '').lower()
 
+        # Get effective user context (handles admin viewing as another role)
+        user_context = get_effective_user_context()
+        effective_role = user_context.get('effective_role', approver_role)
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
         # Get change request
         change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
         if not change_request:
@@ -1274,14 +1375,14 @@ def approve_change_request(cr_id):
         if change_request.status in ['approved', 'rejected']:
             return jsonify({"error": f"Change request already {change_request.status}"}), 400
 
-        # Normalize role for consistent comparison
-        normalized_role = workflow_service.normalize_role(approver_role)
+        # Normalize role for consistent comparison - use effective role for admin viewing
+        normalized_role = workflow_service.normalize_role(effective_role if is_admin_viewing else approver_role)
 
-        # Admin has full approval authority (like TD)
-        is_admin = approver_role in ['admin'] or normalized_role == 'admin'
+        # Admin has full approval authority (like TD) - but only when NOT viewing as another role
+        is_admin = (approver_role in ['admin'] or normalized_role == 'admin') and not is_admin_viewing
 
-        # PM can approve requests that are under_review from SE
-        if normalized_role in ['projectmanager'] and change_request.status == 'under_review':
+        # PM can approve requests that are under_review or send_to_pm from SE
+        if normalized_role in ['projectmanager'] and change_request.status in ['under_review', 'send_to_pm']:
             # PM can approve requests from Site Engineers
             if change_request.requested_by_role and 'site' in change_request.requested_by_role.lower():
                 # This is a valid PM approval scenario
@@ -1289,11 +1390,26 @@ def approve_change_request(cr_id):
             elif change_request.approval_required_from == 'project_manager':
                 # This is explicitly assigned to PM
                 pass
+            elif change_request.status == 'send_to_pm':
+                # SS/SE sent request to PM for approval
+                pass
             else:
                 return jsonify({"error": f"PM cannot approve this request. Current approver: {change_request.approval_required_from}"}), 403
+        # MEP can approve requests sent to them
+        elif normalized_role in ['mep', 'mepsupervisor'] and change_request.status in ['under_review', 'send_to_pm']:
+            # MEP can approve requests from their assigned projects
+            pass
+        # Estimator can approve requests assigned to them
+        elif normalized_role == 'estimator':
+            # Estimator can approve requests assigned to them for approval
+            if change_request.approval_required_from != 'estimator':
+                return jsonify({"error": "You can only approve requests assigned to you for approval"}), 403
+        # Admin can approve any request
+        elif is_admin:
+            pass
         else:
             # Check if request is under review for other roles
-            if change_request.status not in ['under_review', 'approved_by_pm', 'approved_by_td']:
+            if change_request.status not in ['under_review', 'approved_by_pm', 'approved_by_td', 'send_to_pm']:
                 return jsonify({"error": "Request must be sent for review first"}), 400
 
             # Validate workflow state
@@ -1312,18 +1428,20 @@ def approve_change_request(cr_id):
         selected_buyer_id = data.get('buyer_id')  # Required when PM approves external buy
 
         # Multi-stage approval logic
-        if normalized_role in ['projectmanager']:
-            # PM approves - route based on material type
+        if normalized_role in ['projectmanager', 'mep', 'mepsupervisor'] or is_admin:
+            # PM/MEP/Admin approves - route based on material type
             change_request.pm_approved_by_user_id = approver_id
             change_request.pm_approved_by_name = approver_name
             change_request.pm_approval_date = datetime.utcnow()
-            change_request.status = CR_CONFIG.STATUS_APPROVED_BY_PM
 
             # Check if all materials are existing (external buy)
             has_new_materials = any(mat.get('master_material_id') is None for mat in (change_request.materials_data or []))
 
             if has_new_materials:
                 # Has NEW materials → Route to Estimator for pricing
+                change_request.status = CR_CONFIG.STATUS_SEND_TO_EST  # PM approved, send to estimator
+                log.info(f"{approver_role} approving CR {cr_id} - routing to estimator")
+
                 project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
                 if not project or not project.estimator_id:
                     return jsonify({"error": "No Estimator assigned for this project"}), 400
@@ -1354,6 +1472,10 @@ def approve_change_request(cr_id):
                 if buyer_role != 'buyer':
                     return jsonify({"error": "Selected user is not a buyer"}), 400
 
+                # Set status to send_to_buyer when sending to buyer
+                change_request.status = CR_CONFIG.STATUS_SEND_TO_BUYER
+                log.info(f"{approver_role} approving CR {cr_id} - sending to buyer")
+
                 next_role = CR_CONFIG.ROLE_BUYER
                 next_approver = selected_buyer.full_name or selected_buyer.username
                 next_approver_id = selected_buyer.user_id
@@ -1362,7 +1484,6 @@ def approve_change_request(cr_id):
                 change_request.assigned_to_buyer_user_id = next_approver_id
                 change_request.assigned_to_buyer_name = next_approver
                 change_request.assigned_to_buyer_date = datetime.utcnow()
-                change_request.status = CR_CONFIG.STATUS_ASSIGNED_TO_BUYER
 
                 log.info(f"PM approved CR {cr_id} with EXISTING materials → Assigned to Buyer: {next_approver} (user_id={next_approver_id})")
 
@@ -1563,11 +1684,11 @@ def approve_change_request(cr_id):
             }), 200
 
         elif normalized_role == 'estimator':
-            # Estimator approves - Assign to Buyer for purchase
+            # Estimator approves - change status to send_to_buyer
             change_request.approved_by_user_id = approver_id
             change_request.approved_by_name = approver_name
             change_request.approval_date = datetime.utcnow()
-            change_request.status = CR_CONFIG.STATUS_ASSIGNED_TO_BUYER
+            change_request.status = CR_CONFIG.STATUS_SEND_TO_BUYER
             change_request.approval_required_from = CR_CONFIG.ROLE_BUYER
             change_request.current_approver_role = CR_CONFIG.ROLE_BUYER
             change_request.updated_at = datetime.utcnow()
@@ -1645,12 +1766,12 @@ def approve_change_request(cr_id):
                 "receiver": change_request.assigned_to_buyer_name or "Buyer",
                 "sender_role": "estimator",
                 "receiver_role": "buyer",
-                "status": CR_CONFIG.STATUS_ASSIGNED_TO_BUYER,
+                "status": CR_CONFIG.STATUS_SEND_TO_BUYER,
                 "cr_id": cr_id,
                 "item_name": change_request.item_name or f"CR #{cr_id}",
                 "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
                 "total_cost": change_request.materials_total_cost,
-                "comments": f"Estimator approved. Assigned to {change_request.assigned_to_buyer_name or 'Buyer'} for purchase",
+                "comments": f"Estimator approved. Sent to {change_request.assigned_to_buyer_name or 'Buyer'} for purchase",
                 "timestamp": datetime.utcnow().isoformat(),
                 "sender_name": approver_name,
                 "sender_user_id": approver_id,
@@ -1709,9 +1830,9 @@ def approve_change_request(cr_id):
 
             return jsonify({
                 "success": True,
-                "message": "Approved by Estimator. Assigned to Buyer for purchase.",
+                "message": "Approved by Estimator. Sent to Buyer for purchase.",
                 "cr_id": cr_id,
-                "status": CR_CONFIG.STATUS_ASSIGNED_TO_BUYER,
+                "status": CR_CONFIG.STATUS_SEND_TO_BUYER,
                 "next_approver": "Buyer",
                 "assigned_to_buyer_name": change_request.assigned_to_buyer_name
             }), 200
@@ -1842,9 +1963,9 @@ def complete_purchase_and_merge_to_boq(cr_id):
         if not change_request:
             return jsonify({"error": "Change request not found"}), 404
 
-        # Check if assigned to buyer
-        if change_request.status != CR_CONFIG.STATUS_ASSIGNED_TO_BUYER:
-            return jsonify({"error": f"Purchase can only be completed for requests assigned to buyer. Current status: {change_request.status}"}), 400
+        # Check if assigned to buyer or send to buyer
+        if change_request.status not in [CR_CONFIG.STATUS_ASSIGNED_TO_BUYER, CR_CONFIG.STATUS_SEND_TO_BUYER]:
+            return jsonify({"error": f"Purchase can only be completed for requests assigned to buyer or send to buyer. Current status: {change_request.status}"}), 400
 
         # Check if user is a buyer
         if buyer_role != 'buyer':
@@ -2377,20 +2498,16 @@ def update_change_request(cr_id):
         user_role = current_user.get('role_name', '').lower()
         normalized_role = workflow_service.normalize_role(user_role)
 
-        # PM can edit any pending request, SE can only edit their own, Estimator can edit requests assigned to them
-        if user_role in ['projectmanager', 'project_manager']:
-            # PM can edit any pending or under_review request in their projects
-            # under_review means SE sent it to PM, PM can still edit before approving
-            if change_request.status not in ['pending', 'under_review']:
-                return jsonify({"error": "Can only edit pending or under review requests"}), 400
+        # PM/Admin can edit any pending request, SE can only edit their own, Estimator can edit requests assigned to them
+        if user_role in ['projectmanager', 'project_manager', 'admin']:
+            # PM/Admin can edit pending, under_review, send_to_pm, approved_by_pm, send_to_est, send_to_buyer requests
+            editable_statuses = ['pending', 'under_review', 'send_to_pm', 'approved_by_pm', 'pm_request', 'ss_request', 'mep_request', 'admin_request', 'send_to_est', 'send_to_buyer']
+            if change_request.status not in editable_statuses:
+                return jsonify({"error": f"Can only edit requests with status: {', '.join(editable_statuses)}"}), 400
         elif normalized_role == 'estimator':
             # Estimator can edit requests that are assigned to them for approval
             if change_request.approval_required_from != 'estimator':
                 return jsonify({"error": "You can only edit requests assigned to you for approval"}), 403
-
-            # Estimator can only edit if status is under_review or approved_by_pm (meaning it's waiting for estimator review)
-            if change_request.status not in ['under_review', 'approved_by_pm']:
-                return jsonify({"error": "Can only edit requests that are pending your approval"}), 400
         else:
             # SE can only edit their own requests
             if change_request.requested_by_user_id != user_id:
@@ -2431,7 +2548,8 @@ def update_change_request(cr_id):
                 'master_material_id': mat.get('master_material_id'),
                 'justification': mat.get('justification', ''),  # Per-material justification
                 'brand': mat.get('brand'),  # Brand for new materials
-                'specification': mat.get('specification')  # Specification for new materials
+                'size': mat.get('size'),  # Size for materials
+                'specification': mat.get('specification'),  # Specification for materials
             })
 
             sub_items_data.append({
@@ -2443,10 +2561,12 @@ def update_change_request(cr_id):
                 'unit_price': unit_price,
                 'total_price': total_price,
                 'is_new': mat.get('master_material_id') is None,
+                'master_material_id': mat.get('master_material_id'),  # Master material ID for existing materials
                 'reason': mat.get('reason'),
                 'justification': mat.get('justification', ''),  # Per-material justification
                 'brand': mat.get('brand'),  # Brand for new materials
-                'specification': mat.get('specification')  # Specification for new materials
+                'size': mat.get('size'),  # Size for materials
+                'specification': mat.get('specification'),  # Specification for materials
             })
 
         # Update change request

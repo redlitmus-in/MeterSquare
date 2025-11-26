@@ -16,7 +16,7 @@ import {
   TrashIcon
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
-import axios from 'axios';
+import { apiClient } from '@/api/config';
 import { useAuthStore } from '@/store/authStore';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 import { useExtraMaterialsAutoSync } from '@/hooks/useAutoSync';
@@ -63,34 +63,22 @@ const ExtraMaterialPage: React.FC = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteRequestId, setDeleteRequestId] = useState<number | null>(null);
 
-  const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-  const token = localStorage.getItem('access_token');
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
   // Real-time auto-sync for extra materials
   const { data: materialsData, isLoading: loading, refetch } = useExtraMaterialsAutoSync(
     async () => {
-      const response = await axios.get(`${API_URL}/change-requests`, { headers });
+      const response = await apiClient.get('/change-requests');
 
-      // Filter based on role:
-      // - Admin sees all requests
-      // - Site Engineers see their own requests + requests created by admin
-      const isAdmin = user?.role?.toLowerCase() === 'admin';
-      const seRequests = (response.data.data || [])
-        .filter((cr: any) => {
-          // Admin sees everything
-          if (isAdmin) return true;
-          // SE sees their own requests OR requests created by admin
-          return cr.requested_by_user_id === user?.user_id || cr.requested_by_role?.toLowerCase() === 'admin';
-        });
+      // Backend already filters by assigned projects, so no additional filtering needed
+      // SE sees all requests from their assigned projects (including PM/Admin created)
+      const seRequests = response.data.data || [];
 
-      console.log('🔍 User Role:', user?.role, 'Is Admin:', isAdmin);
-      console.log('🔍 Total Requests After Filter:', seRequests.length);
+      console.log('🔍 User Role:', user?.role);
+      console.log('🔍 Total Requests:', seRequests.length);
       console.log('🔍 Request Details:', seRequests.map((r: any) => ({ cr_id: r.cr_id, status: r.status, requested_by: r.requested_by_user_id, requested_by_role: r.requested_by_role, requested_by_name: r.requested_by_name })));
 
       // Transform pending materials (status: 'pending' - not yet sent to PM)
       const filteredPending = seRequests
-        .filter((cr: any) => cr.status === 'pending');
+        .filter((cr: any) => cr.status?.trim() === 'pending');
 
       const transformedPending = filteredPending.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -120,9 +108,9 @@ const ExtraMaterialPage: React.FC = () => {
         };
       });
 
-      // Transform under review materials (status: 'under_review' - sent to PM, waiting for approval)
+      // Transform under review materials (status: 'under_review' or 'send_to_pm' - sent to PM, waiting for approval)
       const filteredUnderReview = seRequests
-        .filter((cr: any) => cr.status === 'under_review');
+        .filter((cr: any) => cr.status?.trim() === 'under_review' || cr.status?.trim() === 'send_to_pm');
 
       const transformedUnderReview = filteredUnderReview.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -155,8 +143,8 @@ const ExtraMaterialPage: React.FC = () => {
       // Transform approved materials (only SE's own approved requests WITHOUT purchase completion)
       const filteredApproved = seRequests
         .filter((cr: any) => {
-          const approvedStatuses = ['approved', 'approved_by_pm', 'approved_by_estimator', 'approved_by_td', 'assigned_to_buyer'];
-          return approvedStatuses.includes(cr.status) && !cr.purchase_completion_date;
+          const approvedStatuses = ['approved', 'approved_by_pm', 'approved_by_estimator', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'send_to_est'];
+          return approvedStatuses.includes(cr.status?.trim()) && !cr.purchase_completion_date;
         });
 
       const transformedApproved = filteredApproved.map((cr: any) => {
@@ -189,7 +177,7 @@ const ExtraMaterialPage: React.FC = () => {
 
       // Transform rejected materials (only SE's own rejected requests)
       const filteredRejected = seRequests
-        .filter((cr: any) => cr.status === 'rejected');
+        .filter((cr: any) => cr.status?.trim() === 'rejected');
 
       const transformedRejected = filteredRejected.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -224,7 +212,7 @@ const ExtraMaterialPage: React.FC = () => {
 
       // Transform completed materials (purchase completed by buyer - status is 'purchase_completed')
       const filteredCompleted = seRequests
-        .filter((cr: any) => cr.status === 'purchase_completed');
+        .filter((cr: any) => cr.status?.trim() === 'purchase_completed');
 
       const transformedCompleted = filteredCompleted.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -299,10 +287,9 @@ const ExtraMaterialPage: React.FC = () => {
         }))
       };
 
-      const response = await axios.post(
-        `${API_URL}/boq/change-request`,
-        changeRequestPayload,
-        { headers }
+      const response = await apiClient.post(
+        '/boq/change-request',
+        changeRequestPayload
       );
 
       if (response.data.success || response.data.cr_id) {
@@ -333,6 +320,16 @@ const ExtraMaterialPage: React.FC = () => {
         icon: <ClockIcon className="w-4 h-4" />,
         label: 'PM Approved - Under Review'
       },
+      send_to_est: {
+        color: 'bg-blue-100 text-blue-700 border-blue-300',
+        icon: <CheckCircleIcon className="w-4 h-4" />,
+        label: 'Sent to Estimator'
+      },
+      send_to_buyer: {
+        color: 'bg-purple-100 text-purple-700 border-purple-300',
+        icon: <CheckCircleIcon className="w-4 h-4" />,
+        label: 'Sent to Buyer'
+      },
       approved_by_td: {
         color: 'bg-indigo-100 text-indigo-700 border-indigo-300',
         icon: <ClockIcon className="w-4 h-4" />,
@@ -350,7 +347,9 @@ const ExtraMaterialPage: React.FC = () => {
       }
     };
 
-    const config = statusConfig[status] || statusConfig.pending;
+    // Trim status to handle trailing/leading spaces
+    const trimmedStatus = status?.trim() || 'pending';
+    const config = statusConfig[trimmedStatus] || statusConfig.pending;
 
     return (
       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${config.color}`}>
@@ -362,7 +361,7 @@ const ExtraMaterialPage: React.FC = () => {
 
   const handleViewDetails = async (requestId: number) => {
     try {
-      const response = await axios.get(`${API_URL}/change-request/${requestId}`, { headers });
+      const response = await apiClient.get(`/change-request/${requestId}`);
       // Backend returns {success: true, data: {...}} - we need response.data.data
       if (response.data && response.data.data) {
         setSelectedRequest(response.data.data);
@@ -379,7 +378,7 @@ const ExtraMaterialPage: React.FC = () => {
   const handleEdit = async (requestId: number) => {
     try {
       // Fetch the change request details
-      const response = await axios.get(`${API_URL}/change-request/${requestId}`, { headers });
+      const response = await apiClient.get(`/change-request/${requestId}`);
 
       if (response.data && response.data.data) {
         const cr = response.data.data;
@@ -406,10 +405,9 @@ const ExtraMaterialPage: React.FC = () => {
 
   const handleSendToPM = async (requestId: number) => {
     try {
-      const response = await axios.post(
-        `${API_URL}/change-request/${requestId}/send-for-review`,
-        {},
-        { headers }
+      const response = await apiClient.post(
+        `/change-request/${requestId}/send-for-review`,
+        {}
       );
 
       // Show intelligent message based on routing
@@ -457,9 +455,8 @@ const ExtraMaterialPage: React.FC = () => {
     if (!deleteRequestId) return;
 
     try {
-      await axios.delete(
-        `${API_URL}/change-request/${deleteRequestId}`,
-        { headers }
+      await apiClient.delete(
+        `/change-request/${deleteRequestId}`
       );
       showSuccess('Request deleted successfully');
       setShowDeleteModal(false);

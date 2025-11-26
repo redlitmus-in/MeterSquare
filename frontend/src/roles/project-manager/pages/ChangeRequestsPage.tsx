@@ -279,6 +279,8 @@ const ChangeRequestsPage: React.FC = () => {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800',
       under_review: 'bg-yellow-100 text-yellow-800',
+      send_to_est: 'bg-blue-100 text-blue-800',
+      send_to_buyer: 'bg-purple-100 text-purple-800',
       approved_by_pm: 'bg-blue-100 text-blue-800',
       approved_by_td: 'bg-blue-100 text-blue-800',
       assigned_to_buyer: 'bg-purple-100 text-purple-800',
@@ -304,6 +306,12 @@ const ChangeRequestsPage: React.FC = () => {
         return 'Estimator Approval Pending';
       }
       return 'Under Review';
+    }
+    if (status === 'send_to_est') {
+      return 'SENT TO ESTIMATOR';
+    }
+    if (status === 'send_to_buyer') {
+      return 'SENT TO BUYER';
     }
     if (status === 'approved_by_pm') {
       return 'APPROVED BY PM';
@@ -349,36 +357,34 @@ const ChangeRequestsPage: React.FC = () => {
       );
 
       // For Admin:
-      // - Pending tab shows only status='pending' (drafts not sent yet)
+      // - Pending tab shows ALL status='pending' (drafts not sent yet) - regardless of who created
       // - Request tab shows ALL status='under_review' (sent for approval to PM/TD/Estimator)
       // For non-Admin PM/SE:
       // - Pending tab shows their own status='pending'
       // - Request tab shows status='under_review' where approval_required_from='project_manager'
 
-      if (isAdminUser) {
-        // Admin user logic
-        matchesTab = (
-          (activeTab === 'requested' && req.status === 'under_review') ||  // All under_review requests in Request tab
-          (activeTab === 'pending' && (isPMRequest || isPMApprovedAndSent) && ['pending', 'under_review', 'assigned_to_buyer'].includes(req.status)) ||  // PM's own requests + SE requests PM sent to EST (all statuses)
-          (activeTab === 'accepted' && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||  // All approved/assigned requests (PM's own + SE requests)
-          (activeTab === 'completed' && req.status === 'purchase_completed') ||
-          (activeTab === 'rejected' && req.status === 'rejected')
-        );
-      } else {
-        // Non-admin user logic
-        matchesTab = (
-          (activeTab === 'requested' && req.status === 'under_review' && req.approval_required_from === 'project_manager') ||  // Requests waiting for PM approval
-          (activeTab === 'pending' && (isPMRequest || isPMApprovedAndSent) && ['pending', 'under_review', 'assigned_to_buyer'].includes(req.status)) ||  // User's own requests + SE requests PM sent to EST (all statuses)
-          (activeTab === 'accepted' && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||  // All approved/assigned requests (PM's own + SE requests)
-          (activeTab === 'completed' && req.status === 'purchase_completed') ||
-          (activeTab === 'rejected' && req.status === 'rejected')
-        );
-      }
+      // Role-based statuses: pm_request, ss_request, mep_request, admin_request
+      const isDraftStatus = ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(req.status);
+
+      // For Pending tab: include all statuses that appear in sub-tabs (drafts, sent_to_estimator, sent_to_buyer)
+      const isPendingTabStatus =
+        isDraftStatus ||  // Drafts sub-tab (all role-based statuses)
+        (req.status === 'under_review' && req.approval_required_from === 'estimator') ||  // Sent to Estimator sub-tab
+        (req.status === 'under_review' && req.approval_required_from === 'buyer') ||  // Sent to Buyer sub-tab
+        req.status === 'assigned_to_buyer';  // Sent to Buyer sub-tab
+
+      matchesTab = (
+        (activeTab === 'requested' && (req.status === 'send_to_pm' || (req.status === 'under_review' && req.approval_required_from === 'project_manager'))) ||  // Requests needing PM approval (send_to_pm or under_review)
+        (activeTab === 'pending' && isPendingTabStatus) ||  // ALL requests for pending sub-tabs
+        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || req.status === 'send_to_est' || req.status === 'send_to_buyer')) ||  // approved_by_pm, send_to_est and send_to_buyer status
+        (activeTab === 'completed' && req.status === 'purchase_completed') ||
+        (activeTab === 'rejected' && req.status === 'rejected')
+      );
     } else {
       // Change Requests tab filtering - show requests that need PM action or PM created
       matchesTab = (
         (activeTab === 'pending' && ['pending', 'under_review'].includes(req.status)) ||
-        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer'].includes(req.status)) ||
+        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer'].includes(req.status)) ||
         (activeTab === 'completed' && req.status === 'purchase_completed') ||
         (activeTab === 'rejected' && req.status === 'rejected')
       );
@@ -388,18 +394,20 @@ const ChangeRequestsPage: React.FC = () => {
 
   const stats = {
     pending: changeRequests.filter(r => ['pending', 'under_review'].includes(r.status)).length,
-    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer'].includes(r.status)).length,
+    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer'].includes(r.status)).length,
     completed: changeRequests.filter(r => r.status === 'purchase_completed').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length,
-    // For Extra Material - Admin vs non-Admin logic
-    my_requests: isAdminUser
-      ? changeRequests.filter(r => r.status === 'under_review').length  // Admin: all under_review in Request tab
-      : changeRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'project_manager').length,  // Non-admin: only PM approval pending
-    pending_approval: changeRequests.filter(r =>
-      (r.requested_by_user_id === user?.user_id && ['pending', 'under_review', 'assigned_to_buyer'].includes(r.status)) ||  // PM's own requests
-      (r.requested_by_user_id !== user?.user_id && r.pm_approved_by_user_id != null && ['under_review', 'assigned_to_buyer'].includes(r.status))  // SE requests PM approved and sent
+    // For Extra Material - Requested tab count (send_to_pm or under_review with PM approval)
+    my_requests: changeRequests.filter(r =>
+      r.status === 'send_to_pm' || (r.status === 'under_review' && r.approval_required_from === 'project_manager')
     ).length,
-    accepted: changeRequests.filter(r => r.requested_by_user_id !== user?.user_id && (r.status === 'approved_by_pm' || (r.status === 'under_review' && ['estimator', 'technical_director'].includes(r.approval_required_from || '')) || r.status === 'assigned_to_buyer')).length,  // Only SE requests PM approved
+    pending_approval: changeRequests.filter(r =>
+        ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status) ||  // Drafts (all role-based statuses)
+        (r.status === 'under_review' && r.approval_required_from === 'estimator') ||  // Sent to Estimator
+        (r.status === 'under_review' && r.approval_required_from === 'buyer') ||  // Sent to Buyer
+        r.status === 'assigned_to_buyer'  // Assigned to Buyer
+      ).length,  // ALL requests for pending tab sub-tabs (backend already filters by project)
+    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || r.status === 'send_to_est' || r.status === 'send_to_buyer').length,  // approved_by_pm, send_to_est and send_to_buyer status
     completed_extra: changeRequests.filter(r => r.status === 'purchase_completed').length
   };
 
@@ -1258,16 +1266,16 @@ const ChangeRequestsPage: React.FC = () => {
                   {/* Drafts Sub-tab Content */}
                   {pendingSubTab === 'drafts' && (
                     <>
-                      {filteredRequests.filter(r => r.status === 'pending').length === 0 ? (
+                      {filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status)).length === 0 ? (
                         <div className="text-center py-12">
                           <Pencil className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                           <p className="text-gray-500 text-lg">No draft requests found</p>
                         </div>
                       ) : viewMode === 'table' ? (
-                        <RequestsTable requests={filteredRequests.filter(r => r.status === 'pending')} />
+                        <RequestsTable requests={filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status))} />
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                          {filteredRequests.filter(r => r.status === 'pending').map((request, index) => (
+                          {filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status)).map((request, index) => (
                             <motion.div
                               key={request.cr_id}
                               initial={{ opacity: 0, y: 20 }}

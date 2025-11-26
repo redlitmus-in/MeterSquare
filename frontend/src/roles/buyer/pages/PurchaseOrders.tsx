@@ -71,28 +71,29 @@ const PurchaseOrders: React.FC = () => {
     // ❌ REMOVED: refetchInterval - No more polling!
   });
 
-  const pendingPurchases: Purchase[] = useMemo(() => {
-    return (pendingData?.pending_purchases || []).map(p => ({ ...p, status: 'pending' as const }));
+  // Use the separated arrays from backend response
+  const ongoingPurchases: Purchase[] = useMemo(() => {
+    return (pendingData?.ongoing_purchases || []).map(p => ({ ...p, status: 'pending' as const }));
+  }, [pendingData]);
+
+  const pendingApprovalPurchases: Purchase[] = useMemo(() => {
+    return (pendingData?.pending_approval_purchases || []).map(p => ({ ...p, status: 'pending' as const }));
   }, [pendingData]);
 
   const completedPurchases: Purchase[] = useMemo(() => {
     return (completedData?.completed_purchases || []).map(p => ({ ...p, status: 'completed' as const }));
   }, [completedData]);
 
-  // Separate purchases by vendor approval status
+  // Separate ongoing purchases by vendor approval status
   const pendingPurchaseItems = useMemo(() => {
-    // No vendor selected yet or vendor pending TD approval
-    return pendingPurchases.filter(p => !p.vendor_id || p.vendor_selection_pending_td_approval);
-  }, [pendingPurchases]);
+    // No vendor selected yet
+    return ongoingPurchases.filter(p => !p.vendor_id);
+  }, [ongoingPurchases]);
 
   const vendorApprovedItems = useMemo(() => {
-    // Vendor selected and approved by TD (no longer pending approval)
-    return pendingPurchases.filter(p => p.vendor_id && !p.vendor_selection_pending_td_approval);
-  }, [pendingPurchases]);
-
-  const pendingApprovalPurchases = useMemo(() => {
-    return pendingPurchases.filter(p => p.vendor_selection_pending_td_approval);
-  }, [pendingPurchases]);
+    // Vendor selected and approved by TD
+    return ongoingPurchases.filter(p => p.vendor_id);
+  }, [ongoingPurchases]);
 
   // Determine which purchases to show based on active tab and sub-tab
   const currentPurchases = useMemo(() => {

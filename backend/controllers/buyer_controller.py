@@ -451,17 +451,21 @@ def get_buyer_pending_purchases():
 
         # Get change requests for buyer:
         # 1. Under review AND approval_required_from='buyer' (pending buyer's review/acceptance)
-        # 2. Assigned to this buyer (via assigned_to_buyer_user_id) - actively being worked on
-        from sqlalchemy import or_, and_
+        # 2. Assigned to this buyer (via assigned_to_buyer_user_id) - actively being worked on (assigned_to_buyer or send_to_buyer status)
+        from sqlalchemy import or_, and_, func
         change_requests = ChangeRequest.query.filter(
             or_(
                 and_(
-                    ChangeRequest.status == 'under_review',
+                    func.trim(ChangeRequest.status) == 'under_review',
                     ChangeRequest.approval_required_from == 'buyer'
                 ),
                 and_(
-                    ChangeRequest.status == 'assigned_to_buyer',
+                    func.trim(ChangeRequest.status).in_(['assigned_to_buyer', 'send_to_buyer']),
                     ChangeRequest.assigned_to_buyer_user_id == buyer_id
+                ),
+                and_(
+                    func.trim(ChangeRequest.status).in_(['approved_by_pm', 'send_to_buyer']),
+                    ChangeRequest.approval_required_from == 'buyer'
                 )
             ),
             ChangeRequest.is_deleted == False
@@ -613,11 +617,31 @@ def get_buyer_pending_purchases():
                 "any_store_request_rejected": any_store_request_rejected,
                 "store_requests_pending": store_requests_pending
             })
+        # Separate ongoing and pending approval
+        ongoing_purchases = []
+        pending_approval_purchases = []
+        ongoing_total = 0
+        pending_approval_total = 0
+
+        for purchase in pending_purchases:
+            if purchase.get('vendor_selection_pending_td_approval'):
+                pending_approval_purchases.append(purchase)
+                pending_approval_total += purchase.get('total_cost', 0)
+            else:
+                ongoing_purchases.append(purchase)
+                ongoing_total += purchase.get('total_cost', 0)
+
         return jsonify({
             "success": True,
             "pending_purchases_count": len(pending_purchases),
             "total_cost": round(total_cost, 2),
-            "pending_purchases": pending_purchases
+            "pending_purchases": pending_purchases,
+            "ongoing_purchases": ongoing_purchases,
+            "ongoing_purchases_count": len(ongoing_purchases),
+            "ongoing_total_cost": round(ongoing_total, 2),
+            "pending_approval_purchases": pending_approval_purchases,
+            "pending_approval_count": len(pending_approval_purchases),
+            "pending_approval_total_cost": round(pending_approval_total, 2)
         }), 200
 
     except Exception as e:
@@ -1113,10 +1137,17 @@ def get_purchase_by_id(cr_id):
 def select_vendor_for_purchase(cr_id):
     """Select vendor for purchase (requires TD approval)"""
     try:
+        from utils.admin_viewing_context import get_effective_user_context
+
         current_user = g.user
         user_id = current_user['user_id']
         user_name = current_user.get('full_name', 'Unknown User')
         user_role = current_user.get('role', '').lower()
+
+        # Get effective context for admin viewing as buyer
+        context = get_effective_user_context()
+        is_admin_viewing = context['is_admin_viewing']
+        effective_role = context['effective_role']
 
         data = request.get_json()
         vendor_id = data.get('vendor_id')
@@ -1135,13 +1166,17 @@ def select_vendor_for_purchase(cr_id):
 
         # Check role-based permissions
         is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+        is_admin = user_role == 'admin'
 
-        # Verify it's assigned to this buyer (skip check for TD)
-        if not is_td and cr.assigned_to_buyer_user_id != user_id:
+        # Allow admin viewing as buyer to select vendor
+        is_admin_as_buyer = is_admin_viewing and effective_role == 'buyer'
+
+        # Verify it's assigned to this buyer (skip check for TD, admin, or admin viewing as buyer)
+        if not is_td and not is_admin and not is_admin_as_buyer and cr.assigned_to_buyer_user_id != user_id:
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Verify it's in the correct status
-        if cr.status != 'assigned_to_buyer':
+        if cr.status not in ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm']:
             return jsonify({"error": f"Cannot select vendor. Current status: {cr.status}"}), 400
 
         # Verify vendor exists

@@ -35,6 +35,8 @@ class ChangeRequestConfig:
     # Status Constants
     STATUS_PENDING = 'pending'
     STATUS_UNDER_REVIEW = 'under_review'
+    STATUS_SEND_TO_EST = 'send_to_est'  # PM approved, sent to estimator for pricing
+    STATUS_SEND_TO_BUYER = 'send_to_buyer'  # PM approved, sent to buyer for procurement
     STATUS_APPROVED_BY_PM = 'approved_by_pm'
     STATUS_APPROVED_BY_TD = 'approved_by_td'
     STATUS_APPROVED = 'approved'
@@ -62,6 +64,8 @@ class ChangeRequestConfig:
             'statuses': {
                 'pending': cls.STATUS_PENDING,
                 'under_review': cls.STATUS_UNDER_REVIEW,
+                'send_to_est': cls.STATUS_SEND_TO_EST,
+                'send_to_buyer': cls.STATUS_SEND_TO_BUYER,
                 'approved_by_pm': cls.STATUS_APPROVED_BY_PM,
                 'approved_by_td': cls.STATUS_APPROVED_BY_TD,
                 'approved': cls.STATUS_APPROVED,

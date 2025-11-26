@@ -129,6 +129,13 @@ export interface PurchaseListResponse {
   projects_count?: number;
   pending_purchases?: Purchase[];
   completed_purchases?: Purchase[];
+  // New separated fields
+  ongoing_purchases?: Purchase[];
+  ongoing_purchases_count?: number;
+  ongoing_total_cost?: number;
+  pending_approval_purchases?: Purchase[];
+  pending_approval_count?: number;
+  pending_approval_total_cost?: number;
 }
 
 export interface CompletePurchaseRequest {

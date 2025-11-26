@@ -195,7 +195,11 @@ const ChangeRequestsPage: React.FC = () => {
   const getStatusColor = (status: string) => {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800',
+      send_to_est: 'bg-yellow-100 text-yellow-800',
       approved_estimator: 'bg-green-100 text-green-800',
+      approved_by_pm: 'bg-green-100 text-green-800',
+      send_to_buyer: 'bg-green-100 text-green-800',
+      assigned_to_buyer: 'bg-green-100 text-green-800',
       approved_td: 'bg-blue-100 text-blue-800',
       rejected: 'bg-red-100 text-red-800'
     };
@@ -207,8 +211,8 @@ const ChangeRequestsPage: React.FC = () => {
     const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesTab = (
-      (activeTab === 'pending' && req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'rejected' && req.status !== 'purchase_completed') ||
-      (activeTab === 'approved' && req.status === 'assigned_to_buyer') ||
+      (activeTab === 'pending' && (req.status === 'send_to_est' || (req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'approved_by_pm' && req.status !== 'rejected' && req.status !== 'purchase_completed'))) ||
+      (activeTab === 'approved' && (req.status === 'assigned_to_buyer' || req.status === 'approved_by_pm' || req.status === 'send_to_buyer')) ||
       (activeTab === 'escalated' && req.status === 'purchase_completed') ||
       (activeTab === 'rejected' && req.status === 'rejected')
     );
@@ -216,8 +220,8 @@ const ChangeRequestsPage: React.FC = () => {
   });
 
   const stats = {
-    pending: changeRequests.filter(r => r.approval_required_from === 'estimator' && r.status !== 'assigned_to_buyer' && r.status !== 'rejected' && r.status !== 'purchase_completed').length,
-    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer').length,
+    pending: changeRequests.filter(r => r.status === 'send_to_est' || (r.approval_required_from === 'estimator' && r.status !== 'assigned_to_buyer' && r.status !== 'approved_by_pm' && r.status !== 'rejected' && r.status !== 'purchase_completed')).length,
+    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer' || r.status === 'approved_by_pm' || r.status === 'send_to_buyer').length,
     escalated: changeRequests.filter(r => r.status === 'purchase_completed').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length
   };
@@ -262,7 +266,7 @@ const ChangeRequestsPage: React.FC = () => {
                     <Eye className="h-3.5 w-3.5 mr-1" />
                     View
                   </Button>
-                  {request.approval_required_from === 'estimator' && request.status !== 'approved' && request.status !== 'rejected' && (
+                  {(request.status === 'send_to_est' || (request.approval_required_from === 'estimator' && request.status !== 'approved_by_pm' && request.status !== 'send_to_buyer' && request.status !== 'assigned_to_buyer' && request.status !== 'rejected')) && (
                     <>
                       <Button size="sm" variant="outline" className="text-blue-600 border-blue-300 hover:bg-blue-50" onClick={() => handleEdit(request.cr_id)}>
                         <Pencil className="h-3.5 w-3.5 mr-1" />
@@ -405,8 +409,8 @@ const ChangeRequestsPage: React.FC = () => {
                         <div className="p-4">
                           <div className="flex items-start justify-between mb-2">
                             <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
-                            <Badge className={getStatusColor(request.status)}>
-                              {request.status.replace('_', ' ').toUpperCase()}
+                            <Badge className="bg-yellow-100 text-yellow-800">
+                              SEND_TO_EST
                             </Badge>
                           </div>
 
@@ -440,7 +444,7 @@ const ChangeRequestsPage: React.FC = () => {
                             <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                             <span>Review</span>
                           </button>
-                          {request.approval_required_from === 'estimator' && request.status !== 'approved' && request.status !== 'rejected' && (
+                          {(request.status === 'send_to_est' || (request.approval_required_from === 'estimator' && request.status !== 'approved_by_pm' && request.status !== 'send_to_buyer' && request.status !== 'assigned_to_buyer' && request.status !== 'rejected')) && (
                             <>
                               <button
                                 onClick={() => handleEdit(request.cr_id)}
