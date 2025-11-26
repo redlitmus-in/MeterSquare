@@ -121,6 +121,18 @@ export interface SelectVendorResponse {
   message: string;
   purchase?: Purchase;
   error?: string;
+  // For TD sub-CR splitting (when TD selects different vendors for materials)
+  split_result?: {
+    original_sub_cr: string;
+    new_sub_crs: Array<{
+      cr_id: number;
+      formatted_cr_id: string;
+      vendor_id: number;
+      vendor_name: string;
+      materials_count: number;
+      total_cost: number;
+    }>;
+  };
 }
 
 export interface UpdatePurchaseNotesRequest {

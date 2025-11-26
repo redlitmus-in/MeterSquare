@@ -556,24 +556,40 @@ def get_buyer_pending_purchases():
         # 3. Sub-CRs created by this buyer (pending TD approval OR vendor approved)
         #    Frontend filters by vendor_selection_pending_td_approval to separate into tabs
         from sqlalchemy import or_, and_, func
+
+        # Convert buyer_id to int for safe comparison
+        buyer_id_int = int(buyer_id)
+
         change_requests = ChangeRequest.query.filter(
             or_(
+                # Under review AND approval_required_from='buyer' AND assigned to this buyer
                 and_(
                     func.trim(ChangeRequest.status) == 'under_review',
-                    ChangeRequest.approval_required_from == 'buyer'
+                    ChangeRequest.approval_required_from == 'buyer',
+                    ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
                 ),
+                # Assigned to this buyer - actively being worked on
                 and_(
                     func.trim(ChangeRequest.status).in_(['assigned_to_buyer', 'send_to_buyer']),
-                    ChangeRequest.assigned_to_buyer_user_id == buyer_id
+                    ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
                 ),
+                # Sub-CRs created by this buyer (pending TD approval OR vendor approved)
                 and_(
                     ChangeRequest.is_sub_cr == True,
-                    ChangeRequest.assigned_to_buyer_user_id == buyer_id,
+                    ChangeRequest.assigned_to_buyer_user_id == buyer_id_int,
                     ChangeRequest.status.in_(['pending_td_approval', 'vendor_approved'])
                 ),
+                # Parent CRs with pending_td_approval OR vendor_approved status (full purchase to single vendor)
+                and_(
+                    ChangeRequest.is_sub_cr == False,
+                    ChangeRequest.assigned_to_buyer_user_id == buyer_id_int,
+                    func.trim(ChangeRequest.status).in_(['pending_td_approval', 'vendor_approved'])
+                ),
+                # approved_by_pm or send_to_buyer status AND assigned to this buyer
                 and_(
                     func.trim(ChangeRequest.status).in_(['approved_by_pm', 'send_to_buyer']),
-                    ChangeRequest.approval_required_from == 'buyer'
+                    ChangeRequest.approval_required_from == 'buyer',
+                    ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
                 )
             ),
             ChangeRequest.is_deleted == False
@@ -1283,7 +1299,12 @@ def select_vendor_for_purchase(cr_id):
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Verify it's in the correct status
-        if cr.status not in ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm']:
+        # TD can change vendor even when status is pending_td_approval
+        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm']
+        if is_td:
+            allowed_statuses.append('pending_td_approval')
+
+        if cr.status not in allowed_statuses:
             return jsonify({"error": f"Cannot select vendor. Current status: {cr.status}"}), 400
 
         # Verify vendor exists
@@ -1302,17 +1323,18 @@ def select_vendor_for_purchase(cr_id):
         cr.updated_at = datetime.utcnow()
 
         # Set status and fields based on user role
+        # TD changing vendor does NOT auto-approve - TD must manually click "Approve Vendor"
         if is_td:
-            # TD is selecting/editing vendor - automatically approved
-            cr.vendor_selection_status = 'approved'
-            cr.vendor_approved_by_td_id = user_id
-            cr.vendor_approved_by_td_name = user_name
-            cr.vendor_approval_date = datetime.utcnow()
-            # Keep buyer info if it exists
-            if not cr.vendor_selected_by_buyer_id:
-                cr.vendor_selected_by_buyer_id = user_id
-                cr.vendor_selected_by_buyer_name = user_name
-                cr.vendor_selection_date = datetime.utcnow()
+            # TD is selecting/editing vendor - set to pending (TD must manually approve)
+            cr.vendor_selection_status = 'pending_td_approval'
+            # Clear previous approval info since vendor changed
+            cr.vendor_approved_by_td_id = None
+            cr.vendor_approved_by_td_name = None
+            cr.vendor_approval_date = None
+            # Track who made the change
+            cr.vendor_selected_by_buyer_id = user_id
+            cr.vendor_selected_by_buyer_name = user_name
+            cr.vendor_selection_date = datetime.utcnow()
         else:
             # Buyer is selecting vendor - needs TD approval
             cr.vendor_selected_by_buyer_id = user_id
@@ -1339,14 +1361,15 @@ def select_vendor_for_purchase(cr_id):
             current_actions = []
 
         # Create history action based on user role
+        # Both TD and Buyer vendor selection goes to pending_td_approval status
         if is_td:
             new_action = {
                 "role": "technical_director",
-                "type": "change_request_vendor_approved",
+                "type": "change_request_vendor_changed",
                 "sender": user_name,
-                "receiver": "Buyer",
+                "receiver": "Technical Director",
                 "sender_role": "technical_director",
-                "receiver_role": "buyer",
+                "receiver_role": "technical_director",
                 "status": cr.status,
                 "cr_id": cr_id,
                 "item_name": cr.item_name or f"CR #{cr_id}",
@@ -1354,8 +1377,8 @@ def select_vendor_for_purchase(cr_id):
                 "total_cost": cr.materials_total_cost,
                 "vendor_id": vendor_id,
                 "vendor_name": vendor.company_name,
-                "vendor_selection_status": "approved",
-                "comments": f"TD selected and approved vendor '{vendor.company_name}' for purchase.",
+                "vendor_selection_status": "pending_td_approval",
+                "comments": f"TD changed vendor to '{vendor.company_name}'. Manual approval required.",
                 "timestamp": datetime.utcnow().isoformat(),
                 "sender_name": user_name,
                 "sender_user_id": user_id,
@@ -1397,10 +1420,10 @@ def select_vendor_for_purchase(cr_id):
             existing_history.sender = user_name
 
             if is_td:
-                existing_history.receiver = "Buyer"
-                existing_history.comments = f"CR #{cr_id} vendor approved by TD"
+                existing_history.receiver = "Technical Director"
+                existing_history.comments = f"CR #{cr_id} vendor changed by TD, pending manual approval"
                 existing_history.sender_role = 'technical_director'
-                existing_history.receiver_role = 'buyer'
+                existing_history.receiver_role = 'technical_director'
             else:
                 existing_history.receiver = "Technical Director"
                 existing_history.comments = f"CR #{cr_id} vendor selected, pending TD approval"
@@ -1418,10 +1441,10 @@ def select_vendor_for_purchase(cr_id):
                     action_by=user_name,
                     boq_status=cr.boq.status if cr.boq else 'unknown',
                     sender=user_name,
-                    receiver="Buyer",
-                    comments=f"CR #{cr_id} vendor approved by TD",
+                    receiver="Technical Director",
+                    comments=f"CR #{cr_id} vendor changed by TD, pending manual approval",
                     sender_role='technical_director',
-                    receiver_role='buyer',
+                    receiver_role='technical_director',
                     action_date=datetime.utcnow(),
                     created_by=user_name
                 )
@@ -1646,13 +1669,263 @@ def select_vendor_for_material(cr_id):
         # Check role-based permissions
         is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
 
+        # Debug logging for assignment check
+        log.info(f"select_vendor_for_material - CR-{cr_id}: user_id={user_id}, assigned_to_buyer_user_id={cr.assigned_to_buyer_user_id}, user_role='{user_role}', is_td={is_td}")
+
         # Verify it's assigned to this buyer (skip check for TD)
-        if not is_td and cr.assigned_to_buyer_user_id != user_id:
+        # Convert both to int for safe comparison (user_id from JWT may be string)
+        assigned_buyer_id = int(cr.assigned_to_buyer_user_id or 0)
+        current_user_id = int(user_id)
+        if not is_td and assigned_buyer_id != current_user_id:
+            log.warning(f"select_vendor_for_material - Permission denied: assigned_buyer_id={assigned_buyer_id} != current_user_id={current_user_id}")
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Verify it's in the correct status
-        if cr.status != 'assigned_to_buyer':
+        # Both buyer and TD can change vendor when status is pending_td_approval
+        # Buyer may want to update their selection before TD approves
+        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm', 'pending_td_approval']
+
+        if cr.status not in allowed_statuses:
             return jsonify({"error": f"Cannot select vendor. Current status: {cr.status}"}), 400
+
+        # Special handling for sub-CRs: TD changing vendor for specific material(s)
+        # When TD changes vendor for ONE material, only that material should be separated
+        # Other materials should stay in the original sub-CR with their existing vendor
+        if is_td and cr.is_sub_cr and material_selections:
+            from models.vendor import Vendor
+
+            # Get the original sub-CR's vendor (convert to int for safe comparison)
+            original_vendor_id = int(cr.selected_vendor_id) if cr.selected_vendor_id else None
+
+            log.info(f"TD vendor change check: original_vendor_id={original_vendor_id}, material_selections={material_selections}")
+
+            # Separate materials into: changed (different vendor) vs unchanged (same vendor)
+            changed_materials = []  # Materials that TD is assigning to a DIFFERENT vendor
+            unchanged_materials = []  # Materials staying with the original vendor
+
+            for sel in material_selections:
+                sel_vendor_id = sel.get('vendor_id')
+                # Convert to int for safe comparison (JSON may send as string)
+                sel_vendor_id_int = int(sel_vendor_id) if sel_vendor_id else None
+
+                log.info(f"  Material '{sel.get('material_name')}': sel_vendor_id={sel_vendor_id} (int: {sel_vendor_id_int}), original={original_vendor_id}, changed={sel_vendor_id_int != original_vendor_id}")
+
+                if sel_vendor_id_int and sel_vendor_id_int != original_vendor_id:
+                    changed_materials.append(sel)
+                else:
+                    unchanged_materials.append(sel)
+
+            # If no materials are being changed to a different vendor, just update the sub-CR
+            if not changed_materials:
+                # Single vendor selected - just update the sub-CR's vendor (no splitting)
+                first_selection = material_selections[0]
+                new_vendor_id = first_selection.get('vendor_id')
+
+                if new_vendor_id:
+                    new_vendor = Vendor.query.filter_by(vendor_id=new_vendor_id, is_deleted=False).first()
+                    if not new_vendor:
+                        return jsonify({"error": f"Vendor {new_vendor_id} not found"}), 404
+                    if new_vendor.status != 'active':
+                        return jsonify({"error": f"Vendor '{new_vendor.company_name}' is not active"}), 400
+
+                    old_vendor_name = cr.selected_vendor_name
+
+                    # Update sub-CR's main vendor fields (vendor changed, but NOT auto-approved)
+                    cr.selected_vendor_id = new_vendor_id
+                    cr.selected_vendor_name = new_vendor.company_name
+                    # Keep status as pending_td_approval - TD needs to explicitly approve
+                    cr.vendor_selection_status = 'pending_td_approval'
+                    cr.updated_at = datetime.utcnow()
+
+                    db.session.commit()
+
+                    log.info(f"TD {user_name} changed vendor for sub-CR {cr.get_formatted_cr_id()} from '{old_vendor_name}' to '{new_vendor.company_name}'")
+
+                    return jsonify({
+                        "success": True,
+                        "message": f"Vendor changed from '{old_vendor_name}' to '{new_vendor.company_name}'",
+                        "purchase": {
+                            "cr_id": cr.cr_id,
+                            "formatted_cr_id": cr.get_formatted_cr_id(),
+                            "status": cr.status,
+                            "selected_vendor_id": cr.selected_vendor_id,
+                            "selected_vendor_name": cr.selected_vendor_name,
+                            "vendor_selection_status": cr.vendor_selection_status
+                        }
+                    })
+                # Fall through to normal processing if no vendor_id
+
+            # TD is changing vendor for SOME materials (not all)
+            # Only split out the changed materials, keep unchanged materials in original sub-CR
+            log.info(f"TD {user_name} changing vendor for {len(changed_materials)} material(s) in sub-CR {cr.get_formatted_cr_id()}. {len(unchanged_materials)} material(s) staying with original vendor.")
+
+            # Get parent CR to create new sub-CRs under it
+            parent_cr = ChangeRequest.query.filter_by(
+                cr_id=cr.parent_cr_id,
+                is_deleted=False
+            ).first()
+
+            if not parent_cr:
+                return jsonify({"error": "Parent CR not found for sub-CR splitting"}), 404
+
+            # Get existing sub-CR count for the parent
+            existing_sub_cr_count = ChangeRequest.query.filter_by(
+                parent_cr_id=parent_cr.cr_id,
+                is_deleted=False
+            ).count()
+            next_suffix_number = existing_sub_cr_count + 1
+
+            created_sub_crs = []
+            old_sub_cr_id = cr.get_formatted_cr_id()
+            old_vendor_name = cr.selected_vendor_name
+
+            # Group changed materials by their new vendor
+            vendor_groups = {}
+            for sel in changed_materials:
+                vendor_id = sel.get('vendor_id')
+                if not vendor_id:
+                    continue
+                if vendor_id not in vendor_groups:
+                    vendor_groups[vendor_id] = []
+                vendor_groups[vendor_id].append(sel)
+
+            # Create new sub-CRs for each new vendor (only for changed materials)
+            for vendor_id, vendor_materials in vendor_groups.items():
+                vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+                if not vendor:
+                    return jsonify({"error": f"Vendor {vendor_id} not found"}), 404
+                if vendor.status != 'active':
+                    return jsonify({"error": f"Vendor '{vendor.company_name}' is not active"}), 400
+
+                # Build materials data for new sub-CR
+                new_materials = []
+                total_cost = 0.0
+
+                for sel in vendor_materials:
+                    material_name = sel.get('material_name')
+                    # Find the material from original sub-CR
+                    original_material = None
+                    if cr.materials_data:
+                        for m in cr.materials_data:
+                            if m.get('material_name') == material_name:
+                                original_material = m
+                                break
+
+                    if original_material:
+                        unit_price = sel.get('negotiated_price') or original_material.get('unit_price', 0)
+                        quantity = original_material.get('quantity', 0)
+                        material_total = unit_price * quantity
+                        total_cost += material_total
+
+                        new_materials.append({
+                            'material_name': material_name,
+                            'sub_item_name': original_material.get('sub_item_name', ''),
+                            'quantity': quantity,
+                            'unit': original_material.get('unit', ''),
+                            'unit_price': unit_price,
+                            'total_price': material_total,
+                            'master_material_id': original_material.get('master_material_id')
+                        })
+
+                # Create new sub-CR for the split-off materials
+                new_sub_cr = ChangeRequest(
+                    boq_id=parent_cr.boq_id,
+                    project_id=parent_cr.project_id,
+                    requested_by_user_id=parent_cr.requested_by_user_id,
+                    requested_by_name=parent_cr.requested_by_name,
+                    requested_by_role=parent_cr.requested_by_role,
+                    request_type=parent_cr.request_type,
+                    justification=f"Sub-CR for vendor {vendor.company_name} - Split by TD from {old_sub_cr_id}",
+                    status='pending_td_approval',  # NOT auto-approved
+                    item_id=parent_cr.item_id,
+                    item_name=parent_cr.item_name,
+                    sub_item_id=parent_cr.sub_item_id,
+                    sub_items_data=new_materials,
+                    materials_data=new_materials,
+                    materials_total_cost=total_cost,
+                    assigned_to_buyer_user_id=parent_cr.assigned_to_buyer_user_id,
+                    assigned_to_buyer_name=parent_cr.assigned_to_buyer_name,
+                    assigned_to_buyer_date=parent_cr.assigned_to_buyer_date,
+                    # Vendor selection
+                    selected_vendor_id=vendor_id,
+                    selected_vendor_name=vendor.company_name,
+                    vendor_selected_by_buyer_id=user_id,
+                    vendor_selected_by_buyer_name=user_name,
+                    vendor_selection_date=datetime.utcnow(),
+                    vendor_selection_status='pending_td_approval',  # NOT auto-approved
+                    # Sub-CR specific fields
+                    parent_cr_id=parent_cr.cr_id,
+                    cr_number_suffix=f".{next_suffix_number}",
+                    is_sub_cr=True,
+                    submission_group_id=cr.submission_group_id,  # Keep same group
+                    use_per_material_vendors=False,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+
+                db.session.add(new_sub_cr)
+                db.session.flush()
+
+                created_sub_crs.append({
+                    'cr_id': new_sub_cr.cr_id,
+                    'formatted_cr_id': new_sub_cr.get_formatted_cr_id(),
+                    'vendor_id': vendor_id,
+                    'vendor_name': vendor.company_name,
+                    'materials_count': len(new_materials),
+                    'total_cost': total_cost
+                })
+
+                next_suffix_number += 1
+                log.info(f"TD created split sub-CR {new_sub_cr.get_formatted_cr_id()} for vendor {vendor.company_name} with {len(new_materials)} material(s)")
+
+            # Update the ORIGINAL sub-CR to keep only the unchanged materials
+            if unchanged_materials:
+                # Keep the original sub-CR but update its materials list
+                remaining_materials = []
+                remaining_total_cost = 0.0
+
+                for sel in unchanged_materials:
+                    material_name = sel.get('material_name')
+                    # Find the material from original sub-CR
+                    if cr.materials_data:
+                        for m in cr.materials_data:
+                            if m.get('material_name') == material_name:
+                                remaining_materials.append(m)
+                                remaining_total_cost += m.get('total_price', 0) or (m.get('unit_price', 0) * m.get('quantity', 0))
+                                break
+
+                # Update original sub-CR with remaining materials
+                cr.materials_data = remaining_materials
+                cr.sub_items_data = remaining_materials
+                cr.materials_total_cost = remaining_total_cost
+                cr.updated_at = datetime.utcnow()
+                # Keep original vendor and status
+
+                # Flag JSONB fields as modified so SQLAlchemy detects the change
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(cr, 'materials_data')
+                flag_modified(cr, 'sub_items_data')
+
+                log.info(f"Original sub-CR {cr.get_formatted_cr_id()} updated with {len(remaining_materials)} remaining material(s)")
+            else:
+                # All materials were moved to new sub-CRs, soft-delete the original
+                cr.is_deleted = True
+                cr.updated_at = datetime.utcnow()
+                log.info(f"Original sub-CR {old_sub_cr_id} soft-deleted (all materials moved to new sub-CRs)")
+
+            db.session.commit()
+
+            log.info(f"TD {user_name} split {len(changed_materials)} material(s) from sub-CR {old_sub_cr_id} into {len(created_sub_crs)} new sub-CR(s)")
+
+            return jsonify({
+                "success": True,
+                "message": f"{len(changed_materials)} material(s) separated into new purchase order(s). {len(unchanged_materials)} material(s) remain with original vendor.",
+                "split_result": {
+                    "original_sub_cr": old_sub_cr_id,
+                    "original_materials_remaining": len(unchanged_materials),
+                    "new_sub_crs": created_sub_crs
+                }
+            })
 
         # Initialize material_vendor_selections if it doesn't exist
         if not cr.material_vendor_selections:
@@ -1770,13 +2043,22 @@ def select_vendor_for_material(cr_id):
                     break
 
         # If all materials have vendors selected, change CR status to pending_td_approval
-        if all_materials_have_vendors and not is_td:
+        # TD selecting vendors does NOT auto-approve - TD must manually click "Approve Vendor"
+        if all_materials_have_vendors:
             cr.status = 'pending_td_approval'
-            log.info(f"All materials have vendors selected for CR-{cr_id}. Status changed to 'pending_td_approval'")
-        elif all_materials_have_vendors and is_td:
-            # TD approved all materials directly
-            cr.status = 'vendor_approved'
-            log.info(f"All materials have vendors approved by TD for CR-{cr_id}. Status changed to 'vendor_approved'")
+            cr.vendor_selection_status = 'pending_td_approval'  # Also set vendor_selection_status for Pending Approval tab
+            # Set selected_vendor fields from the first material's vendor (for single vendor case)
+            first_material = list(cr.material_vendor_selections.values())[0] if cr.material_vendor_selections else None
+            if first_material:
+                cr.selected_vendor_id = first_material.get('vendor_id')
+                cr.selected_vendor_name = first_material.get('vendor_name')
+                cr.vendor_selected_by_buyer_id = user_id
+                cr.vendor_selected_by_buyer_name = user_name
+                cr.vendor_selection_date = datetime.utcnow()
+            if is_td:
+                log.info(f"TD selected vendors for all materials in CR-{cr_id}. Status: pending_td_approval (manual approval required)")
+            else:
+                log.info(f"All materials have vendors selected for CR-{cr_id}. Status changed to 'pending_td_approval'")
 
         cr.updated_at = datetime.utcnow()
         db.session.commit()
@@ -1892,12 +2174,21 @@ def create_sub_crs_for_vendor_groups(cr_id):
         # Check role-based permissions
         is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
 
+        # Debug logging for buyer assignment check
+        log.info(f"create_sub_crs - CR-{cr_id}: user_id={user_id} (type={type(user_id)}), assigned_to_buyer_user_id={parent_cr.assigned_to_buyer_user_id} (type={type(parent_cr.assigned_to_buyer_user_id)}), user_role='{user_role}', is_td={is_td}")
+
         # Verify it's assigned to this buyer (skip check for TD)
-        if not is_td and parent_cr.assigned_to_buyer_user_id != user_id:
-            return jsonify({"error": "This purchase is not assigned to you"}), 403
+        # Convert both to int for safe comparison (user_id from JWT may be string)
+        assigned_buyer_id = int(parent_cr.assigned_to_buyer_user_id or 0)
+        current_user_id = int(user_id)
+        if not is_td and assigned_buyer_id != current_user_id:
+            log.warning(f"create_sub_crs - Permission denied: assigned_buyer_id={assigned_buyer_id} != current_user_id={current_user_id}")
+            return jsonify({"error": f"This purchase is not assigned to you (assigned to buyer ID {assigned_buyer_id})"}), 403
 
         # Verify parent CR is in correct status
-        if parent_cr.status != 'assigned_to_buyer':
+        # Allow 'assigned_to_buyer', 'send_to_buyer', and 'approved_by_pm' statuses
+        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm']
+        if parent_cr.status not in allowed_statuses:
             return jsonify({"error": f"Cannot create sub-CRs. Parent CR status: {parent_cr.status}"}), 400
 
         # Create sub-CRs for each vendor group
@@ -1963,6 +2254,7 @@ def create_sub_crs_for_vendor_groups(cr_id):
                 })
 
             # Create the sub-CR
+            # TD creating sub-CRs does NOT auto-approve - TD must manually click "Approve Vendor"
             sub_cr = ChangeRequest(
                 boq_id=parent_cr.boq_id,
                 project_id=parent_cr.project_id,
@@ -1971,7 +2263,7 @@ def create_sub_crs_for_vendor_groups(cr_id):
                 requested_by_role=parent_cr.requested_by_role,
                 request_type=parent_cr.request_type,
                 justification=f"Sub-CR for vendor {vendor_name} - Split from CR-{cr_id}",
-                status='pending_td_approval' if not is_td else 'vendor_approved',
+                status='pending_td_approval',  # Always pending - TD must manually approve
                 item_id=parent_cr.item_id,
                 item_name=parent_cr.item_name,
                 sub_item_id=parent_cr.sub_item_id,
@@ -1987,7 +2279,7 @@ def create_sub_crs_for_vendor_groups(cr_id):
                 vendor_selected_by_buyer_id=user_id,
                 vendor_selected_by_buyer_name=user_name,
                 vendor_selection_date=datetime.utcnow(),
-                vendor_selection_status='pending_td_approval' if not is_td else 'approved',
+                vendor_selection_status='pending_td_approval',  # Always pending - TD must manually approve
                 # Sub-CR specific fields
                 parent_cr_id=parent_cr.cr_id,
                 cr_number_suffix=f".{idx}",
@@ -1998,11 +2290,8 @@ def create_sub_crs_for_vendor_groups(cr_id):
                 updated_at=datetime.utcnow()
             )
 
-            # If TD is creating, mark as approved
-            if is_td:
-                sub_cr.vendor_approved_by_td_id = user_id
-                sub_cr.vendor_approved_by_td_name = user_name
-                sub_cr.vendor_approval_date = datetime.utcnow()
+            # Note: TD must manually approve even when TD creates sub-CRs
+            # No auto-approval here
 
             db.session.add(sub_cr)
             db.session.flush()  # Get the cr_id

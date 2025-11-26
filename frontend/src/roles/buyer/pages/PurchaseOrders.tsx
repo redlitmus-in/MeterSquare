@@ -122,8 +122,9 @@ const PurchaseOrders: React.FC = () => {
 
   // Separate ongoing purchases by vendor approval status
   const pendingPurchaseItems = useMemo(() => {
-    // No vendor selected yet - only show parent CRs (not sub-CRs, they go to Pending Approval)
-    return pendingPurchases.filter(p => !p.is_sub_cr && (!p.vendor_id || p.vendor_selection_pending_td_approval));
+    // No vendor selected yet AND not pending TD approval - only show parent CRs
+    // CRs with vendor_selection_pending_td_approval should be in Pending Approval tab, not here
+    return pendingPurchases.filter(p => !p.is_sub_cr && !p.vendor_id && !p.vendor_selection_pending_td_approval);
   }, [pendingPurchases]);
 
   const vendorApprovedItems = useMemo(() => {

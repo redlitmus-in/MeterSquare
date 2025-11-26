@@ -27,6 +27,7 @@ interface MaterialVendorSelectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onVendorSelected?: () => void;
+  viewMode?: 'buyer' | 'td'; // 'buyer' = full edit mode, 'td' = simplified view for TD to change vendor
 }
 
 interface SelectedVendorInfo {
@@ -50,7 +51,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   purchase,
   isOpen,
   onClose,
-  onVendorSelected
+  onVendorSelected,
+  viewMode = 'buyer' // Default to buyer mode
 }) => {
   const { user } = useAuthStore();
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -195,9 +197,20 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     material: string
   ): boolean => {
     // Handle very short material names (1-2 characters) with exact matching
+    // First check for EXACT match (case-insensitive) - highest priority
+    if (productName === material) {
+      return true;
+    }
+
+    // Check if material is contained in product name or vice versa
+    if (productName.includes(material) || material.includes(productName)) {
+      return true;
+    }
+
     if (material.length <= 2) {
-      // For very short materials, check if product name contains the exact material as a standalone word
-      const materialRegex = new RegExp(`\\b${material}\\b`, 'i');
+      // For very short materials (1-2 chars), check if product name contains the exact material as a standalone word
+      const escapedMaterial = material.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const materialRegex = new RegExp(`\\b${escapedMaterial}\\b`, 'i');
       const exactMatch = materialRegex.test(productName);
 
       // Also check if material is at start or end of product name
@@ -208,20 +221,39 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     }
 
     // For longer material names, use word-based matching
-    const materialWords = material.split(/\s+/).filter(w => w.length > 2);
-    const productWords = productName.split(/\s+/).filter(w => w.length > 2);
+    // Keep all words (don't filter by length) to handle cases like "de 01"
+    const materialWords = material.split(/\s+/).filter(w => w.length > 0);
+    const productWords = productName.split(/\s+/).filter(w => w.length > 0);
 
     let matchingWords = 0;
     let totalWords = materialWords.length;
 
-    if (totalWords === 0) return false;
+    // If no words after split, fallback to direct contains check
+    if (totalWords === 0) {
+      return productName.includes(material) || material.includes(productName);
+    }
 
     materialWords.forEach(matWord => {
       const matched = productWords.some(prodWord => {
-        return prodWord === matWord ||
-               (prodWord.length > 3 && matWord.length > 3 && (
-                 prodWord.includes(matWord) || matWord.includes(prodWord)
-               ));
+        // Exact match (case already lowercased) - works for any length including 1 char
+        if (prodWord === matWord) return true;
+
+        // For longer words (>3 chars), allow partial matching
+        if (prodWord.length > 3 && matWord.length > 3) {
+          if (prodWord.includes(matWord) || matWord.includes(prodWord)) return true;
+        }
+
+        // For short words (1-3 chars), check if they appear as substrings in longer words
+        if (matWord.length >= 1 && matWord.length <= 3 && prodWord.length > matWord.length) {
+          if (prodWord.startsWith(matWord) || prodWord.endsWith(matWord)) return true;
+        }
+
+        // For single character matches, also check if product word starts with it
+        if (matWord.length === 1 && prodWord.startsWith(matWord)) {
+          return true;
+        }
+
+        return false;
       });
       if (matched) matchingWords++;
     });
@@ -265,10 +297,18 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   };
 
   // Get vendors that have products matching a specific material
+  // Falls back to showing ALL vendors if no matches found (allows manual selection)
   const getVendorsForMaterial = (materialName: string): Vendor[] => {
+    const result = getVendorsForMaterialWithFallbackInfo(materialName);
+    return result.vendors;
+  };
+
+  // Helper to check if we have actual product matches or using fallback
+  const getVendorsForMaterialWithFallbackInfo = (materialName: string): { vendors: Vendor[], isFallback: boolean } => {
     const materialLower = materialName.toLowerCase().trim();
 
-    return vendors.filter(vendor => {
+    // First try to find vendors with matching products
+    const matchedVendors = vendors.filter(vendor => {
       if (!vendor.vendor_id) return false;
       const products = vendorProducts.get(vendor.vendor_id) || [];
       const vendorCategory = vendor.category?.toLowerCase().trim() || '';
@@ -278,11 +318,20 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         const productCategory = product.category?.toLowerCase().trim() || '';
         return isProductMatchingMaterial(productName, productCategory, vendorCategory, materialLower);
       });
-    }).filter(vendor => {
+    });
+
+    // If no matches found, return ALL vendors (fallback for manual selection)
+    const isFallback = matchedVendors.length === 0;
+    const vendorsToReturn = isFallback ? vendors.filter(v => v.vendor_id) : matchedVendors;
+
+    // Apply search filter
+    const filteredVendors = vendorsToReturn.filter(vendor => {
       if (!searchTerm) return true;
       return vendor.company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
              vendor.category?.toLowerCase().includes(searchTerm.toLowerCase());
     });
+
+    return { vendors: filteredVendors, isFallback };
   };
 
   // Get vendors with cost information for auto-selection
@@ -339,6 +388,9 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   };
 
   const handleSelectVendorForMaterial = (materialName: string, vendorId: number, vendorName: string) => {
+    // TD mode with sub-CRs: allow different vendors - backend will split the sub-CR if needed
+    // No longer auto-selecting same vendor for all materials
+
     setMaterialVendors(prev => prev.map(m => {
       if (m.material_name !== materialName) return m;
 
@@ -559,21 +611,33 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       toast.warning(`${unselectedMaterials.length} material(s) without vendors will be skipped: ${unselectedMaterials.map(m => m.material_name).join(', ')}`);
     }
 
-    // If send separately is checked, create separate sub-CRs for each vendor
-    if (sendSeparately) {
+    // For buyer mode: Check if full purchase to single vendor (no sub-CR needed)
+    // or partial/multiple vendors (create sub-CRs)
+    if (viewMode === 'buyer') {
+      // Group materials by vendor
+      const vendorGroupsMap = new Map<number, Array<typeof selectedMaterials[0]>>();
+
+      selectedMaterials.forEach(material => {
+        const vendorId = material.selected_vendors[0].vendor_id;
+        if (!vendorGroupsMap.has(vendorId)) {
+          vendorGroupsMap.set(vendorId, []);
+        }
+        vendorGroupsMap.get(vendorId)!.push(material);
+      });
+
+      const uniqueVendorCount = vendorGroupsMap.size;
+      const allMaterialsSelected = selectedMaterials.length === materialVendors.length;
+
+      // FULL PURCHASE TO SINGLE VENDOR: Update parent CR directly (no sub-CR)
+      if (uniqueVendorCount === 1 && allMaterialsSelected) {
+        // Show confirmation dialog for full purchase
+        setShowConfirmation(true);
+        return;
+      }
+
+      // PARTIAL OR MULTIPLE VENDORS: Create sub-CRs
       try {
         setIsSubmitting(true);
-
-        // Group materials by vendor
-        const vendorGroupsMap = new Map<number, Array<typeof selectedMaterials[0]>>();
-
-        selectedMaterials.forEach(material => {
-          const vendorId = material.selected_vendors[0].vendor_id;
-          if (!vendorGroupsMap.has(vendorId)) {
-            vendorGroupsMap.set(vendorId, []);
-          }
-          vendorGroupsMap.get(vendorId)!.push(material);
-        });
 
         // Prepare vendor groups data for sub-CR creation
         const vendorGroups = Array.from(vendorGroupsMap.entries()).map(([vendorId, materials]) => ({
@@ -598,26 +662,26 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           submissionGroupId
         );
 
-        toast.success(response.message || `Created ${vendorGroups.length} separate purchase orders!`);
+        toast.success(response.message || `Sent to TD for approval!`);
 
         // Show individual sub-CR IDs created
         if (response.sub_crs && response.sub_crs.length > 0) {
           const subCRsList = response.sub_crs.map((sub: any) =>
             `${sub.formatted_cr_id} (${sub.vendor_name})`
           ).join(', ');
-          toast.info(`Purchase Orders: ${subCRsList}`, { duration: 5000 });
+          toast.info(`Purchase Order: ${subCRsList}`, { duration: 5000 });
         }
 
         onVendorSelected?.();
         onClose();
       } catch (error: any) {
         console.error('Error creating sub-CRs:', error);
-        toast.error(error.message || 'Failed to create separate purchase orders');
+        toast.error(error.message || 'Failed to submit for approval');
       } finally {
         setIsSubmitting(false);
       }
     } else {
-      // Send all together as before
+      // TD mode: show confirmation dialog for approval
       setShowConfirmation(true);
     }
   };
@@ -657,7 +721,25 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         materialSelections
       );
 
-      toast.success(response.message || 'Vendor selections sent for approval!');
+      // Show different message based on mode and response type
+      if (viewMode === 'td') {
+        // Check if this was a sub-CR split
+        if (response.split_result) {
+          const newSubCRs = response.split_result.new_sub_crs || [];
+          toast.success(`Order split into ${newSubCRs.length} new purchase orders!`);
+          // Show the new sub-CR IDs
+          if (newSubCRs.length > 0) {
+            const subCRsList = newSubCRs.map((sub: any) =>
+              `${sub.formatted_cr_id} (${sub.vendor_name})`
+            ).join(', ');
+            toast.info(`New Orders: ${subCRsList}`, { duration: 5000 });
+          }
+        } else {
+          toast.success('Vendor Changed Successfully!');
+        }
+      } else {
+        toast.success(response.message || 'Vendor selections sent for approval!');
+      }
       onVendorSelected?.();
       onClose();
     } catch (error: any) {
@@ -734,20 +816,23 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-5 border-b border-blue-200">
+              <div className={`px-6 py-5 border-b ${viewMode === 'td' ? 'bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200' : 'bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200'}`}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
-                      <ShoppingCart className="w-6 h-6 text-blue-600" />
+                      <ShoppingCart className={`w-6 h-6 ${viewMode === 'td' ? 'text-purple-600' : 'text-blue-600'}`} />
                       <h2 className="text-2xl font-bold text-gray-900">
-                        Select Vendors for Materials
+                        {viewMode === 'td' ? 'Change Vendor Selection' : 'Select Vendors for Materials'}
                       </h2>
                     </div>
                     <div className="text-sm text-gray-600">
                       <span className="font-medium">Purchase Order:</span> CR #{purchase.cr_id} - {purchase.item_name}
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
-                      Select vendor for each material ({selectedCount}/{materialVendors.length} selected)
+                      {viewMode === 'td'
+                        ? `Review and change vendor selections (${selectedCount}/${materialVendors.length} materials)`
+                        : `Select vendor for each material (${selectedCount}/${materialVendors.length} selected)`
+                      }
                     </div>
                   </div>
                   <button
@@ -774,7 +859,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   </div>
                 </div>
 
-                {/* AI-Powered Info Banner - Floating Light Navy & Red Theme */}
+                {/* AI-Powered Info Banner - Floating Light Navy & Red Theme - Only for Buyer mode */}
+                {viewMode === 'buyer' && (
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{
@@ -912,9 +998,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-red-300/50 to-transparent"
                   />
                 </motion.div>
+                )}
 
-                {/* Locked Materials Info Banner */}
-                {lockedMaterialsCount > 0 && (
+                {/* Locked Materials Info Banner - Only show for Buyer mode */}
+                {viewMode === 'buyer' && lockedMaterialsCount > 0 && (
                   <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                     <div className="flex items-start gap-2">
                       <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -930,6 +1017,44 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   </div>
                 )}
 
+                {/* Warning Note: Check carefully before sending - only show for Buyer mode with unlocked materials */}
+                {viewMode === 'buyer' && unlockedMaterials.length > 0 && (
+                  <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-amber-900">
+                          Check carefully before sending to TD
+                        </p>
+                        <p className="text-xs text-amber-700 mt-1">
+                          Once sent for approval, you <strong>cannot add more materials</strong> to the same vendor submission.
+                          Make sure to assign all required materials before submitting.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* TD Mode: Info banner */}
+                {viewMode === 'td' && (
+                  <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-purple-900">
+                          TD Vendor Change Mode
+                        </p>
+                        <p className="text-xs text-purple-700 mt-1">
+                          {purchase.is_sub_cr
+                            ? 'You can select different vendors for each material. If you select different vendors, this order will be split into multiple purchase orders (one per vendor).'
+                            : 'Select different vendors for the materials below. Changes will be applied immediately.'
+                          }
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Materials List with Vendor Selection */}
                 {loadingVendors ? (
                   <div className="flex items-center justify-center py-12">
@@ -939,7 +1064,9 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   <div className="space-y-3">
                     {materialVendors.map((material, materialIdx) => {
                       const isExpanded = expandedMaterial === material.material_name;
-                      const matchingVendors = getVendorsForMaterial(material.material_name);
+                      const vendorInfo = getVendorsForMaterialWithFallbackInfo(material.material_name);
+                      const matchingVendors = vendorInfo.vendors;
+                      const isShowingAllVendors = vendorInfo.isFallback;
                       const existingSelection = purchase.material_vendor_selections?.[material.material_name];
                       const selectionStatus = existingSelection?.selection_status;
 
@@ -1016,8 +1143,14 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                     }
                                     return null;
                                   })()}
-                                  <Badge variant="outline" className="text-xs">
-                                    {matchingVendors.length} vendor{matchingVendors.length !== 1 ? 's' : ''} available
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-xs ${isShowingAllVendors ? 'border-amber-400 text-amber-700 bg-amber-50' : ''}`}
+                                  >
+                                    {isShowingAllVendors
+                                      ? `All ${matchingVendors.length} vendor${matchingVendors.length !== 1 ? 's' : ''} (no exact match)`
+                                      : `${matchingVendors.length} vendor${matchingVendors.length !== 1 ? 's' : ''} available`
+                                    }
                                   </Badge>
                                 </div>
 
@@ -1160,24 +1293,42 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                         const isExpanded = expandedVendorRow?.materialName === material.material_name &&
                                                           expandedVendorRow?.vendorId === vendor.vendor_id;
 
+                                        // Check if this vendor is already in a pending sub-CR (sent to TD)
+                                        const isVendorSentToTD = purchase.sub_crs?.some(subCR =>
+                                          subCR.vendor_id === vendor.vendor_id &&
+                                          subCR.vendor_selection_status === 'pending_td_approval'
+                                        ) || false;
+
                                         return (
                                           <div key={vendor.vendor_id}>
                                             {/* Vendor Row */}
                                             <div
-                                              onClick={() => handleSelectVendorForMaterial(
-                                                material.material_name,
-                                                vendor.vendor_id!,
-                                                vendor.company_name
-                                              )}
-                                              className={`flex items-center gap-3 px-3 py-2 border-b border-gray-100 cursor-pointer transition-colors ${
-                                                isSelected
-                                                  ? 'bg-blue-50 hover:bg-blue-100'
-                                                  : 'bg-white hover:bg-gray-50'
+                                              onClick={() => {
+                                                if (isVendorSentToTD) {
+                                                  toast.error('This vendor is already sent for TD approval. You cannot assign more materials to it.');
+                                                  return;
+                                                }
+                                                handleSelectVendorForMaterial(
+                                                  material.material_name,
+                                                  vendor.vendor_id!,
+                                                  vendor.company_name
+                                                );
+                                              }}
+                                              className={`flex items-center gap-3 px-3 py-2 border-b border-gray-100 transition-colors ${
+                                                isVendorSentToTD
+                                                  ? 'bg-amber-50 cursor-not-allowed opacity-70'
+                                                  : isSelected
+                                                    ? 'bg-blue-50 hover:bg-blue-100 cursor-pointer'
+                                                    : 'bg-white hover:bg-gray-50 cursor-pointer'
                                               }`}
                                             >
                                               {/* Checkbox/Radio */}
                                               <div className="flex-shrink-0">
-                                                {material.selection_mode === 'multi' ? (
+                                                {isVendorSentToTD ? (
+                                                  <div className="w-4 h-4 rounded-full border-2 border-amber-400 bg-amber-100 flex items-center justify-center">
+                                                    <AlertCircle className="w-3 h-3 text-amber-600" />
+                                                  </div>
+                                                ) : material.selection_mode === 'multi' ? (
                                                   <input
                                                     type="checkbox"
                                                     checked={isSelected}
@@ -1195,7 +1346,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
                                               {/* Vendor Name & Category */}
                                               <div className="flex-1 min-w-0">
-                                                <div className="font-medium text-gray-900 text-sm truncate">{vendor.company_name}</div>
+                                                <div className="flex items-center gap-2">
+                                                  <span className={`font-medium text-sm truncate ${isVendorSentToTD ? 'text-amber-700' : 'text-gray-900'}`}>
+                                                    {vendor.company_name}
+                                                  </span>
+                                                  {isVendorSentToTD && (
+                                                    <Badge className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0">
+                                                      Sent to TD
+                                                    </Badge>
+                                                  )}
+                                                </div>
                                                 {vendor.category && (
                                                   <div className="text-xs text-gray-500 truncate">{vendor.category}</div>
                                                 )}
@@ -1417,8 +1577,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   </div>
                 )}
 
-                {/* Selection Summary - Grouped by Vendor */}
-                {selectedCount > 0 && (
+                {/* Selection Summary - Grouped by Vendor - Only for Buyer mode */}
+                {viewMode === 'buyer' && selectedCount > 0 && (
                   <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-xl">
                     <h4 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
                       <CheckCircle className="w-5 h-5" />
@@ -1444,10 +1604,18 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       }>();
 
                       // Group materials by their selected vendor (exclude materials actually in pending sub-CRs)
+                      // Also exclude vendors that are already sent to TD
                       materialVendors.filter(m => {
                         if (m.selected_vendors.length === 0) return false;
                         // Exclude materials that are actually in a pending sub-CR
                         if (isMaterialActuallyLocked(m.material_name)) return false;
+                        // Exclude if selected vendor is already sent to TD
+                        const selectedVendorId = m.selected_vendors[0]?.vendor_id;
+                        const isVendorAlreadySent = purchase.sub_crs?.some(subCR =>
+                          subCR.vendor_id === selectedVendorId &&
+                          subCR.vendor_selection_status === 'pending_td_approval'
+                        ) || sentVendorIds.has(selectedVendorId);
+                        if (isVendorAlreadySent) return false;
                         return true;
                       }).forEach(material => {
                         const selectedVendor = material.selected_vendors[0];
@@ -1505,6 +1673,9 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         group.total_amount += vendorMaterialAmount;
                       });
 
+                      // Check if there's only 1 vendor selected - if so, hide individual send buttons
+                      const hasMultipleVendors = vendorGroups.size > 1;
+
                       return (
                         <div className="space-y-3">
                           {Array.from(vendorGroups.values()).map((vendorGroup, idx) => {
@@ -1542,52 +1713,54 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                     </div>
                                   </div>
 
-                                  {/* Right Column: Send Button - Always show for unlocked materials */}
-                                  {/* Note: vendorGroup only contains UNLOCKED materials, so if it appears here, it can be sent */}
-                                  <div className="flex items-center px-3 bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200">
-                                    <Button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
+                                  {/* Right Column: Send Button - Only show when multiple vendors selected */}
+                                  {/* When only 1 vendor, user should use "Submit for TD Approval" button at bottom */}
+                                  {hasMultipleVendors && (
+                                    <div className="flex items-center px-3 bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200">
+                                      <Button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
 
-                                        // Get ONLY unlocked materials for this vendor to show in confirmation
-                                        const vendorMaterials = materialVendors
-                                          .filter(m => m.selected_vendors.length > 0)
-                                          .filter(m => m.selected_vendors[0].vendor_id === vendorGroup.vendor_id)
-                                          .filter(m => !isMaterialActuallyLocked(m.material_name)) // Exclude locked materials
-                                          .map(m => ({
-                                            material_name: m.material_name,
-                                            quantity: m.quantity,
-                                            unit: m.unit
-                                          }));
+                                          // Get ONLY unlocked materials for this vendor to show in confirmation
+                                          const vendorMaterials = materialVendors
+                                            .filter(m => m.selected_vendors.length > 0)
+                                            .filter(m => m.selected_vendors[0].vendor_id === vendorGroup.vendor_id)
+                                            .filter(m => !isMaterialActuallyLocked(m.material_name)) // Exclude locked materials
+                                            .map(m => ({
+                                              material_name: m.material_name,
+                                              quantity: m.quantity,
+                                              unit: m.unit
+                                            }));
 
-                                        if (vendorMaterials.length === 0) {
-                                          toast.error('No materials found for this vendor');
-                                          return;
-                                        }
+                                          if (vendorMaterials.length === 0) {
+                                            toast.error('No materials found for this vendor');
+                                            return;
+                                          }
 
-                                        // Show confirmation dialog
-                                        setVendorSendConfirmation({
-                                          vendor_id: vendorGroup.vendor_id,
-                                          vendor_name: vendorGroup.vendor_name,
-                                          materials: vendorMaterials
-                                        });
-                                      }}
-                                      disabled={isSubmitting}
-                                      className="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 whitespace-nowrap"
-                                    >
-                                      {isSubmitting ? (
-                                        <>
-                                          <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                          Sending...
-                                        </>
-                                      ) : (
-                                        <>
-                                          <CheckCircle className="w-4 h-4 mr-2" />
-                                          Send This Vendor to TD
-                                        </>
-                                      )}
-                                    </Button>
-                                  </div>
+                                          // Show confirmation dialog
+                                          setVendorSendConfirmation({
+                                            vendor_id: vendorGroup.vendor_id,
+                                            vendor_name: vendorGroup.vendor_name,
+                                            materials: vendorMaterials
+                                          });
+                                        }}
+                                        disabled={isSubmitting}
+                                        className="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 whitespace-nowrap"
+                                      >
+                                        {isSubmitting ? (
+                                          <>
+                                            <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            Sending...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <CheckCircle className="w-4 h-4 mr-2" />
+                                            Send This Vendor to TD
+                                          </>
+                                        )}
+                                      </Button>
+                                    </div>
+                                  )}
                                 </div>
 
                                 {/* Collapsible Content */}
@@ -1730,36 +1903,54 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
               {/* Footer */}
               <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between gap-4">
                 <div className="text-sm text-gray-600">
-                  {lockedMaterialsCount === materialVendors.length ? (
-                    <span className="font-medium text-amber-600">
-                      All materials are locked - Awaiting TD approval
-                    </span>
-                  ) : allMaterialsHaveVendors && unlockedMaterials.length > 0 ? (
-                    <span className="font-medium text-green-600">
-                      ✓ All materials have vendors selected
-                      {lockedMaterialsCount > 0 && (
-                        <span className="text-amber-600 ml-2">
-                          ({lockedMaterialsCount} locked)
-                        </span>
-                      )}
-                    </span>
-                  ) : selectedCount > 0 ? (
-                    <span className="font-medium text-blue-600">
-                      {selectedCount}/{unlockedMaterials.length} materials selected
-                      {lockedMaterialsCount > 0 && (
-                        <span className="text-amber-600 ml-2">
-                          • {lockedMaterialsCount} locked
-                        </span>
-                      )}
-                    </span>
-                  ) : lockedMaterialsCount > 0 ? (
-                    <span className="font-medium text-amber-600">
-                      {lockedMaterialsCount} material{lockedMaterialsCount > 1 ? 's' : ''} locked • Select vendors for remaining
-                    </span>
+                  {viewMode === 'td' ? (
+                    // TD Mode: Simplified status
+                    allMaterialsHaveVendors ? (
+                      <span className="font-medium text-purple-600">
+                        ✓ All materials have vendors assigned - Ready to apply changes
+                      </span>
+                    ) : selectedCount > 0 ? (
+                      <span className="font-medium text-purple-600">
+                        {selectedCount}/{materialVendors.length} materials with vendors selected
+                      </span>
+                    ) : (
+                      <span className="font-medium text-orange-600">
+                        Select vendors for materials to change
+                      </span>
+                    )
                   ) : (
-                    <span className="font-medium text-orange-600">
-                      Select at least one vendor to continue
-                    </span>
+                    // Buyer Mode: Full status with locked materials
+                    lockedMaterialsCount === materialVendors.length ? (
+                      <span className="font-medium text-amber-600">
+                        All materials are locked - Awaiting TD approval
+                      </span>
+                    ) : allMaterialsHaveVendors && unlockedMaterials.length > 0 ? (
+                      <span className="font-medium text-green-600">
+                        ✓ All materials have vendors selected
+                        {lockedMaterialsCount > 0 && (
+                          <span className="text-amber-600 ml-2">
+                            ({lockedMaterialsCount} locked)
+                          </span>
+                        )}
+                      </span>
+                    ) : selectedCount > 0 ? (
+                      <span className="font-medium text-blue-600">
+                        {selectedCount}/{unlockedMaterials.length} materials selected
+                        {lockedMaterialsCount > 0 && (
+                          <span className="text-amber-600 ml-2">
+                            • {lockedMaterialsCount} locked
+                          </span>
+                        )}
+                      </span>
+                    ) : lockedMaterialsCount > 0 ? (
+                      <span className="font-medium text-amber-600">
+                        {lockedMaterialsCount} material{lockedMaterialsCount > 1 ? 's' : ''} locked • Select vendors for remaining
+                      </span>
+                    ) : (
+                      <span className="font-medium text-orange-600">
+                        Select at least one vendor to continue
+                      </span>
+                    )
                   )}
                 </div>
 
@@ -1773,32 +1964,56 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     Cancel
                   </Button>
 
-                  {/* Submit All Together - Single Purchase Indicator */}
-                  <div className="flex flex-col items-end gap-1">
-                    <span className="text-xs text-gray-500 italic">
-                      Send all materials as one purchase
-                    </span>
+                  {/* TD Mode: Simple Apply Changes button */}
+                  {viewMode === 'td' ? (
                     <Button
                       onClick={() => {
-                        setSendSeparately(false);
+                        // For TD mode, just save the vendor selection changes
                         handleSubmit();
                       }}
                       disabled={selectedCount === 0 || isSubmitting}
-                      className="px-6 bg-blue-600 hover:bg-blue-700 text-white"
+                      className="px-6 bg-purple-600 hover:bg-purple-700 text-white"
                     >
-                      {isSubmitting && !sendSeparately ? (
+                      {isSubmitting ? (
                         <>
                           <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          {isTechnicalDirector ? 'Approving...' : 'Submitting...'}
+                          Applying Changes...
                         </>
                       ) : (
                         <>
                           <CheckCircle className="w-4 h-4 mr-2" />
-                          {isTechnicalDirector ? 'Approve All' : 'Submit for TD Approval'}
+                          Apply Vendor Changes
                         </>
                       )}
                     </Button>
-                  </div>
+                  ) : (
+                    /* Buyer Mode: Submit All Together - Single Purchase Indicator */
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-xs text-gray-500 italic">
+                        Send all materials as one purchase
+                      </span>
+                      <Button
+                        onClick={() => {
+                          setSendSeparately(false);
+                          handleSubmit();
+                        }}
+                        disabled={selectedCount === 0 || isSubmitting}
+                        className="px-6 bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        {isSubmitting && !sendSeparately ? (
+                          <>
+                            <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            {isTechnicalDirector ? 'Approving...' : 'Submitting...'}
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            {isTechnicalDirector ? 'Approve All' : 'Submit for TD Approval'}
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -1987,9 +2202,13 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                           try {
                             setIsSubmitting(true);
 
+                            const sentVendorId = vendorSendConfirmation.vendor_id;
+                            const sentVendorName = vendorSendConfirmation.vendor_name;
+
                             const materials = materialVendors
                               .filter(m => m.selected_vendors.length > 0)
-                              .filter(m => m.selected_vendors[0].vendor_id === vendorSendConfirmation.vendor_id)
+                              .filter(m => m.selected_vendors[0].vendor_id === sentVendorId)
+                              .filter(m => !isMaterialActuallyLocked(m.material_name)) // Only unlocked materials
                               .map(m => ({
                                 material_name: m.material_name,
                                 quantity: m.quantity,
@@ -1998,36 +2217,67 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                 save_price_for_future: m.selected_vendors[0].save_price_for_future
                               }));
 
+                            if (materials.length === 0) {
+                              toast.error('No materials to send for this vendor');
+                              setVendorSendConfirmation(null);
+                              return;
+                            }
+
                             const submissionGroupId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
                             const response = await buyerService.createSubCRs(
                               purchase.cr_id,
                               [{
-                                vendor_id: vendorSendConfirmation.vendor_id,
-                                vendor_name: vendorSendConfirmation.vendor_name,
+                                vendor_id: sentVendorId,
+                                vendor_name: sentVendorName,
                                 materials: materials
                               }],
                               submissionGroupId
                             );
 
-                            toast.success(response.message || `Created purchase order for ${vendorSendConfirmation.vendor_name}!`);
+                            // Show success immediately
+                            toast.success(response.message || `Sent to TD for approval: ${sentVendorName}!`);
 
                             if (response.sub_crs && response.sub_crs.length > 0) {
                               toast.info(`Purchase Order: ${response.sub_crs[0].formatted_cr_id}`, { duration: 5000 });
+
+                              // Optimistically update purchase.sub_crs locally for immediate UI feedback
+                              const newSubCR: SubCR = {
+                                cr_id: response.sub_crs[0].cr_id,
+                                formatted_cr_id: response.sub_crs[0].formatted_cr_id,
+                                cr_number_suffix: response.sub_crs[0].cr_number_suffix,
+                                vendor_id: sentVendorId,
+                                vendor_name: sentVendorName,
+                                vendor_selection_status: 'pending_td_approval',
+                                materials: materials.map(m => ({
+                                  material_name: m.material_name,
+                                  quantity: m.quantity,
+                                  unit: m.unit
+                                }))
+                              };
+
+                              // Update the purchase object's sub_crs array
+                              if (!purchase.sub_crs) {
+                                purchase.sub_crs = [];
+                              }
+                              purchase.sub_crs.push(newSubCR);
                             }
 
-                            // Mark this vendor as sent
-                            setSentVendorIds(prev => new Set([...prev, vendorSendConfirmation.vendor_id]));
+                            // Mark this vendor as sent (updates UI immediately)
+                            setSentVendorIds(prev => new Set([...prev, sentVendorId]));
 
-                            // Close confirmation dialog
+                            // Close confirmation dialog first (UI stays responsive)
                             setVendorSendConfirmation(null);
+                            setIsSubmitting(false);
 
-                            // Refresh data
-                            onVendorSelected?.();
+                            // Lazy refresh data in background (doesn't block UI)
+                            setTimeout(() => {
+                              onVendorSelected?.();
+                            }, 500);
+
                           } catch (error: any) {
                             console.error('Error creating sub-CR:', error);
                             toast.error(error.message || 'Failed to create purchase order');
-                          } finally {
                             setIsSubmitting(false);
                           }
                         }}

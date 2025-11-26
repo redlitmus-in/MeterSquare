@@ -129,12 +129,17 @@ const ChangeRequestsPage: React.FC = () => {
         console.log('📊 Total change requests:', response.data.length);
 
         // Filter for change requests with vendor selection pending TD approval
-        // Include both regular CRs (status='assigned_to_buyer') and sub-CRs (status='pending_td_approval', is_sub_cr=true)
+        // Include:
+        // 1. Regular CRs (status='assigned_to_buyer') with vendor_selection_status='pending_td_approval'
+        // 2. Sub-CRs (status='pending_td_approval', is_sub_cr=true)
+        // 3. Full purchase parent CRs (status='pending_td_approval', is_sub_cr=false) - when buyer sends all materials to single vendor
         const pendingVendorApprovals = response.data.filter(
           (cr: ChangeRequestItem) => {
             const status = cr.status?.trim(); // Trim to handle trailing spaces
             const isRegularCRPending = status === 'assigned_to_buyer' && cr.vendor_selection_status === 'pending_td_approval';
-            const isSubCRPending = cr.is_sub_cr && cr.status === 'pending_td_approval' && cr.vendor_selection_status === 'pending_td_approval';
+            const isSubCRPending = cr.is_sub_cr && status === 'pending_td_approval' && cr.vendor_selection_status === 'pending_td_approval';
+            // Full purchase parent CR: status='pending_td_approval', is_sub_cr=false, vendor_selection_status='pending_td_approval'
+            const isFullPurchaseParentCR = !cr.is_sub_cr && status === 'pending_td_approval' && cr.vendor_selection_status === 'pending_td_approval';
 
             console.log(`CR-${cr.cr_id}:`, {
               status: cr.status,
@@ -145,10 +150,11 @@ const ChangeRequestsPage: React.FC = () => {
               formatted_cr_id: cr.formatted_cr_id,
               isRegularCRPending,
               isSubCRPending,
-              matches: isRegularCRPending || isSubCRPending
+              isFullPurchaseParentCR,
+              matches: isRegularCRPending || isSubCRPending || isFullPurchaseParentCR
             });
 
-            return isRegularCRPending || isSubCRPending;
+            return isRegularCRPending || isSubCRPending || isFullPurchaseParentCR;
           }
         );
 
@@ -438,7 +444,28 @@ const ChangeRequestsPage: React.FC = () => {
           buyerVendorService.getVendorProducts(purchase.vendor_id)
         ]);
         setVendorDetails(vendor);
-        setVendorProducts(products);
+
+        // Filter products to only show those that match materials in this purchase
+        const materialNames = (purchase.materials || []).map(m =>
+          m.material_name?.toLowerCase().trim() || ''
+        );
+
+        const relevantProducts = products.filter(product => {
+          const productName = product.product_name?.toLowerCase().trim() || '';
+          const productCategory = product.category?.toLowerCase().trim() || '';
+
+          // Check if product matches any material in the purchase
+          return materialNames.some(materialName => {
+            if (!materialName) return false;
+            // Match by name similarity
+            return productName.includes(materialName) ||
+                   materialName.includes(productName) ||
+                   productCategory.includes(materialName) ||
+                   materialName.includes(productCategory);
+          });
+        });
+
+        setVendorProducts(relevantProducts);
       } catch (error) {
         console.error('Error loading vendor details:', error);
         showError('Failed to load vendor details');
@@ -820,21 +847,42 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Stats - Compact */}
-                        <div className="px-2 pb-1 text-center text-[10px]">
-                          <span className="font-bold text-orange-600 text-sm">{purchase.materials_count}</span>
-                          <span className="text-gray-600 ml-0.5">Material{purchase.materials_count > 1 ? 's' : ''}</span>
-                        </div>
-
-                        {/* Financial Impact - Compact */}
-                        <div className="px-2 pb-2 space-y-0.5 text-[9px]">
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Total Cost:</span>
-                            <span className="font-bold text-gray-900">AED {purchase.total_cost.toLocaleString()}</span>
+                        {/* Materials List with Prices */}
+                        <div className="px-2 pb-2">
+                          <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
+                            <Package className="h-2.5 w-2.5" />
+                            Materials ({purchase.materials_count})
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Item:</span>
-                            <span className="font-semibold text-gray-700 truncate ml-1">{purchase.item_name}</span>
+                          <div className="bg-gray-50 rounded border border-gray-200 max-h-24 overflow-y-auto">
+                            {purchase.materials && purchase.materials.length > 0 ? (
+                              <div className="divide-y divide-gray-100">
+                                {purchase.materials.map((material, idx) => (
+                                  <div key={idx} className="px-1.5 py-1 text-[9px]">
+                                    <div className="flex justify-between items-start gap-1">
+                                      <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
+                                      <span className="text-orange-700 font-bold whitespace-nowrap">
+                                        AED {(material.unit_price || 0).toLocaleString()}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between text-gray-500 mt-0.5">
+                                      <span>{material.quantity} {material.unit}</span>
+                                      <span className="font-semibold text-gray-700">
+                                        = AED {(material.total_price || 0).toLocaleString()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="px-2 py-2 text-[9px] text-gray-400 text-center">
+                                No materials data
+                              </div>
+                            )}
+                          </div>
+                          {/* Total Cost */}
+                          <div className="flex justify-between mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
+                            <span className="text-gray-600 font-semibold">Total Cost:</span>
+                            <span className="font-bold text-green-700">AED {(purchase.total_cost || 0).toLocaleString()}</span>
                           </div>
                         </div>
 
@@ -907,7 +955,13 @@ const ChangeRequestsPage: React.FC = () => {
                         <div className="p-2">
                           <div className="flex items-start justify-between mb-1">
                             <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{request.project_name}</h3>
-                            <Badge className="bg-blue-100 text-blue-800 text-[9px] px-1 py-0">APPROVED</Badge>
+                            <Badge className={`text-[9px] px-1.5 py-0.5 ${
+                              request.is_sub_cr
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}>
+                              {request.formatted_cr_id || `CR-${request.cr_id}`}
+                            </Badge>
                           </div>
 
                           <div className="space-y-0.5 text-[10px] text-gray-600">
@@ -919,6 +973,12 @@ const ChangeRequestsPage: React.FC = () => {
                               <Calendar className="h-2.5 w-2.5 text-gray-400" />
                               <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
                             </div>
+                            {request.selected_vendor_name && (
+                              <div className="flex items-center gap-1">
+                                <Store className="h-2.5 w-2.5 text-green-500" />
+                                <span className="truncate font-medium text-green-700">{request.selected_vendor_name}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -933,10 +993,8 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="font-bold text-blue-600">{formatCurrency(request.materials_total_cost)}</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Increase:</span>
-                            <span className={`font-semibold ${getPercentageColor((request.budget_impact?.increase_percentage || 0))}`}>
-                              +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
-                            </span>
+                            <span className="text-gray-500">Item:</span>
+                            <span className="font-semibold text-gray-700 truncate ml-1">{request.item_name}</span>
                           </div>
                         </div>
 
@@ -1285,13 +1343,14 @@ const ChangeRequestsPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Vendor Products/Services Table */}
+                    {/* Matching Vendor Products - Only showing products relevant to this purchase */}
                     {vendorProducts.length > 0 && (
                       <div>
                         <h4 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
                           <Package className="w-5 h-5 text-green-600" />
-                          Vendor Products/Services ({vendorProducts.length})
+                          Matching Vendor Products ({vendorProducts.length})
                         </h4>
+                        <p className="text-xs text-gray-500 mb-2">Products from this vendor that match the requested materials</p>
                         <div className="bg-green-50 border border-green-200 rounded-xl overflow-hidden">
                           <table className="w-full">
                             <thead className="bg-green-100">
@@ -1393,7 +1452,7 @@ const ChangeRequestsPage: React.FC = () => {
         </>
       )}
 
-      {/* Material Vendor Selection Modal - For changing vendor per material */}
+      {/* Material Vendor Selection Modal - TD Mode for changing vendor */}
       {selectedVendorPurchase && (
         <MaterialVendorSelectionModal
           purchase={selectedVendorPurchase}
@@ -1403,8 +1462,9 @@ const ChangeRequestsPage: React.FC = () => {
             setShowVendorSelectionModal(false);
             loadVendorApprovals();
             loadChangeRequests();
-            showSuccess('Vendor selection updated!');
+            showSuccess('Vendor Changed Successfully!');
           }}
+          viewMode="td"
         />
       )}
 

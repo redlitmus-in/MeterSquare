@@ -30,9 +30,34 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [customUnit, setCustomUnit] = useState('');
+  const [showCustomUnit, setShowCustomUnit] = useState(false);
 
-  // Updated units - removed Hour and Day, kept only material units
-  const units = ['Piece', 'Kg', 'Gram', 'Ton', 'Liter', 'Meter', 'Sq Meter', 'Sq Feet', 'Cubic Meter', 'Box', 'Set', 'Roll', 'Pack', 'Bag', 'Other'];
+  // Comprehensive universal units list
+  const units = [
+    // Count/Quantity
+    'Piece', 'Pcs', 'Unit', 'Each', 'Nos', 'Number', 'Item',
+    // Weight
+    'Kg', 'Kilogram', 'Gram', 'g', 'mg', 'Milligram', 'Ton', 'Metric Ton', 'Pound', 'lb', 'Ounce', 'oz',
+    // Volume
+    'Liter', 'L', 'Milliliter', 'ml', 'Gallon', 'Cubic Meter', 'm³', 'Cubic Feet', 'ft³', 'Barrel',
+    // Length
+    'Meter', 'm', 'Centimeter', 'cm', 'Millimeter', 'mm', 'Kilometer', 'km', 'Feet', 'ft', 'Inch', 'in', 'Yard', 'yd',
+    // Area
+    'Sq Meter', 'm²', 'Sq Feet', 'ft²', 'Sq Yard', 'Sq Inch', 'Acre', 'Hectare',
+    // Packaging
+    'Box', 'Carton', 'Case', 'Pack', 'Packet', 'Bundle', 'Bag', 'Sack', 'Pallet', 'Container',
+    // Roll/Sheet
+    'Roll', 'Sheet', 'Ream', 'Coil',
+    // Set/Pair
+    'Set', 'Pair', 'Dozen', 'Gross',
+    // Construction specific
+    'Bag (50kg)', 'Bag (25kg)', 'CFT', 'RFT', 'Running Feet', 'Running Meter', 'Brass', 'Load', 'Trip',
+    // Time based (for services)
+    'Hour', 'Day', 'Week', 'Month',
+    // Custom option
+    'Other (Custom)'
+  ];
 
   useEffect(() => {
     loadCategories();
@@ -65,6 +90,8 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
       unit_price: undefined
     });
     setErrors([]);
+    setCustomUnit('');
+    setShowCustomUnit(false);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -238,18 +265,58 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
                     <label htmlFor="unit" className="block text-sm font-medium text-gray-700 mb-2">
                       Unit
                     </label>
-                    <select
-                      id="unit"
-                      name="unit"
-                      value={formData.unit}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                      <option value="">Select Unit</option>
-                      {units.map((unit) => (
-                        <option key={unit} value={unit}>{unit}</option>
-                      ))}
-                    </select>
+                    {!showCustomUnit ? (
+                      <select
+                        id="unit"
+                        name="unit"
+                        value={formData.unit}
+                        onChange={(e) => {
+                          if (e.target.value === 'Other (Custom)') {
+                            setShowCustomUnit(true);
+                            setFormData(prev => ({ ...prev, unit: '' }));
+                          } else {
+                            handleInputChange(e);
+                          }
+                        }}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="">Select Unit</option>
+                        {units.map((unit) => (
+                          <option key={unit} value={unit}>{unit}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={customUnit}
+                          onChange={(e) => {
+                            setCustomUnit(e.target.value);
+                            setFormData(prev => ({ ...prev, unit: e.target.value }));
+                          }}
+                          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="Enter custom unit (e.g., Bundle, Drum)"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCustomUnit(false);
+                            setCustomUnit('');
+                            setFormData(prev => ({ ...prev, unit: '' }));
+                          }}
+                          className="px-3 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50"
+                          title="Back to list"
+                        >
+                          ←
+                        </button>
+                      </div>
+                    )}
+                    {!showCustomUnit && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Can't find your unit? Select "Other (Custom)" to enter manually
+                      </p>
+                    )}
                   </div>
 
                   <div>
