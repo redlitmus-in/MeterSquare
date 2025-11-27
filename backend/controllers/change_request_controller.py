@@ -2876,27 +2876,22 @@ def reject_change_request(cr_id):
         # Normalize role for consistent comparison
         normalized_role = workflow_service.normalize_role(approver_role)
 
-        # Admin has full rejection authority
+        # Admin, Estimator, PM, and TD have full rejection authority
         is_admin = approver_role in ['admin'] or normalized_role == 'admin'
+        is_estimator = normalized_role in ['estimator']
+        is_pm = normalized_role == 'projectmanager'
+        is_td = normalized_role == 'technicaldirector'
 
-        # PM can reject requests that are under_review from SE
-        if normalized_role in ['projectmanager'] and change_request.status == 'under_review':
-            # PM can reject requests from Site Engineers
-            if change_request.requested_by_role and 'site' in change_request.requested_by_role.lower():
-                # This is a valid PM rejection scenario
-                pass
-            elif change_request.approval_required_from == 'project_manager':
-                # This is explicitly assigned to PM
-                pass
-            else:
-                return jsonify({"error": f"PM cannot reject this request. Current approver: {change_request.approval_required_from}"}), 403
-        else:
-            # Check if request is under review (can reject at any stage)
+        # Roles that can bypass status checks
+        can_bypass_status = is_admin or is_estimator or is_pm or is_td
+
+        if not can_bypass_status:
+            # Check if request is under review (can reject at any stage) - Privileged roles bypass this check
             if change_request.status not in ['under_review', 'approved_by_pm', 'approved_by_td']:
                 return jsonify({"error": "Request must be under review to reject"}), 400
 
-        # For other roles, check if user has permission to reject (admin bypasses this check)
-        if normalized_role not in ['projectmanager'] and not is_admin:
+        # For other roles, check if user has permission to reject (privileged roles bypass this check)
+        if not can_bypass_status:
             required_approver = change_request.approval_required_from
             if not workflow_service.can_approve(approver_role, required_approver):
                 return jsonify({"error": f"You don't have permission to reject this request. Required: {required_approver}, Your role: {approver_role}"}), 403
