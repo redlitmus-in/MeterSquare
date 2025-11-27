@@ -163,7 +163,12 @@ def get_all_pm_boqs():
                     text("""
                         SELECT DISTINCT bh.boq_id
                         FROM boq_history bh,
-                             jsonb_array_elements(bh.action) AS action_item
+                             jsonb_array_elements(
+                                CASE
+                                    WHEN jsonb_typeof(bh.action) = 'array' THEN bh.action
+                                    ELSE '[]'::jsonb
+                                END
+                             ) AS action_item
                         WHERE (
                             (action_item->>'receiver_role' IN ('project_manager', 'mep')
                              AND (action_item->>'recipient_user_id')::INTEGER = :user_id

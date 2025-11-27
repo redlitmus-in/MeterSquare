@@ -1522,6 +1522,8 @@ def approve_change_request(cr_id):
         # Admin has full approval authority (like TD) - but only when NOT viewing as another role
         is_admin = (current_user.get('role_name', '').lower() in ['admin'] or normalized_role == 'admin') and not is_admin_viewing
 
+        log.info(f"APPROVAL DEBUG - CR {cr_id}: approver_role={approver_role}, normalized_role={normalized_role}, is_admin={is_admin}, is_admin_viewing={is_admin_viewing}, CR status={change_request.status}, approval_required_from={change_request.approval_required_from}")
+
         # PM can approve requests that are under_review or send_to_pm from SE
         if normalized_role in ['projectmanager'] and change_request.status in [CR_CONFIG.STATUS_UNDER_REVIEW, CR_CONFIG.STATUS_SEND_TO_PM]:
             # PM can approve requests from Site Engineers
@@ -1542,9 +1544,16 @@ def approve_change_request(cr_id):
             pass
         # Estimator can approve requests assigned to them
         elif normalized_role == 'estimator':
-            # Estimator can approve requests assigned to them for approval
-            if change_request.approval_required_from != 'estimator':
-                return jsonify({"error": "You can only approve requests assigned to you for approval"}), 403
+            # Admin viewing as estimator can approve any request with status send_to_est
+            # Regular estimator can only approve requests assigned to estimator role
+            if not is_admin_viewing:
+                # Regular estimator validation
+                if change_request.approval_required_from != 'estimator':
+                    return jsonify({"error": "You can only approve requests assigned to you for approval"}), 403
+            else:
+                # Admin viewing as estimator - allow if status is send_to_est
+                if change_request.status != CR_CONFIG.STATUS_SEND_TO_EST:
+                    return jsonify({"error": "This request is not in send_to_est status"}), 403
         # Admin can approve any request
         elif is_admin:
             pass
@@ -1824,6 +1833,7 @@ def approve_change_request(cr_id):
 
         elif normalized_role == 'estimator':
             # Estimator approves - change status to send_to_buyer
+            log.info(f"ESTIMATOR APPROVAL BLOCK - CR {cr_id}, approver: {approver_name}, is_admin_viewing: {is_admin_viewing}, current status: {change_request.status}")
             change_request.approved_by_user_id = approver_id
             change_request.approved_by_name = approver_name
             change_request.approval_date = datetime.utcnow()
@@ -1831,6 +1841,7 @@ def approve_change_request(cr_id):
             change_request.approval_required_from = CR_CONFIG.ROLE_BUYER
             change_request.current_approver_role = CR_CONFIG.ROLE_BUYER
             change_request.updated_at = datetime.utcnow()
+            log.info(f"ESTIMATOR APPROVAL - Changed status to send_to_buyer for CR {cr_id}")
 
             # Update materials with pricing if estimator provided updated prices
             updated_materials = data.get('materials_data')
@@ -2097,6 +2108,15 @@ def complete_purchase_and_merge_to_boq(cr_id):
         buyer_name = current_user.get('full_name') or current_user.get('username') or 'User'
         buyer_role = current_user.get('role_name', '').lower()
 
+        # Get effective user context for admin viewing as buyer
+        user_context = get_effective_user_context()
+        effective_role = user_context.get('effective_role', buyer_role)
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # When admin is viewing as buyer, use the effective role
+        if is_admin_viewing:
+            buyer_role = effective_role
+
         # Get change request
         change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
         if not change_request:
@@ -2106,8 +2126,9 @@ def complete_purchase_and_merge_to_boq(cr_id):
         if change_request.status not in [CR_CONFIG.STATUS_ASSIGNED_TO_BUYER, CR_CONFIG.STATUS_SEND_TO_BUYER, CR_CONFIG.STATUS_PENDING_TD_APPROVAL]:
             return jsonify({"error": f"Purchase can only be completed for requests assigned to buyer or send to buyer. Current status: {change_request.status}"}), 400
 
-        # Check if user is a buyer
-        if buyer_role != 'buyer':
+        # Check if user is a buyer or admin viewing as buyer
+        is_admin = current_user.get('role_name', '').lower() == 'admin'
+        if buyer_role != 'buyer' and not is_admin:
             return jsonify({"error": "Only buyers can complete purchases"}), 403
 
         # Get request data

@@ -451,14 +451,23 @@ def get_buyer_dashboard():
     """Get buyer dashboard statistics"""
     try:
         from sqlalchemy import or_, and_
+        from utils.admin_viewing_context import get_effective_user_context
+
         current_user = g.user
         buyer_id = current_user['user_id']
-        user_role = current_user.get('role', '').lower()
+        user_role = (current_user.get('role_name', '') or current_user.get('role', '')).lower()
 
-        # Get projects where BOTH buyer AND site_supervisor (SE) are assigned
-        # Admin sees all projects
-        # ✅ PERFORMANCE FIX: Eager load BOQs (N+1 queries → 2)
+        # Check if admin is viewing as buyer
+        context = get_effective_user_context()
+        is_admin_viewing = context['is_admin_viewing']
+
+        # FORCE admin to see all data
         if user_role == 'admin':
+            is_admin_viewing = True
+        # Get projects where BOTH buyer AND site_supervisor (SE) are assigned
+        # Admin viewing as buyer sees all projects
+        # ✅ PERFORMANCE FIX: Eager load BOQs (N+1 queries → 2)
+        if is_admin_viewing or user_role == 'admin':
             projects = Project.query.options(
                 selectinload(Project.boqs)
             ).filter(
@@ -487,18 +496,32 @@ def get_buyer_dashboard():
             # Get change requests assigned to buyer for these BOQs
             # Include: 1) Regular CRs assigned to buyer
             #          2) Sub-CRs that are vendor_approved (ready for buyer to complete purchase)
-            change_requests = ChangeRequest.query.filter(
-                ChangeRequest.boq_id.in_([boq.boq_id for boq in boqs]),
-                or_(
-                    ChangeRequest.status == 'assigned_to_buyer',
-                    and_(
-                        ChangeRequest.is_sub_cr == True,
-                        ChangeRequest.status == 'vendor_approved',
-                        ChangeRequest.assigned_to_buyer_user_id == buyer_id
-                    )
-                ),
-                ChangeRequest.is_deleted == False
-            ).all()
+            # If admin is viewing, show ALL change requests (no buyer filtering)
+            if is_admin_viewing:
+                change_requests = ChangeRequest.query.filter(
+                    ChangeRequest.boq_id.in_([boq.boq_id for boq in boqs]),
+                    or_(
+                        ChangeRequest.status == 'assigned_to_buyer',
+                        and_(
+                            ChangeRequest.is_sub_cr == True,
+                            ChangeRequest.status == 'vendor_approved'
+                        )
+                    ),
+                    ChangeRequest.is_deleted == False
+                ).all()
+            else:
+                change_requests = ChangeRequest.query.filter(
+                    ChangeRequest.boq_id.in_([boq.boq_id for boq in boqs]),
+                    or_(
+                        ChangeRequest.status == 'assigned_to_buyer',
+                        and_(
+                            ChangeRequest.is_sub_cr == True,
+                            ChangeRequest.status == 'vendor_approved',
+                            ChangeRequest.assigned_to_buyer_user_id == buyer_id
+                        )
+                    ),
+                    ChangeRequest.is_deleted == False
+                ).all()
 
             for cr in change_requests:
                 sub_items_data = cr.sub_items_data or cr.materials_data or []
@@ -547,8 +570,25 @@ def get_buyer_dashboard():
 def get_buyer_pending_purchases():
     """Get approved change requests (extra materials) for buyer to purchase"""
     try:
+        from flask import request as flask_request
+        from utils.admin_viewing_context import get_effective_user_context
+
         current_user = g.user
         buyer_id = current_user['user_id']
+        user_role = current_user.get('role_name', '').lower()
+
+        # Check if admin is viewing as buyer
+        context = get_effective_user_context()
+        is_admin_viewing = context['is_admin_viewing']
+
+        # Get headers for debugging
+        viewing_as_role_header = flask_request.headers.get('X-Viewing-As-Role')
+        viewing_as_role_id_header = flask_request.headers.get('X-Viewing-As-Role-Id')
+
+        # FORCE admin to see all buyer data if they are admin (regardless of headers)
+        # This is a workaround if headers are not working
+        if user_role == 'admin':
+            is_admin_viewing = True
 
         # Get change requests for buyer:
         # 1. Under review AND approval_required_from='buyer' (pending buyer's review/acceptance)
@@ -560,49 +600,57 @@ def get_buyer_pending_purchases():
         # Convert buyer_id to int for safe comparison
         buyer_id_int = int(buyer_id)
 
-        change_requests = ChangeRequest.query.filter(
-            or_(
-                # Under review AND approval_required_from='buyer' AND assigned to this buyer
-                and_(
-                    func.trim(ChangeRequest.status) == 'under_review',
-                    ChangeRequest.approval_required_from == 'buyer',
-                    ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
-                ),
-                # Assigned to this buyer - actively being worked on
-                and_(
-                    func.trim(ChangeRequest.status).in_(['assigned_to_buyer', 'send_to_buyer']),
-                    ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
-                ),
-                # Sub-CRs created by this buyer (pending TD approval OR vendor approved)
-                and_(
-                    ChangeRequest.is_sub_cr == True,
-                    ChangeRequest.assigned_to_buyer_user_id == buyer_id_int,
-                    ChangeRequest.status.in_(['pending_td_approval', 'vendor_approved'])
-                ),
-                # Parent CRs with pending_td_approval OR vendor_approved status (full purchase to single vendor)
-                and_(
-                    ChangeRequest.is_sub_cr == False,
-                    ChangeRequest.assigned_to_buyer_user_id == buyer_id_int,
-                    func.trim(ChangeRequest.status).in_(['pending_td_approval', 'vendor_approved'])
-                ),
-                # approved_by_pm or send_to_buyer status AND assigned to this buyer
-                and_(
-                    func.trim(ChangeRequest.status).in_(['approved_by_pm', 'send_to_buyer']),
-                    ChangeRequest.approval_required_from == 'buyer',
-                    ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
-                )
-            ),
-            ChangeRequest.is_deleted == False
-        ).all()
+        # If admin is viewing as buyer, show ALL purchases (no buyer filtering)
+        # If regular buyer, show only purchases assigned to them
+        if is_admin_viewing:
+            # First, let's check how many CRs exist with assigned_to_buyer_user_id set
+            all_buyer_crs = ChangeRequest.query.filter(
+                ChangeRequest.assigned_to_buyer_user_id.isnot(None),
+                ChangeRequest.is_deleted == False
+            ).all()
+            # SIMPLIFIED QUERY: Show ALL CRs assigned to any buyer (for admin viewing)
+            # Exclude purchase_completed status - those should go to completed tab
+            change_requests = ChangeRequest.query.filter(
+                ChangeRequest.assigned_to_buyer_user_id.isnot(None),
+                ChangeRequest.is_deleted == False,
+                func.trim(ChangeRequest.status) != 'purchase_completed'
+            ).all()
 
-        # 🔍 DEBUG: Log what we're returning
-        log.info(f"=== BUYER PENDING PURCHASES DEBUG ===")
-        log.info(f"Buyer ID: {buyer_id}")
-        log.info(f"Total CRs returned: {len(change_requests)}")
-        sub_crs = [cr for cr in change_requests if cr.is_sub_cr]
-        log.info(f"Sub-CRs in results: {len(sub_crs)}")
-        for cr in sub_crs:
-            log.info(f"  Sub-CR {cr.get_formatted_cr_id()}: status={cr.status}, vendor_selection_status={cr.vendor_selection_status}")
+        else:
+            change_requests = ChangeRequest.query.filter(
+                or_(
+                    # Under review AND approval_required_from='buyer' AND assigned to this buyer
+                    and_(
+                        func.trim(ChangeRequest.status) == 'under_review',
+                        ChangeRequest.approval_required_from == 'buyer',
+                        ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
+                    ),
+                    # Assigned to this buyer - actively being worked on
+                    and_(
+                        func.trim(ChangeRequest.status).in_(['assigned_to_buyer', 'send_to_buyer']),
+                        ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
+                    ),
+                    # Sub-CRs created by this buyer (pending TD approval OR vendor approved)
+                    and_(
+                        ChangeRequest.is_sub_cr == True,
+                        ChangeRequest.assigned_to_buyer_user_id == buyer_id_int,
+                        ChangeRequest.status.in_(['pending_td_approval', 'vendor_approved'])
+                    ),
+                    # Parent CRs with pending_td_approval OR vendor_approved status (full purchase to single vendor)
+                    and_(
+                        ChangeRequest.is_sub_cr == False,
+                        ChangeRequest.assigned_to_buyer_user_id == buyer_id_int,
+                        func.trim(ChangeRequest.status).in_(['pending_td_approval', 'vendor_approved'])
+                    ),
+                    # approved_by_pm or send_to_buyer status AND assigned to this buyer
+                    and_(
+                        func.trim(ChangeRequest.status).in_(['approved_by_pm', 'send_to_buyer']),
+                        ChangeRequest.approval_required_from == 'buyer',
+                        ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
+                    )
+                ),
+                ChangeRequest.is_deleted == False
+            ).all()
 
         pending_purchases = []
         total_cost = 0
@@ -818,15 +866,33 @@ def get_buyer_pending_purchases():
 def get_buyer_completed_purchases():
     """Get completed purchases by buyer"""
     try:
+        from utils.admin_viewing_context import get_effective_user_context
+
         current_user = g.user
         buyer_id = current_user['user_id']
+        user_role = current_user.get('role_name', '').lower()
 
-        # Get change requests completed by this buyer
-        change_requests = ChangeRequest.query.filter(
-            ChangeRequest.status == 'purchase_completed',
-            ChangeRequest.purchase_completed_by_user_id == buyer_id,
-            ChangeRequest.is_deleted == False
-        ).all()
+        # Check if admin is viewing as buyer
+        context = get_effective_user_context()
+        is_admin_viewing = context['is_admin_viewing']
+
+        # FORCE admin to see all data
+        if user_role == 'admin':
+            is_admin_viewing = True
+        # If admin is viewing as buyer, show ALL completed purchases
+        # If regular buyer, show only purchases assigned to them (not just completed by them)
+        if is_admin_viewing:
+            change_requests = ChangeRequest.query.filter(
+                ChangeRequest.status == 'purchase_completed',
+                ChangeRequest.is_deleted == False
+            ).all()
+        else:
+            # Show completed purchases where assigned_to_buyer_user_id matches current buyer
+            change_requests = ChangeRequest.query.filter(
+                ChangeRequest.status == 'purchase_completed',
+                ChangeRequest.assigned_to_buyer_user_id == buyer_id,
+                ChangeRequest.is_deleted == False
+            ).all()
 
         completed_purchases = []
         total_cost = 0
@@ -967,6 +1033,7 @@ def complete_purchase():
         current_user = g.user
         buyer_id = current_user['user_id']
         buyer_name = current_user.get('full_name', 'Unknown Buyer')
+        user_role = current_user.get('role', '').lower()
 
         data = request.get_json()
         cr_id = data.get('cr_id')
@@ -984,8 +1051,14 @@ def complete_purchase():
         if not cr:
             return jsonify({"error": "Purchase not found"}), 404
 
-        # Verify it's assigned to this buyer
-        if cr.assigned_to_buyer_user_id != buyer_id:
+        # Check if admin or admin viewing as buyer
+        is_admin = user_role == 'admin'
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # Verify it's assigned to this buyer (skip check for admin)
+        if not is_admin and not is_admin_viewing and cr.assigned_to_buyer_user_id != buyer_id:
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Verify it's in the correct status
@@ -1015,7 +1088,6 @@ def complete_purchase():
 
                 if master_item:
                     database_item_id = master_item.item_id
-                    log.info(f"Found database item_id {database_item_id} for item '{cr.item_name}'")
                 else:
                     log.warning(f"Could not find master_item for item_name '{cr.item_name}'")
             except Exception as e:
@@ -1031,9 +1103,6 @@ def complete_purchase():
         # Save newly purchased materials to MasterMaterial table
         new_materials_added = []
         sub_items_data = cr.sub_items_data or cr.materials_data or []
-
-        log.info(f"🔍 DEBUG: Processing {len(sub_items_data)} sub_items for CR-{cr_id}")
-        log.info(f"🔍 DEBUG: cr.item_id = {cr.item_id}, database_item_id = {database_item_id}")
 
         for sub_item in sub_items_data:
             if isinstance(sub_item, dict):
@@ -1079,18 +1148,10 @@ def complete_purchase():
                         # Fallback to change request sub_item_id if still None
                         if sub_item_id_int is None and cr.sub_item_id:
                             sub_item_id_int = cr.sub_item_id
-                            log.info(f"   - Using cr.sub_item_id as fallback: {sub_item_id_int}")
 
                         # Log warning if sub_item_id is still None
                         if sub_item_id_int is None:
                             log.warning(f"⚠️ No valid sub_item_id found for material '{material_name}' in CR-{cr_id}")
-
-                        log.info(f"🟢 Creating new material '{material_name}' with:")
-                        log.info(f"   - item_id (database_item_id): {database_item_id}")
-                        log.info(f"   - sub_item_id (parsed): {sub_item_id_int}")
-                        log.info(f"   - raw_sub_item_id from payload: {raw_sub_item_id}")
-                        log.info(f"   - brand: {material.get('brand', '')}")
-                        log.info(f"   - specification: {material.get('specification', '')}")
 
                         new_material = MasterMaterial(
                             material_name=material_name,
@@ -1112,7 +1173,6 @@ def complete_purchase():
                         )
                         db.session.add(new_material)
                         new_materials_added.append(material_name)
-                        log.info(f"✅ New material '{material_name}' added to MasterMaterial with item_id={database_item_id}, sub_item_id={sub_item_id_int} by buyer {buyer_id}")
 
         db.session.commit()
 
@@ -1129,11 +1189,6 @@ def complete_purchase():
                 )
         except Exception as notif_error:
             log.error(f"Failed to send CR purchase completion notification: {notif_error}")
-
-        if new_materials_added:
-            log.info(f"Purchase CR-{cr_id} completed. Added {len(new_materials_added)} new materials: {', '.join(new_materials_added)}")
-        else:
-            log.info(f"Purchase CR-{cr_id} marked as complete by buyer {buyer_id}. No new materials added.")
 
         success_message = "Purchase marked as complete successfully"
         if new_materials_added:
@@ -1166,6 +1221,7 @@ def get_purchase_by_id(cr_id):
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
 
         # Get the change request
         cr = ChangeRequest.query.filter_by(
@@ -1176,8 +1232,14 @@ def get_purchase_by_id(cr_id):
         if not cr:
             return jsonify({"error": "Purchase not found"}), 404
 
-        # Verify it's assigned to this buyer or completed by this buyer
-        if cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
+        # Check if admin or admin viewing as buyer
+        is_admin = user_role == 'admin'
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # Verify it's assigned to this buyer or completed by this buyer (skip check for admin)
+        if not is_admin and not is_admin_viewing and cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
             return jsonify({"error": "You don't have access to this purchase"}), 403
 
         # Get project details
@@ -1412,7 +1474,6 @@ def select_vendor_for_purchase(cr_id):
             }
 
         current_actions.append(new_action)
-        log.info(f"Appending change_request_vendor_selected action to BOQ {cr.boq_id} history")
 
         # Update history entry based on user role
         if existing_history:
@@ -1494,7 +1555,6 @@ def select_vendor_for_purchase(cr_id):
 
         # Log and return response based on user role
         if is_td:
-            log.info(f"Vendor {vendor_id} selected and approved for purchase CR-{cr_id} by TD {user_id}")
             return jsonify({
                 "success": True,
                 "message": "Vendor selection saved and approved",
@@ -1507,7 +1567,6 @@ def select_vendor_for_purchase(cr_id):
                 }
             }), 200
         else:
-            log.info(f"Vendor {vendor_id} selected for purchase CR-{cr_id} by buyer {user_id}, pending TD approval")
             return jsonify({
                 "success": True,
                 "message": "Vendor selection sent to TD for approval",
@@ -1572,28 +1631,23 @@ def update_vendor_price(vendor_id):
                 for product in matching_products:
                     old_price = product.unit_price
                     product.unit_price = float(new_price)
-                    log.info(f"Updated vendor product price: vendor_id={vendor_id}, product='{product.product_name}', old_price={old_price}, new_price={new_price}")
 
                 db.session.commit()
-                log.info(f"Price saved for future: {len(matching_products)} product(s) updated for material '{material_name}'")
 
                 return jsonify({
                     "success": True,
                     "message": f"Price updated for {len(matching_products)} product(s) for future purchases"
                 }), 200
             else:
-                log.warning(f"No matching products found for material '{material_name}' from vendor {vendor_id}")
                 return jsonify({"error": f"No matching products found for material '{material_name}'"}), 404
         else:
             # For "This BOQ" option, save negotiated price to change request
             # Get cr_id from request (optional - if provided, save to that CR)
             cr_id = data.get('cr_id')
-            log.info(f"Received cr_id for negotiated price: {cr_id}")
 
             if cr_id:
                 # Find the change request and update the material_vendor_selections
                 cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
-                log.info(f"Found CR {cr_id}: {cr is not None}")
 
                 if cr:
                     # Get or create material_vendor_selections
@@ -1604,7 +1658,6 @@ def update_vendor_price(vendor_id):
                         # Material already has vendor selection - update negotiated price
                         material_vendor_selections[material_name]['negotiated_price'] = float(new_price)
                         material_vendor_selections[material_name]['save_price_for_future'] = False
-                        log.info(f"Updated negotiated price for CR {cr_id}, material '{material_name}': {new_price}")
                     else:
                         # Material not yet selected - create entry with negotiated price for vendor_id
                         # Store with vendor_id so we can retrieve it later
@@ -1615,7 +1668,6 @@ def update_vendor_price(vendor_id):
                             'save_price_for_future': False,
                             'selection_status': 'pending'
                         }
-                        log.info(f"Created negotiated price entry for CR {cr_id}, material '{material_name}', vendor {vendor_id}: {new_price}")
 
                     # Update the JSONB field
                     from sqlalchemy.orm.attributes import flag_modified
@@ -1670,15 +1722,18 @@ def select_vendor_for_material(cr_id):
 
         # Check role-based permissions
         is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+        is_admin = user_role == 'admin'
 
-        # Debug logging for assignment check
-        log.info(f"select_vendor_for_material - CR-{cr_id}: user_id={user_id}, assigned_to_buyer_user_id={cr.assigned_to_buyer_user_id}, user_role='{user_role}', is_td={is_td}")
+        # Get effective user context for admin viewing as buyer
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
 
-        # Verify it's assigned to this buyer (skip check for TD)
+        # Verify it's assigned to this buyer (skip check for TD, Admin, or Admin viewing as Buyer)
         # Convert both to int for safe comparison (user_id from JWT may be string)
         assigned_buyer_id = int(cr.assigned_to_buyer_user_id or 0)
         current_user_id = int(user_id)
-        if not is_td and assigned_buyer_id != current_user_id:
+        if not is_td and not is_admin and not is_admin_viewing and assigned_buyer_id != current_user_id:
             log.warning(f"select_vendor_for_material - Permission denied: assigned_buyer_id={assigned_buyer_id} != current_user_id={current_user_id}")
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
@@ -1699,8 +1754,6 @@ def select_vendor_for_material(cr_id):
             # Get the original sub-CR's vendor (convert to int for safe comparison)
             original_vendor_id = int(cr.selected_vendor_id) if cr.selected_vendor_id else None
 
-            log.info(f"TD vendor change check: original_vendor_id={original_vendor_id}, material_selections={material_selections}")
-
             # Separate materials into: changed (different vendor) vs unchanged (same vendor)
             changed_materials = []  # Materials that TD is assigning to a DIFFERENT vendor
             unchanged_materials = []  # Materials staying with the original vendor
@@ -1709,8 +1762,6 @@ def select_vendor_for_material(cr_id):
                 sel_vendor_id = sel.get('vendor_id')
                 # Convert to int for safe comparison (JSON may send as string)
                 sel_vendor_id_int = int(sel_vendor_id) if sel_vendor_id else None
-
-                log.info(f"  Material '{sel.get('material_name')}': sel_vendor_id={sel_vendor_id} (int: {sel_vendor_id_int}), original={original_vendor_id}, changed={sel_vendor_id_int != original_vendor_id}")
 
                 if sel_vendor_id_int and sel_vendor_id_int != original_vendor_id:
                     changed_materials.append(sel)
@@ -1742,8 +1793,6 @@ def select_vendor_for_material(cr_id):
 
                     db.session.commit()
 
-                    log.info(f"TD {user_name} changed vendor for sub-CR {cr.get_formatted_cr_id()} from '{old_vendor_name}' to '{new_vendor.company_name}'")
-
                     return jsonify({
                         "success": True,
                         "message": f"Vendor changed from '{old_vendor_name}' to '{new_vendor.company_name}'",
@@ -1760,8 +1809,6 @@ def select_vendor_for_material(cr_id):
 
             # TD is changing vendor for SOME materials (not all)
             # Only split out the changed materials, keep unchanged materials in original sub-CR
-            log.info(f"TD {user_name} changing vendor for {len(changed_materials)} material(s) in sub-CR {cr.get_formatted_cr_id()}. {len(unchanged_materials)} material(s) staying with original vendor.")
-
             # Get parent CR to create new sub-CRs under it
             parent_cr = ChangeRequest.query.filter_by(
                 cr_id=cr.parent_cr_id,
@@ -1880,7 +1927,6 @@ def select_vendor_for_material(cr_id):
                 })
 
                 next_suffix_number += 1
-                log.info(f"TD created split sub-CR {new_sub_cr.get_formatted_cr_id()} for vendor {vendor.company_name} with {len(new_materials)} material(s)")
 
             # Update the ORIGINAL sub-CR to keep only the unchanged materials
             if unchanged_materials:
@@ -1910,16 +1956,12 @@ def select_vendor_for_material(cr_id):
                 flag_modified(cr, 'materials_data')
                 flag_modified(cr, 'sub_items_data')
 
-                log.info(f"Original sub-CR {cr.get_formatted_cr_id()} updated with {len(remaining_materials)} remaining material(s)")
             else:
                 # All materials were moved to new sub-CRs, soft-delete the original
                 cr.is_deleted = True
                 cr.updated_at = datetime.utcnow()
-                log.info(f"Original sub-CR {old_sub_cr_id} soft-deleted (all materials moved to new sub-CRs)")
 
             db.session.commit()
-
-            log.info(f"TD {user_name} split {len(changed_materials)} material(s) from sub-CR {old_sub_cr_id} into {len(created_sub_crs)} new sub-CR(s)")
 
             return jsonify({
                 "success": True,
@@ -1983,10 +2025,8 @@ def select_vendor_for_material(cr_id):
                     if matching_products:
                         for product in matching_products:
                             product.unit_price = float(negotiated_price)
-                            log.info(f"Updated vendor product price: vendor_id={vendor_id}, product='{product.product_name}', new_price={negotiated_price}")
 
                         db.session.flush()  # Flush to ensure updates are persisted
-                        log.info(f"Price saved for future: {len(matching_products)} product(s) updated for material '{material_name}'")
                     else:
                         log.warning(f"No matching products found for material '{material_name}' from vendor {vendor_id}")
 
@@ -2060,15 +2100,9 @@ def select_vendor_for_material(cr_id):
                 cr.vendor_selected_by_buyer_id = user_id
                 cr.vendor_selected_by_buyer_name = user_name
                 cr.vendor_selection_date = datetime.utcnow()
-            if is_td:
-                log.info(f"TD selected vendors for all materials in CR-{cr_id}. Status: pending_td_approval (manual approval required)")
-            else:
-                log.info(f"All materials have vendors selected for CR-{cr_id}. Status changed to 'pending_td_approval'")
 
         cr.updated_at = datetime.utcnow()
         db.session.commit()
-
-        log.info(f"Material-specific vendors selected for CR-{cr_id} by user {user_id}: {updated_materials}")
 
         # Send notifications to TD if buyer made selections
         if not is_td:
@@ -2178,16 +2212,18 @@ def create_sub_crs_for_vendor_groups(cr_id):
 
         # Check role-based permissions
         is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+        is_admin = user_role == 'admin'
 
-        # Debug logging for buyer assignment check
-        log.info(f"create_sub_crs - CR-{cr_id}: user_id={user_id} (type={type(user_id)}), assigned_to_buyer_user_id={parent_cr.assigned_to_buyer_user_id} (type={type(parent_cr.assigned_to_buyer_user_id)}), user_role='{user_role}', is_td={is_td}")
+        # Get effective user context for admin viewing as buyer
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
 
-        # Verify it's assigned to this buyer (skip check for TD)
+        # Verify it's assigned to this buyer (skip check for TD, Admin, or Admin viewing as Buyer)
         # Convert both to int for safe comparison (user_id from JWT may be string)
         assigned_buyer_id = int(parent_cr.assigned_to_buyer_user_id or 0)
         current_user_id = int(user_id)
-        if not is_td and assigned_buyer_id != current_user_id:
-            log.warning(f"create_sub_crs - Permission denied: assigned_buyer_id={assigned_buyer_id} != current_user_id={current_user_id}")
+        if not is_td and not is_admin and not is_admin_viewing and assigned_buyer_id != current_user_id:
             return jsonify({"error": f"This purchase is not assigned to you (assigned to buyer ID {assigned_buyer_id})"}), 403
 
         # Verify parent CR is in correct status
@@ -2311,8 +2347,6 @@ def create_sub_crs_for_vendor_groups(cr_id):
                 'total_cost': total_cost
             })
 
-            log.info(f"Created sub-CR {sub_cr.get_formatted_cr_id()} for vendor {vendor_name} with {len(sub_cr_materials)} materials")
-
         # Check if ALL materials from parent CR have been sent to sub-CRs
         # Get all sub-CRs for this parent (including newly created ones)
         all_sub_crs = ChangeRequest.query.filter_by(
@@ -2342,11 +2376,9 @@ def create_sub_crs_for_vendor_groups(cr_id):
             # All materials sent - mark parent as split
             parent_cr.status = 'split_to_sub_crs'
             parent_cr.updated_at = datetime.utcnow()
-            log.info(f"All materials sent to sub-CRs. Parent CR-{parent_cr.cr_id} status changed to 'split_to_sub_crs'")
         else:
             # Some materials still not sent - keep parent as 'assigned_to_buyer'
             unsent_materials = parent_materials - materials_in_sub_crs
-            log.info(f"Parent CR-{parent_cr.cr_id} still has {len(unsent_materials)} unsent materials: {unsent_materials}. Keeping status as 'assigned_to_buyer'")
 
         db.session.commit()
 
@@ -2379,8 +2411,6 @@ def create_sub_crs_for_vendor_groups(cr_id):
             except Exception as notif_error:
                 log.error(f"Failed to send notification: {notif_error}")
 
-        log.info(f"Successfully created {len(created_sub_crs)} sub-CRs for parent CR-{cr_id}")
-
         return jsonify({
             "success": True,
             "message": f"Successfully created {len(created_sub_crs)} separate purchase orders!",
@@ -2402,6 +2432,7 @@ def update_purchase_order(cr_id):
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
 
         data = request.get_json()
         materials = data.get('materials')
@@ -2419,8 +2450,14 @@ def update_purchase_order(cr_id):
         if not cr:
             return jsonify({"error": "Purchase not found"}), 404
 
-        # Verify it's assigned to this buyer
-        if cr.assigned_to_buyer_user_id != buyer_id:
+        # Check if admin or admin viewing as buyer
+        is_admin = user_role == 'admin'
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # Verify it's assigned to this buyer (skip check for admin)
+        if not is_admin and not is_admin_viewing and cr.assigned_to_buyer_user_id != buyer_id:
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Verify it's in the correct status (can only edit pending purchases)
@@ -2450,8 +2487,6 @@ def update_purchase_order(cr_id):
 
         db.session.commit()
 
-        log.info(f"Purchase order CR-{cr_id} updated by buyer {buyer_id}")
-
         return jsonify({
             "success": True,
             "message": "Purchase order updated successfully",
@@ -2475,6 +2510,7 @@ def update_purchase_notes(cr_id):
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
 
         data = request.get_json()
         notes = data.get('notes', '')
@@ -2488,8 +2524,14 @@ def update_purchase_notes(cr_id):
         if not cr:
             return jsonify({"error": "Purchase not found"}), 404
 
-        # Verify it's assigned to this buyer or completed by this buyer
-        if cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
+        # Check if admin or admin viewing as buyer
+        is_admin = user_role == 'admin'
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # Verify it's assigned to this buyer or completed by this buyer (skip check for admin)
+        if not is_admin and not is_admin_viewing and cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Update notes
@@ -2497,8 +2539,6 @@ def update_purchase_notes(cr_id):
         cr.updated_at = datetime.utcnow()
 
         db.session.commit()
-
-        log.info(f"Purchase notes updated for CR-{cr_id} by buyer {buyer_id}")
 
         return jsonify({
             "success": True,
@@ -2586,7 +2626,6 @@ def td_approve_vendor(cr_id):
         }
 
         current_actions.append(new_action)
-        log.info(f"Appending change_request_vendor_approved_by_td action to BOQ {cr.boq_id} history")
 
         if existing_history:
             existing_history.action = current_actions
@@ -2616,8 +2655,6 @@ def td_approve_vendor(cr_id):
 
         db.session.commit()
 
-        log.info(f"Vendor selection for CR-{cr_id} approved by TD {td_id}")
-
         # Send notification to buyer about vendor approval
         try:
             from utils.notification_utils import NotificationManager
@@ -2643,7 +2680,6 @@ def td_approve_vendor(cr_id):
                     sender_name=td_name
                 )
                 send_notification_to_user(cr.created_by, notification.to_dict())
-                log.info(f"Sent vendor approval notification to buyer {cr.created_by}")
         except Exception as notif_error:
             log.error(f"Failed to send vendor approval notification: {notif_error}")
 
@@ -2711,8 +2747,6 @@ def td_reject_vendor(cr_id):
 
         db.session.commit()
 
-        log.info(f"Vendor selection for CR-{cr_id} rejected by TD {td_id}: {reason}")
-
         # Send notification to buyer about vendor rejection
         try:
             from utils.notification_utils import NotificationManager
@@ -2738,7 +2772,6 @@ def td_reject_vendor(cr_id):
                     sender_name=td_name
                 )
                 send_notification_to_user(cr.created_by, notification.to_dict())
-                log.info(f"Sent vendor rejection notification to buyer {cr.created_by}")
         except Exception as notif_error:
             log.error(f"Failed to send vendor rejection notification: {notif_error}")
 
@@ -2765,6 +2798,7 @@ def preview_vendor_email(cr_id):
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
 
         # Get the change request
         cr = ChangeRequest.query.filter_by(
@@ -2775,8 +2809,14 @@ def preview_vendor_email(cr_id):
         if not cr:
             return jsonify({"error": "Purchase not found"}), 404
 
-        # Verify it's assigned to this buyer or completed by this buyer
-        if cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
+        # Check if admin or admin viewing as buyer
+        is_admin = user_role == 'admin'
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # Verify it's assigned to this buyer or completed by this buyer (skip check for admin)
+        if not is_admin and not is_admin_viewing and cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
             return jsonify({"error": "You don't have access to this purchase"}), 403
 
         # Check if vendor is selected
@@ -2884,6 +2924,7 @@ def send_vendor_email(cr_id):
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
 
         data = request.get_json()
         vendor_email = data.get('vendor_email')
@@ -2919,8 +2960,14 @@ def send_vendor_email(cr_id):
         if not cr:
             return jsonify({"error": "Purchase not found"}), 404
 
-        # Verify it's assigned to this buyer
-        if cr.assigned_to_buyer_user_id != buyer_id:
+        # Check if admin or admin viewing as buyer
+        is_admin = user_role == 'admin'
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # Verify it's assigned to this buyer (skip check for admin)
+        if not is_admin and not is_admin_viewing and cr.assigned_to_buyer_user_id != buyer_id:
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Verify vendor is selected and approved
@@ -3067,7 +3114,6 @@ def send_vendor_email(cr_id):
 
                             # Add to attachments list
                             attachments.append((filename, file_response, mime_type))
-                            log.info(f"Added attachment: {filename} for CR-{cr_id}")
                         else:
                             log.warning(f"Could not download file: {filename} for CR-{cr_id}")
 
@@ -3075,9 +3121,6 @@ def send_vendor_email(cr_id):
                         log.error(f"Error downloading file {filename}: {str(e)}")
                         # Continue with other files even if one fails
                         continue
-
-                if attachments:
-                    log.info(f"Prepared {len(attachments)} attachments for CR-{cr_id}")
 
             except Exception as e:
                 log.error(f"Error processing attachments for CR-{cr_id}: {str(e)}")
@@ -3099,7 +3142,6 @@ def send_vendor_email(cr_id):
             db.session.commit()
 
             recipients_str = ', '.join(email_list)
-            log.info(f"Purchase order email sent to vendor(s) {recipients_str} for CR-{cr_id}")
             message = f"Purchase order email sent to {len(email_list)} recipient(s) successfully" if len(email_list) > 1 else "Purchase order email sent to vendor successfully"
             # Count recipients for response message
             if isinstance(vendor_email, str):
@@ -3107,7 +3149,6 @@ def send_vendor_email(cr_id):
             else:
                 recipient_count = len(vendor_email) if isinstance(vendor_email, list) else 1
 
-            log.info(f"Purchase order email sent to {recipient_count} vendor(s) for CR-{cr_id}")
             return jsonify({
                 "success": True,
                 "message": f"Purchase order email sent to {recipient_count} recipient(s) successfully"
@@ -3222,7 +3263,6 @@ def send_vendor_whatsapp(cr_id):
             cr.updated_at = datetime.utcnow()
             db.session.commit()
 
-            log.info(f"Purchase order WhatsApp sent to vendor {vendor_phone} for CR-{cr_id}")
             return jsonify({
                 "success": True,
                 "message": "Purchase order sent via WhatsApp successfully"
@@ -3484,8 +3524,6 @@ def select_vendor_for_se_boq(assignment_id):
 
         db.session.commit()
 
-        log.info(f"User {user_id} ({user_role}) selected vendor {vendor_id} for SE BOQ assignment {assignment_id}")
-
         return jsonify({
             "success": True,
             "message": f"Vendor {vendor.company_name} selected. Awaiting TD approval.",
@@ -3586,8 +3624,6 @@ def td_approve_vendor_for_se_boq(assignment_id):
 
         db.session.commit()
 
-        log.info(f"TD {td_id} approved vendor for SE BOQ assignment {assignment_id}")
-
         # Send notifications to buyer and site engineer about vendor approval
         try:
             from utils.notification_utils import NotificationManager
@@ -3613,7 +3649,6 @@ def td_approve_vendor_for_se_boq(assignment_id):
                     sender_name=td_name
                 )
                 send_notification_to_user(assignment.assigned_to_buyer_id, buyer_notification.to_dict())
-                log.info(f"Sent SE BOQ vendor approval notification to buyer {assignment.assigned_to_buyer_id}")
 
             # Notify site engineer
             if assignment.site_engineer_id:
@@ -3635,7 +3670,6 @@ def td_approve_vendor_for_se_boq(assignment_id):
                     sender_name=td_name
                 )
                 send_notification_to_user(assignment.site_engineer_id, se_notification.to_dict())
-                log.info(f"Sent SE BOQ vendor approval notification to site engineer {assignment.site_engineer_id}")
 
         except Exception as notif_error:
             log.error(f"Failed to send SE BOQ vendor approval notification: {notif_error}")
@@ -3752,8 +3786,6 @@ def td_reject_vendor_for_se_boq(assignment_id):
 
         db.session.commit()
 
-        log.info(f"TD {td_id} rejected vendor for SE BOQ assignment {assignment_id}")
-
         # Send notifications to buyer and site engineer about vendor rejection
         try:
             from utils.notification_utils import NotificationManager
@@ -3781,7 +3813,6 @@ def td_reject_vendor_for_se_boq(assignment_id):
                     sender_name=td_name
                 )
                 send_notification_to_user(assignment.assigned_to_buyer_id, buyer_notification.to_dict())
-                log.info(f"Sent SE BOQ vendor rejection notification to buyer {assignment.assigned_to_buyer_id}")
 
             # Notify site engineer
             if assignment.site_engineer_id:
@@ -3804,7 +3835,6 @@ def td_reject_vendor_for_se_boq(assignment_id):
                     sender_name=td_name
                 )
                 send_notification_to_user(assignment.site_engineer_id, se_notification.to_dict())
-                log.info(f"Sent SE BOQ vendor rejection notification to site engineer {assignment.site_engineer_id}")
 
         except Exception as notif_error:
             log.error(f"Failed to send SE BOQ vendor rejection notification: {notif_error}")
@@ -3915,8 +3945,6 @@ def complete_se_boq_purchase(assignment_id):
             db.session.add(boq_history)
 
         db.session.commit()
-
-        log.info(f"Buyer {buyer_id} completed purchase for SE BOQ assignment {assignment_id}")
 
         return jsonify({
             "success": True,
@@ -4051,7 +4079,6 @@ def send_se_boq_vendor_email(assignment_id):
             assignment.updated_at = datetime.utcnow()
             db.session.commit()
 
-            log.info(f"SE BOQ purchase order email sent to vendor {vendor_email} for assignment {assignment_id}")
             return jsonify({
                 "success": True,
                 "message": "Purchase order email sent to vendor successfully"
@@ -4097,7 +4124,6 @@ def get_store_items():
                 }
             })
 
-        log.info(f"Retrieved {len(store_items)} store items from inventory")
         return jsonify(store_items), 200
 
     except Exception as e:
@@ -4135,7 +4161,6 @@ def get_store_item_details(item_id):
             'certifications': []
         }
 
-        log.info(f"Retrieved details for store item {item_id}")
         return jsonify(item), 200
 
     except Exception as e:
@@ -4164,7 +4189,6 @@ def get_store_categories():
                 'items_count': count
             })
 
-        log.info(f"Retrieved {len(categories)} store categories from inventory")
         return jsonify(categories), 200
 
     except Exception as e:
@@ -4196,7 +4220,6 @@ def get_projects_by_material(material_id):
         ).all()
 
         if not change_requests:
-            log.info(f"No pending CRs found for material '{material.material_name}'")
             return jsonify([]), 200
 
         # Get CRs that already have active requests for this material
@@ -4245,7 +4268,6 @@ def get_projects_by_material(material_id):
                 'active_request_status': active_request_status
             })
 
-        log.info(f"Found {len(projects_list)} projects with pending CRs for material '{material.material_name}'")
         return jsonify(projects_list), 200
 
     except Exception as e:
@@ -4369,7 +4391,6 @@ def complete_from_store(cr_id):
 
         db.session.commit()
 
-        log.info(f"CR-{cr_id} materials requested from store by user {current_user.get('user_id')}")
         return jsonify({
             "success": True,
             "message": f"Material requests sent to M2 Store. {requests_created} request(s) created.",
@@ -4582,10 +4603,8 @@ def update_vendor_price(vendor_id):
                         'old_price': old_price,
                         'new_price': new_price
                     })
-                    log.info(f"Updated vendor product price: vendor_id={vendor_id}, product='{product.product_name}', old_price={old_price}, new_price={new_price}, user_id={user_id}")
 
                 db.session.flush()
-                log.info(f"Price saved for future: {len(matching_products)} product(s) updated for material '{material_name}' by user {user_id}")
             else:
                 log.warning(f"No matching products found for material '{material_name}' from vendor {vendor_id}")
 
@@ -4619,7 +4638,6 @@ def update_vendor_price(vendor_id):
                 flag_modified(cr, 'material_vendor_selections')
 
                 cr.updated_at = datetime.utcnow()
-                log.info(f"Saved negotiated price to CR-{cr_id}: material='{material_name}', price={new_price}, save_for_future={save_for_future}")
 
         db.session.commit()
 
