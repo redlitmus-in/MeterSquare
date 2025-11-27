@@ -1982,7 +1982,7 @@ class BOQEmailService:
                                 <table width="100%" cellpadding="10" cellspacing="0" border="0" style="background: #f0f9ff; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
                                     <tr>
                                         <td style="color: #000000; font-size: 14px; font-weight: bold; width: 30%;">PO Number:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">CR-{cr_id}</td>
+                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">PO-{cr_id}</td>
                                     </tr>
                                     <tr>
                                         <td style="color: #000000; font-size: 14px; font-weight: bold;">Vendor:</td>
@@ -2052,7 +2052,7 @@ class BOQEmailService:
                                                 <li>Materials should be delivered to the project site: <strong>{location}</strong></li>
                                                 <li>Please coordinate delivery schedule with the buyer</li>
                                                 <li>Proper packaging and labeling is required</li>
-                                                <li>Invoice should reference PO Number: <strong>CR-{cr_id}</strong></li>
+                                                <li>Invoice should reference PO Number: <strong>PO-{cr_id}</strong></li>
                                             </ul>
                                         </td>
                                     </tr>
@@ -2123,7 +2123,7 @@ class BOQEmailService:
             # Create subject
             project_name = project_data.get('project_name', 'Project')
             cr_id = purchase_data.get('cr_id', 'N/A')
-            subject = f"Purchase Order CR-{cr_id} - {project_name}"
+            subject = f"Purchase Order PO-{cr_id} - {project_name}"
 
             # Log attachment info if present
             if attachments:
@@ -2173,7 +2173,7 @@ class BOQEmailService:
             # Create subject
             project_name = project_data.get('project_name', 'Project')
             cr_id = purchase_data.get('cr_id', 'N/A')
-            subject = f"Purchase Order CR-{cr_id} - {project_name}"
+            subject = f"Purchase Order PO-{cr_id} - {project_name}"
 
             # Log attachment info if present
             if attachments:

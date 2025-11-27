@@ -3024,6 +3024,77 @@ def reject_change_request(cr_id):
         return jsonify({"error": str(e)}), 500
 
 
+def resend_change_request(cr_id):
+    """
+    Resend/resubmit a rejected change request
+    PUT /api/change-request/{cr_id}/resend
+    """
+    try:
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({"error": "User not authenticated"}), 401
+
+        user_id = current_user.get('user_id')
+        user_name = current_user.get('full_name') or current_user.get('username') or 'User'
+
+        # Get change request
+        change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        if not change_request:
+            return jsonify({"error": "Change request not found"}), 404
+
+        # Only allow resending rejected CRs
+        if change_request.status != 'rejected' and change_request.vendor_selection_status != 'rejected':
+            return jsonify({"error": "Only rejected requests can be resent"}), 400
+
+        # Determine what type of rejection this was and reset appropriately
+        if change_request.vendor_selection_status == 'rejected':
+            # Vendor was rejected - reset vendor selection fields but keep CR approved
+            change_request.vendor_selection_status = None
+            change_request.selected_vendor_id = None
+            change_request.selected_vendor_name = None
+            change_request.vendor_rejection_reason = None
+            change_request.vendor_approved_by_td_id = None
+            change_request.vendor_approved_by_td_name = None
+            change_request.vendor_approval_date = None
+            change_request.vendor_selected_by_buyer_id = None
+            change_request.vendor_selected_by_buyer_name = None
+            change_request.vendor_selection_date = None
+            # Keep status as assigned_to_buyer so buyer can select new vendor
+            if change_request.status == 'rejected':
+                change_request.status = 'assigned_to_buyer'
+        else:
+            # CR was rejected - reset to under_review for resubmission
+            change_request.status = 'under_review'
+            change_request.rejected_by_user_id = None
+            change_request.rejected_by_name = None
+            change_request.rejection_reason = None
+            change_request.rejected_at_stage = None
+
+        change_request.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Change request resent successfully",
+            "cr_id": cr_id,
+            "new_status": change_request.status,
+            "vendor_selection_status": change_request.vendor_selection_status
+        }), 200
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        log.error(f"Database error resending change request {cr_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error resending change request {cr_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
 # REMOVED: update_change_request_status - DEPRECATED
 # Use send_for_review() instead
 # This function has been removed as the endpoint is no longer available

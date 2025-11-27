@@ -373,7 +373,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-indigo-600'
       },
       {
-        name: 'Purchase Requests',
+        name: 'Purchase Orders',
         href: buildPath('/change-requests'),
         icon: DocumentPlusIcon,
         iconSolid: DocumentPlusSolid,
@@ -416,7 +416,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-blue-600'
       },
       {
-        name: 'Purchase Requests',
+        name: 'Purchase Orders',
         href: buildPath('/change-requests'),
         icon: DocumentPlusIcon,
         iconSolid: DocumentPlusSolid,

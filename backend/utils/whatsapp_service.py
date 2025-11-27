@@ -245,7 +245,7 @@ class WhatsAppService:
         body_text = f"""*PURCHASE ORDER*
 ━━━━━━━━━━━━━━━━━━━━
 
-📋 *PO Number:* CR-{purchase_data.get('cr_id', 'N/A')}
+📋 *PO Number:* PO-{purchase_data.get('cr_id', 'N/A')}
 📅 *Date:* {purchase_data.get('date', 'N/A')}
 
 🏢 *Vendor:* {vendor_data.get('company_name', 'N/A')}
@@ -294,7 +294,7 @@ _MeterSquare Interiors LLC_"""
 
         return f"""*PURCHASE ORDER - MeterSquare Interiors*
 
-*PO Number:* CR-{purchase_data.get('cr_id', 'N/A')}
+*PO Number:* PO-{purchase_data.get('cr_id', 'N/A')}
 *Date:* {purchase_data.get('date', 'N/A')}
 
 *Vendor:* {vendor_data.get('company_name', 'N/A')}

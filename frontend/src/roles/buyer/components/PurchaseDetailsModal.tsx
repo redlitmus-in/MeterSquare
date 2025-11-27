@@ -202,7 +202,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         {purchase.project_name}
                       </h2>
                       <Badge className="bg-blue-100 text-blue-800">
-                        CR #{purchase.cr_id}
+                        PO #{purchase.cr_id}
                       </Badge>
                       {purchase.status === 'completed' && (
                         <Badge className="bg-green-600 text-white">
@@ -369,7 +369,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       Materials Breakdown
                     </h3>
                     {/* Edit button - only show for pending purchases that are NOT sent to TD for approval */}
-                    {purchase.status === 'pending' && !isEditMode && !purchase.vendor_selection_pending_td_approval && !purchase.is_sub_cr && (
+                    {purchase.status === 'pending' && !isEditMode && !purchase.vendor_selection_pending_td_approval && (
                       <Button
                         onClick={() => setIsEditMode(true)}
                         className="bg-blue-600 hover:bg-blue-700 text-white"

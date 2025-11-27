@@ -126,7 +126,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       setEditedBuyerEmail(currentUser?.email || '');
       setEditedBuyerPhone(currentUser?.phone || '');
       setEditedInstructions('Please confirm receipt of this purchase order\nProvide delivery timeline and availability confirmation\nEnsure all materials meet the specified quality standards\nInclude all necessary certifications and documentation\nContact the buyer for any clarifications or concerns');
-      setEditedDeliveryReq(`Materials should be delivered to the project site: ${purchase.location}\nPlease coordinate delivery schedule with the buyer\nProper packaging and labeling is required\nInvoice should reference PO Number: CR-${purchase.cr_id}`);
+      setEditedDeliveryReq(`Materials should be delivered to the project site: ${purchase.location}\nPlease coordinate delivery schedule with the buyer\nProper packaging and labeling is required\nInvoice should reference PO Number: PO-${purchase.cr_id}`);
     } catch (error: any) {
       console.error('Error loading email preview:', error);
       showError(error.message || 'Failed to load email preview');
@@ -304,7 +304,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
           <div style="background-color: #EBF5FF; border-left: 4px solid #2563EB; padding: 12px;">
             <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
               <span style="color: #4B5563;">PO Number:</span>
-              <span style="font-weight: 600; color: #2563EB;">CR-${purchase.cr_id}</span>
+              <span style="font-weight: 600; color: #2563EB;">PO-${purchase.cr_id}</span>
             </div>
             <div style="display: flex; justify-content: space-between;">
               <span style="color: #4B5563;">Total Items:</span>
@@ -458,7 +458,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                       </h2>
                     </div>
                     <div className="text-sm text-gray-600">
-                      <span className="font-medium">Purchase Order:</span> CR #{purchase.cr_id} - {purchase.project_name}
+                      <span className="font-medium">Purchase Order:</span> PO #{purchase.cr_id} - {purchase.project_name}
                     </div>
                   </div>
                   <button
@@ -705,7 +705,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                               <div className="bg-blue-50 border-l-4 border-blue-600 p-3 space-y-2">
                                 <div className="flex justify-between">
                                   <span className="text-gray-600">PO Number:</span>
-                                  <span className="font-semibold text-blue-600">CR-{purchase.cr_id}</span>
+                                  <span className="font-semibold text-blue-600">PO-{purchase.cr_id}</span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-600">Total Items:</span>

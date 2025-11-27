@@ -141,7 +141,7 @@ const ChangeRequestsPage: React.FC = () => {
           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-6 shadow-sm border border-blue-100">
             <div className="flex justify-between items-center">
               <div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">Change Requests</h1>
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">Purchase Orders</h1>
                 <p className="text-gray-600">Request additional sub-items for BOQ items</p>
               </div>
               <button
@@ -189,7 +189,7 @@ const ChangeRequestsPage: React.FC = () => {
           ) : changeRequests.length === 0 ? (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
               <DocumentPlusIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No Change Requests</h3>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No Purchase Orders</h3>
               <p className="text-gray-500">Click "New Request" to create your first change request</p>
             </div>
           ) : (
@@ -228,7 +228,7 @@ const ChangeRequestsPage: React.FC = () => {
                     {changeRequests.map((request) => (
                       <tr key={request.cr_id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          CR-{request.cr_id}
+                          PO-{request.cr_id}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                           {request.item_name}

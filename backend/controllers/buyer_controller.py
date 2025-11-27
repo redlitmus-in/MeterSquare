@@ -4,6 +4,7 @@ from config.db import db
 from models.project import Project
 from models.boq import BOQ, BOQDetails, MasterItem, MasterSubItem, MasterMaterial
 from models.change_request import ChangeRequest
+from models.po_child import POChild
 from models.user import User
 from models.role import Role
 from models.vendor import Vendor
@@ -494,32 +495,19 @@ def get_buyer_dashboard():
                 continue
 
             # Get change requests assigned to buyer for these BOQs
-            # Include: 1) Regular CRs assigned to buyer
-            #          2) Sub-CRs that are vendor_approved (ready for buyer to complete purchase)
-            # If admin is viewing, show ALL change requests (no buyer filtering)
+            # Include: CRs assigned to buyer or with vendor_approved status
+            # NOTE: Sub-CRs deprecated - now using po_child table for vendor splits
             if is_admin_viewing:
                 change_requests = ChangeRequest.query.filter(
                     ChangeRequest.boq_id.in_([boq.boq_id for boq in boqs]),
-                    or_(
-                        ChangeRequest.status == 'assigned_to_buyer',
-                        and_(
-                            ChangeRequest.is_sub_cr == True,
-                            ChangeRequest.status == 'vendor_approved'
-                        )
-                    ),
+                    ChangeRequest.status.in_(['assigned_to_buyer', 'vendor_approved']),
                     ChangeRequest.is_deleted == False
                 ).all()
             else:
                 change_requests = ChangeRequest.query.filter(
                     ChangeRequest.boq_id.in_([boq.boq_id for boq in boqs]),
-                    or_(
-                        ChangeRequest.status == 'assigned_to_buyer',
-                        and_(
-                            ChangeRequest.is_sub_cr == True,
-                            ChangeRequest.status == 'vendor_approved',
-                            ChangeRequest.assigned_to_buyer_user_id == buyer_id
-                        )
-                    ),
+                    ChangeRequest.status.in_(['assigned_to_buyer', 'vendor_approved']),
+                    ChangeRequest.assigned_to_buyer_user_id == buyer_id,
                     ChangeRequest.is_deleted == False
                 ).all()
 
@@ -592,9 +580,9 @@ def get_buyer_pending_purchases():
 
         # Get change requests for buyer:
         # 1. Under review AND approval_required_from='buyer' (pending buyer's review/acceptance)
-        # 2. Assigned to this buyer (via assigned_to_buyer_user_id) - actively being worked on (assigned_to_buyer or send_to_buyer status)
-        # 3. Sub-CRs created by this buyer (pending TD approval OR vendor approved)
-        #    Frontend filters by vendor_selection_pending_td_approval to separate into tabs
+        # 2. Assigned to this buyer (via assigned_to_buyer_user_id) - actively being worked on
+        # 3. CRs with pending_td_approval OR vendor_approved status (vendor selection flow)
+        # NOTE: Sub-CRs are deprecated - now using po_child table for vendor splits
         from sqlalchemy import or_, and_, func
 
         # Convert buyer_id to int for safe comparison
@@ -603,11 +591,6 @@ def get_buyer_pending_purchases():
         # If admin is viewing as buyer, show ALL purchases (no buyer filtering)
         # If regular buyer, show only purchases assigned to them
         if is_admin_viewing:
-            # First, let's check how many CRs exist with assigned_to_buyer_user_id set
-            all_buyer_crs = ChangeRequest.query.filter(
-                ChangeRequest.assigned_to_buyer_user_id.isnot(None),
-                ChangeRequest.is_deleted == False
-            ).all()
             # SIMPLIFIED QUERY: Show ALL CRs assigned to any buyer (for admin viewing)
             # Exclude purchase_completed status - those should go to completed tab
             change_requests = ChangeRequest.query.filter(
@@ -630,15 +613,8 @@ def get_buyer_pending_purchases():
                         func.trim(ChangeRequest.status).in_(['assigned_to_buyer', 'send_to_buyer']),
                         ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
                     ),
-                    # Sub-CRs created by this buyer (pending TD approval OR vendor approved)
+                    # CRs with pending_td_approval OR vendor_approved status (full purchase to single vendor)
                     and_(
-                        ChangeRequest.is_sub_cr == True,
-                        ChangeRequest.assigned_to_buyer_user_id == buyer_id_int,
-                        ChangeRequest.status.in_(['pending_td_approval', 'vendor_approved'])
-                    ),
-                    # Parent CRs with pending_td_approval OR vendor_approved status (full purchase to single vendor)
-                    and_(
-                        ChangeRequest.is_sub_cr == False,
                         ChangeRequest.assigned_to_buyer_user_id == buyer_id_int,
                         func.trim(ChangeRequest.status).in_(['pending_td_approval', 'vendor_approved'])
                     ),
@@ -767,36 +743,36 @@ def get_buyer_pending_purchases():
                 any_store_request_rejected = rejected_count > 0
                 store_requests_pending = pending_count > 0
 
-            # Get sub-CRs for this parent CR (if any exist)
+            # Get POChild records for this CR (if any exist)
             # This allows the frontend to know which materials have already been sent to TD
-            sub_crs_data = []
-            if not cr.is_sub_cr:  # Only get sub-CRs for parent CRs
-                sub_crs_for_parent = ChangeRequest.query.filter_by(
-                    parent_cr_id=cr.cr_id,
-                    is_deleted=False
-                ).all()
+            po_children_data = []
+            po_children_for_parent = POChild.query.filter_by(
+                parent_cr_id=cr.cr_id,
+                is_deleted=False
+            ).all()
 
-                for sub_cr in sub_crs_for_parent:
-                    sub_crs_data.append({
-                        "cr_id": sub_cr.cr_id,
-                        "formatted_cr_id": sub_cr.get_formatted_cr_id(),
-                        "cr_number_suffix": sub_cr.cr_number_suffix,
-                        "vendor_id": sub_cr.selected_vendor_id,
-                        "vendor_name": sub_cr.selected_vendor_name,
-                        "vendor_selection_status": sub_cr.vendor_selection_status,
-                        "status": sub_cr.status,
-                        # Include the materials in this sub-CR so frontend knows which are locked
-                        "materials": sub_cr.materials_data or []
-                    })
+            for po_child in po_children_for_parent:
+                po_children_data.append({
+                    "id": po_child.id,
+                    "formatted_id": po_child.get_formatted_id(),
+                    "suffix": po_child.suffix,
+                    "vendor_id": po_child.vendor_id,
+                    "vendor_name": po_child.vendor_name,
+                    "vendor_selection_status": po_child.vendor_selection_status,
+                    "status": po_child.status,
+                    "materials": po_child.materials_data or [],
+                    "materials_count": len(po_child.materials_data) if po_child.materials_data else 0,
+                    "materials_total_cost": po_child.materials_total_cost,
+                    "vendor_email_sent": po_child.vendor_email_sent,
+                    "purchase_completed_by_name": po_child.purchase_completed_by_name,
+                    "purchase_completion_date": po_child.purchase_completion_date.isoformat() if po_child.purchase_completion_date else None
+                })
 
             pending_purchases.append({
                 "cr_id": cr.cr_id,
-                "formatted_cr_id": cr.get_formatted_cr_id(),  # "CR-100" or "CR-100.1"
-                "is_sub_cr": cr.is_sub_cr or False,
-                "parent_cr_id": cr.parent_cr_id,
-                "cr_number_suffix": cr.cr_number_suffix,  # ".1", ".2", etc.
+                "formatted_cr_id": cr.get_formatted_cr_id(),
                 "submission_group_id": cr.submission_group_id,
-                "sub_crs": sub_crs_data,  # Include sub-CRs with their materials
+                "po_children": po_children_data,  # POChild records for vendor splits
                 "project_id": project.project_id,
                 "project_name": project.project_name,
                 "project_code": project.project_code,
@@ -1025,6 +1001,168 @@ def get_buyer_completed_purchases():
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to fetch completed purchases: {str(e)}"}), 500
+
+
+def get_buyer_rejected_purchases():
+    """Get rejected change requests for buyer (rejected by TD or vendor selection rejected)"""
+    try:
+        from utils.admin_viewing_context import get_effective_user_context
+        from sqlalchemy import or_, and_
+
+        current_user = g.user
+        buyer_id = current_user['user_id']
+        user_role = current_user.get('role_name', '').lower()
+
+        # Check if admin is viewing as buyer
+        context = get_effective_user_context()
+        is_admin_viewing = context['is_admin_viewing']
+
+        # FORCE admin to see all data
+        if user_role == 'admin':
+            is_admin_viewing = True
+
+        # Get rejected change requests:
+        # 1. status='rejected' (rejected by TD)
+        # 2. vendor_selection_status='rejected' (vendor rejected by TD)
+        if is_admin_viewing:
+            change_requests = ChangeRequest.query.filter(
+                or_(
+                    ChangeRequest.status == 'rejected',
+                    ChangeRequest.vendor_selection_status == 'rejected'
+                ),
+                ChangeRequest.is_deleted == False
+            ).all()
+        else:
+            change_requests = ChangeRequest.query.filter(
+                or_(
+                    ChangeRequest.status == 'rejected',
+                    ChangeRequest.vendor_selection_status == 'rejected'
+                ),
+                ChangeRequest.assigned_to_buyer_user_id == buyer_id,
+                ChangeRequest.is_deleted == False
+            ).all()
+
+        rejected_purchases = []
+
+        for cr in change_requests:
+            # Get project details
+            project = Project.query.get(cr.project_id)
+            if not project:
+                continue
+
+            # Get BOQ details
+            boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
+            if not boq:
+                continue
+
+            # Process materials
+            sub_items_data = cr.sub_items_data or cr.materials_data or []
+            cr_total = 0
+            materials_list = []
+            first_sub_item_name = ""
+
+            if cr.sub_items_data:
+                for sub_item in sub_items_data:
+                    if isinstance(sub_item, dict):
+                        if not first_sub_item_name and sub_item.get('sub_item_name'):
+                            first_sub_item_name = sub_item.get('sub_item_name', '')
+
+                        sub_materials = sub_item.get('materials', [])
+                        if sub_materials:
+                            for material in sub_materials:
+                                material_total = float(material.get('total_price', 0) or 0)
+                                cr_total += material_total
+                                materials_list.append({
+                                    "material_name": material.get('material_name', ''),
+                                    "quantity": material.get('quantity', 0),
+                                    "unit": material.get('unit', ''),
+                                    "unit_price": material.get('unit_price', 0),
+                                    "total_price": material_total,
+                                    "brand": material.get('brand'),
+                                    "specification": material.get('specification')
+                                })
+                        else:
+                            sub_total = float(sub_item.get('total_price', 0) or 0)
+                            cr_total += sub_total
+                            materials_list.append({
+                                "material_name": sub_item.get('material_name', ''),
+                                "sub_item_name": sub_item.get('sub_item_name', ''),
+                                "quantity": sub_item.get('quantity', 0),
+                                "unit": sub_item.get('unit', ''),
+                                "unit_price": sub_item.get('unit_price', 0),
+                                "total_price": sub_total,
+                                "brand": sub_item.get('brand'),
+                                "specification": sub_item.get('specification')
+                            })
+            else:
+                for material in sub_items_data:
+                    if isinstance(material, dict):
+                        material_total = float(material.get('total_price', 0) or 0)
+                        cr_total += material_total
+                        materials_list.append({
+                            "material_name": material.get('material_name', ''),
+                            "quantity": material.get('quantity', 0),
+                            "unit": material.get('unit', ''),
+                            "unit_price": material.get('unit_price', 0),
+                            "total_price": material_total
+                        })
+
+            # Get vendor details if available
+            vendor_phone = None
+            vendor_contact_person = None
+            if cr.selected_vendor_id:
+                vendor = Vendor.query.get(cr.selected_vendor_id)
+                if vendor:
+                    vendor_phone = vendor.phone
+                    vendor_contact_person = vendor.contact_person_name
+
+            # Determine rejection type and reason
+            rejection_type = "change_request"  # default
+            rejection_reason = cr.rejection_reason or "No reason provided"
+
+            if cr.vendor_selection_status == 'rejected':
+                rejection_type = "vendor_selection"
+                rejection_reason = cr.vendor_rejection_reason or "Vendor selection rejected by TD"
+
+            rejected_purchases.append({
+                "cr_id": cr.cr_id,
+                "formatted_cr_id": cr.get_formatted_cr_id(),
+                "project_id": cr.project_id,
+                "project_name": project.project_name,
+                "project_code": project.project_code,
+                "client": project.client or "Unknown Client",
+                "location": project.location or "Unknown Location",
+                "boq_id": cr.boq_id,
+                "boq_name": boq.boq_name if boq else "Unknown",
+                "item_name": cr.item_name or "N/A",
+                "sub_item_name": first_sub_item_name,
+                "request_type": cr.request_type or "EXTRA_MATERIALS",
+                "reason": cr.justification or "",
+                "materials": materials_list,
+                "materials_count": len(materials_list),
+                "total_cost": round(cr_total, 2),
+                "created_at": cr.created_at.isoformat() if cr.created_at else None,
+                "status": cr.status,
+                "rejection_type": rejection_type,
+                "rejection_reason": rejection_reason,
+                "rejected_by_name": cr.rejected_by_name,
+                "rejected_at_stage": cr.rejected_at_stage,
+                "vendor_id": cr.selected_vendor_id,
+                "vendor_name": cr.selected_vendor_name,
+                "vendor_selection_status": cr.vendor_selection_status
+            })
+
+        return jsonify({
+            "success": True,
+            "rejected_purchases_count": len(rejected_purchases),
+            "rejected_purchases": rejected_purchases
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching rejected purchases: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch rejected purchases: {str(e)}"}), 500
 
 
 def complete_purchase():
@@ -2144,9 +2282,9 @@ def select_vendor_for_material(cr_id):
         # Determine appropriate message based on status
         if all_materials_have_vendors:
             if is_td:
-                message = f"All materials approved! CR-{cr_id} is ready for purchase."
+                message = f"All materials approved! PO-{cr_id} is ready for purchase."
             else:
-                message = f"All materials submitted for TD approval! CR-{cr_id} will be reviewed by Technical Director."
+                message = f"All materials submitted for TD approval! PO-{cr_id} will be reviewed by Technical Director."
         else:
             message = f"Vendor(s) {'approved' if is_td else 'selected for TD approval'} for {len(updated_materials)} material(s)"
 
@@ -2303,7 +2441,7 @@ def create_sub_crs_for_vendor_groups(cr_id):
                 requested_by_name=parent_cr.requested_by_name,
                 requested_by_role=parent_cr.requested_by_role,
                 request_type=parent_cr.request_type,
-                justification=f"Sub-CR for vendor {vendor_name} - Split from CR-{cr_id}",
+                justification=f"Sub-PO for vendor {vendor_name} - Split from PO-{cr_id}",
                 status='pending_td_approval',  # Always pending - TD must manually approve
                 approval_required_from='technical_director',  # Set approval_required_from to TD
                 item_id=parent_cr.item_id,
@@ -2398,7 +2536,7 @@ def create_sub_crs_for_vendor_groups(cr_id):
                             user_id=td_user.user_id,
                             type='action_required',
                             title=f'{len(created_sub_crs)} Purchase Orders Need Approval',
-                            message=f'Buyer created {len(created_sub_crs)} separate purchase orders from CR-{cr_id}. Each needs approval.',
+                            message=f'Buyer created {len(created_sub_crs)} separate purchase orders from PO-{cr_id}. Each needs approval.',
                             priority='high',
                             category='purchase',
                             action_url=f'/technical-director/change-requests',
@@ -2425,6 +2563,229 @@ def create_sub_crs_for_vendor_groups(cr_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to create sub-CRs: {str(e)}"}), 500
+
+
+def create_po_children(cr_id):
+    """
+    Create POChild records for each vendor group.
+    Replaces the deprecated create_sub_crs_for_vendor_groups() function.
+
+    Each POChild will have:
+    - parent_cr_id pointing to the original CR
+    - suffix like ".1", ".2", ".3"
+    - Subset of materials for that vendor
+    - Independent lifecycle (vendor approval, purchase tracking)
+    """
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_name = current_user.get('full_name', 'Unknown User')
+        user_role = current_user.get('role', '').lower()
+
+        data = request.get_json()
+        vendor_groups = data.get('vendor_groups')  # Array of {vendor_id, vendor_name, materials: []}
+        submission_group_id = data.get('submission_group_id')  # UUID to group these PO children
+
+        if not vendor_groups or not isinstance(vendor_groups, list):
+            return jsonify({"error": "vendor_groups array is required"}), 400
+
+        if not submission_group_id:
+            import uuid
+            submission_group_id = str(uuid.uuid4())
+
+        # Get the parent change request
+        parent_cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not parent_cr:
+            return jsonify({"error": "Parent purchase not found"}), 404
+
+        # Check role-based permissions
+        is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+        is_admin = user_role == 'admin'
+
+        # Get effective user context for admin viewing as buyer
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # Verify it's assigned to this buyer (skip check for TD, Admin, or Admin viewing as Buyer)
+        assigned_buyer_id = int(parent_cr.assigned_to_buyer_user_id or 0)
+        current_user_id = int(user_id)
+        if not is_td and not is_admin and not is_admin_viewing and assigned_buyer_id != current_user_id:
+            return jsonify({"error": f"This purchase is not assigned to you (assigned to buyer ID {assigned_buyer_id})"}), 403
+
+        # Verify parent CR is in correct status
+        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm']
+        if parent_cr.status not in allowed_statuses:
+            return jsonify({"error": f"Cannot create PO children. Parent CR status: {parent_cr.status}"}), 400
+
+        # Create POChild records for each vendor group
+        created_po_children = []
+
+        # Count existing POChild records to determine next suffix
+        existing_po_child_count = POChild.query.filter_by(
+            parent_cr_id=cr_id,
+            is_deleted=False
+        ).count()
+        next_suffix_number = existing_po_child_count + 1
+
+        for idx, vendor_group in enumerate(vendor_groups, start=next_suffix_number):
+            vendor_id = vendor_group.get('vendor_id')
+            vendor_name = vendor_group.get('vendor_name')
+            materials = vendor_group.get('materials')
+
+            if not vendor_id or not materials:
+                continue
+
+            # Verify vendor exists and is active
+            vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+            if not vendor:
+                return jsonify({"error": f"Vendor {vendor_id} not found"}), 404
+
+            if vendor.status != 'active':
+                return jsonify({"error": f"Vendor '{vendor.company_name}' is not active"}), 400
+
+            # Extract materials data for this vendor group
+            po_materials = []
+            total_cost = 0.0
+
+            for material in materials:
+                material_name = material.get('material_name')
+                quantity = material.get('quantity', 0)
+                unit = material.get('unit', '')
+                negotiated_price = material.get('negotiated_price')
+
+                # Find the material from parent CR
+                parent_material = None
+                if parent_cr.materials_data:
+                    for pm in parent_cr.materials_data:
+                        if pm.get('material_name') == material_name:
+                            parent_material = pm
+                            break
+
+                # Calculate price
+                unit_price = negotiated_price if negotiated_price else (parent_material.get('unit_price', 0) if parent_material else 0)
+                material_total = unit_price * quantity
+                total_cost += material_total
+
+                po_materials.append({
+                    'material_name': material_name,
+                    'sub_item_name': parent_material.get('sub_item_name', '') if parent_material else '',
+                    'quantity': quantity,
+                    'unit': unit,
+                    'unit_price': unit_price,
+                    'total_price': material_total,
+                    'master_material_id': parent_material.get('master_material_id') if parent_material else None
+                })
+
+            # Create the POChild record
+            po_child = POChild(
+                parent_cr_id=parent_cr.cr_id,
+                suffix=f".{idx}",
+                boq_id=parent_cr.boq_id,
+                project_id=parent_cr.project_id,
+                item_id=parent_cr.item_id,
+                item_name=parent_cr.item_name,
+                submission_group_id=submission_group_id,
+                materials_data=po_materials,
+                materials_total_cost=total_cost,
+                vendor_id=vendor_id,
+                vendor_name=vendor.company_name,
+                vendor_selected_by_buyer_id=user_id,
+                vendor_selected_by_buyer_name=user_name,
+                vendor_selection_date=datetime.utcnow(),
+                vendor_selection_status='pending_td_approval',
+                status='pending_td_approval',
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+
+            db.session.add(po_child)
+            db.session.flush()  # Get the id
+
+            created_po_children.append({
+                'id': po_child.id,
+                'formatted_id': po_child.get_formatted_id(),
+                'vendor_id': vendor_id,
+                'vendor_name': vendor.company_name,
+                'materials_count': len(po_materials),
+                'total_cost': total_cost
+            })
+
+        # Check if ALL materials from parent CR have been assigned to PO children
+        all_po_children = POChild.query.filter_by(
+            parent_cr_id=parent_cr.cr_id,
+            is_deleted=False
+        ).all()
+
+        materials_in_po_children = set()
+        for po_child in all_po_children:
+            if po_child.materials_data:
+                for material in po_child.materials_data:
+                    material_name = material.get('material_name')
+                    if material_name:
+                        materials_in_po_children.add(material_name)
+
+        parent_materials = set()
+        if parent_cr.materials_data:
+            for material in parent_cr.materials_data:
+                material_name = material.get('material_name')
+                if material_name:
+                    parent_materials.add(material_name)
+
+        # Mark parent as 'split_to_po_children' if all materials assigned
+        if parent_materials and materials_in_po_children >= parent_materials:
+            parent_cr.status = 'split_to_sub_crs'  # Keep same status name for compatibility
+            parent_cr.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        # Send notifications to TD if buyer created PO children
+        if not is_td:
+            try:
+                from models.role import Role
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user
+
+                td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
+                if td_role:
+                    from models.user import User
+                    td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                    for td_user in td_users:
+                        notification = NotificationManager.create_notification(
+                            user_id=td_user.user_id,
+                            type='action_required',
+                            title=f'{len(created_po_children)} Purchase Orders Need Approval',
+                            message=f'Buyer created {len(created_po_children)} separate purchase orders from PO-{cr_id}. Each needs approval.',
+                            priority='high',
+                            category='purchase',
+                            action_url=f'/technical-director/change-requests',
+                            action_label='Review Purchase Orders',
+                            metadata={'parent_cr_id': str(cr_id), 'po_children_count': len(created_po_children), 'submission_group_id': submission_group_id},
+                            sender_id=user_id,
+                            sender_name=user_name
+                        )
+                        send_notification_to_user(td_user.user_id, notification.to_dict())
+            except Exception as notif_error:
+                log.error(f"Failed to send notification: {notif_error}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Successfully created {len(created_po_children)} separate purchase orders!",
+            "parent_cr_id": parent_cr.cr_id,
+            "submission_group_id": submission_group_id,
+            "po_children": created_po_children
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error creating PO children: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to create PO children: {str(e)}"}), 500
 
 
 def update_purchase_order(cr_id):
@@ -2791,6 +3152,381 @@ def td_reject_vendor(cr_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to reject vendor: {str(e)}"}), 500
+
+
+def td_approve_po_child(po_child_id):
+    """TD approves vendor selection for POChild"""
+    try:
+        current_user = g.user
+        td_id = current_user['user_id']
+        td_name = current_user.get('full_name', 'Unknown TD')
+
+        # Get the PO child
+        po_child = POChild.query.filter_by(
+            id=po_child_id,
+            is_deleted=False
+        ).first()
+
+        if not po_child:
+            return jsonify({"error": "PO Child not found"}), 404
+
+        # Verify vendor selection is pending approval
+        if po_child.vendor_selection_status != 'pending_td_approval':
+            return jsonify({"error": f"Vendor selection not pending approval. Status: {po_child.vendor_selection_status}"}), 400
+
+        # Approve the vendor selection
+        po_child.vendor_selection_status = 'approved'
+        po_child.status = 'vendor_approved'
+        po_child.vendor_approved_by_td_id = td_id
+        po_child.vendor_approved_by_td_name = td_name
+        po_child.vendor_approval_date = datetime.utcnow()
+        po_child.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        # Send notification to buyer about vendor approval
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            if po_child.vendor_selected_by_buyer_id:
+                notification = NotificationManager.create_notification(
+                    user_id=po_child.vendor_selected_by_buyer_id,
+                    type='approval',
+                    title='Vendor Selection Approved',
+                    message=f'TD approved vendor "{po_child.vendor_name}" for {po_child.get_formatted_id()}',
+                    priority='high',
+                    category='vendor',
+                    action_url=f'/buyer/purchases',
+                    action_label='Proceed with Purchase',
+                    metadata={
+                        'po_child_id': str(po_child_id),
+                        'vendor_name': po_child.vendor_name,
+                        'vendor_id': str(po_child.vendor_id) if po_child.vendor_id else None
+                    },
+                    sender_id=td_id,
+                    sender_name=td_name
+                )
+                send_notification_to_user(po_child.vendor_selected_by_buyer_id, notification.to_dict())
+        except Exception as notif_error:
+            log.error(f"Failed to send vendor approval notification: {notif_error}")
+
+        return jsonify({
+            "success": True,
+            "message": "Vendor selection approved successfully",
+            "po_child": po_child.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error approving PO child vendor: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to approve vendor: {str(e)}"}), 500
+
+
+def td_reject_po_child(po_child_id):
+    """TD rejects vendor selection for POChild"""
+    try:
+        current_user = g.user
+        td_id = current_user['user_id']
+        td_name = current_user.get('full_name', 'Unknown TD')
+
+        data = request.get_json()
+        reason = data.get('reason', '')
+
+        if not reason:
+            return jsonify({"error": "Rejection reason is required"}), 400
+
+        # Get the PO child
+        po_child = POChild.query.filter_by(
+            id=po_child_id,
+            is_deleted=False
+        ).first()
+
+        if not po_child:
+            return jsonify({"error": "PO Child not found"}), 404
+
+        # Verify vendor selection is pending approval
+        if po_child.vendor_selection_status != 'pending_td_approval':
+            return jsonify({"error": f"Vendor selection not pending approval. Status: {po_child.vendor_selection_status}"}), 400
+
+        # Reject the vendor selection
+        po_child.vendor_selection_status = 'rejected'
+        po_child.status = 'rejected'
+        po_child.vendor_approved_by_td_id = td_id
+        po_child.vendor_approved_by_td_name = td_name
+        po_child.vendor_approval_date = datetime.utcnow()
+        po_child.rejection_reason = reason
+        po_child.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        # Send notification to buyer about vendor rejection
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            if po_child.vendor_selected_by_buyer_id:
+                notification = NotificationManager.create_notification(
+                    user_id=po_child.vendor_selected_by_buyer_id,
+                    type='rejection',
+                    title='Vendor Selection Rejected',
+                    message=f'TD rejected vendor selection for {po_child.get_formatted_id()}. Reason: {reason}',
+                    priority='high',
+                    category='vendor',
+                    action_required=True,
+                    action_url=f'/buyer/purchases',
+                    action_label='Select New Vendor',
+                    metadata={
+                        'po_child_id': str(po_child_id),
+                        'rejection_reason': reason
+                    },
+                    sender_id=td_id,
+                    sender_name=td_name
+                )
+                send_notification_to_user(po_child.vendor_selected_by_buyer_id, notification.to_dict())
+        except Exception as notif_error:
+            log.error(f"Failed to send vendor rejection notification: {notif_error}")
+
+        return jsonify({
+            "success": True,
+            "message": "Vendor selection rejected",
+            "po_child": po_child.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error rejecting PO child vendor: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to reject vendor: {str(e)}"}), 500
+
+
+def complete_po_child_purchase(po_child_id):
+    """Mark a POChild purchase as complete"""
+    try:
+        current_user = g.user
+        buyer_id = current_user['user_id']
+        buyer_name = current_user.get('full_name', 'Unknown Buyer')
+        user_role = current_user.get('role', '').lower()
+
+        data = request.get_json() or {}
+        notes = data.get('notes', '')
+
+        # Get the PO child
+        po_child = POChild.query.filter_by(
+            id=po_child_id,
+            is_deleted=False
+        ).first()
+
+        if not po_child:
+            return jsonify({"error": "PO Child not found"}), 404
+
+        # Check if admin or admin viewing as buyer
+        is_admin = user_role == 'admin'
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # Verify it's assigned to this buyer (via parent CR)
+        parent_cr = po_child.parent_cr
+        if parent_cr and not is_admin and not is_admin_viewing:
+            if parent_cr.assigned_to_buyer_user_id != buyer_id:
+                return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Verify it's in the correct status
+        if po_child.status != 'vendor_approved':
+            return jsonify({"error": f"Purchase cannot be completed. Current status: {po_child.status}"}), 400
+
+        # Update the PO child
+        po_child.status = 'purchase_completed'
+        po_child.purchase_completed_by_user_id = buyer_id
+        po_child.purchase_completed_by_name = buyer_name
+        po_child.purchase_completion_date = datetime.utcnow()
+        po_child.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        # Check if all PO children for parent CR are completed
+        all_po_children = POChild.query.filter_by(
+            parent_cr_id=po_child.parent_cr_id,
+            is_deleted=False
+        ).all()
+
+        all_completed = all(pc.status == 'purchase_completed' for pc in all_po_children)
+
+        # If all completed, update parent CR status
+        if all_completed and parent_cr:
+            parent_cr.status = 'purchase_completed'
+            parent_cr.purchase_completed_by_user_id = buyer_id
+            parent_cr.purchase_completed_by_name = buyer_name
+            parent_cr.purchase_completion_date = datetime.utcnow()
+            parent_cr.updated_at = datetime.utcnow()
+            db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Purchase marked as complete successfully",
+            "po_child": po_child.to_dict(),
+            "all_po_children_completed": all_completed
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error completing PO child purchase: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to complete purchase: {str(e)}"}), 500
+
+
+def get_pending_po_children():
+    """Get all POChild records pending TD approval"""
+    try:
+        current_user = g.user
+        user_role = current_user.get('role', '').lower()
+
+        # Check if TD or admin
+        is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+        is_admin = user_role == 'admin'
+
+        if not is_td and not is_admin:
+            return jsonify({"error": "Access denied. TD or Admin role required."}), 403
+
+        # Get all POChild records pending TD approval
+        pending_po_children = POChild.query.filter_by(
+            vendor_selection_status='pending_td_approval',
+            is_deleted=False
+        ).all()
+
+        result = []
+        for po_child in pending_po_children:
+            # Get parent CR
+            parent_cr = ChangeRequest.query.get(po_child.parent_cr_id) if po_child.parent_cr_id else None
+
+            # Get project details
+            project = None
+            if po_child.project_id:
+                project = Project.query.get(po_child.project_id)
+            elif parent_cr:
+                project = Project.query.get(parent_cr.project_id)
+
+            # Get BOQ details
+            boq = None
+            if po_child.boq_id:
+                boq = BOQ.query.get(po_child.boq_id)
+            elif parent_cr and parent_cr.boq_id:
+                boq = BOQ.query.get(parent_cr.boq_id)
+
+            result.append({
+                **po_child.to_dict(),
+                'project_name': project.project_name if project else 'Unknown',
+                'project_code': project.project_code if project else None,
+                'client': project.client if project else None,
+                'location': project.location if project else None,
+                'boq_name': boq.boq_name if boq else None,
+                'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
+                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None
+            })
+
+        return jsonify({
+            "success": True,
+            "pending_count": len(result),
+            "po_children": result
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching pending PO children: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch pending PO children: {str(e)}"}), 500
+
+
+def get_approved_po_children():
+    """Get all POChild records with approved vendor selection (for buyer to complete purchase)"""
+    try:
+        from utils.admin_viewing_context import get_effective_user_context
+
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_role = current_user.get('role_name', current_user.get('role', '')).lower()
+
+        log.info(f"get_approved_po_children called by user {user_id}, role: '{user_role}'")
+
+        # Check roles
+        is_buyer = user_role == 'buyer'
+        is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+        is_admin = user_role == 'admin'
+
+        log.info(f"Role check: is_buyer={is_buyer}, is_td={is_td}, is_admin={is_admin}")
+
+        # Check if admin is viewing as buyer
+        context = get_effective_user_context()
+        is_admin_viewing = context['is_admin_viewing']
+
+        if user_role == 'admin':
+            is_admin_viewing = True
+
+        if not is_buyer and not is_td and not is_admin:
+            return jsonify({"error": "Access denied. Buyer, TD, or Admin role required."}), 403
+
+        # Get all POChild records with approved vendor selection (not yet completed)
+        approved_po_children = POChild.query.filter(
+            POChild.vendor_selection_status == 'approved',
+            POChild.status != 'purchase_completed',
+            POChild.is_deleted == False
+        ).all()
+
+        log.info(f"Found {len(approved_po_children)} approved PO children in database")
+
+        result = []
+        for po_child in approved_po_children:
+            # Get parent CR to check buyer assignment
+            parent_cr = ChangeRequest.query.get(po_child.parent_cr_id)
+
+            # For buyer, only show PO children for CRs assigned to them (unless admin viewing)
+            if is_buyer and not is_admin_viewing:
+                if not parent_cr or parent_cr.assigned_to_buyer_user_id != user_id:
+                    continue
+
+            # Get project details
+            project = None
+            if po_child.project_id:
+                project = Project.query.get(po_child.project_id)
+            elif parent_cr:
+                project = Project.query.get(parent_cr.project_id)
+
+            # Get BOQ details
+            boq = None
+            if po_child.boq_id:
+                boq = BOQ.query.get(po_child.boq_id)
+            elif parent_cr and parent_cr.boq_id:
+                boq = BOQ.query.get(parent_cr.boq_id)
+
+            result.append({
+                **po_child.to_dict(),
+                'project_name': project.project_name if project else 'Unknown',
+                'project_code': project.project_code if project else None,
+                'client': project.client if project else None,
+                'location': project.location if project else None,
+                'boq_name': boq.boq_name if boq else None,
+                'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
+                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None
+            })
+
+        log.info(f"Returning {len(result)} approved PO children to user {user_id} (role: {user_role})")
+
+        return jsonify({
+            "success": True,
+            "approved_count": len(result),
+            "po_children": result
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching approved PO children: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch approved PO children: {str(e)}"}), 500
 
 
 def preview_vendor_email(cr_id):
