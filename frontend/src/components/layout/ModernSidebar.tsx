@@ -262,7 +262,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       'Project Manager': { role: 'projectManager', roleId: 6, displayName: 'Project Manager', slug: 'project-manager' },
       'MEP': { role: 'mep', roleId: 11, displayName: 'MEP Manager', slug: 'mep' },
       'Site Engineer': { role: 'siteEngineer', roleId: 3, displayName: 'Site Engineer', slug: 'site-engineer' },
-      'Buyer': { role: 'buyer', roleId: 8, displayName: 'Buyer', slug: 'buyer' },
+      'Procurement': { role: 'buyer', roleId: 8, displayName: 'Procurement', slug: 'buyer' },
       'Production Manager': { role: 'productionManager', roleId: 9, displayName: 'Production Manager', slug: 'production-manager' }
     };
 
@@ -692,7 +692,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
           color: 'text-orange-600'
         });
         navigation.push({
-          name: 'Buyer',
+          name: 'Procurement',
           href: '#',
           icon: UserGroupIcon,
           iconSolid: UserGroupIcon,

@@ -42,7 +42,7 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
     { roleId: 4, roleName: 'estimator', displayName: 'Estimator', color: 'bg-indigo-100 text-indigo-800', dashboardPath: '/admin/dashboard' },
     { roleId: 5, roleName: 'projectManager', displayName: 'Project Manager', color: 'bg-green-100 text-green-800', dashboardPath: '/admin/dashboard' },
     { roleId: 2, roleName: 'siteEngineer', displayName: 'Site Engineer', color: 'bg-orange-100 text-orange-800', dashboardPath: '/admin/dashboard' },
-    { roleId: 8, roleName: 'buyer', displayName: 'Buyer', color: 'bg-purple-100 text-purple-800', dashboardPath: '/admin/dashboard' }
+    { roleId: 8, roleName: 'buyer', displayName: 'Procurement', color: 'bg-purple-100 text-purple-800', dashboardPath: '/admin/dashboard' }
   ];
 
   // Fetch users grouped by role
