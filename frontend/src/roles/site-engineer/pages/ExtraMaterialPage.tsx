@@ -22,6 +22,7 @@ import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 import { useExtraMaterialsAutoSync } from '@/hooks/useAutoSync';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface ExtraMaterialRequest {
   id: number;
@@ -62,6 +63,7 @@ const ExtraMaterialPage: React.FC = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteRequestId, setDeleteRequestId] = useState<number | null>(null);
+  const [sendingRequestId, setSendingRequestId] = useState<number | null>(null); // Prevents double-clicks
 
   // Real-time auto-sync for extra materials
   const { data: materialsData, isLoading: loading, refetch } = useExtraMaterialsAutoSync(
@@ -404,6 +406,12 @@ const ExtraMaterialPage: React.FC = () => {
   };
 
   const handleSendToPM = async (requestId: number) => {
+    // Prevent double-clicks
+    if (sendingRequestId === requestId) {
+      return;
+    }
+
+    setSendingRequestId(requestId);
     try {
       const response = await apiClient.post(
         `/change-request/${requestId}/send-for-review`,
@@ -442,6 +450,8 @@ const ExtraMaterialPage: React.FC = () => {
     } catch (error: any) {
       console.error('Error sending request:', error);
       showError(error.response?.data?.error || 'Failed to send request');
+    } finally {
+      setSendingRequestId(null);
     }
   };
 
@@ -477,7 +487,7 @@ const ExtraMaterialPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pr-20">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -615,7 +625,7 @@ const ExtraMaterialPage: React.FC = () => {
             {/* Pending List */}
             {loading ? (
               <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#243d8a]"></div>
+                <ModernLoadingSpinners variant="pulse-wave" />
               </div>
             ) : pendingMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -680,10 +690,11 @@ const ExtraMaterialPage: React.FC = () => {
                         <div className="grid grid-cols-2 gap-2">
                           <button
                             onClick={() => handleSendToPM(request.id)}
-                            className="bg-[#243d8a] hover:bg-[#1e3270] text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
+                            disabled={sendingRequestId === request.id}
+                            className="bg-[#243d8a] hover:bg-[#1e3270] text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <PaperAirplaneIcon className="w-4 h-4" />
-                            Send
+                            {sendingRequestId === request.id ? 'Sending...' : 'Send'}
                           </button>
                           <button
                             onClick={() => handleDelete(request.id)}
@@ -764,10 +775,11 @@ const ExtraMaterialPage: React.FC = () => {
                               </button>
                               <button
                                 onClick={() => handleSendToPM(request.id)}
-                                className="text-[#243d8a] hover:text-[#1e3270] font-medium"
+                                disabled={sendingRequestId === request.id}
+                                className="text-[#243d8a] hover:text-[#1e3270] font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 <PaperAirplaneIcon className="w-4 h-4 inline mr-1" />
-                                Send
+                                {sendingRequestId === request.id ? 'Sending...' : 'Send'}
                               </button>
                               <button
                                 onClick={() => handleDelete(request.id)}
@@ -796,7 +808,7 @@ const ExtraMaterialPage: React.FC = () => {
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Sent for PM Approval</h2>
             {loading ? (
               <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#243d8a]"></div>
+                <ModernLoadingSpinners variant="pulse-wave" />
               </div>
             ) : underReviewMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -956,7 +968,7 @@ const ExtraMaterialPage: React.FC = () => {
             {/* Approved List */}
             {loading ? (
               <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#243d8a]"></div>
+                <ModernLoadingSpinners variant="pulse-wave" />
               </div>
             ) : approvedMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -1109,7 +1121,7 @@ const ExtraMaterialPage: React.FC = () => {
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Rejected Requests</h2>
             {loading ? (
               <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#243d8a]"></div>
+                <ModernLoadingSpinners variant="pulse-wave" />
               </div>
             ) : rejectedMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -1300,7 +1312,7 @@ const ExtraMaterialPage: React.FC = () => {
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Completed Purchases</h2>
             {loading ? (
               <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#243d8a]"></div>
+                <ModernLoadingSpinners variant="pulse-wave" />
               </div>
             ) : completedMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">

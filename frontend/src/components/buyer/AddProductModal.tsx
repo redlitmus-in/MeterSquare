@@ -364,4 +364,9 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
   );
 };
 
-export default AddProductModal;
+// Performance optimization: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(AddProductModal, (prevProps, nextProps) => {
+  return prevProps.isOpen === nextProps.isOpen &&
+         prevProps.vendorId === nextProps.vendorId &&
+         prevProps.editProduct?.product_id === nextProps.editProduct?.product_id;
+});

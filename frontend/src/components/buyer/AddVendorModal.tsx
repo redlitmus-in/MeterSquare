@@ -588,4 +588,8 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
   );
 };
 
-export default AddVendorModal;
+// Performance optimization: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(AddVendorModal, (prevProps, nextProps) => {
+  return prevProps.isOpen === nextProps.isOpen &&
+         prevProps.editVendor?.vendor_id === nextProps.editVendor?.vendor_id;
+});

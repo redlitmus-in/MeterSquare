@@ -1827,9 +1827,19 @@ def get_boq(boq_id):
         return jsonify({"error": str(e)}), 500
 
 def get_all_boq():
-    """Get all BOQs with their details from JSON storage"""
+    """Get all BOQs with their details from JSON storage
+
+    Optional query params for pagination (backward compatible):
+    - page: Page number (1-indexed), default None (returns all)
+    - page_size: Items per page, default 20, max 100
+    """
     try:
-         # Get current logged-in user
+        # PERFORMANCE: Optional pagination support (backward compatible)
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)  # Cap at 100 items per page
+
+        # Get current logged-in user
         current_user = getattr(g, 'user', None)
         user_id = current_user.get('user_id') if current_user else None
         user_role = current_user.get('role', '').lower() if current_user else ''
@@ -1869,8 +1879,18 @@ def get_all_boq():
                 query = query.filter(Project.buyer_id == user_id)
                 log.info(f"Buyer {user_id} - filtering BOQs by assigned projects")
 
-        boqs = query.all()
-        log.info(f"📊 Processing {len(boqs)} BOQs for user {user_id} (role: {user_role})")
+        # PERFORMANCE: Apply pagination if requested, otherwise return all (backward compatible)
+        total_count = query.count()  # Get total count for pagination metadata
+
+        if page is not None:
+            # Pagination requested - return paginated results
+            offset = (page - 1) * page_size
+            boqs = query.offset(offset).limit(page_size).all()
+            log.info(f"📊 Processing page {page} ({len(boqs)}/{total_count} BOQs) for user {user_id} (role: {user_role})")
+        else:
+            # No pagination - return all (backward compatible)
+            boqs = query.all()
+            log.info(f"📊 Processing {len(boqs)} BOQs for user {user_id} (role: {user_role})")
 
         # OPTIMIZATION: Fetch all BOQ histories at once to avoid N+1 queries
         boq_ids = [boq.boq_id for boq, _ in boqs]
@@ -1936,11 +1956,26 @@ def get_all_boq():
 
             complete_boqs.append(boq_summary)
 
-        return jsonify({
+        # PERFORMANCE: Return pagination metadata when paginated
+        response = {
             "message": "BOQs retrieved successfully",
             "count": len(complete_boqs),
             "data": complete_boqs
-        }), 200
+        }
+
+        if page is not None:
+            # Add pagination metadata
+            total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        return jsonify(response), 200
 
     except Exception as e:
         db.session.rollback()

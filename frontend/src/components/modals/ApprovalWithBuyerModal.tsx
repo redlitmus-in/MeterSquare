@@ -340,4 +340,5 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
   );
 };
 
-export default ApprovalWithBuyerModal;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(ApprovalWithBuyerModal);

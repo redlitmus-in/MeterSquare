@@ -68,6 +68,7 @@ const ChangeRequestsPage: React.FC = () => {
   const [showBuyerSelectionModal, setShowBuyerSelectionModal] = useState(false);
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
   const [sendingCrId, setSendingCrId] = useState<number | null>(null);
+  const [processingCrId, setProcessingCrId] = useState<number | null>(null); // Prevents double-clicks
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [selectedBuyerId, setSelectedBuyerId] = useState<number | null>(null);
 
@@ -106,6 +107,11 @@ const ChangeRequestsPage: React.FC = () => {
   const initialLoad = isLoading;
 
   const handleSendForReview = async (crId: number, buyerId?: number) => {
+    // Prevent double-clicks
+    if (processingCrId === crId) {
+      return;
+    }
+
     // Check if materials are new or existing to determine routing
     const request = changeRequests.find(r => r.cr_id === crId);
     if (!request) {
@@ -128,6 +134,7 @@ const ChangeRequestsPage: React.FC = () => {
       return;
     }
 
+    setProcessingCrId(crId);
     try {
       const response = await changeRequestService.sendForReview(crId, routeTo, buyerId);
       if (response.success) {
@@ -138,6 +145,8 @@ const ChangeRequestsPage: React.FC = () => {
       }
     } catch (error) {
       showError('Failed to send request for review');
+    } finally {
+      setProcessingCrId(null);
     }
   };
 
@@ -292,7 +301,6 @@ const ChangeRequestsPage: React.FC = () => {
 
   const getStatusLabel = (status: string, approvalFrom?: string) => {
     // Status display based on workflow stage
-    console.log('getStatusLabel called with:', { status, approvalFrom });
     if (status === 'pending') {
       return 'Pending';
     }
@@ -489,10 +497,13 @@ const ChangeRequestsPage: React.FC = () => {
                             ? "bg-blue-600 hover:bg-blue-700"
                             : "bg-green-600 hover:bg-green-700"}
                           onClick={() => handleSendForReview(request.cr_id)}
+                          disabled={processingCrId === request.cr_id}
                         >
-                          {request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
-                            ? 'Send to Estimator'
-                            : 'Send to Buyer'}
+                          {processingCrId === request.cr_id ? 'Sending...' : (
+                            request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
+                              ? 'Send to Estimator'
+                              : 'Send to Buyer'
+                          )}
                         </Button>
                       </>
                     )}
@@ -511,7 +522,7 @@ const ChangeRequestsPage: React.FC = () => {
     <div className="min-h-screen bg-gray-50">
       {/* Header - Conditional theme */}
       <div className="bg-white border-b border-gray-200 shadow-sm mb-8">
-        <div className="max-w-7xl mx-auto px-6 py-6">
+        <div className="max-w-7xl mx-auto px-6 py-6 pr-20">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className={`p-3 rounded-lg ${isExtraMaterial ? "bg-gradient-to-br from-[#243d8a] to-[#4a5fa8]" : "bg-gradient-to-br from-[#243d8a] to-[#4a5fa8]"}`}>
@@ -778,15 +789,18 @@ const ChangeRequestsPage: React.FC = () => {
                               </button>
                               <button
                                 onClick={() => handleSendForReview(request.cr_id)}
+                                disabled={processingCrId === request.cr_id}
                                 className={`w-full ${request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
                                   ? 'bg-blue-600 hover:bg-blue-700'
-                                  : 'bg-green-600 hover:bg-green-700'} text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold`}
+                                  : 'bg-green-600 hover:bg-green-700'} text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold disabled:opacity-50 disabled:cursor-not-allowed`}
                               >
                                 <Check className="h-4 w-4" />
                                 <span>
-                                  {request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
-                                    ? 'Send to Estimator'
-                                    : 'Send to Buyer'}
+                                  {processingCrId === request.cr_id ? 'Sending...' : (
+                                    request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
+                                      ? 'Send to Estimator'
+                                      : 'Send to Buyer'
+                                  )}
                                 </span>
                               </button>
                             </div>
@@ -1170,15 +1184,6 @@ const ChangeRequestsPage: React.FC = () => {
                                       mat.master_material_id === ''
                                     );
 
-                                    // Debug log for troubleshooting
-                                    if (request.materials_data && request.materials_data.length > 0) {
-                                      console.log(`CR ${request.cr_id} materials:`, request.materials_data.map(m => ({
-                                        name: m.material_name,
-                                        master_id: m.master_material_id,
-                                        is_new: m.master_material_id === null || m.master_material_id === undefined
-                                      })));
-                                    }
-
                                     return hasNewMaterials ? 'Approve & Send to Estimator' : 'Approve & Send to Buyer';
                                   })()}
                                 </span>
@@ -1350,15 +1355,18 @@ const ChangeRequestsPage: React.FC = () => {
                                 {/* Send for Review to Estimator or Buyer */}
                                 <button
                                   onClick={() => handleSendForReview(request.cr_id)}
+                                  disabled={processingCrId === request.cr_id}
                                   className={`w-full ${request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
                                     ? 'bg-blue-600 hover:bg-blue-700'
-                                    : 'bg-green-600 hover:bg-green-700'} text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold`}
+                                    : 'bg-green-600 hover:bg-green-700'} text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold disabled:opacity-50 disabled:cursor-not-allowed`}
                                 >
                                   <Check className="h-4 w-4" />
                                   <span>
-                                    {request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
-                                      ? 'Send to Estimator'
-                                      : 'Send to Buyer'}
+                                    {processingCrId === request.cr_id ? 'Sending...' : (
+                                      request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
+                                        ? 'Send to Estimator'
+                                        : 'Send to Buyer'
+                                    )}
                                   </span>
                                 </button>
                               </div>
@@ -1817,7 +1825,6 @@ const ChangeRequestsPage: React.FC = () => {
       {showExtraForm && (
         <div
           className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
-          onClick={() => setShowExtraForm(false)}
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}

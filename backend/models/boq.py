@@ -160,7 +160,7 @@ class BOQDetails(db.Model):
     __tablename__ = "boq_details"
 
     boq_detail_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
+    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False, index=True)  # ✅ PERFORMANCE: Added index
 
     # Complete BOQ structure stored as JSONB
     boq_details = db.Column(JSONB, nullable=False)  # Stores complete BOQ structure
@@ -189,8 +189,8 @@ class BOQDetailsHistory(db.Model):
     __tablename__ = "boq_details_history"
 
     boq_detail_history_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    boq_detail_id = db.Column(db.Integer, db.ForeignKey("boq_details.boq_detail_id"), nullable=False)
-    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
+    boq_detail_id = db.Column(db.Integer, db.ForeignKey("boq_details.boq_detail_id"), nullable=False, index=True)  # ✅ PERFORMANCE: Added index
+    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False, index=True)  # ✅ PERFORMANCE: Added index
     version = db.Column(db.Integer, nullable=False)  # Version number (1, 2, 3...)
 
     # Complete BOQ structure stored as JSONB (snapshot of that version)
@@ -215,7 +215,7 @@ class BOQHistory(db.Model):
     __tablename__ = "boq_history"
 
     boq_history_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
+    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False, index=True)  # ✅ PERFORMANCE: Added index
     action = db.Column(JSONB, nullable=True)  # EMAIL_SENT, STATUS_CHANGED, CREATED, UPDATED, APPROVED, REJECTED
     action_by = db.Column(db.String(100), nullable=False)
     boq_status = db.Column(db.String(50), nullable=True)  # BOQ status at the time of action

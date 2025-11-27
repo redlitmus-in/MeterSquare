@@ -45,6 +45,11 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
   ) : [];
 
   const handleSendForReview = async (crId: number) => {
+    // Prevent double-clicks
+    if (sendingCrId === crId) {
+      return;
+    }
+
     setSendingCrId(crId);
     try {
       const response = await changeRequestService.sendForReview(crId);
@@ -298,4 +303,5 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
   );
 };
 
-export default PendingRequestsSection;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(PendingRequestsSection);

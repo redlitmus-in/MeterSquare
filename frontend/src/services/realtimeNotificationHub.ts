@@ -288,6 +288,7 @@ class RealtimeNotificationHub {
 
     // Check permission - Firefox may block if not from user gesture
     let permission = Notification.permission;
+
     if (permission === 'default') {
       try {
         permission = await Notification.requestPermission();
@@ -302,7 +303,7 @@ class RealtimeNotificationHub {
 
     // Create desktop notification with Firefox-compatible options
     try {
-      const actionUrl = (notification as any).actionUrl || notification.metadata?.actionUrl;
+      const actionUrl = (notification as any).actionUrl || notification.metadata?.actionUrl || notification.metadata?.action_url;
 
       // Base options that work in all browsers
       const notifOptions: NotificationOptions = {
@@ -329,8 +330,8 @@ class RealtimeNotificationHub {
 
       // Auto close after 8 seconds
       setTimeout(() => desktopNotif.close(), 8000);
-    } catch (error) {
-      // Notification failed
+    } catch {
+      // Silent fail
     }
   }
 
@@ -349,9 +350,6 @@ class RealtimeNotificationHub {
     if (isSender) {
       // Sender already gets toast from the component that performed the action
       // No need to show another toast here - would be duplicate
-      if (import.meta.env.DEV) {
-        console.log(`[PR Notification] Sender confirmed: PR ${data.documentId} ${type}`);
-      }
     } else if (data.targetRole === this.userRole || data.targetUserId === currentUserId) {
       // Receiver gets desktop notification + panel notification (no toast)
       const notification: RealtimeNotification = {
@@ -484,10 +482,6 @@ class RealtimeNotificationHub {
       const data = await response.json();
 
       if (data.success && data.notifications && Array.isArray(data.notifications)) {
-        if (import.meta.env.DEV) {
-          console.log(`[NotificationHub] Found ${data.notifications.length} unsynced notifications out of ${data.total || 0} total`);
-        }
-
         // Process each notification
         const now = Date.now();
         const RECENT_THRESHOLD = 5 * 60 * 1000; // 5 minutes - show popup for recent notifications

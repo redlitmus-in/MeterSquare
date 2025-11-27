@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -363,6 +363,92 @@ const EstimatorHub: React.FC = () => {
   const [selectedPM, setSelectedPM] = useState<number | null>(null);
   const [isSendingToPM, setIsSendingToPM] = useState(false);
   const [loadingPMs, setLoadingPMs] = useState(false);
+
+  // ✅ PERFORMANCE: useCallback handlers to prevent unnecessary re-renders
+  // These handlers are used frequently in the UI and benefit from memoization
+  const handleSetDeletingBoq = useCallback((boq: BOQ | null) => {
+    setDeletingBoq(boq);
+  }, []);
+
+  const handleSetDeletingProject = useCallback((project: any) => {
+    setDeletingProject(project);
+  }, []);
+
+  const handleSetViewingProject = useCallback((project: any) => {
+    setViewingProject(project);
+  }, []);
+
+  const handleShowCancelModal = useCallback((boq: BOQ) => {
+    setBoqToCancel(boq);
+    setShowCancelModal(true);
+  }, []);
+
+  const handleShowRevisionModal = useCallback((boq: BOQ) => {
+    setSelectedBoqForRevision(boq);
+    setShowRevisionModal(true);
+  }, []);
+
+  const handleShowEmailModal = useCallback((boq: BOQ, mode: 'td' | 'client') => {
+    setBoqToEmail(boq);
+    setEmailMode(mode);
+    setShowSendEmailModal(true);
+  }, []);
+
+  const handlePageChange = useCallback((page: number) => {
+    setCurrentPage(page);
+  }, []);
+
+  const handleBoqPageChange = useCallback((page: number) => {
+    setBoqCurrentPage(page);
+  }, []);
+
+  // ✅ PERFORMANCE: Memoized tab counts to prevent expensive recalculations on every render
+  const tabCounts = useMemo(() => {
+    const pendingProjectsCount = projects.filter(p => {
+      const projectBoqs = boqs.filter(boq => boq.project?.project_id == p.project_id);
+      return projectBoqs.length === 0 || projectBoqs.every(boq => {
+        const status = boq.status?.toLowerCase() || '';
+        return !status || status === 'draft';
+      });
+    }).length;
+
+    const sentCount = boqs.filter(b => {
+      const status = b.status?.toLowerCase();
+      return status === 'pending' || status === 'pending_pm_approval';
+    }).length;
+
+    const approvedCount = boqs.filter(b => {
+      const s = b.status?.toLowerCase();
+      return s === 'pm_approved' || s === 'pending_td_approval' || s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed';
+    }).length;
+
+    const revisionsCount = boqs.filter(b => {
+      const s = b.status?.toLowerCase();
+      return s === 'under_revision' || s === 'pending_revision' || s === 'revision_approved';
+    }).length;
+
+    const rejectedCount = boqs.filter(b => {
+      const s = b.status?.toLowerCase();
+      return s === 'rejected' || s === 'client_rejected' || s === 'pm_rejected';
+    }).length;
+
+    const completedCount = boqs.filter(b => b.status?.toLowerCase() === 'completed').length;
+    const cancelledCount = boqs.filter(b => b.status?.toLowerCase() === 'client_cancelled').length;
+
+    return {
+      pending: pendingProjectsCount,
+      sent: sentCount,
+      approved: approvedCount,
+      revisions: revisionsCount,
+      rejected: rejectedCount,
+      completed: completedCount,
+      cancelled: cancelledCount
+    };
+  }, [boqs, projects]);
+
+  const handleShowProjectDialog = useCallback(() => {
+    setShowProjectDialog(true);
+  }, []);
 
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes BOQs reload automatically!
   const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
@@ -1362,7 +1448,7 @@ const EstimatorHub: React.FC = () => {
               <h3 className="font-semibold text-gray-900 text-base">{boq.title}</h3>
               {revisionNumber > 0 && (
                 <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full">
-                  Rev {revisionNumber}
+                  R{revisionNumber}
                 </span>
               )}
             </div>
@@ -1414,7 +1500,7 @@ const EstimatorHub: React.FC = () => {
               {isDraft && (
                 <button
                   className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
-                  onClick={() => setDeletingBoq(boq)}
+                  onClick={() => handleSetDeletingBoq(boq)}
                   title="Delete BOQ"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -1455,21 +1541,32 @@ const EstimatorHub: React.FC = () => {
             </div>
           )}
 
-          {/* TD Approval/Rejection Remarks */}
-          {(boq.notes || (boq.status.toLowerCase() === 'rejected' && boq.client_rejection_reason)) && (() => {
-            const remarksText = boq.notes || boq.client_rejection_reason;
+          {/* TD Approval/Rejection/Cancellation Remarks */}
+          {(() => {
+            const statusLower = boq.status.toLowerCase();
+            const isCancelled = statusLower === 'client_cancelled';
+            const isRejected = statusLower === 'rejected' || statusLower === 'client_rejected';
+            const isApproved = statusLower.includes('approved') || statusLower === 'revision_approved';
+
+            // For cancelled/rejected: show client_rejection_reason
+            // For approved: show notes
+            const remarksText = (isCancelled || isRejected)
+              ? boq.client_rejection_reason
+              : (isApproved ? boq.notes : (boq.notes || boq.client_rejection_reason));
+
+            // Don't show anything if no remarks
+            if (!remarksText) return null;
+
             const maxLength = 80;
             const isLongText = remarksText && remarksText.length > maxLength;
             const displayText = isLongText
               ? remarksText.substring(0, maxLength) + '...'
               : remarksText;
 
-            const isApproved = boq.status.toLowerCase().includes('approved') || boq.status.toLowerCase() === 'revision_approved';
-
             const openRemarksModal = () => {
               setRemarksModalData({
                 text: remarksText,
-                type: isApproved ? 'approval' : 'rejection',
+                type: isApproved ? 'approval' : (isCancelled ? 'cancellation' : 'rejection'),
                 boqName: boq.boq_name || 'BOQ'
               });
               setShowRemarksModal(true);
@@ -1479,22 +1576,24 @@ const EstimatorHub: React.FC = () => {
               <div className={`mt-2 rounded-lg p-2 border ${
                 isApproved
                   ? 'bg-green-50 border-green-200'
-                  : 'bg-red-50 border-red-200'
+                  : isCancelled
+                    ? 'bg-gray-50 border-gray-300'
+                    : 'bg-red-50 border-red-200'
               }`}>
                 <div className="flex items-start gap-1.5">
                   {isApproved ? (
                     <CheckCircleIcon className="w-3.5 h-3.5 text-green-600 mt-0.5 flex-shrink-0" />
                   ) : (
-                    <XCircleIcon className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
+                    <XCircleIcon className={`w-3.5 h-3.5 ${isCancelled ? 'text-gray-600' : 'text-red-600'} mt-0.5 flex-shrink-0`} />
                   )}
                   <div className="flex-1 min-w-0">
                     <p className={`text-[10px] font-semibold mb-0.5 ${
-                      isApproved ? 'text-green-700' : 'text-red-700'
+                      isApproved ? 'text-green-700' : (isCancelled ? 'text-gray-700' : 'text-red-700')
                     }`}>
-                      {isApproved ? 'Approval Comments:' : 'Rejection Reason:'}
+                      {isApproved ? 'Approval Comments:' : (isCancelled ? 'Cancellation Reason:' : 'Rejection Reason:')}
                     </p>
                     <p className={`text-[10px] leading-relaxed ${
-                      isApproved ? 'text-green-600' : 'text-red-600'
+                      isApproved ? 'text-green-600' : (isCancelled ? 'text-gray-600' : 'text-red-600')
                     }`}>
                       {displayText}
                     </p>
@@ -1502,7 +1601,7 @@ const EstimatorHub: React.FC = () => {
                       <button
                         onClick={openRemarksModal}
                         className={`text-[10px] font-medium mt-0.5 hover:underline ${
-                          isApproved ? 'text-green-700' : 'text-red-700'
+                          isApproved ? 'text-green-700' : (isCancelled ? 'text-gray-700' : 'text-red-700')
                         }`}
                       >
                         Read more
@@ -1531,8 +1630,8 @@ const EstimatorHub: React.FC = () => {
             <span className="sm:hidden">View</span>
           </button>
 
-          {/* Show Compare button only if revision number > 0 and not in approved/client statuses */}
-          {revisionNumber > 0 && !isApprovedByTD && !isSentToClient && !isClientConfirmed && (
+          {/* Show Compare button only if revision number > 0 and not in approved/client/cancelled statuses */}
+          {revisionNumber > 0 && !isApprovedByTD && !isSentToClient && !isClientConfirmed && !isClientCancelled && (
             <button
               className="text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm font-semibold"
               onClick={() => {
@@ -2102,7 +2201,7 @@ const EstimatorHub: React.FC = () => {
                             }} className="h-8 w-8 p-0" title="Send Revision to TD">
                               <Send className="h-4 w-4 text-red-600" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => { setBoqToCancel(boq); setShowCancelModal(true); }} className="h-8 w-8 p-0" title="Cancel Project">
+                            <Button variant="ghost" size="sm" onClick={() => handleShowCancelModal(boq)} className="h-8 w-8 p-0" title="Cancel Project">
                               <XCircleIcon className="h-4 w-4 text-red-600" />
                             </Button>
                           </>
@@ -2141,11 +2240,11 @@ const EstimatorHub: React.FC = () => {
                               <CheckCircle className="h-4 w-4 mr-1" />
                               <span className="text-xs">Approved</span>
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => { setSelectedBoqForRevision(boq); setShowRevisionModal(true); }} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Revisions">
+                            <Button variant="ghost" size="sm" onClick={() => handleShowRevisionModal(boq)} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Revisions">
                               <Edit className="h-4 w-4 mr-1" />
                               <span className="text-xs">Revisions</span>
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => { setBoqToCancel(boq); setShowCancelModal(true); }} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Cancel Project">
+                            <Button variant="ghost" size="sm" onClick={() => handleShowCancelModal(boq)} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Cancel Project">
                               <XCircleIcon className="h-4 w-4 mr-1" />
                               <span className="text-xs">Cancel</span>
                             </Button>
@@ -2505,7 +2604,7 @@ const EstimatorHub: React.FC = () => {
 
             {/* New Project Button */}
             <Button
-              onClick={() => setShowProjectDialog(true)}
+              onClick={handleShowProjectDialog}
               className="bg-red-600 hover:bg-red-700 text-white shadow-md h-8 whitespace-nowrap"
               size="sm"
             >
@@ -2525,14 +2624,7 @@ const EstimatorHub: React.FC = () => {
               >
                 <span className="hidden sm:inline">Pending</span>
                 <span className="sm:hidden">Pending</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({projects.filter(p => {
-                  const projectBoqs = boqs.filter(boq => boq.project?.project_id == p.project_id);
-                  // Only show projects that have NO BOQs or only have draft BOQs
-                  return projectBoqs.length === 0 || projectBoqs.every(boq => {
-                    const status = boq.status?.toLowerCase() || '';
-                    return !status || status === 'draft';
-                  });
-                }).length})</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.pending})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="sent"
@@ -2540,10 +2632,7 @@ const EstimatorHub: React.FC = () => {
               >
                 <span className="hidden sm:inline">Send BOQ</span>
                 <span className="sm:hidden">Sent</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
-                  const status = b.status?.toLowerCase();
-                  return status === 'pending' || status === 'pending_pm_approval';
-                }).length})</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.sent})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="approved"
@@ -2551,10 +2640,7 @@ const EstimatorHub: React.FC = () => {
               >
                 <span className="hidden sm:inline">Approved BOQ</span>
                 <span className="sm:hidden">Approved</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
-                  const s = b.status?.toLowerCase();
-                  return s === 'pm_approved' || s === 'pending_td_approval' || s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed';
-                }).length})</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.approved})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="revisions"
@@ -2562,10 +2648,7 @@ const EstimatorHub: React.FC = () => {
               >
                 <span className="hidden sm:inline">Revisions</span>
                 <span className="sm:hidden">Revisions</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
-                  const s = b.status?.toLowerCase();
-                  return s === 'under_revision' || s === 'pending_revision' || s === 'revision_approved';
-                }).length})</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.revisions})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="rejected"
@@ -2573,10 +2656,7 @@ const EstimatorHub: React.FC = () => {
               >
                 <span className="hidden sm:inline">Rejected BOQ</span>
                 <span className="sm:hidden">Rejected</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
-                  const s = b.status?.toLowerCase();
-                  return s === 'rejected' || s === 'client_rejected' || s === 'pm_rejected';
-                }).length})</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.rejected})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="completed"
@@ -2584,7 +2664,7 @@ const EstimatorHub: React.FC = () => {
               >
                 <span className="hidden sm:inline">Completed BOQ</span>
                 <span className="sm:hidden">Completed</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'completed').length})</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.completed})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="cancelled"
@@ -2592,7 +2672,7 @@ const EstimatorHub: React.FC = () => {
               >
                 <span className="hidden sm:inline">Cancelled BOQ</span>
                 <span className="sm:hidden">Cancelled</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'client_cancelled').length})</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.cancelled})</span>
               </TabsTrigger>
             </TabsList>
 
@@ -2653,7 +2733,7 @@ const EstimatorHub: React.FC = () => {
                             </button>
                             <button
                               className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
-                              onClick={() => setDeletingProject(project)}
+                              onClick={() => handleSetDeletingProject(project)}
                               title="Delete Project"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -2702,7 +2782,7 @@ const EstimatorHub: React.FC = () => {
                         <button
                           className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
                           style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                          onClick={() => setViewingProject(project)}
+                          onClick={() => handleSetViewingProject(project)}
                         >
                           <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                           <span className="hidden sm:inline">View Details</span>
@@ -2829,7 +2909,7 @@ const EstimatorHub: React.FC = () => {
                         <h3 className="text-xl font-bold text-gray-900 mb-2">No projects yet</h3>
                         <p className="text-sm text-gray-500 mb-6">Create your first project to start managing BOQs</p>
                         <Button
-                          onClick={() => setShowProjectDialog(true)}
+                          onClick={handleShowProjectDialog}
                           className="bg-green-600 hover:bg-green-700 text-white shadow-md"
                         >
                           <Plus className="h-5 w-5 mr-2" />
@@ -2935,7 +3015,7 @@ const EstimatorHub: React.FC = () => {
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      onClick={() => setViewingProject(project)}
+                                      onClick={() => handleSetViewingProject(project)}
                                       className="h-7 w-7 p-0 hover:bg-gray-100"
                                       title="View Details"
                                     >
@@ -3018,7 +3098,7 @@ const EstimatorHub: React.FC = () => {
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      onClick={() => setDeletingProject(project)}
+                                      onClick={() => handleSetDeletingProject(project)}
                                       className="h-7 w-7 p-0 hover:bg-red-50"
                                       title="Delete Project"
                                     >

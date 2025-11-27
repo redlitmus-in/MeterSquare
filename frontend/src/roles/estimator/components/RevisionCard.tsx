@@ -67,7 +67,7 @@ const RevisionCard: React.FC<RevisionCardProps> = ({
 
   const getRevisionLabel = () => {
     const revNum = project.revision_number || 0;
-    return revNum === 0 ? 'Original' : `${revNum}`;
+    return revNum === 0 ? 'Original' : `R${revNum}`;
   };
 
   const revisionNumber = getDisplayRevisionNumber();
@@ -272,4 +272,5 @@ const RevisionCard: React.FC<RevisionCardProps> = ({
   );
 };
 
-export default RevisionCard;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(RevisionCard);

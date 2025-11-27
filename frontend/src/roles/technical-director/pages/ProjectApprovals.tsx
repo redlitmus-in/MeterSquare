@@ -591,6 +591,8 @@ const ProjectApprovals: React.FC = () => {
       priority: 'medium',
       approvalNotes: status === 'approved' ? boq.notes : undefined,
       rejectionReason: status === 'rejected' ? boq.notes : undefined,
+      cancellationReason: status === 'cancelled' ? boq.client_rejection_reason : undefined,
+      client_rejection_reason: boq.client_rejection_reason,
       location: boq.location || boq.project_details?.location || boq.project?.location || 'N/A',
       floor: boq.floor || boq.floor_name || boq.project_details?.floor || boq.project?.floor_name || 'N/A',
       workingHours: boq.hours || boq.working_hours || boq.project_details?.hours || boq.project?.working_hours || 'N/A',
@@ -1922,9 +1924,16 @@ const ProjectApprovals: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Approval/Rejection Remarks Section */}
-                    {(estimation.approvalNotes || estimation.rejectionReason) && (() => {
-                      const remarksText = estimation.approvalNotes || estimation.rejectionReason;
+                    {/* Approval/Rejection/Cancellation Remarks Section */}
+                    {(estimation.approvalNotes || estimation.rejectionReason || (estimation as any).cancellationReason) && (() => {
+                      const isCancelled = estimation.status === 'cancelled';
+                      const isApproved = estimation.status === 'approved';
+                      const remarksText = isCancelled
+                        ? (estimation as any).cancellationReason
+                        : (estimation.approvalNotes || estimation.rejectionReason);
+
+                      if (!remarksText) return null;
+
                       const maxLength = 100;
                       const isLongText = remarksText.length > maxLength;
                       const isExpanded = expandedRemarks.has(estimation.id);
@@ -1947,28 +1956,34 @@ const ProjectApprovals: React.FC = () => {
                       return (
                         <div className="mt-3">
                           <div className={`rounded-lg p-3 border ${
-                            estimation.status === 'approved'
+                            isApproved
                               ? 'bg-green-50 border-green-200'
-                              : 'bg-red-50 border-red-200'
+                              : isCancelled
+                                ? 'bg-gray-50 border-gray-300'
+                                : 'bg-red-50 border-red-200'
                           }`}>
                             <div className="flex items-start gap-2">
-                              {estimation.status === 'approved' ? (
+                              {isApproved ? (
                                 <CheckCircleIcon className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
                               ) : (
-                                <XCircleIcon className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+                                <XCircleIcon className={`w-4 h-4 ${isCancelled ? 'text-gray-600' : 'text-red-600'} mt-0.5 flex-shrink-0`} />
                               )}
                               <div className="flex-1 min-w-0">
                                 <p className={`text-xs font-semibold mb-1 ${
-                                  estimation.status === 'approved'
+                                  isApproved
                                     ? 'text-green-700'
-                                    : 'text-red-700'
+                                    : isCancelled
+                                      ? 'text-gray-700'
+                                      : 'text-red-700'
                                 }`}>
-                                  {estimation.status === 'approved' ? 'Approval Comments:' : 'Rejection Reason:'}
+                                  {isApproved ? 'Approval Comments:' : isCancelled ? 'Cancellation Reason:' : 'Rejection Reason:'}
                                 </p>
                                 <p className={`text-xs leading-relaxed ${
-                                  estimation.status === 'approved'
+                                  isApproved
                                     ? 'text-green-600'
-                                    : 'text-red-600'
+                                    : isCancelled
+                                      ? 'text-gray-600'
+                                      : 'text-red-600'
                                 }`}>
                                   {displayText}
                                 </p>
@@ -1976,9 +1991,11 @@ const ProjectApprovals: React.FC = () => {
                                   <button
                                     onClick={toggleExpanded}
                                     className={`text-xs font-medium mt-1 hover:underline ${
-                                      estimation.status === 'approved'
+                                      isApproved
                                         ? 'text-green-700'
-                                        : 'text-red-700'
+                                        : isCancelled
+                                          ? 'text-gray-700'
+                                          : 'text-red-700'
                                     }`}
                                   >
                                     {isExpanded ? 'Show less' : 'Read more'}

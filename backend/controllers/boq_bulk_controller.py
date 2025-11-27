@@ -33,6 +33,8 @@ def add_to_master_tables_bulk(item_name, description, work_type, materials_data,
     """
     Add items, materials, and labour to master tables
     Same as boq_controller.add_to_master_tables but adapted for bulk operations
+
+    ✅ PERFORMANCE: Uses batch queries instead of N+1 queries (1 query for N materials instead of N queries)
     """
     master_item_id = None
     master_material_ids = []
@@ -64,66 +66,88 @@ def add_to_master_tables_bulk(item_name, description, work_type, materials_data,
 
     master_item_id = master_item.item_id
 
-    # Add to master materials (prevent duplicates)
-    for mat_data in materials_data:
-        material_name = mat_data.get("material_name")
-        unit_price = mat_data.get("unit_price", 0.0)
-        master_material = MasterMaterial.query.filter_by(material_name=material_name).first()
-        if not master_material:
-            master_material = MasterMaterial(
-                material_name=material_name,
-                item_id=master_item_id,
-                default_unit=mat_data.get("unit", "nos"),
-                current_market_price=unit_price,
-                created_by=created_by
-            )
-            db.session.add(master_material)
-            db.session.flush()
-        else:
-            # Update existing material
-            if master_material.item_id is None:
-                master_material.item_id = master_item_id
-            master_material.current_market_price = unit_price
-            new_unit = mat_data.get("unit", "nos")
-            if master_material.default_unit != new_unit:
-                master_material.default_unit = new_unit
-            db.session.flush()
+    # ✅ PERFORMANCE: Batch lookup all materials in ONE query instead of N queries
+    if materials_data:
+        material_names = [mat.get("material_name") for mat in materials_data if mat.get("material_name")]
+        existing_materials = MasterMaterial.query.filter(
+            MasterMaterial.material_name.in_(material_names)
+        ).all()
+        material_map = {m.material_name: m for m in existing_materials}
 
-        master_material_ids.append(master_material.material_id)
+        # Add to master materials (prevent duplicates)
+        for mat_data in materials_data:
+            material_name = mat_data.get("material_name")
+            if not material_name:
+                continue
+            unit_price = mat_data.get("unit_price", 0.0)
+            master_material = material_map.get(material_name)
+            if not master_material:
+                master_material = MasterMaterial(
+                    material_name=material_name,
+                    item_id=master_item_id,
+                    default_unit=mat_data.get("unit", "nos"),
+                    current_market_price=unit_price,
+                    created_by=created_by
+                )
+                db.session.add(master_material)
+                db.session.flush()
+                material_map[material_name] = master_material  # Add to map for future lookups
+            else:
+                # Update existing material
+                if master_material.item_id is None:
+                    master_material.item_id = master_item_id
+                master_material.current_market_price = unit_price
+                new_unit = mat_data.get("unit", "nos")
+                if master_material.default_unit != new_unit:
+                    master_material.default_unit = new_unit
+                db.session.flush()
 
-    # Add to master labour (prevent duplicates)
-    for labour_data_item in labour_data:
-        labour_role = labour_data_item.get("labour_role")
-        rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
-        hours = labour_data_item.get("hours", 0.0)
-        labour_amount = float(rate_per_hour) * float(hours)
+            master_material_ids.append(master_material.material_id)
 
-        master_labour = MasterLabour.query.filter_by(labour_role=labour_role).first()
+    # ✅ PERFORMANCE: Batch lookup all labour roles in ONE query instead of N queries
+    if labour_data:
+        labour_roles = [lab.get("labour_role") for lab in labour_data if lab.get("labour_role")]
+        existing_labour = MasterLabour.query.filter(
+            MasterLabour.labour_role.in_(labour_roles)
+        ).all()
+        labour_map = {l.labour_role: l for l in existing_labour}
 
-        if not master_labour:
-            master_labour = MasterLabour(
-                labour_role=labour_role,
-                item_id=master_item_id,
-                work_type=work_type,
-                hours=float(hours),
-                rate_per_hour=float(rate_per_hour),
-                amount=labour_amount,
-                created_by=created_by
-            )
-            db.session.add(master_labour)
-            db.session.flush()
-        else:
-            # Update existing labour
-            if master_labour.item_id is None:
-                master_labour.item_id = master_item_id
-            if master_labour.work_type is None and work_type:
-                master_labour.work_type = work_type
-            master_labour.hours = float(hours)
-            master_labour.rate_per_hour = float(rate_per_hour)
-            master_labour.amount = labour_amount
-            db.session.flush()
+        # Add to master labour (prevent duplicates)
+        for labour_data_item in labour_data:
+            labour_role = labour_data_item.get("labour_role")
+            if not labour_role:
+                continue
+            rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
+            hours = labour_data_item.get("hours", 0.0)
+            labour_amount = float(rate_per_hour) * float(hours)
 
-        master_labour_ids.append(master_labour.labour_id)
+            master_labour = labour_map.get(labour_role)
+
+            if not master_labour:
+                master_labour = MasterLabour(
+                    labour_role=labour_role,
+                    item_id=master_item_id,
+                    work_type=work_type,
+                    hours=float(hours),
+                    rate_per_hour=float(rate_per_hour),
+                    amount=labour_amount,
+                    created_by=created_by
+                )
+                db.session.add(master_labour)
+                db.session.flush()
+                labour_map[labour_role] = master_labour  # Add to map for future lookups
+            else:
+                # Update existing labour
+                if master_labour.item_id is None:
+                    master_labour.item_id = master_item_id
+                if master_labour.work_type is None and work_type:
+                    master_labour.work_type = work_type
+                master_labour.hours = float(hours)
+                master_labour.rate_per_hour = float(rate_per_hour)
+                master_labour.amount = labour_amount
+                db.session.flush()
+
+            master_labour_ids.append(master_labour.labour_id)
 
     return master_item_id, master_material_ids, master_labour_ids
 

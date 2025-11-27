@@ -150,11 +150,12 @@ export const getNotificationRedirectPath = (
     }
   }
 
-  // Handle Change Request notifications
+  // Handle Materials Purchase (Change Request) notifications
   if (titleLower.includes('change request') || messageLower.includes('change request') ||
+      titleLower.includes('materials purchase') || messageLower.includes('materials purchase') ||
       category === 'change_request') {
 
-    // CR Approved
+    // Materials Purchase Approved
     if (titleLower.includes('approved') || messageLower.includes('approved')) {
       return {
         path: buildPath('/change-requests'),
@@ -162,7 +163,7 @@ export const getNotificationRedirectPath = (
       };
     }
 
-    // CR Rejected
+    // Materials Purchase Rejected
     if (titleLower.includes('rejected')) {
       return {
         path: buildPath('/change-requests'),
@@ -170,7 +171,7 @@ export const getNotificationRedirectPath = (
       };
     }
 
-    // New CR Created
+    // New Materials Purchase Created
     if (titleLower.includes('new') || titleLower.includes('created')) {
       return {
         path: buildPath('/change-requests'),

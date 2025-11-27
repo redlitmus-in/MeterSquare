@@ -528,4 +528,5 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
   );
 };
 
-export default SimplifiedBOQView;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(SimplifiedBOQView);

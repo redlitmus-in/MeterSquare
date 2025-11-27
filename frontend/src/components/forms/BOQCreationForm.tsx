@@ -1024,8 +1024,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           }
         }
 
-        // Set basic BOQ info
-        setBoqName(isRevision ? `${boqDetails.boq_name} - Revision` : boqDetails.boq_name);
+        // Set basic BOQ info - Keep original title, don't append " - Revision"
+        // The revision number is tracked separately and shown as badge (R1, R2, etc.)
+        // Strip any existing " - Revision" suffixes from previous saves to clean up data
+        let cleanTitle = boqDetails.boq_name || '';
+        while (cleanTitle.endsWith(' - Revision')) {
+          cleanTitle = cleanTitle.slice(0, -11); // Remove " - Revision" (11 chars)
+        }
+        setBoqName(cleanTitle);
         setSelectedProjectId(boqDetails.project_id);
 
         // Load and merge preliminaries with master list

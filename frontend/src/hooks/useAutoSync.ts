@@ -112,7 +112,6 @@ export function useAutoSync<TData = any>({
 
   // Silent background refresh without UI flicker
   const silentRefresh = useCallback(async () => {
-    console.log(`🔄 Real-time update triggered for:`, queryKey);
     // Invalidate and refetch in background
     await queryClient.invalidateQueries({ queryKey, refetchType: 'active' });
   }, [queryClient, queryKey]);
@@ -121,25 +120,20 @@ export function useAutoSync<TData = any>({
   useEffect(() => {
     if (!enabled || realtimeTables.length === 0) return;
 
-    console.log(`📡 Setting up real-time subscriptions for:`, realtimeTables);
-
     // Subscribe to each table
     realtimeTables.forEach(table => {
       const cleanup = subscribeToRealtime({
         table,
         event: '*',
         onInsert: (payload) => {
-          console.log(`✅ Real-time INSERT on ${table}:`, payload);
           if (onRealtimeEvent) onRealtimeEvent({ type: 'INSERT', payload });
           silentRefresh();
         },
         onUpdate: (payload) => {
-          console.log(`✅ Real-time UPDATE on ${table}:`, payload);
           if (onRealtimeEvent) onRealtimeEvent({ type: 'UPDATE', payload });
           silentRefresh();
         },
         onDelete: (payload) => {
-          console.log(`✅ Real-time DELETE on ${table}:`, payload);
           if (onRealtimeEvent) onRealtimeEvent({ type: 'DELETE', payload });
           silentRefresh();
         },
@@ -154,7 +148,6 @@ export function useAutoSync<TData = any>({
 
     // Cleanup on unmount
     return () => {
-      console.log(`🔌 Cleaning up real-time subscriptions for:`, realtimeTables);
       cleanupFnsRef.current.forEach(cleanup => cleanup());
       cleanupFnsRef.current = [];
       setRealtimeConnected(false);

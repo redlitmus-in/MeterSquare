@@ -15,6 +15,7 @@ import { useAuthStore } from '@/store/authStore';
 import ExtraSubItemsForm from '@/components/change-requests/ExtraSubItemsForm';
 import { useChangeRequestsAutoSync } from '@/hooks/useAutoSync';
 import { changeRequestService } from '@/services/changeRequestService';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface ChangeRequest {
   cr_id: number;
@@ -35,6 +36,7 @@ const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
   const [showForm, setShowForm] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<ChangeRequest | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false); // Prevents double-submission
 
   const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
   const token = localStorage.getItem('access_token');
@@ -54,6 +56,12 @@ const ChangeRequestsPage: React.FC = () => {
   const changeRequests = useMemo(() => changeRequestsData || [], [changeRequestsData]);
 
   const handleSubmitChangeRequest = async (data: any) => {
+    // Prevent double-submission
+    if (isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
     try {
       const response = await axios.post(`${API_URL}/boq/change-request`, data, { headers });
 
@@ -72,6 +80,8 @@ const ChangeRequestsPage: React.FC = () => {
     } catch (error: any) {
       console.error('Error submitting change request:', error);
       showError(error.response?.data?.error || 'Failed to submit change request');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -174,7 +184,7 @@ const ChangeRequestsPage: React.FC = () => {
         >
           {loading ? (
             <div className="flex justify-center items-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+              <ModernLoadingSpinners variant="pulse-wave" />
             </div>
           ) : changeRequests.length === 0 ? (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -269,4 +279,5 @@ const ChangeRequestsPage: React.FC = () => {
   );
 };
 
-export default ChangeRequestsPage;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(ChangeRequestsPage);

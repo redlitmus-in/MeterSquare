@@ -283,8 +283,23 @@ const usePurchaseStore = create<PurchaseStore>()(
           }
 
           // Only update if data has changed
+          // ✅ PERFORMANCE: Use efficient comparison instead of JSON.stringify (avoids serializing ~200KB twice)
           const currentPurchases = get().purchases;
-          const hasChanges = JSON.stringify(currentPurchases) !== JSON.stringify(purchaseData);
+          const hasChanges =
+            purchaseData.length !== currentPurchases.length ||
+            purchaseData.some((p, idx) => {
+              const currentP = currentPurchases[idx];
+              return !currentP ||
+                p.purchase_id !== currentP.purchase_id ||
+                p.status !== currentP.status ||
+                p.current_workflow_status !== currentP.current_workflow_status ||
+                p.procurement_status !== currentP.procurement_status ||
+                p.project_manager_status !== currentP.project_manager_status ||
+                p.estimation_status !== currentP.estimation_status ||
+                p.technical_director_status !== currentP.technical_director_status ||
+                p.accounts_status !== currentP.accounts_status ||
+                p.last_modified_at !== currentP.last_modified_at;
+            });
 
           if (hasChanges) {
             // Get current user role
@@ -317,19 +332,20 @@ const usePurchaseStore = create<PurchaseStore>()(
                 // Show toast notification
                 showInfo(`${newPurchases.length} new purchase${newPurchases.length > 1 ? 's' : ''} received`);
 
-                // Send browser notifications for each new purchase
-                newPurchases.forEach(async (purchase) => {
-                  // Request notification permission if not already granted
+                // ✅ PERFORMANCE: Request notification permission ONCE before the loop (not per purchase)
+                (async () => {
                   await requestNotificationPermission();
 
-                  // Send browser notification using the purchase notification service
-                  await sendPRNotification('submitted', {
-                    documentId: `PR-${purchase.purchase_id}`,
-                    submittedBy: purchase.requested_by || purchase.created_by || 'Unknown',
-                    projectName: purchase.project_id?.toString() || 'Unknown Project',
-                    nextRole: 'Procurement'
-                  });
-                });
+                  // Send browser notifications for each new purchase
+                  for (const purchase of newPurchases) {
+                    await sendPRNotification('submitted', {
+                      documentId: `PR-${purchase.purchase_id}`,
+                      submittedBy: purchase.requested_by || purchase.created_by || 'Unknown',
+                      projectName: purchase.project_id?.toString() || 'Unknown Project',
+                      nextRole: 'Procurement'
+                    });
+                  }
+                })();
               }
             }
 
@@ -693,12 +709,20 @@ export const startPolling = (role?: string) => {
     // Setup real-time subscription for instant updates
     store.setupRealtimeSubscription();
 
-    // Setup aggressive polling (every 2 seconds when tab is visible)
+    // ✅ PERFORMANCE: Smart polling - skip if real-time recently updated (reduces redundant API calls)
     pollingIntervalId = setInterval(() => {
       const currentStore = usePurchaseStore.getState();
-      // Always poll when tab is visible - no conditions
+      // Only poll when tab is visible AND we haven't had a recent update
       if (document.visibilityState === 'visible') {
-        currentStore.fetchPurchases(mappedRole);
+        const lastUpdate = currentStore.lastFetchTime;
+        const now = Date.now();
+        const timeSinceLastUpdate = lastUpdate ? now - lastUpdate.getTime() : Infinity;
+
+        // If we received an update in the last 3 seconds (from real-time), skip this poll
+        // This avoids redundant fetches when real-time is working correctly
+        if (timeSinceLastUpdate > 3000) {
+          currentStore.fetchPurchases(mappedRole);
+        }
       }
     }, store.pollingInterval);
 
@@ -712,40 +736,60 @@ export const stopPolling = () => {
   }
 };
 
-// Auto-refresh INSTANTLY when tab becomes visible
+// ✅ PERFORMANCE: Debounced visibility change handler to prevent rapid API calls
+let visibilityChangeTimeout: ReturnType<typeof setTimeout> | null = null;
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    // INSTANT refresh when tab becomes active - no delays!
-    const store = usePurchaseStore.getState();
-    const userRole = localStorage.getItem('userRole');
-
-
-    // Fix role mapping - localStorage might have different format
-    let mappedRole = userRole;
-    if (userRole) {
-      // Map common role variations
-      if (userRole.toLowerCase().includes('mep')) {
-        mappedRole = 'mepsupervisor';
-      } else if (userRole.toLowerCase().includes('site') && !userRole.toLowerCase().includes('mep')) {
-        mappedRole = 'sitesupervisor';
-      } else if (userRole.toLowerCase().includes('procurement')) {
-        mappedRole = 'procurement';
-      } else if (userRole.toLowerCase().includes('project')) {
-        mappedRole = 'projectmanager';
-      } else if (userRole.toLowerCase().includes('estimation')) {
-        mappedRole = 'estimation';
-      } else if (userRole.toLowerCase().includes('technical')) {
-        mappedRole = 'technicaldirector';
-      } else if (userRole.toLowerCase().includes('account')) {
-        mappedRole = 'accounts';
-      } else {
-        // Keep original role if no mapping found
-        mappedRole = userRole;
-      }
+    // Clear any pending timeout to prevent duplicate calls
+    if (visibilityChangeTimeout) {
+      clearTimeout(visibilityChangeTimeout);
     }
 
-    if (mappedRole) {
-      store.fetchPurchases(mappedRole);
+    // ✅ PERFORMANCE: Debounce with 300ms delay - prevents spam when quickly switching tabs
+    visibilityChangeTimeout = setTimeout(() => {
+      const store = usePurchaseStore.getState();
+      const userRole = localStorage.getItem('userRole');
+
+      // Skip if we just fetched recently (within last 2 seconds)
+      const lastFetch = store.lastFetchTime;
+      if (lastFetch && Date.now() - lastFetch.getTime() < 2000) {
+        return; // Skip - data is fresh
+      }
+
+      // Fix role mapping - localStorage might have different format
+      let mappedRole = userRole;
+      if (userRole) {
+        // Map common role variations
+        if (userRole.toLowerCase().includes('mep')) {
+          mappedRole = 'mepsupervisor';
+        } else if (userRole.toLowerCase().includes('site') && !userRole.toLowerCase().includes('mep')) {
+          mappedRole = 'sitesupervisor';
+        } else if (userRole.toLowerCase().includes('procurement')) {
+          mappedRole = 'procurement';
+        } else if (userRole.toLowerCase().includes('project')) {
+          mappedRole = 'projectmanager';
+        } else if (userRole.toLowerCase().includes('estimation')) {
+          mappedRole = 'estimation';
+        } else if (userRole.toLowerCase().includes('technical')) {
+          mappedRole = 'technicaldirector';
+        } else if (userRole.toLowerCase().includes('account')) {
+          mappedRole = 'accounts';
+        } else {
+          // Keep original role if no mapping found
+          mappedRole = userRole;
+        }
+      }
+
+      if (mappedRole) {
+        store.fetchPurchases(mappedRole);
+      }
+    }, 300);
+  } else {
+    // Tab is hidden - clear any pending refresh
+    if (visibilityChangeTimeout) {
+      clearTimeout(visibilityChangeTimeout);
+      visibilityChangeTimeout = null;
     }
   }
 });

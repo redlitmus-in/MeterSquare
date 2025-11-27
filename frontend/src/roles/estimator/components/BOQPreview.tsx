@@ -315,4 +315,5 @@ const BOQPreview: React.FC<BOQPreviewProps> = ({
   );
 };
 
-export default BOQPreview;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(BOQPreview);

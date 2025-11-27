@@ -55,7 +55,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
   const getRevisionLabel = (boq: BOQ) => {
     const revNum = boq.revision_number || 0;
-    return revNum === 0 ? 'Original' : `${revNum}`;
+    return revNum === 0 ? 'Original' : `R${revNum}`;
   };
 
   // Filter BOQs for Client Revisions tab:
@@ -597,7 +597,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                         getDisplayRevisionNumber(boq) >= 1 ? 'bg-blue-100 text-blue-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
-                        Rev {getDisplayRevisionNumber(boq)}
+                        {getRevisionLabel(boq)}
                       </div>
                     </div>
                   </div>
@@ -621,6 +621,34 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                 <div className="text-lg font-bold text-blue-900">{getRevisionLabel(selectedBoq)}</div>
               </div>
             </div>
+            {/* Show rejection/cancellation reason based on status */}
+            {selectedBoq.client_rejection_reason && (() => {
+              const status = selectedBoq.status?.toLowerCase() || '';
+              const isCancelled = status === 'client_cancelled';
+              const isRejected = status === 'rejected' || status === 'client_rejected';
+
+              return (
+                <div className={`mt-3 p-3 rounded-lg border ${
+                  isCancelled
+                    ? 'bg-gray-50 border-gray-300'
+                    : 'bg-red-50 border-red-200'
+                }`}>
+                  <div className="flex items-start gap-2">
+                    <span className={`text-lg ${isCancelled ? 'text-gray-500' : 'text-red-500'}`}>
+                      {isCancelled ? '🚫' : '⚠️'}
+                    </span>
+                    <div>
+                      <p className={`text-sm font-semibold ${isCancelled ? 'text-gray-800' : 'text-red-800'}`}>
+                        {isCancelled ? 'Cancellation Reason:' : 'TD Rejection Reason:'}
+                      </p>
+                      <p className={`text-sm ${isCancelled ? 'text-gray-700' : 'text-red-700'}`}>
+                        {selectedBoq.client_rejection_reason}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>

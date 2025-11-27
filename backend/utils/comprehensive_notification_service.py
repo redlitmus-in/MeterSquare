@@ -29,9 +29,17 @@ def check_duplicate_notification(user_id, title_pattern, metadata_key, metadata_
             Notification.deleted_at.is_(None)
         ).first()
 
-        if existing and existing.meta_data:
-            if existing.meta_data.get(metadata_key) == metadata_value:
-                log.info(f"[DuplicateCheck] Found existing notification for user {user_id}, {metadata_key}={metadata_value}")
+        if existing:
+            # Check metadata if both notification has metadata and we have a key to check
+            if existing.meta_data and metadata_key and metadata_value is not None:
+                stored_value = existing.meta_data.get(metadata_key)
+                # Compare as strings to handle type mismatches (int vs str)
+                if str(stored_value) == str(metadata_value):
+                    log.info(f"[DuplicateCheck] Found duplicate notification for user {user_id}, {metadata_key}={metadata_value}")
+                    return True
+            else:
+                # If no metadata to compare, just check title match is enough
+                log.info(f"[DuplicateCheck] Found duplicate notification by title for user {user_id}, title pattern: {title_pattern}")
                 return True
         return False
     except Exception as e:
@@ -506,32 +514,41 @@ class ComprehensiveNotificationService:
         Priority: URGENT
         """
         try:
+            log.info(f"[notify_cr_created] CR {cr_id} - Sending to {len(recipient_user_ids)} recipients: {recipient_user_ids}, role: {recipient_role}")
+
             for user_id in recipient_user_ids:
                 # Check for duplicate notification
-                if check_duplicate_notification(user_id, 'Change Request', 'cr_id', cr_id, minutes=5):
-                    log.info(f"Skipping duplicate CR created notification for CR {cr_id}")
+                if check_duplicate_notification(user_id, 'Materials Purchase', 'cr_id', cr_id, minutes=5):
+                    log.info(f"[notify_cr_created] Skipping duplicate CR created notification for CR {cr_id} to user {user_id}")
                     continue
+
+                action_url = f'/{recipient_role.lower().replace(" ", "-")}/change-requests?cr_id={cr_id}'
+                log.info(f"[notify_cr_created] Creating notification for user {user_id}, action_url: {action_url}")
 
                 notification = NotificationManager.create_notification(
                     user_id=user_id,
                     type='approval',
-                    title='New Change Request',
-                    message=f'{creator_name} ({creator_role}) created a change request for {project_name}',
+                    title='New Materials Purchase Request',
+                    message=f'{creator_name} ({creator_role}) created a materials purchase request for {project_name}',
                     priority='urgent',
                     category='change_request',
                     action_required=True,
-                    action_url=f'/{recipient_role.lower().replace(" ", "-")}/change-requests?cr_id={cr_id}',
+                    action_url=action_url,
                     action_label='Review Request',
-                    metadata={'cr_id': cr_id},
+                    metadata={'cr_id': cr_id, 'action_url': action_url},
                     sender_id=creator_id,
                     sender_name=creator_name
                 )
 
+                log.info(f"[notify_cr_created] Notification created with ID: {notification.id}, sending to user {user_id}")
                 send_notification_to_user(user_id, notification.to_dict())
+                log.info(f"[notify_cr_created] Notification sent successfully to user {user_id}")
 
-            log.info(f"Sent CR created notification for CR {cr_id}")
+            log.info(f"[notify_cr_created] Completed sending CR created notification for CR {cr_id}")
         except Exception as e:
-            log.error(f"Error sending CR created notification: {e}")
+            log.error(f"[notify_cr_created] Error sending CR created notification for CR {cr_id}: {e}")
+            import traceback
+            log.error(f"[notify_cr_created] Traceback: {traceback.format_exc()}")
 
     @staticmethod
     def notify_cr_approved(cr_id, project_name, approver_id, approver_name, approver_role, next_user_ids, next_role):
@@ -551,8 +568,8 @@ class ComprehensiveNotificationService:
                 notification = NotificationManager.create_notification(
                     user_id=user_id,
                     type='approval',
-                    title='Change Request Approved - Your Review Required',
-                    message=f'Change request for {project_name} was approved by {approver_name} ({approver_role}) and requires your review',
+                    title='Materials Purchase Approved - Your Review Required',
+                    message=f'Materials purchase request for {project_name} was approved by {approver_name} ({approver_role}) and requires your review',
                     priority='high',
                     category='change_request',
                     action_required=True,
@@ -586,8 +603,8 @@ class ComprehensiveNotificationService:
             notification = NotificationManager.create_notification(
                 user_id=creator_user_id,
                 type='rejection',
-                title='Change Request Rejected',
-                message=f'Your change request for {project_name} was rejected by {rejector_name} ({rejector_role}). Reason: {rejection_reason}',
+                title='Materials Purchase Rejected',
+                message=f'Your materials purchase request for {project_name} was rejected by {rejector_name} ({rejector_role}). Reason: {rejection_reason}',
                 priority='high',
                 category='change_request',
                 action_required=True,
@@ -621,7 +638,7 @@ class ComprehensiveNotificationService:
                 user_id=td_user_id,
                 type='approval',
                 title='Vendor Selection Requires Approval',
-                message=f'{buyer_name} selected vendor "{vendor_name}" for change request in {project_name}',
+                message=f'{buyer_name} selected vendor "{vendor_name}" for materials purchase in {project_name}',
                 priority='urgent',
                 category='change_request',
                 action_required=True,
@@ -654,8 +671,8 @@ class ComprehensiveNotificationService:
             notification = NotificationManager.create_notification(
                 user_id=requester_user_id,
                 type='success',
-                title='Change Request Purchase Completed',
-                message=f'{buyer_name} completed the purchase for your change request in {project_name}',
+                title='Materials Purchase Completed',
+                message=f'{buyer_name} completed the purchase for your materials request in {project_name}',
                 priority='medium',
                 category='change_request',
                 action_url=f'/site-engineer/change-requests?cr_id={cr_id}',
@@ -915,7 +932,7 @@ class ComprehensiveNotificationService:
             log.error(f"Error sending internal revision rejected notification: {e}")
 
     @staticmethod
-    def notify_client_revision_approved(boq_id, project_name, td_id, td_name, estimator_user_id, estimator_name):
+    def notify_client_revision_approved(boq_id, project_name, td_id, td_name, estimator_user_id, estimator_name, revision_number=None):
         """
         Notify estimator when TD approves client revision
         Trigger: TD approves client revision BOQ
@@ -923,16 +940,22 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Build message with revision number if available
+            if revision_number and revision_number > 0:
+                message = f'Client revision R{revision_number} for {project_name} has been approved by {td_name}'
+            else:
+                message = f'Client revision for {project_name} has been approved by {td_name}'
+
             notification = NotificationManager.create_notification(
                 user_id=estimator_user_id,
                 type='success',
                 title='Client Revision Approved',
-                message=f'Client revision for {project_name} has been approved by {td_name}',
+                message=message,
                 priority='high',
                 category='boq',
                 action_url=f'/estimator/projects?tab=revisions&boq_id={boq_id}',
                 action_label='View BOQ',
-                metadata={'boq_id': boq_id, 'client_revision_approved': True},
+                metadata={'boq_id': boq_id, 'client_revision_approved': True, 'revision_number': revision_number},
                 sender_id=td_id,
                 sender_name=td_name
             )
@@ -943,7 +966,7 @@ class ComprehensiveNotificationService:
             log.error(f"Error sending client revision approved notification: {e}")
 
     @staticmethod
-    def notify_client_revision_rejected(boq_id, project_name, td_id, td_name, estimator_user_id, estimator_name, rejection_reason):
+    def notify_client_revision_rejected(boq_id, project_name, td_id, td_name, estimator_user_id, estimator_name, rejection_reason, revision_number=None):
         """
         Notify estimator when TD rejects client revision
         Trigger: TD rejects client revision BOQ
@@ -951,17 +974,23 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Build message with revision number if available
+            if revision_number and revision_number > 0:
+                message = f'Client revision R{revision_number} for {project_name} was rejected by {td_name}. Reason: {rejection_reason}'
+            else:
+                message = f'Client revision for {project_name} was rejected by {td_name}. Reason: {rejection_reason}'
+
             notification = NotificationManager.create_notification(
                 user_id=estimator_user_id,
                 type='rejection',
                 title='Client Revision Rejected',
-                message=f'Client revision for {project_name} was rejected by {td_name}. Reason: {rejection_reason}',
+                message=message,
                 priority='high',
                 category='boq',
                 action_required=True,
                 action_url=f'/estimator/projects?tab=revisions&boq_id={boq_id}',
                 action_label='Make Changes',
-                metadata={'boq_id': boq_id, 'client_revision_rejected': True, 'reason': rejection_reason},
+                metadata={'boq_id': boq_id, 'client_revision_rejected': True, 'reason': rejection_reason, 'revision_number': revision_number},
                 sender_id=td_id,
                 sender_name=td_name
             )

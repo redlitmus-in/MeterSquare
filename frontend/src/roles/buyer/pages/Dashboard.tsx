@@ -394,4 +394,5 @@ const BuyerDashboard: React.FC = () => {
   );
 };
 
-export default BuyerDashboard;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(BuyerDashboard);

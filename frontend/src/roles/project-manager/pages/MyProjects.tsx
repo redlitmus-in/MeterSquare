@@ -2383,15 +2383,15 @@ const MyProjects: React.FC = () => {
                       const labourTotal = item.labour?.reduce((sum, l) => sum + (l.amount || 0), 0) || 0;
 
                       return (
-                        <div key={idx} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                        <div key={item.item_id || `item-${idx}`} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                           <h4 className="font-semibold text-gray-900 mb-2">{idx + 1}. {item.description}</h4>
 
                           <div className="ml-2">
                             <div className="text-xs mb-2">
                               <p className="font-medium text-gray-700 mb-1">+ RAW MATERIALS</p>
                               <div className="ml-2 space-y-1">
-                                {item.materials?.map((mat, i) => (
-                                  <div key={i} className="flex justify-between text-gray-600">
+                                {item.materials?.map((mat) => (
+                                  <div key={mat.material_id || mat.name} className="flex justify-between text-gray-600">
                                     <span>{mat.name} ({mat.quantity} {mat.unit})</span>
                                     <span>AED{mat.amount?.toFixed(2) || '0.00'}</span>
                                   </div>
@@ -2406,8 +2406,8 @@ const MyProjects: React.FC = () => {
                             <div className="text-xs">
                               <p className="font-medium text-gray-700 mb-1">+ LABOUR</p>
                               <div className="ml-2 space-y-1">
-                                {item.labour?.map((lab, i) => (
-                                  <div key={i} className="flex justify-between text-gray-600">
+                                {item.labour?.map((lab) => (
+                                  <div key={lab.labour_id || lab.type} className="flex justify-between text-gray-600">
                                     <span>{lab.type} ({lab.quantity} {lab.unit})</span>
                                     <span>AED{lab.amount?.toFixed(2) || '0.00'}</span>
                                   </div>
@@ -2479,17 +2479,17 @@ const MyProjects: React.FC = () => {
                       const itemTotal = itemBaseCost * (1 + totalMarkupPct / 100);
 
                       return (
-                        <div key={idx} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                        <div key={item.item_id || `client-item-${idx}`} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                           <h4 className="font-semibold text-gray-900 mb-2">{idx + 1}. {item.description}</h4>
 
                           <div className="ml-2">
                             <div className="text-xs mb-2">
                               <p className="font-medium text-gray-700 mb-1">+ RAW MATERIALS</p>
                               <div className="ml-2 space-y-1">
-                                {item.materials?.map((mat, i) => {
+                                {item.materials?.map((mat) => {
                                   const clientPrice = mat.amount * (1 + totalMarkupPct / 100);
                                   return (
-                                    <div key={i} className="flex justify-between text-gray-600">
+                                    <div key={mat.material_id || mat.name} className="flex justify-between text-gray-600">
                                       <span>{mat.name} ({mat.quantity} {mat.unit})</span>
                                       <span>AED{clientPrice?.toFixed(2) || '0.00'}</span>
                                     </div>
@@ -2505,10 +2505,10 @@ const MyProjects: React.FC = () => {
                             <div className="text-xs">
                               <p className="font-medium text-gray-700 mb-1">+ LABOUR</p>
                               <div className="ml-2 space-y-1">
-                                {item.labour?.map((lab, i) => {
+                                {item.labour?.map((lab) => {
                                   const clientPrice = lab.amount * (1 + totalMarkupPct / 100);
                                   return (
-                                    <div key={i} className="flex justify-between text-gray-600">
+                                    <div key={lab.labour_id || lab.type} className="flex justify-between text-gray-600">
                                       <span>{lab.type} ({lab.quantity} {lab.unit})</span>
                                       <span>AED{clientPrice?.toFixed(2) || '0.00'}</span>
                                     </div>
@@ -2887,7 +2887,7 @@ const MyProjects: React.FC = () => {
                 <h3 className="text-lg font-semibold text-gray-700 mb-4">PM-SE Assignment Details</h3>
                 <div className="space-y-3">
                   {completionDetails.assignment_pairs?.map((pair: any, index: number) => (
-                    <div key={index} className="bg-white border rounded-lg p-4">
+                    <div key={pair.assignment_id || `${pair.pm_name}-${pair.se_name}`} className="bg-white border rounded-lg p-4">
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">

@@ -16,18 +16,18 @@ class Notification(db.Model):
 
     # Primary fields
     id = Column(String(100), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
-    target_role = Column(String(50), nullable=True)
+    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False, index=True)  # ✅ Index for user queries
+    target_role = Column(String(50), nullable=True, index=True)  # ✅ Index for role-based queries
 
     # Notification content
     type = Column(String(50), nullable=False)  # email, approval, rejection, alert, info, success, error, update, reminder
     title = Column(String(200), nullable=False)
     message = Column(Text, nullable=False)
     priority = Column(String(20), default='medium')  # urgent, high, medium, low
-    category = Column(String(50), default='system')  # system, pr, project, email, etc.
+    category = Column(String(50), default='system', index=True)  # ✅ Index for category filtering
 
     # Status fields
-    read = Column(Boolean, default=False)
+    read = Column(Boolean, default=False, index=True)  # ✅ Index for unread queries
     action_required = Column(Boolean, default=False)
     action_url = Column(Text, nullable=True)
     action_label = Column(String(50), nullable=True)
@@ -40,9 +40,16 @@ class Notification(db.Model):
     sender_name = Column(String(100), nullable=True)
 
     # Timestamps
-    created_at = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
+    created_at = Column(TIMESTAMP, default=datetime.utcnow, nullable=False, index=True)  # ✅ Index for sorting
     read_at = Column(TIMESTAMP, nullable=True)
-    deleted_at = Column(TIMESTAMP, nullable=True)
+    deleted_at = Column(TIMESTAMP, nullable=True, index=True)  # ✅ Index for soft-delete filtering
+
+    # ✅ PERFORMANCE: Composite indexes for common query patterns
+    __table_args__ = (
+        db.Index('idx_notification_user_read', 'user_id', 'read'),  # For: WHERE user_id=X AND read=false
+        db.Index('idx_notification_user_deleted', 'user_id', 'deleted_at'),  # For: WHERE user_id=X AND deleted_at IS NULL
+        db.Index('idx_notification_user_created', 'user_id', 'created_at'),  # For: WHERE user_id=X ORDER BY created_at
+    )
 
     # Relationships
     user = relationship('User', foreign_keys=[user_id], backref='notifications')

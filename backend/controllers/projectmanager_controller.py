@@ -984,6 +984,7 @@ def assign_items_to_se():
             # Assign the item
             item['assigned_by_pm_user_id'] = pm_user_id
             item['assigned_by_pm_name'] = pm_name
+            item['assigned_by_role'] = role_name  # Track if PM or MEP assigned this item
             item['assigned_to_se_user_id'] = se_user_id
             item['assigned_to_se_name'] = se_name
             item['assignment_date'] = datetime.utcnow().isoformat()

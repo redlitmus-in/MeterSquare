@@ -540,28 +540,100 @@ def send_for_review(cr_id):
         next_role = None
 
         if normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
-            # Site Engineer routes to assigned PM
-            next_role = CR_CONFIG.ROLE_PROJECT_MANAGER
+            # Site Engineer routes to whoever assigned them (PM or MEP)
+            # Check the BOQ item's assigned_by_role to determine routing
 
-            assigned_pm_id = None
+            assigned_approver_id = None
+            assigner_role = None
+
             project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
-            if project:
-                # The project manager is stored in the user_id field (now JSONB array)
-                pm_ids = project.user_id if isinstance(project.user_id, list) else ([project.user_id] if project.user_id else [])
-                assigned_pm_id = pm_ids[0] if pm_ids else None
+            if not project:
+                return jsonify({"error": "Project not found"}), 404
 
-            if not assigned_pm_id:
-                log.error(f"No assigned PM found for Project ID {change_request.project_id}")
-                return jsonify({"error": "No Project Manager assigned for this project"}), 400
+            # Try to get the assigner info from the BOQ item
+            boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
+            if boq_details and boq_details.boq_details:
+                boq_items = boq_details.boq_details.get('items', [])
 
-            # --- Fetch PM details from User table ---
-            assigned_pm_user = User.query.filter_by(user_id=assigned_pm_id, is_deleted=False).first()
-            if not assigned_pm_user:
-                return jsonify({"error": "Assigned Project Manager user record not found"}), 400
+                # Parse item_id to get the item index (e.g., "item_1" -> index 0)
+                item_id = change_request.item_id
+                item_index = None
+                if item_id:
+                    try:
+                        # Handle formats like "item_1", "item_2", etc.
+                        if item_id.startswith('item_'):
+                            item_index = int(item_id.split('_')[1]) - 1
+                        else:
+                            item_index = int(item_id) - 1
+                    except (ValueError, IndexError):
+                        item_index = None
 
-            next_approver = assigned_pm_user.full_name or assigned_pm_user.username
-            next_approver_id = assigned_pm_user.user_id
-            log.info(f"Routing CR {cr_id} to PM: {next_approver} (user_id={next_approver_id})")
+                # Find the item and check who assigned it
+                if item_index is not None and 0 <= item_index < len(boq_items):
+                    item = boq_items[item_index]
+                    assigner_role = item.get('assigned_by_role')
+                    assigned_approver_id = item.get('assigned_by_pm_user_id')
+                    log.info(f"Found item assignment: assigned_by_role={assigner_role}, assigned_by_pm_user_id={assigned_approver_id}")
+
+            # If we couldn't find from BOQ item, check PMAssignSS table
+            if not assigned_approver_id:
+                from models.pm_assign_ss import PMAssignSS
+                assignment = PMAssignSS.query.filter_by(
+                    boq_id=change_request.boq_id,
+                    assigned_to_se_id=user_id,
+                    is_deleted=False
+                ).order_by(PMAssignSS.assignment_date.desc()).first()
+
+                if assignment and assignment.assigned_by_pm_id:
+                    assigned_approver_id = assignment.assigned_by_pm_id
+                    # Look up the user to determine their role
+                    assigner_user = User.query.filter_by(user_id=assigned_approver_id, is_deleted=False).first()
+                    if assigner_user and assigner_user.role:
+                        assigner_role = assigner_user.role.role.lower()
+                        log.info(f"Found assignment from PMAssignSS: assigned_by_pm_id={assigned_approver_id}, role={assigner_role}")
+
+            # Determine the correct approver based on who assigned
+            if assigner_role and assigner_role.lower() == 'mep':
+                # MEP assigned this SE - route to MEP
+                next_role = CR_CONFIG.ROLE_MEP
+                log.info(f"SE was assigned by MEP, routing to MEP")
+            else:
+                # PM assigned this SE (or fallback to PM)
+                next_role = CR_CONFIG.ROLE_PROJECT_MANAGER
+                log.info(f"SE was assigned by PM, routing to PM")
+
+            # Get the specific approver (either from assignment or fallback to project level)
+            if assigned_approver_id:
+                assigned_approver_user = User.query.filter_by(user_id=assigned_approver_id, is_deleted=False).first()
+                if assigned_approver_user:
+                    next_approver = assigned_approver_user.full_name or assigned_approver_user.username
+                    next_approver_id = assigned_approver_user.user_id
+                    log.info(f"Routing CR {cr_id} to {next_role}: {next_approver} (user_id={next_approver_id})")
+                else:
+                    assigned_approver_id = None  # Reset to trigger fallback
+
+            # Fallback: Get from project level if no specific approver found
+            if not assigned_approver_id:
+                if next_role == CR_CONFIG.ROLE_MEP:
+                    # Get MEP from project
+                    mep_ids = project.mep_supervisor_id if isinstance(project.mep_supervisor_id, list) else ([project.mep_supervisor_id] if project.mep_supervisor_id else [])
+                    assigned_approver_id = mep_ids[0] if mep_ids else None
+                else:
+                    # Get PM from project
+                    pm_ids = project.user_id if isinstance(project.user_id, list) else ([project.user_id] if project.user_id else [])
+                    assigned_approver_id = pm_ids[0] if pm_ids else None
+
+                if not assigned_approver_id:
+                    log.error(f"No assigned {next_role} found for Project ID {change_request.project_id}")
+                    return jsonify({"error": f"No {next_role.replace('_', ' ').title()} assigned for this project"}), 400
+
+                assigned_approver_user = User.query.filter_by(user_id=assigned_approver_id, is_deleted=False).first()
+                if not assigned_approver_user:
+                    return jsonify({"error": f"Assigned {next_role.replace('_', ' ').title()} user record not found"}), 400
+
+                next_approver = assigned_approver_user.full_name or assigned_approver_user.username
+                next_approver_id = assigned_approver_user.user_id
+                log.info(f"Routing CR {cr_id} to {next_role} (fallback): {next_approver} (user_id={next_approver_id})")
 
         elif normalized_role in ['projectmanager', 'project_manager', 'mep', 'mepsupervisor', 'admin']:
             # PM/MEP routing logic:
@@ -743,8 +815,12 @@ def send_for_review(cr_id):
             change_request.status = CR_CONFIG.STATUS_ASSIGNED_TO_BUYER
         elif next_role == CR_CONFIG.ROLE_PROJECT_MANAGER and normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
             # SS/SE sending to PM - set status to send_to_pm
-            change_request.status = 'send_to_pm'
-            log.info(f"SS/SE sending CR {cr_id} to PM - status set to 'send_to_pm'")
+            change_request.status = CR_CONFIG.STATUS_SEND_TO_PM
+            log.info(f"SS/SE sending CR {cr_id} to PM - status set to '{CR_CONFIG.STATUS_SEND_TO_PM}'")
+        elif next_role == CR_CONFIG.ROLE_MEP and normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
+            # SS/SE sending to MEP - set status to send_to_mep
+            change_request.status = CR_CONFIG.STATUS_SEND_TO_MEP
+            log.info(f"SS/SE sending CR {cr_id} to MEP - status set to '{CR_CONFIG.STATUS_SEND_TO_MEP}'")
         else:
             change_request.status = CR_CONFIG.STATUS_UNDER_REVIEW
 
@@ -850,8 +926,17 @@ def get_all_change_requests():
     Estimator sees requests ≤50k
     TD sees all requests, especially >50k
     PM/SE see their own requests
+
+    Optional query params for pagination (backward compatible):
+    - page: Page number (1-indexed), default None (returns all)
+    - page_size: Items per page, default 20, max 100
     """
     try:
+        # PERFORMANCE: Optional pagination support (backward compatible)
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)  # Cap at 100 items per page
+
         current_user = getattr(g, 'user', None)
         if not current_user:
             return jsonify({"error": "User not authenticated"}), 401
@@ -980,7 +1065,7 @@ def get_all_change_requests():
             )
 
             # Filter for SS/SE requests sent to PM (status = 'send_to_pm')
-            send_to_pm_filter = ChangeRequest.status == 'send_to_pm'
+            send_to_pm_filter = ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_PM
 
             # Filter for approved/completed requests (to show in Accepted/Completed tabs)
             approved_status_filter = ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer'])
@@ -1073,8 +1158,10 @@ def get_all_change_requests():
         elif user_role in ['mep', 'mepsupervisor']:
             # MEP sees:
             # 1. Requests where requested_by_role is 'mep'/'mepsupervisor' and status is 'pending'
-            # 2. Admin raised requests as MEP role
-            # 3. Their own requests
+            # 2. Requests with status 'send_to_mep' (sent by SS/SE for MEP approval)
+            # 3. Admin raised requests as MEP role
+            # 4. Their own requests
+            # 5. Approved/completed requests from their projects
             from sqlalchemy import or_, and_
 
             # Get projects where this user is the MEP supervisor (mep_supervisor_id field in Project table)
@@ -1093,9 +1180,20 @@ def get_all_change_requests():
                 ChangeRequest.status == 'pending'
             )
 
+            # Filter for requests sent by SE to MEP for approval
+            se_to_mep_filter = and_(
+                ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_MEP,
+                ChangeRequest.current_approver_role == CR_CONFIG.ROLE_MEP
+            )
+
             # Admin raised requests as MEP role - show to MEP assigned to that project
             admin_as_mep_filter = and_(
                 ChangeRequest.requested_by_role == 'admin',
+            )
+
+            # Approved/completed requests from MEP's projects
+            mep_approved_status_filter = and_(
+                ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer'])
             )
 
             if is_admin_viewing:
@@ -1104,7 +1202,7 @@ def get_all_change_requests():
                 log.info(f"Admin viewing as MEP - showing ALL requests (no filtering)")
                 pass  # No additional filtering - admin sees everything
             elif mep_project_ids:
-                # Regular MEP - sees pending requests from MEPs in their assigned projects + admin raised as MEP + own requests
+                # Regular MEP - sees pending requests from MEPs + SE requests sent to MEP + approved/completed + own requests
                 query = query.filter(
                     or_(
                         and_(
@@ -1113,7 +1211,15 @@ def get_all_change_requests():
                         ),
                         and_(
                             ChangeRequest.project_id.in_(mep_project_ids),  # Requests from assigned projects
+                            se_to_mep_filter  # SE sent requests for MEP approval
+                        ),
+                        and_(
+                            ChangeRequest.project_id.in_(mep_project_ids),  # Requests from assigned projects
                             admin_as_mep_filter  # Admin raised as MEP role
+                        ),
+                        and_(
+                            ChangeRequest.project_id.in_(mep_project_ids),  # Requests from assigned projects
+                            mep_approved_status_filter  # Approved/completed requests
                         ),
                         ChangeRequest.requested_by_user_id == user_id  # Own requests
                     )
@@ -1213,8 +1319,18 @@ def get_all_change_requests():
             # Other roles see nothing
             return jsonify({"success": True, "data": []}), 200
 
-        # Execute query
-        change_requests = query.order_by(ChangeRequest.created_at.desc()).all()
+        # Execute query with optional pagination
+        ordered_query = query.order_by(ChangeRequest.created_at.desc())
+
+        # PERFORMANCE: Apply pagination if requested, otherwise return all (backward compatible)
+        if page is not None:
+            total_count = ordered_query.count()
+            offset = (page - 1) * page_size
+            change_requests = ordered_query.offset(offset).limit(page_size).all()
+            log.info(f"📊 Processing page {page} ({len(change_requests)}/{total_count} CRs) for user {user_id}")
+        else:
+            change_requests = ordered_query.all()
+            total_count = len(change_requests)
 
         # 🔍 DEBUG: Log what we're returning for buyer role
         if user_role == 'buyer':
@@ -1253,11 +1369,26 @@ def get_all_change_requests():
 
             result.append(cr_dict)
 
-        return jsonify({
+        # PERFORMANCE: Return pagination metadata when paginated
+        response = {
             "success": True,
             "data": result,
             "count": len(result)
-        }), 200
+        }
+
+        if page is not None:
+            # Add pagination metadata
+            total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        return jsonify(response), 200
 
     except Exception as e:
         log.error(f"Error fetching change requests: {str(e)}")
@@ -1373,7 +1504,7 @@ def approve_change_request(cr_id):
         is_admin = (approver_role in ['admin'] or normalized_role == 'admin') and not is_admin_viewing
 
         # PM can approve requests that are under_review or send_to_pm from SE
-        if normalized_role in ['projectmanager'] and change_request.status in ['under_review', 'send_to_pm']:
+        if normalized_role in ['projectmanager'] and change_request.status in [CR_CONFIG.STATUS_UNDER_REVIEW, CR_CONFIG.STATUS_SEND_TO_PM]:
             # PM can approve requests from Site Engineers
             if change_request.requested_by_role and 'site' in change_request.requested_by_role.lower():
                 # This is a valid PM approval scenario
@@ -1381,13 +1512,13 @@ def approve_change_request(cr_id):
             elif change_request.approval_required_from == 'project_manager':
                 # This is explicitly assigned to PM
                 pass
-            elif change_request.status == 'send_to_pm':
+            elif change_request.status == CR_CONFIG.STATUS_SEND_TO_PM:
                 # SS/SE sent request to PM for approval
                 pass
             else:
                 return jsonify({"error": f"PM cannot approve this request. Current approver: {change_request.approval_required_from}"}), 403
         # MEP can approve requests sent to them
-        elif normalized_role in ['mep', 'mepsupervisor'] and change_request.status in ['under_review', 'send_to_pm']:
+        elif normalized_role in ['mep', 'mepsupervisor'] and change_request.status in [CR_CONFIG.STATUS_UNDER_REVIEW, CR_CONFIG.STATUS_SEND_TO_PM, CR_CONFIG.STATUS_SEND_TO_MEP]:
             # MEP can approve requests from their assigned projects
             pass
         # Estimator can approve requests assigned to them
@@ -1400,7 +1531,7 @@ def approve_change_request(cr_id):
             pass
         else:
             # Check if request is under review for other roles
-            if change_request.status not in ['under_review', 'approved_by_pm', 'approved_by_td', 'send_to_pm']:
+            if change_request.status not in [CR_CONFIG.STATUS_UNDER_REVIEW, CR_CONFIG.STATUS_APPROVED_BY_PM, CR_CONFIG.STATUS_APPROVED_BY_TD, CR_CONFIG.STATUS_SEND_TO_PM, CR_CONFIG.STATUS_SEND_TO_MEP]:
                 return jsonify({"error": "Request must be sent for review first"}), 400
 
             # Validate workflow state
@@ -2484,9 +2615,9 @@ def update_change_request(cr_id):
         normalized_role = workflow_service.normalize_role(user_role)
 
         # PM/Admin can edit any pending request, SE can only edit their own, Estimator can edit requests assigned to them
-        if user_role in ['projectmanager', 'project_manager', 'admin']:
-            # PM/Admin can edit pending, under_review, send_to_pm, approved_by_pm, send_to_est, send_to_buyer requests
-            editable_statuses = ['pending', 'under_review', 'send_to_pm', 'approved_by_pm', 'pm_request', 'ss_request', 'mep_request', 'admin_request', 'send_to_est', 'send_to_buyer']
+        if user_role in ['projectmanager', 'project_manager', 'admin', 'mep', 'mepsupervisor']:
+            # PM/Admin/MEP can edit pending, under_review, send_to_pm, send_to_mep, approved_by_pm, send_to_est, send_to_buyer requests
+            editable_statuses = ['pending', 'under_review', 'send_to_pm', 'send_to_mep', 'approved_by_pm', 'pm_request', 'ss_request', 'mep_request', 'admin_request', 'send_to_est', 'send_to_buyer']
             if change_request.status not in editable_statuses:
                 return jsonify({"error": f"Can only edit requests with status: {', '.join(editable_statuses)}"}), 400
         elif normalized_role == 'estimator':

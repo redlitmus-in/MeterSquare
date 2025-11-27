@@ -213,21 +213,39 @@ export const useNotificationStore = create<NotificationStore>()(
   )
 );
 
-// Initialize notification service subscription
+// ✅ PERFORMANCE: Track subscriptions for proper cleanup to prevent memory leaks
 let serviceInitialized = false;
+let notificationUnsubscriber: (() => void) | null = null;
+let indexedDBUnsubscriber: (() => void) | null = null;
 
 export const initializeNotificationService = async () => {
   if (serviceInitialized) return;
 
   serviceInitialized = true;
 
+  // Clear any existing subscriptions first (prevents duplicate subscriptions)
+  cleanupNotificationService();
+
   // Subscribe to notifications from service
-  notificationService.subscribe((notification: NotificationData) => {
+  notificationUnsubscriber = notificationService.subscribe((notification: NotificationData) => {
     useNotificationStore.getState().addNotification(notification);
   });
 
   // Setup IndexedDB persistence
   await setupIndexedDBPersistence();
+};
+
+// ✅ PERFORMANCE: Export cleanup function for proper resource management
+export const cleanupNotificationService = () => {
+  if (notificationUnsubscriber) {
+    notificationUnsubscriber();
+    notificationUnsubscriber = null;
+  }
+  if (indexedDBUnsubscriber) {
+    indexedDBUnsubscriber();
+    indexedDBUnsubscriber = null;
+  }
+  serviceInitialized = false;
 };
 
 // IndexedDB setup for notification persistence
@@ -267,7 +285,8 @@ async function setupIndexedDBPersistence() {
       }
     };
 
-    useNotificationStore.subscribe((state) => {
+    // ✅ PERFORMANCE: Store unsubscriber for proper cleanup
+    indexedDBUnsubscriber = useNotificationStore.subscribe((state) => {
       saveNotificationsToIndexedDB(state.notifications);
     });
   } catch {

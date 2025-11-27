@@ -11,18 +11,18 @@ class ChangeRequest(db.Model):
     __tablename__ = "change_requests"
 
     cr_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
-    project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False)
+    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False, index=True)  # ✅ PERFORMANCE: Added index
+    project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False, index=True)  # ✅ PERFORMANCE: Added index
 
     # Requester information
-    requested_by_user_id = db.Column(db.Integer, nullable=False)
+    requested_by_user_id = db.Column(db.Integer, nullable=False, index=True)  # ✅ PERFORMANCE: Added index
     requested_by_name = db.Column(db.String(255), nullable=False)
     requested_by_role = db.Column(db.String(100), nullable=False)  # 'project_manager' or 'site_supervisor'
 
     # Request details
     request_type = db.Column(db.String(50), default="EXTRA_MATERIALS")  # For future: MODIFY_ITEMS, etc.
     justification = db.Column(db.Text, nullable=False)  # Why these materials are needed
-    status = db.Column(db.String(50), default="pending")  # pending, under_review, approved_by_pm, approved_by_td, approved, rejected
+    status = db.Column(db.String(50), default="pending", index=True)  # ✅ PERFORMANCE: Added index
     current_approver_role = db.Column(db.String(50), nullable=True)  # Tracks who should act next
 
     # BOQ Item Reference (which item these sub-items belong to)
@@ -86,7 +86,7 @@ class ChangeRequest(db.Model):
     cost_increase_percentage = db.Column(db.Float, default=0.0)  # Percentage increase
 
     # Approval workflow - Multi-stage
-    approval_required_from = db.Column(db.String(50), nullable=True)  # Current stage: 'project_manager', 'estimator', 'technical_director'
+    approval_required_from = db.Column(db.String(50), nullable=True, index=True)  # ✅ PERFORMANCE: Added index
 
     # PM Approval
     pm_approved_by_user_id = db.Column(db.Integer, nullable=True)
@@ -155,9 +155,17 @@ class ChangeRequest(db.Model):
     submission_group_id = db.Column(db.String(50), nullable=True)  # UUID to group related sub-CRs
 
     # Metadata
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)  # ✅ PERFORMANCE: Added index
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
-    is_deleted = db.Column(db.Boolean, default=False)
+    is_deleted = db.Column(db.Boolean, default=False, index=True)  # ✅ PERFORMANCE: Added index
+
+    # ✅ PERFORMANCE: Composite indexes for common query patterns
+    __table_args__ = (
+        db.Index('idx_cr_boq_status', 'boq_id', 'status'),  # For BOQ change request queries
+        db.Index('idx_cr_project_status', 'project_id', 'status'),  # For project change request queries
+        db.Index('idx_cr_deleted_status', 'is_deleted', 'status'),  # For filtered queries
+        db.Index('idx_cr_approval_from', 'approval_required_from', 'is_deleted'),  # For approval workflow
+    )
 
     # Relationships
     boq = db.relationship("BOQ", backref=db.backref("change_requests", lazy=True))

@@ -557,7 +557,8 @@ def client_revision_td_mail_send():
                         td_id=td_user_id,
                         td_name=td_name,
                         estimator_user_id=estimator_user_id,
-                        estimator_name=estimator_name
+                        estimator_name=estimator_name,
+                        revision_number=boq.revision_number
                     )
                 else:
                     ComprehensiveNotificationService.notify_client_revision_rejected(
@@ -567,7 +568,8 @@ def client_revision_td_mail_send():
                         td_name=td_name,
                         estimator_user_id=estimator_user_id,
                         estimator_name=estimator_name,
-                        rejection_reason=rejection_reason or comments or "No reason provided"
+                        rejection_reason=rejection_reason or comments or "No reason provided",
+                        revision_number=boq.revision_number
                     )
         except Exception as notif_error:
             log.error(f"Failed to send client revision notification: {notif_error}")

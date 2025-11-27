@@ -8,7 +8,8 @@ import { visualizer } from 'rollup-plugin-visualizer'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const isProduction = mode === 'production'
+  // ✅ SECURITY FIX: Detect ALL production modes (production, production.ath, production.kol)
+  const isProduction = mode.startsWith('production')
 
   // ✅ PRODUCTION: Enable compression for 70% file size reduction
   const ENABLE_COMPRESSION = isProduction  // Auto-enable in production
@@ -160,15 +161,31 @@ export default defineConfig(({ mode }) => {
       // Optimize chunk size
       chunkSizeWarningLimit: isProduction ? 2000 : 1000,
 
-      // ✅ PERFORMANCE: Minify with esbuild (faster, more reliable than terser)
-      minify: isProduction ? 'esbuild' : false,
+      // ✅ SECURITY: Use terser for better console removal in production
+      minify: isProduction ? 'terser' : 'esbuild',
 
-      // ✅ PRODUCTION: Remove console.logs and debugger statements
-      esbuildOptions: {
-        drop: isProduction ? ['console', 'debugger'] : [],
-      },
+      // Terser options for production (removes ALL console statements)
+      terserOptions: isProduction ? {
+        compress: {
+          drop_console: true,      // Remove ALL console.* calls
+          drop_debugger: true,     // Remove debugger statements
+          pure_funcs: ['console.log', 'console.info', 'console.debug', 'console.warn'],
+          passes: 2,               // Multiple passes for better compression
+        },
+        mangle: {
+          safari10: true,          // Safari 10 compatibility
+        },
+        format: {
+          comments: false,         // Remove all comments
+        },
+      } : undefined,
 
-      // Source maps only disabled in production
+      // Fallback esbuild options for development
+      esbuildOptions: !isProduction ? {
+        legalComments: 'inline',
+      } : undefined,
+
+      // ✅ SECURITY: NEVER enable source maps in production - hides source code
       sourcemap: isProduction ? false : true,
 
       // CSS code splitting
@@ -190,13 +207,17 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: true,
-      allowedHosts: ['msq.kol.tel', 'localhost'],
-      // Security headers for dev server
+      allowedHosts: ['msq.kol.tel', 'msq.ath.cx', 'localhost'],
+      // ✅ SECURITY: Comprehensive security headers
       headers: {
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'DENY',
         'X-XSS-Protection': '1; mode=block',
-        'Referrer-Policy': 'strict-origin-when-cross-origin'
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+        'Content-Security-Policy': isProduction
+          ? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://msq.ath.cx https://msq.kol.tel wss://msq.ath.cx wss://msq.kol.tel https://*.supabase.co wss://*.supabase.co;"
+          : ''
       },
       // Disable file serving for source maps and original files
       middlewareMode: false,

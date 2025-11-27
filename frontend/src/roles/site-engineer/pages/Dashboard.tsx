@@ -367,4 +367,5 @@ const Dashboard: React.FC = () => {
   );
 };
 
-export default Dashboard;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(Dashboard);

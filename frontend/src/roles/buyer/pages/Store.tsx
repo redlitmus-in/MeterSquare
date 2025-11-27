@@ -623,4 +623,5 @@ const Store: React.FC = () => {
   );
 };
 
-export default Store;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(Store);

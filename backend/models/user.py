@@ -20,7 +20,9 @@ class User(db.Model):
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     
     # Relationship with Role - use string reference to avoid circular imports
-    role = db.relationship('Role', foreign_keys=[role_id], primaryjoin='User.role_id == Role.role_id', lazy=True)
+    # ✅ PERFORMANCE: Changed from lazy=True to lazy='joined' for eager loading
+    # This eliminates N+1 queries when accessing user.role (1 query instead of N)
+    role = db.relationship('Role', foreign_keys=[role_id], primaryjoin='User.role_id == Role.role_id', lazy='joined')
 
     def __init__(self, user_id=None, email=None, full_name=None, phone=None, role_id=None, 
                  department=None, is_active=True, is_deleted=False, last_login=None, user_status=None,

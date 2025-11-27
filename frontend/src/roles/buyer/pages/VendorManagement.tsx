@@ -370,4 +370,5 @@ const VendorManagement: React.FC = () => {
   );
 };
 
-export default VendorManagement;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(VendorManagement);

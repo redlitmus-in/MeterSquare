@@ -29,12 +29,16 @@ export const useRealtimePurchases = ({ role, showNotifications = true }: UseReal
   const rolePurchases = getPurchasesForRole(role);
 
   // Initialize real-time updates on mount
+  // ✅ PERFORMANCE: Use getState() to avoid unstable function dependencies that cause effect re-runs
   useEffect(() => {
     // Store user role for the purchase store
     localStorage.setItem('userRole', role);
 
+    // Get stable references from store state
+    const store = usePurchaseStore.getState();
+
     // Setup real-time subscriptions
-    setupRealtimeSubscription();
+    store.setupRealtimeSubscription();
 
     // Start polling for updates
     startPolling(role);
@@ -42,9 +46,9 @@ export const useRealtimePurchases = ({ role, showNotifications = true }: UseReal
     // Cleanup on unmount
     return () => {
       stopPolling();
-      cleanupRealtimeSubscription();
+      usePurchaseStore.getState().cleanupRealtimeSubscription();
     };
-  }, [role, setupRealtimeSubscription, cleanupRealtimeSubscription]);
+  }, [role]); // Only depend on role - functions are accessed via getState()
 
   // Manual refresh handler
   const handleRefresh = async () => {

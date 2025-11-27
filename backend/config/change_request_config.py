@@ -28,6 +28,7 @@ class ChangeRequestConfig:
     # Approval Roles
     ROLE_SITE_ENGINEER = 'site_supervisor'
     ROLE_PROJECT_MANAGER = 'project_manager'
+    ROLE_MEP = 'mep'  # MEP Supervisor role
     ROLE_ESTIMATOR = 'estimator'
     ROLE_TECHNICAL_DIRECTOR = 'technical_director'
     ROLE_BUYER = 'buyer'
@@ -35,6 +36,8 @@ class ChangeRequestConfig:
     # Status Constants
     STATUS_PENDING = 'pending'
     STATUS_UNDER_REVIEW = 'under_review'
+    STATUS_SEND_TO_PM = 'send_to_pm'  # SE sent to PM for approval
+    STATUS_SEND_TO_MEP = 'send_to_mep'  # SE sent to MEP for approval
     STATUS_SEND_TO_EST = 'send_to_est'  # PM approved, sent to estimator for pricing
     STATUS_SEND_TO_BUYER = 'send_to_buyer'  # PM approved, sent to buyer for procurement
     STATUS_APPROVED_BY_PM = 'approved_by_pm'
