@@ -1327,6 +1327,7 @@ def select_vendor_for_purchase(cr_id):
         if is_td:
             # TD is selecting/editing vendor - set to pending (TD must manually approve)
             cr.vendor_selection_status = 'pending_td_approval'
+            cr.approval_required_from = 'technical_director'  # Set approval_required_from to TD
             # Clear previous approval info since vendor changed
             cr.vendor_approved_by_td_id = None
             cr.vendor_approved_by_td_name = None
@@ -1341,6 +1342,7 @@ def select_vendor_for_purchase(cr_id):
             cr.vendor_selected_by_buyer_name = user_name
             cr.vendor_selection_date = datetime.utcnow()
             cr.vendor_selection_status = 'pending_td_approval'
+            cr.approval_required_from = 'technical_director'  # Set approval_required_from to TD
 
         # Add to BOQ History - Vendor Selection
         from models.boq import BOQHistory
@@ -1735,6 +1737,7 @@ def select_vendor_for_material(cr_id):
                     cr.selected_vendor_name = new_vendor.company_name
                     # Keep status as pending_td_approval - TD needs to explicitly approve
                     cr.vendor_selection_status = 'pending_td_approval'
+                    cr.approval_required_from = 'technical_director'  # Set approval_required_from to TD
                     cr.updated_at = datetime.utcnow()
 
                     db.session.commit()
@@ -1837,6 +1840,7 @@ def select_vendor_for_material(cr_id):
                     request_type=parent_cr.request_type,
                     justification=f"Sub-CR for vendor {vendor.company_name} - Split by TD from {old_sub_cr_id}",
                     status='pending_td_approval',  # NOT auto-approved
+                    approval_required_from='technical_director',  # Set approval_required_from to TD
                     item_id=parent_cr.item_id,
                     item_name=parent_cr.item_name,
                     sub_item_id=parent_cr.sub_item_id,
@@ -2047,6 +2051,7 @@ def select_vendor_for_material(cr_id):
         if all_materials_have_vendors:
             cr.status = 'pending_td_approval'
             cr.vendor_selection_status = 'pending_td_approval'  # Also set vendor_selection_status for Pending Approval tab
+            cr.approval_required_from = 'technical_director'  # Set approval_required_from to TD
             # Set selected_vendor fields from the first material's vendor (for single vendor case)
             first_material = list(cr.material_vendor_selections.values())[0] if cr.material_vendor_selections else None
             if first_material:
@@ -2264,6 +2269,7 @@ def create_sub_crs_for_vendor_groups(cr_id):
                 request_type=parent_cr.request_type,
                 justification=f"Sub-CR for vendor {vendor_name} - Split from CR-{cr_id}",
                 status='pending_td_approval',  # Always pending - TD must manually approve
+                approval_required_from='technical_director',  # Set approval_required_from to TD
                 item_id=parent_cr.item_id,
                 item_name=parent_cr.item_name,
                 sub_item_id=parent_cr.sub_item_id,

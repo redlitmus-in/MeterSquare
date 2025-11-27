@@ -145,7 +145,7 @@ const ExtraMaterialPage: React.FC = () => {
       // Transform approved materials (only SE's own approved requests WITHOUT purchase completion)
       const filteredApproved = seRequests
         .filter((cr: any) => {
-          const approvedStatuses = ['approved', 'approved_by_pm', 'approved_by_estimator', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'send_to_est'];
+          const approvedStatuses = ['approved', 'approved_by_pm', 'approved_by_estimator', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'send_to_est', 'pending_td_approval'];
           return approvedStatuses.includes(cr.status?.trim()) && !cr.purchase_completion_date;
         });
 
@@ -331,6 +331,11 @@ const ExtraMaterialPage: React.FC = () => {
         color: 'bg-purple-100 text-purple-700 border-purple-300',
         icon: <CheckCircleIcon className="w-4 h-4" />,
         label: 'Sent to Buyer'
+      },
+      pending_td_approval: {
+        color: 'bg-indigo-100 text-indigo-700 border-indigo-300',
+        icon: <ClockIcon className="w-4 h-4" />,
+        label: 'TD Approval Pending'
       },
       approved_by_td: {
         color: 'bg-indigo-100 text-indigo-700 border-indigo-300',

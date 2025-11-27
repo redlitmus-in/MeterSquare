@@ -196,6 +196,7 @@ class ChangeRequestWorkflow:
             CR_CONFIG.STATUS_UNDER_REVIEW: 'Under Review',
             CR_CONFIG.STATUS_APPROVED_BY_PM: 'Approved by PM',
             CR_CONFIG.STATUS_APPROVED_BY_TD: 'Approved by TD',
+            CR_CONFIG.STATUS_PENDING_TD_APPROVAL: 'Pending TD Approval',
             CR_CONFIG.STATUS_APPROVED: 'Approved & Merged',
             CR_CONFIG.STATUS_REJECTED: 'Rejected'
         }
@@ -225,7 +226,7 @@ class ChangeRequestWorkflow:
         elif action in ['approve', 'reject']:
             if status in [CR_CONFIG.STATUS_APPROVED, CR_CONFIG.STATUS_REJECTED]:
                 return False, f"Request already {status}"
-            if status not in [CR_CONFIG.STATUS_UNDER_REVIEW, CR_CONFIG.STATUS_APPROVED_BY_PM, CR_CONFIG.STATUS_APPROVED_BY_TD]:
+            if status not in [CR_CONFIG.STATUS_UNDER_REVIEW, CR_CONFIG.STATUS_APPROVED_BY_PM, CR_CONFIG.STATUS_APPROVED_BY_TD, CR_CONFIG.STATUS_SEND_TO_EST, CR_CONFIG.STATUS_SEND_TO_BUYER, CR_CONFIG.STATUS_PENDING_TD_APPROVAL]:
                 return False, f"Request must be under review to {action}. Current status: {status}"
             return True, None
 

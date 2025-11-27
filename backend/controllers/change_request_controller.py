@@ -1003,7 +1003,7 @@ def get_all_change_requests():
             # Filter for approved/completed requests (to show in Accepted/Completed tabs)
             # SE should ONLY see their own approved requests, NOT PM/MEP created requests
             se_approved_status_filter = and_(
-                ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer']),
+                ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'pending_td_approval']),
                 ChangeRequest.requested_by_role.in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])  # Only SE created requests
             )
 
@@ -1068,7 +1068,7 @@ def get_all_change_requests():
             send_to_pm_filter = ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_PM
 
             # Filter for approved/completed requests (to show in Accepted/Completed tabs)
-            approved_status_filter = ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer'])
+            approved_status_filter = ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'pending_td_approval'])
 
             # Admin raised requests as PM role - show to PM assigned to that project
             admin_as_pm_filter = and_(
@@ -1180,6 +1180,12 @@ def get_all_change_requests():
                 ChangeRequest.status == 'pending'
             )
 
+            # Filter for approved/completed requests (to show in Accepted/Completed tabs)
+            mep_approved_status_filter = and_(
+                ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer', 'pending_td_approval']),
+                ChangeRequest.requested_by_role.in_(['mep', 'mepsupervisor'])  # Only MEP created requests
+            )
+
             # Filter for requests sent by SE to MEP for approval
             se_to_mep_filter = and_(
                 ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_MEP,
@@ -1258,6 +1264,15 @@ def get_all_change_requests():
                         and_(
                             ChangeRequest.status == 'purchase_completed',
                             ChangeRequest.project_id.in_(estimator_project_ids)
+                        ),
+                        and_(
+                            ChangeRequest.status == 'under_review',
+                            ChangeRequest.approval_required_from == 'estimator',
+                            ChangeRequest.project_id.in_(estimator_project_ids)
+                        ),
+                        and_(
+                            ChangeRequest.status == 'pending_td_approval',
+                            ChangeRequest.project_id.in_(estimator_project_ids)
                         )
                     )
                 )
@@ -1274,9 +1289,9 @@ def get_all_change_requests():
             # 3. ALL requests that are purchase_completed (completed tab) - regardless of who approved
             # 4. Requests with vendor selection pending TD approval (vendor_selection_status = 'pending_td_approval')
             # 5. Requests with vendor approved by TD (vendor_selection_status = 'approved')
+            # 6. Requests rejected by TD (status = 'rejected')
             from sqlalchemy import or_
 
-            log.info(f"TD filter - is_admin_viewing: {is_admin_viewing}")
             # Admin viewing as TD sees same as regular TD (no user-specific filtering needed)
             query = query.filter(
                 or_(
@@ -1284,6 +1299,7 @@ def get_all_change_requests():
                     ChangeRequest.td_approved_by_user_id.isnot(None),  # Approved by TD
                     ChangeRequest.status == 'purchase_completed',  # All completed purchases (actual DB value)
                     ChangeRequest.status == 'send_to_buyer',  # Send to buyer status
+                    ChangeRequest.status == 'rejected',  # Rejected requests
                     ChangeRequest.vendor_selection_status == 'pending_td_approval',  # Vendor approval pending
                     ChangeRequest.vendor_approved_by_td_id.isnot(None)  # Vendor approved by TD
                 )
@@ -1296,7 +1312,6 @@ def get_all_change_requests():
             # 4. Sub-CRs pending TD approval (vendor_selection_status='pending_td_approval')
             # 5. Sub-CRs that are vendor approved (vendor_selection_status='approved')
             from sqlalchemy import or_, and_
-            log.info(f"🔍 BUYER FILTER: user_id={user_id}, applying sub-CR filter with vendor_selection_status.in_(['pending_td_approval', 'approved'])")
             query = query.filter(
                 or_(
                     and_(
@@ -1488,6 +1503,10 @@ def approve_change_request(cr_id):
         effective_role = user_context.get('effective_role', approver_role)
         is_admin_viewing = user_context.get('is_admin_viewing', False)
 
+        # When admin is viewing as another role, use the effective role as the approver role
+        if is_admin_viewing:
+            approver_role = effective_role
+
         # Get change request
         change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
         if not change_request:
@@ -1497,11 +1516,11 @@ def approve_change_request(cr_id):
         if change_request.status in ['approved', 'rejected']:
             return jsonify({"error": f"Change request already {change_request.status}"}), 400
 
-        # Normalize role for consistent comparison - use effective role for admin viewing
-        normalized_role = workflow_service.normalize_role(effective_role if is_admin_viewing else approver_role)
+        # Normalize role for consistent comparison
+        normalized_role = workflow_service.normalize_role(approver_role)
 
         # Admin has full approval authority (like TD) - but only when NOT viewing as another role
-        is_admin = (approver_role in ['admin'] or normalized_role == 'admin') and not is_admin_viewing
+        is_admin = (current_user.get('role_name', '').lower() in ['admin'] or normalized_role == 'admin') and not is_admin_viewing
 
         # PM can approve requests that are under_review or send_to_pm from SE
         if normalized_role in ['projectmanager'] and change_request.status in [CR_CONFIG.STATUS_UNDER_REVIEW, CR_CONFIG.STATUS_SEND_TO_PM]:
@@ -1596,7 +1615,6 @@ def approve_change_request(cr_id):
 
                 # Set status to send_to_buyer when sending to buyer
                 change_request.status = CR_CONFIG.STATUS_SEND_TO_BUYER
-                log.info(f"{approver_role} approving CR {cr_id} - sending to buyer")
 
                 next_role = CR_CONFIG.ROLE_BUYER
                 next_approver = selected_buyer.full_name or selected_buyer.username
@@ -1607,7 +1625,6 @@ def approve_change_request(cr_id):
                 change_request.assigned_to_buyer_name = next_approver
                 change_request.assigned_to_buyer_date = datetime.utcnow()
 
-                log.info(f"PM approved CR {cr_id} with EXISTING materials → Assigned to Buyer: {next_approver} (user_id={next_approver_id})")
 
             change_request.approval_required_from = next_role
             change_request.current_approver_role = next_role
@@ -1698,7 +1715,7 @@ def approve_change_request(cr_id):
             return jsonify({
                 "success": True,
                 "message": f"Approved by PM. Automatically forwarded to {next_approver} for review",
-                "status": CR_CONFIG.STATUS_APPROVED_BY_PM,
+                "status": change_request.status,  # Return actual status (send_to_est or send_to_buyer)
                 "next_approver": next_approver
             }), 200
 
@@ -2086,7 +2103,7 @@ def complete_purchase_and_merge_to_boq(cr_id):
             return jsonify({"error": "Change request not found"}), 404
 
         # Check if assigned to buyer or send to buyer
-        if change_request.status not in [CR_CONFIG.STATUS_ASSIGNED_TO_BUYER, CR_CONFIG.STATUS_SEND_TO_BUYER]:
+        if change_request.status not in [CR_CONFIG.STATUS_ASSIGNED_TO_BUYER, CR_CONFIG.STATUS_SEND_TO_BUYER, CR_CONFIG.STATUS_PENDING_TD_APPROVAL]:
             return jsonify({"error": f"Purchase can only be completed for requests assigned to buyer or send to buyer. Current status: {change_request.status}"}), 400
 
         # Check if user is a buyer

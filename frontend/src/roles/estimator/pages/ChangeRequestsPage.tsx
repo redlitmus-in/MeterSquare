@@ -211,8 +211,8 @@ const ChangeRequestsPage: React.FC = () => {
     const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesTab = (
-      (activeTab === 'pending' && (req.status === 'send_to_est' || (req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'approved_by_pm' && req.status !== 'rejected' && req.status !== 'purchase_completed'))) ||
-      (activeTab === 'approved' && (req.status === 'assigned_to_buyer' || req.status === 'approved_by_pm' || req.status === 'send_to_buyer')) ||
+      (activeTab === 'pending' && (req.status === 'send_to_est' || req.status === 'under_review' || (req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'approved_by_pm' && req.status !== 'rejected' && req.status !== 'purchase_completed' && req.status !== 'pending_td_approval'))) ||
+      (activeTab === 'approved' && (req.status === 'assigned_to_buyer' || req.status === 'approved_by_pm' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval')) ||
       (activeTab === 'escalated' && req.status === 'purchase_completed') ||
       (activeTab === 'rejected' && req.status === 'rejected')
     );
@@ -220,8 +220,8 @@ const ChangeRequestsPage: React.FC = () => {
   });
 
   const stats = {
-    pending: changeRequests.filter(r => r.status === 'send_to_est' || (r.approval_required_from === 'estimator' && r.status !== 'assigned_to_buyer' && r.status !== 'approved_by_pm' && r.status !== 'rejected' && r.status !== 'purchase_completed')).length,
-    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer' || r.status === 'approved_by_pm' || r.status === 'send_to_buyer').length,
+    pending: changeRequests.filter(r => r.status === 'send_to_est' || r.status === 'under_review' || (r.approval_required_from === 'estimator' && r.status !== 'assigned_to_buyer' && r.status !== 'approved_by_pm' && r.status !== 'rejected' && r.status !== 'purchase_completed' && r.status !== 'pending_td_approval')).length,
+    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer' || r.status === 'approved_by_pm' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval').length,
     escalated: changeRequests.filter(r => r.status === 'purchase_completed').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length
   };

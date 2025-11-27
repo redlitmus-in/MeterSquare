@@ -355,17 +355,32 @@ const ChangeRequestsPage: React.FC = () => {
     const status = req.status?.trim(); // Trim to handle trailing spaces
 
     if (activeTab === 'pending') {
+      // Pending tab: Items awaiting TD approval
+      // EXCLUDE items with vendor_selection_status='pending_td_approval' (they belong in Vendor Approvals tab)
       matchesTab = ['under_review', 'approved_by_pm', 'pending'].includes(status);
     } else if (activeTab === 'approved') {
       // Filter by sub-tab when in approved tab
       if (approvedSubTab === 'purchase_approved') {
         // Purchase approved: TD approved purchase, buyer needs to select vendor
-        matchesTab = (status === 'assigned_to_buyer' || status === 'send_to_buyer') && !req.selected_vendor_id;
+        // Exclude items with vendor_selection_status='approved' (they belong in vendor_approved tab)
+        // Also exclude items that have a selected vendor
+        matchesTab = (status === 'assigned_to_buyer' || status === 'send_to_buyer') &&
+                     !req.selected_vendor_id &&
+                     (!req.vendor_selection_status || req.vendor_selection_status !== 'approved') &&
+                     !req.vendor_approved_by_td_id;
       } else if (approvedSubTab === 'vendor_approved') {
         // Vendor approved: TD approved vendor selection, buyer hasn't completed purchase yet
         // Once purchase is completed (status = purchase_completed), it moves to Completed tab
-        matchesTab = (status === 'assigned_to_buyer' || status === 'send_to_buyer') &&
-                     !!req.selected_vendor_id && (!!req.vendor_approval_date || !!req.vendor_approved_by_td_id);
+        // Include ONLY items where vendor_selection_status='approved' (NOT 'pending_td_approval')
+        matchesTab = (
+          status === 'vendor_approved' ||
+          (
+            (status === 'assigned_to_buyer' || status === 'send_to_buyer' || status === 'pending_td_approval') &&
+            !!req.selected_vendor_id &&
+            req.vendor_selection_status === 'approved' &&
+            (!!req.vendor_approval_date || !!req.vendor_approved_by_td_id)
+          )
+        );
       }
     } else if (activeTab === 'completed') {
       // Only show truly completed purchases (purchase_completed status)
@@ -476,15 +491,33 @@ const ChangeRequestsPage: React.FC = () => {
   };
 
   const stats = {
-    pending: changeRequests.filter(r => ['under_review', 'approved_by_pm', 'pending'].includes(r.status?.trim())).length,
+    pending: changeRequests.filter(r => {
+      const status = r.status?.trim();
+      // EXCLUDE items with vendor_selection_status='pending_td_approval' (they belong in Vendor Approvals tab)
+      return ['under_review', 'approved_by_pm', 'pending'].includes(status);
+    }).length,
     approved: changeRequests.filter(r =>
       (r.status?.trim() === 'assigned_to_buyer' || r.status?.trim() === 'send_to_buyer') // Count items in assigned_to_buyer or send_to_buyer status
     ).length,
-    purchaseApproved: changeRequests.filter(r => (r.status?.trim() === 'assigned_to_buyer' || r.status?.trim() === 'send_to_buyer') && !r.selected_vendor_id).length,
-    vendorApproved: changeRequests.filter(r =>
-      (r.status?.trim() === 'assigned_to_buyer' || r.status?.trim() === 'send_to_buyer') && // Must be assigned_to_buyer or send_to_buyer, not purchase_completed
-      !!r.selected_vendor_id && (!!r.vendor_approval_date || !!r.vendor_approved_by_td_id)
-    ).length,
+    purchaseApproved: changeRequests.filter(r => {
+      const status = r.status?.trim();
+      return (status === 'assigned_to_buyer' || status === 'send_to_buyer') &&
+             !r.selected_vendor_id &&
+             (!r.vendor_selection_status || r.vendor_selection_status !== 'approved') &&
+             !r.vendor_approved_by_td_id;
+    }).length,
+    vendorApproved: changeRequests.filter(r => {
+      const status = r.status?.trim();
+      return (
+        status === 'vendor_approved' ||
+        (
+          (status === 'assigned_to_buyer' || status === 'send_to_buyer' || status === 'pending_td_approval') &&
+          !!r.selected_vendor_id &&
+          r.vendor_selection_status === 'approved' &&
+          (!!r.vendor_approval_date || !!r.vendor_approved_by_td_id)
+        )
+      );
+    }).length,
     completed: changeRequests.filter(r => r.status?.trim() === 'purchase_completed').length,
     rejected: changeRequests.filter(r => r.status?.trim() === 'rejected').length,
     vendorApprovals: vendorApprovals.length

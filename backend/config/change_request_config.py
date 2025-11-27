@@ -42,6 +42,7 @@ class ChangeRequestConfig:
     STATUS_SEND_TO_BUYER = 'send_to_buyer'  # PM approved, sent to buyer for procurement
     STATUS_APPROVED_BY_PM = 'approved_by_pm'
     STATUS_APPROVED_BY_TD = 'approved_by_td'
+    STATUS_PENDING_TD_APPROVAL = 'pending_td_approval'  # Vendor selection pending TD approval
     STATUS_APPROVED = 'approved'
     STATUS_ASSIGNED_TO_BUYER = 'assigned_to_buyer'
     STATUS_PURCHASE_COMPLETE = 'purchase_completed'  # Fixed: was 'purchase_complete', now 'purchase_completed'
@@ -71,6 +72,7 @@ class ChangeRequestConfig:
                 'send_to_buyer': cls.STATUS_SEND_TO_BUYER,
                 'approved_by_pm': cls.STATUS_APPROVED_BY_PM,
                 'approved_by_td': cls.STATUS_APPROVED_BY_TD,
+                'pending_td_approval': cls.STATUS_PENDING_TD_APPROVAL,
                 'approved': cls.STATUS_APPROVED,
                 'assigned_to_buyer': cls.STATUS_ASSIGNED_TO_BUYER,
                 'purchase_completed': cls.STATUS_PURCHASE_COMPLETE,  # Fixed key to match status value
