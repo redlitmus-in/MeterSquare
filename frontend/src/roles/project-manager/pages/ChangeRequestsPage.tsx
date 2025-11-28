@@ -32,7 +32,8 @@ import {
   List,
   Plus,
   Box,
-  Pencil
+  Pencil,
+  GitBranch
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
@@ -343,6 +344,58 @@ const ChangeRequestsPage: React.FC = () => {
     if (percentage <= 10) return 'text-green-600';
     if (percentage <= 20) return 'text-yellow-600';
     return 'text-red-600';
+  };
+
+  // Helper to render POChildren (vendor splits) info
+  const renderPOChildrenInfo = (request: ChangeRequestItem) => {
+    if (!request.has_po_children || !request.po_children || request.po_children.length === 0) {
+      return null;
+    }
+
+    const getChildStatusColor = (status: string) => {
+      switch (status) {
+        case 'purchase_completed': return 'bg-green-100 text-green-700';
+        case 'vendor_approved': return 'bg-blue-100 text-blue-700';
+        case 'pending_td_approval': return 'bg-yellow-100 text-yellow-700';
+        case 'rejected': return 'bg-red-100 text-red-700';
+        default: return 'bg-gray-100 text-gray-700';
+      }
+    };
+
+    const getChildStatusLabel = (status: string) => {
+      switch (status) {
+        case 'purchase_completed': return 'Completed';
+        case 'vendor_approved': return 'Vendor Approved';
+        case 'pending_td_approval': return 'Pending TD';
+        case 'rejected': return 'Rejected';
+        default: return status;
+      }
+    };
+
+    return (
+      <div className="px-4 pb-3">
+        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-3 border border-indigo-200">
+          <div className="flex items-center gap-2 mb-2">
+            <GitBranch className="h-4 w-4 text-indigo-600" />
+            <span className="text-xs font-semibold text-indigo-700">Split into {request.po_children.length} Vendor{request.po_children.length > 1 ? 's' : ''}</span>
+          </div>
+          <div className="space-y-1.5">
+            {request.po_children.map((child) => (
+              <div key={child.id} className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-gray-700">{child.formatted_id}</span>
+                  <span className="text-gray-500">→</span>
+                  <span className="text-gray-600 truncate max-w-[100px]">{child.vendor_name || 'No vendor'}</span>
+                </div>
+                <Badge className={`text-[10px] px-1.5 py-0.5 ${getChildStatusColor(child.status)}`}>
+                  {getChildStatusLabel(child.status)}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const isAdminUser = user?.role?.toLowerCase() === 'admin' || user?.role_name?.toLowerCase() === 'admin';
@@ -767,6 +820,9 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
+                        {/* POChildren (Vendor Splits) Info */}
+                        {renderPOChildrenInfo(request)}
+
                         {/* Actions */}
                         <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
                           <button
@@ -898,6 +954,9 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
+                        {/* POChildren (Vendor Splits) Info */}
+                        {renderPOChildrenInfo(request)}
+
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button
                             onClick={() => handleReview(request.cr_id)}
@@ -982,6 +1041,9 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
+                        {/* POChildren (Vendor Splits) Info */}
+                        {renderPOChildrenInfo(request)}
+
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button
                             onClick={() => handleReview(request.cr_id)}
@@ -1059,6 +1121,10 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="font-semibold text-red-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
                           </div>
                         </div>
+
+                        {/* POChildren (Vendor Splits) Info */}
+                        {renderPOChildrenInfo(request)}
+
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button
                             onClick={() => handleReview(request.cr_id)}
@@ -1445,6 +1511,9 @@ const ChangeRequestsPage: React.FC = () => {
                                 </div>
                               </div>
 
+                              {/* POChildren (Vendor Splits) Info */}
+                              {renderPOChildrenInfo(request)}
+
                               {/* View-only: Only show Review button */}
                               <div className="border-t border-gray-200 p-2 sm:p-3">
                                 <button
@@ -1525,6 +1594,9 @@ const ChangeRequestsPage: React.FC = () => {
                                 </div>
                               </div>
 
+                              {/* POChildren (Vendor Splits) Info */}
+                              {renderPOChildrenInfo(request)}
+
                               <div className="border-t border-gray-200 p-3">
                                 <button
                                   onClick={() => handleReview(request.cr_id)}
@@ -1602,6 +1674,10 @@ const ChangeRequestsPage: React.FC = () => {
                               <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
                             </div>
                           </div>
+
+                          {/* POChildren (Vendor Splits) Info */}
+                          {renderPOChildrenInfo(request)}
+
                           <div className="border-t border-gray-200 p-2 sm:p-3">
                             <button
                               onClick={() => handleReview(request.cr_id)}
@@ -1677,6 +1753,10 @@ const ChangeRequestsPage: React.FC = () => {
                               <span className="font-bold text-purple-600">{formatCurrency(request.materials_total_cost)}</span>
                             </div>
                           </div>
+
+                          {/* POChildren (Vendor Splits) Info */}
+                          {renderPOChildrenInfo(request)}
+
                           <div className="border-t border-gray-200 p-2 sm:p-3">
                             <button
                               onClick={() => handleReview(request.cr_id)}
@@ -1763,6 +1843,10 @@ const ChangeRequestsPage: React.FC = () => {
                               </div>
                             )}
                           </div>
+
+                          {/* POChildren (Vendor Splits) Info */}
+                          {renderPOChildrenInfo(request)}
+
                           <div className="border-t border-gray-200 p-2 sm:p-3">
                             <button
                               onClick={() => handleReview(request.cr_id)}

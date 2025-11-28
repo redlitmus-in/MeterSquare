@@ -112,6 +112,7 @@ export interface Purchase {
   vendor_selection_pending_td_approval?: boolean;
   vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
   vendor_email_sent?: boolean;
+  po_child_id?: number;  // If this is a POChild record, this is its ID
   use_per_material_vendors?: boolean;
   material_vendor_selections?: Record<string, MaterialVendorSelection>;
   has_store_requests?: boolean;
@@ -519,6 +520,30 @@ class BuyerService {
     }
   }
 
+  // Preview vendor email for POChild (vendor-split purchases)
+  async previewPOChildVendorEmail(poChildId: number): Promise<PreviewVendorEmailResponse> {
+    try {
+      const response = await axios.get<PreviewVendorEmailResponse>(
+        `${API_URL}/buyer/po-child/${poChildId}/preview-vendor-email`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to preview vendor email');
+    } catch (error: any) {
+      console.error('Error previewing POChild vendor email:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase order child not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to preview vendor email');
+    }
+  }
+
   // Send email to vendor
   async sendVendorEmail(crId: number, data: SendVendorEmailRequest): Promise<SendVendorEmailResponse> {
     try {
@@ -555,6 +580,57 @@ class BuyerService {
       }
       if (error.response?.status === 404) {
         throw new Error('Purchase not found');
+      }
+      if (error.response?.status === 403) {
+        throw new Error('You do not have permission to send this email');
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response?.data?.error || error.response?.data?.message || 'Invalid request');
+      }
+      if (error.response?.status === 500) {
+        const errorMsg = error.response?.data?.error || error.response?.data?.message || 'Server error while sending email. Check backend logs.';
+        throw new Error(errorMsg);
+      }
+      throw new Error(error.response?.data?.error || error.response?.data?.message || 'Failed to send email to vendor');
+    }
+  }
+
+  // Send email to vendor for POChild (vendor-split purchases)
+  async sendPOChildVendorEmail(poChildId: number, data: SendVendorEmailRequest): Promise<SendVendorEmailResponse> {
+    try {
+      const payload: any = { vendor_email: data.vendor_email };
+      if (data.custom_email_body) {
+        payload.custom_email_body = data.custom_email_body;
+      }
+      if (data.vendor_company_name) {
+        payload.vendor_company_name = data.vendor_company_name;
+      }
+      if (data.vendor_contact_person) {
+        payload.vendor_contact_person = data.vendor_contact_person;
+      }
+      if (data.vendor_phone) {
+        payload.vendor_phone = data.vendor_phone;
+      }
+
+      const response = await axios.post<SendVendorEmailResponse>(
+        `${API_URL}/buyer/po-child/${poChildId}/send-vendor-email`,
+        payload,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || response.data.message || 'Failed to send email to vendor');
+    } catch (error: any) {
+      console.error('Error sending POChild vendor email:', error);
+      console.error('Response data:', error.response?.data);
+
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase order child not found');
       }
       if (error.response?.status === 403) {
         throw new Error('You do not have permission to send this email');
@@ -893,6 +969,31 @@ class BuyerService {
       throw new Error(response.data.error || 'Failed to fetch pending PO children');
     } catch (error: any) {
       console.error('Error fetching pending PO children:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to fetch pending PO children');
+    }
+  }
+
+  // Get buyer's POChild records pending TD approval
+  async getBuyerPendingPOChildren(): Promise<{
+    success: boolean;
+    pending_count: number;
+    po_children: POChild[];
+  }> {
+    try {
+      const response = await axios.get(
+        `${API_URL}/buyer/po-children/buyer-pending`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to fetch pending PO children');
+    } catch (error: any) {
+      console.error('Error fetching buyer pending PO children:', error);
       if (error.response?.status === 401) {
         throw new Error('Authentication required. Please login again.');
       }

@@ -6,6 +6,7 @@ from config.db import db
 from models.change_request import ChangeRequest
 from models.boq import *
 from models.project import Project
+from models.po_child import POChild
 from models.user import User
 from config.logging import get_logger
 from config.change_request_config import CR_CONFIG
@@ -1381,6 +1382,33 @@ def get_all_change_requests():
 
             # Skip material lookup - master_material_id values like 'mat_198_1_2'
             # are not database IDs but sub_item identifiers
+
+            # Add POChildren data for this change request (for PM/SE/EST/MEP visibility)
+            po_children = POChild.query.filter_by(
+                parent_cr_id=cr.cr_id,
+                is_deleted=False
+            ).all()
+
+            if po_children:
+                cr_dict['po_children'] = [{
+                    'id': pc.id,
+                    'formatted_id': pc.get_formatted_id(),
+                    'suffix': pc.suffix,
+                    'vendor_id': pc.vendor_id,
+                    'vendor_name': pc.vendor_name,
+                    'status': pc.status,
+                    'vendor_selection_status': pc.vendor_selection_status,
+                    'materials_count': len(pc.materials_data) if pc.materials_data else 0,
+                    'materials_total_cost': round(pc.materials_total_cost, 2) if pc.materials_total_cost else 0,
+                    'vendor_email_sent': pc.vendor_email_sent,
+                    'purchase_completion_date': pc.purchase_completion_date.isoformat() if pc.purchase_completion_date else None
+                } for pc in po_children]
+                cr_dict['has_po_children'] = True
+                cr_dict['po_children_count'] = len(po_children)
+            else:
+                cr_dict['po_children'] = []
+                cr_dict['has_po_children'] = False
+                cr_dict['po_children_count'] = 0
 
             result.append(cr_dict)
 

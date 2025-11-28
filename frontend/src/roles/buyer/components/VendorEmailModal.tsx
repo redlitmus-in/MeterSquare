@@ -107,7 +107,10 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const loadEmailPreview = async () => {
     try {
       setIsLoadingPreview(true);
-      const response = await buyerService.previewVendorEmail(purchase.cr_id);
+      // Use POChild API if this is a vendor-split purchase
+      const response = purchase.po_child_id
+        ? await buyerService.previewPOChildVendorEmail(purchase.po_child_id)
+        : await buyerService.previewVendorEmail(purchase.cr_id);
       setEmailPreview(response.email_preview);
       setVendorEmail(response.vendor_email);
       setVendorName(response.vendor_name);
@@ -200,13 +203,20 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       const emailContent = isEditMode ? constructEmailHtml() : (editedEmailContent || emailPreview);
 
       // Send email with custom body and vendor fields only
-      await buyerService.sendVendorEmail(purchase.cr_id, {
+      // Use POChild API if this is a vendor-split purchase (has po_child_id)
+      const emailData = {
         vendor_email: editedVendorEmail || vendorEmail,
         custom_email_body: emailContent,
         vendor_company_name: editedVendorName,
         vendor_contact_person: editedVendorContact,
         vendor_phone: editedVendorPhone
-      });
+      };
+
+      if (purchase.po_child_id) {
+        await buyerService.sendPOChildVendorEmail(purchase.po_child_id, emailData);
+      } else {
+        await buyerService.sendVendorEmail(purchase.cr_id, emailData);
+      }
       setStep('success');
 
       const emailCount = (editedVendorEmail || vendorEmail).split(',').map(e => e.trim()).filter(e => e).length;
@@ -920,6 +930,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                       >
                         Back
                       </Button>
+{/* WhatsApp button commented out
                       <Button
                         onClick={handleSendWhatsApp}
                         disabled={isSendingWhatsApp || isSendingEmail || !(editedVendorPhone || purchase.vendor_phone)}
@@ -938,6 +949,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                           </>
                         )}
                       </Button>
+*/}
                       <Button
                         onClick={handleSendEmail}
                         disabled={isSendingEmail || isSendingWhatsApp}

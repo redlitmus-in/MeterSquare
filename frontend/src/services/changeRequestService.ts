@@ -127,10 +127,28 @@ export interface ChangeRequestItem {
   assigned_to_buyer_date?: string | null;
   project_client?: string | null;
   project_location?: string | null;
+  area?: string | null;
 
   // PO Child Support (for separate vendor submissions)
   submission_group_id?: string | null;
   formatted_cr_id?: string;  // "CR-100"
+
+  // POChildren data (for split purchases)
+  has_po_children?: boolean;
+  po_children_count?: number;
+  po_children?: Array<{
+    id: number;
+    formatted_id: string;
+    suffix: string;
+    vendor_id: number | null;
+    vendor_name: string | null;
+    status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'rejected';
+    vendor_selection_status: 'pending_td_approval' | 'approved' | 'rejected';
+    materials_count: number;
+    materials_total_cost: number;
+    vendor_email_sent: boolean;
+    purchase_completion_date: string | null;
+  }>;
 }
 
 export interface CreateChangeRequestData {

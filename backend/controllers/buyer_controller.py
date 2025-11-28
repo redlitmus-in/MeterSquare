@@ -989,11 +989,60 @@ def get_buyer_completed_purchases():
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
             })
 
+        # Also get completed POChildren (vendor-split purchases)
+        from models.po_child import POChild
+
+        if is_admin_viewing:
+            completed_po_children = POChild.query.filter(
+                POChild.status == 'purchase_completed',
+                POChild.is_deleted == False
+            ).all()
+        else:
+            # Get POChildren where parent CR is assigned to this buyer
+            completed_po_children = POChild.query.join(
+                ChangeRequest, POChild.parent_cr_id == ChangeRequest.cr_id
+            ).filter(
+                POChild.status == 'purchase_completed',
+                POChild.is_deleted == False,
+                ChangeRequest.assigned_to_buyer_user_id == buyer_id
+            ).all()
+
+        completed_po_children_list = []
+        for po_child in completed_po_children:
+            parent_cr = ChangeRequest.query.get(po_child.parent_cr_id)
+            project = Project.query.get(parent_cr.project_id) if parent_cr else None
+            boq = BOQ.query.get(po_child.boq_id) if po_child.boq_id else (BOQ.query.get(parent_cr.boq_id) if parent_cr and parent_cr.boq_id else None)
+
+            # Get vendor details
+            vendor = None
+            if po_child.vendor_id:
+                from models.vendor import Vendor
+                vendor = Vendor.query.get(po_child.vendor_id)
+
+            po_child_total = po_child.materials_total_cost or 0
+            total_cost += po_child_total
+
+            completed_po_children_list.append({
+                **po_child.to_dict(),
+                'project_name': project.project_name if project else 'Unknown',
+                'project_code': project.project_code if project else None,
+                'client': project.client if project else None,
+                'location': project.location if project else None,
+                'boq_name': boq.boq_name if boq else None,
+                'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
+                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None,
+                'vendor_phone': vendor.phone if vendor else None,
+                'vendor_contact_person': vendor.contact_person_name if vendor else None,
+                'is_po_child': True
+            })
+
         return jsonify({
             "success": True,
             "completed_purchases_count": len(completed_purchases),
             "total_cost": round(total_cost, 2),
-            "completed_purchases": completed_purchases
+            "completed_purchases": completed_purchases,
+            "completed_po_children": completed_po_children_list,
+            "completed_po_children_count": len(completed_po_children_list)
         }), 200
 
     except Exception as e:
@@ -3442,6 +3491,77 @@ def get_pending_po_children():
         return jsonify({"error": f"Failed to fetch pending PO children: {str(e)}"}), 500
 
 
+def get_buyer_pending_po_children():
+    """Get POChild records pending TD approval for the current buyer"""
+    try:
+        from utils.admin_viewing_context import get_effective_user_context
+
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_role = current_user.get('role_name', current_user.get('role', '')).lower()
+
+        # Check if admin is viewing as buyer
+        context = get_effective_user_context()
+        is_admin_viewing = context['is_admin_viewing']
+
+        if user_role == 'admin':
+            is_admin_viewing = True
+
+        # Get POChildren where parent CR is assigned to this buyer and pending TD approval
+        if is_admin_viewing:
+            pending_po_children = POChild.query.filter(
+                POChild.vendor_selection_status == 'pending_td_approval',
+                POChild.is_deleted == False
+            ).all()
+        else:
+            pending_po_children = POChild.query.join(
+                ChangeRequest, POChild.parent_cr_id == ChangeRequest.cr_id
+            ).filter(
+                POChild.vendor_selection_status == 'pending_td_approval',
+                POChild.is_deleted == False,
+                ChangeRequest.assigned_to_buyer_user_id == user_id
+            ).all()
+
+        result = []
+        for po_child in pending_po_children:
+            parent_cr = ChangeRequest.query.get(po_child.parent_cr_id) if po_child.parent_cr_id else None
+
+            project = None
+            if po_child.project_id:
+                project = Project.query.get(po_child.project_id)
+            elif parent_cr:
+                project = Project.query.get(parent_cr.project_id)
+
+            boq = None
+            if po_child.boq_id:
+                boq = BOQ.query.get(po_child.boq_id)
+            elif parent_cr and parent_cr.boq_id:
+                boq = BOQ.query.get(parent_cr.boq_id)
+
+            result.append({
+                **po_child.to_dict(),
+                'project_name': project.project_name if project else 'Unknown',
+                'project_code': project.project_code if project else None,
+                'client': project.client if project else None,
+                'location': project.location if project else None,
+                'boq_name': boq.boq_name if boq else None,
+                'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
+                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None
+            })
+
+        return jsonify({
+            "success": True,
+            "pending_count": len(result),
+            "po_children": result
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching buyer pending PO children: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch pending PO children: {str(e)}"}), 500
+
+
 def get_approved_po_children():
     """Get all POChild records with approved vendor selection (for buyer to complete purchase)"""
     try:
@@ -3652,6 +3772,136 @@ def preview_vendor_email(cr_id):
 
     except Exception as e:
         log.error(f"Error generating email preview: {str(e)}")
+        return jsonify({"error": f"Failed to generate email preview: {str(e)}"}), 500
+
+
+def preview_po_child_vendor_email(po_child_id):
+    """Preview vendor purchase order email for POChild (vendor-split purchases)"""
+    try:
+        from models.po_child import POChild
+        from models.vendor import Vendor
+        from utils.boq_email_service import BOQEmailService
+
+        current_user = g.user
+        buyer_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
+
+        # Get the POChild record
+        po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
+        if not po_child:
+            return jsonify({"error": "Purchase order child not found"}), 404
+
+        # Check if admin or admin viewing as buyer
+        is_admin = user_role == 'admin'
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # Check if vendor is selected
+        if not po_child.vendor_id:
+            return jsonify({"error": "No vendor selected for this purchase"}), 400
+
+        # Get vendor details
+        vendor = Vendor.query.filter_by(vendor_id=po_child.vendor_id, is_deleted=False).first()
+        if not vendor:
+            return jsonify({"error": "Vendor not found"}), 404
+
+        # Get parent CR for project info
+        parent_cr = ChangeRequest.query.filter_by(cr_id=po_child.parent_cr_id).first()
+        if not parent_cr:
+            return jsonify({"error": "Parent purchase order not found"}), 404
+
+        # Get project details
+        project = Project.query.get(parent_cr.project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Get buyer details
+        buyer = User.query.filter_by(user_id=buyer_id).first()
+
+        # Process materials from POChild's materials_data
+        materials_list = []
+        total_cost = 0
+        if po_child.materials_data:
+            for material in po_child.materials_data:
+                mat_total = float(material.get('total_price', 0) or 0)
+                materials_list.append({
+                    'material_name': material.get('material_name', 'N/A'),
+                    'quantity': material.get('quantity', 0),
+                    'unit': material.get('unit', 'pcs'),
+                    'unit_price': material.get('unit_price', 0),
+                    'total_price': round(mat_total, 2)
+                })
+                total_cost += mat_total
+
+        # Prepare data for email template
+        vendor_data = {
+            'company_name': vendor.company_name or 'N/A',
+            'contact_person_name': vendor.contact_person_name or '',
+            'email': vendor.email or 'N/A'
+        }
+
+        purchase_data = {
+            'cr_id': po_child.parent_cr_id,
+            'po_child_id': po_child.id,
+            'formatted_id': po_child.get_formatted_id(),
+            'materials': materials_list,
+            'total_cost': round(total_cost, 2)
+        }
+
+        buyer_data = {
+            'buyer_name': (buyer.full_name if buyer and buyer.full_name else None) or 'Procurement Team',
+            'buyer_email': (buyer.email if buyer and buyer.email else None) or 'N/A',
+            'buyer_phone': (buyer.phone if buyer and buyer.phone else None) or 'N/A'
+        }
+
+        project_data = {
+            'project_name': project.project_name or 'N/A',
+            'client': project.client or 'N/A',
+            'location': project.location or 'N/A'
+        }
+
+        # Get uploaded files from parent CR
+        uploaded_files = []
+        if parent_cr.file_path:
+            filenames = [f.strip() for f in parent_cr.file_path.split(",") if f.strip()]
+            for filename in filenames:
+                file_path = f"buyer/cr_{parent_cr.cr_id}/{filename}"
+                file_size = None
+                try:
+                    file_response = supabase.storage.from_(SUPABASE_BUCKET).download(file_path)
+                    if file_response:
+                        file_size = len(file_response)
+                except Exception as e:
+                    log.warning(f"Could not get file size for {filename}: {str(e)}")
+
+                uploaded_files.append({
+                    "filename": filename,
+                    "path": file_path,
+                    "size_bytes": file_size,
+                    "size_mb": round(file_size / (1024 * 1024), 2) if file_size else None,
+                    "public_url": f"{supabase_url}/storage/v1/object/public/{SUPABASE_BUCKET}/{file_path}"
+                })
+
+        # Generate email preview
+        email_service = BOQEmailService()
+        email_html = email_service.generate_vendor_purchase_order_email(
+            vendor_data, purchase_data, buyer_data, project_data
+        )
+
+        return jsonify({
+            "success": True,
+            "email_preview": email_html,
+            "vendor_email": vendor.email,
+            "vendor_name": vendor.company_name,
+            "vendor_contact_person": vendor.contact_person_name,
+            "vendor_phone": vendor.phone,
+            "uploaded_files": uploaded_files,
+            "total_attachments": len(uploaded_files)
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error generating POChild email preview: {str(e)}")
         return jsonify({"error": f"Failed to generate email preview: {str(e)}"}), 500
 
 
@@ -3897,6 +4147,202 @@ def send_vendor_email(cr_id):
 
     except Exception as e:
         log.error(f"Error sending vendor email: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to send vendor email: {str(e)}"}), 500
+
+
+def send_po_child_vendor_email(po_child_id):
+    """Send purchase order email to vendor for POChild (vendor-split purchases)"""
+    try:
+        from utils.boq_email_service import BOQEmailService
+        from datetime import datetime
+        from models.po_child import POChild
+        from models.vendor import Vendor
+        import re
+
+        current_user = g.user
+        buyer_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
+
+        data = request.get_json()
+        vendor_email = data.get('vendor_email')
+        custom_email_body = data.get('custom_email_body')
+        vendor_company_name = data.get('vendor_company_name')
+        vendor_contact_person = data.get('vendor_contact_person')
+        vendor_phone = data.get('vendor_phone')
+
+        if not vendor_email:
+            return jsonify({"error": "Vendor email is required"}), 400
+
+        # Parse comma-separated emails
+        email_list = [email.strip() for email in vendor_email.split(',') if email.strip()]
+
+        # Validate each email
+        email_regex = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+        invalid_emails = [email for email in email_list if not email_regex.match(email)]
+
+        if invalid_emails:
+            return jsonify({"error": f"Invalid email address: {invalid_emails[0]}"}), 400
+
+        if not email_list:
+            return jsonify({"error": "At least one valid email address is required"}), 400
+
+        # Get the POChild record
+        po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
+        if not po_child:
+            return jsonify({"error": "Purchase order child not found"}), 404
+
+        # Check if admin or admin viewing as buyer
+        is_admin = user_role == 'admin'
+        from utils.admin_viewing_context import get_effective_user_context
+        user_context = get_effective_user_context()
+        is_admin_viewing = user_context.get('is_admin_viewing', False)
+
+        # Verify vendor is selected and approved
+        if not po_child.vendor_id:
+            return jsonify({"error": "No vendor selected for this purchase"}), 400
+
+        if po_child.vendor_selection_status != 'approved':
+            return jsonify({"error": "Vendor selection must be approved by TD before sending email"}), 400
+
+        # Get vendor details
+        vendor = Vendor.query.filter_by(vendor_id=po_child.vendor_id, is_deleted=False).first()
+        if not vendor:
+            return jsonify({"error": "Vendor not found"}), 404
+
+        # Update vendor details in vendors table if provided
+        if vendor_company_name and vendor_company_name != vendor.company_name:
+            vendor.company_name = vendor_company_name
+        if vendor_contact_person and vendor_contact_person != vendor.contact_person_name:
+            vendor.contact_person_name = vendor_contact_person
+        if vendor_phone and vendor_phone != vendor.phone:
+            sanitized_phone = vendor_phone.strip()
+            while sanitized_phone.count('+971') > 1:
+                sanitized_phone = sanitized_phone.replace('+971 ', '', 1)
+            sanitized_phone = sanitized_phone[:20]
+            vendor.phone = sanitized_phone
+        if vendor_email and vendor_email != vendor.email:
+            vendor.email = vendor_email
+
+        # Get buyer details
+        buyer = User.query.filter_by(user_id=buyer_id).first()
+        if not buyer:
+            return jsonify({"error": "Buyer not found"}), 404
+
+        # Get parent CR for project info
+        parent_cr = ChangeRequest.query.filter_by(cr_id=po_child.parent_cr_id).first()
+        if not parent_cr:
+            return jsonify({"error": "Parent purchase order not found"}), 404
+
+        # Get project details
+        project = Project.query.get(parent_cr.project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Get BOQ details (optional for POChild)
+        boq = None
+        if po_child.boq_id:
+            boq = BOQ.query.filter_by(boq_id=po_child.boq_id).first()
+
+        # Process materials from POChild's materials_data
+        materials_list = []
+        total_cost = 0
+        if po_child.materials_data:
+            for material in po_child.materials_data:
+                mat_total = float(material.get('total_price', 0) or 0)
+                materials_list.append({
+                    'material_name': material.get('material_name', 'N/A'),
+                    'quantity': material.get('quantity', 0),
+                    'unit': material.get('unit', 'pcs'),
+                    'unit_price': material.get('unit_price', 0),
+                    'total_price': round(mat_total, 2)
+                })
+                total_cost += mat_total
+
+        # Prepare data for email template
+        vendor_data = {
+            'company_name': vendor.company_name,
+            'contact_person_name': vendor.contact_person_name,
+            'email': email_list[0]
+        }
+
+        purchase_data = {
+            'cr_id': po_child.parent_cr_id,
+            'po_child_id': po_child.id,
+            'formatted_id': po_child.get_formatted_id(),
+            'materials': materials_list,
+            'total_cost': round(total_cost, 2)
+        }
+
+        buyer_data = {
+            'buyer_name': (buyer.full_name if buyer and buyer.full_name else None) or 'Procurement Team',
+            'buyer_email': (buyer.email if buyer and buyer.email else None) or 'N/A',
+            'buyer_phone': (buyer.phone if buyer and buyer.phone else None) or 'N/A'
+        }
+
+        project_data = {
+            'project_name': project.project_name or 'N/A',
+            'client': project.client or 'N/A',
+            'location': project.location or 'N/A'
+        }
+
+        # Fetch uploaded files from Supabase if available (use parent CR's files)
+        attachments = []
+        if parent_cr.file_path:
+            try:
+                filenames = [f.strip() for f in parent_cr.file_path.split(",") if f.strip()]
+                for filename in filenames:
+                    try:
+                        file_path = f"buyer/cr_{parent_cr.cr_id}/{filename}"
+                        file_response = supabase.storage.from_(SUPABASE_BUCKET).download(file_path)
+                        if file_response:
+                            ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'bin'
+                            mime_types = {
+                                'pdf': 'application/pdf',
+                                'doc': 'application/msword',
+                                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                'xls': 'application/vnd.ms-excel',
+                                'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                'png': 'image/png',
+                                'jpg': 'image/jpeg',
+                                'jpeg': 'image/jpeg',
+                                'zip': 'application/zip'
+                            }
+                            mime_type = mime_types.get(ext, 'application/octet-stream')
+                            attachments.append((filename, file_response, mime_type))
+                    except Exception as e:
+                        log.warning(f"Could not download file {filename}: {str(e)}")
+                        continue
+            except Exception as e:
+                log.error(f"Error processing attachments: {str(e)}")
+
+        # Send email
+        email_service = BOQEmailService()
+        email_sent = email_service.send_vendor_purchase_order_async(
+            email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments
+        )
+
+        if email_sent:
+            # Mark email as sent on POChild
+            po_child.vendor_email_sent = True
+            po_child.vendor_email_sent_date = datetime.utcnow()
+            po_child.updated_at = datetime.utcnow()
+            db.session.commit()
+
+            recipient_count = len(email_list)
+            return jsonify({
+                "success": True,
+                "message": f"Purchase order email sent to {recipient_count} recipient(s) successfully"
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Failed to send email to vendor"
+            }), 500
+
+    except Exception as e:
+        log.error(f"Error sending POChild vendor email: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to send vendor email: {str(e)}"}), 500
