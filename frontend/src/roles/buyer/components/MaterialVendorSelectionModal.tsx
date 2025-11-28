@@ -788,6 +788,11 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const unlockedMaterials = materialVendors.filter(m => !isMaterialActuallyLocked(m.material_name));
   const lockedMaterialsCount = materialVendors.length - unlockedMaterials.length;
 
+  // Check if purchase is already split (has ANY PO children - regardless of status)
+  // If split, we should hide the main "Submit for TD Approval" button and only show individual vendor buttons
+  // Once a purchase is split, all subsequent submissions must go through individual vendor buttons
+  const isPurchaseAlreadySplit = purchase.po_children && purchase.po_children.length > 0;
+
   const allMaterialsHaveVendors = unlockedMaterials.every(m => m.selected_vendors.length > 0);
   const selectedCount = unlockedMaterials.filter(m => m.selected_vendors.length > 0).length;
   const totalVendorSelections = unlockedMaterials.reduce((sum, m) => sum + m.selected_vendors.length, 0);
@@ -1713,8 +1718,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         group.total_amount += vendorMaterialAmount;
                       });
 
-                      // Check if there's only 1 vendor selected - if so, hide individual send buttons
-                      const hasMultipleVendors = vendorGroups.size > 1;
+                      // Show individual send buttons if:
+                      // 1. Multiple vendors are selected, OR
+                      // 2. Purchase is already split (has pending PO children) - so we continue the split pattern
+                      const hasMultipleVendors = vendorGroups.size > 1 || isPurchaseAlreadySplit;
 
                       return (
                         <div className="space-y-3">
@@ -2028,31 +2035,34 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     </Button>
                   ) : (
                     /* Buyer Mode: Submit All Together - Single Purchase Indicator */
-                    <div className="flex flex-col items-end gap-1">
-                      <span className="text-xs text-gray-500 italic">
-                        Send all materials as one purchase
-                      </span>
-                      <Button
-                        onClick={() => {
-                          setSendSeparately(false);
-                          handleSubmit();
-                        }}
-                        disabled={selectedCount === 0 || isSubmitting}
-                        className="px-6 bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                        {isSubmitting && !sendSeparately ? (
-                          <>
-                            <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            {isTechnicalDirector ? 'Approving...' : 'Submitting...'}
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle className="w-4 h-4 mr-2" />
-                            {isTechnicalDirector ? 'Approve All' : 'Submit for TD Approval'}
-                          </>
-                        )}
-                      </Button>
-                    </div>
+                    /* Hide this button if purchase is already split - user should use individual vendor buttons */
+                    !isPurchaseAlreadySplit && (
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="text-xs text-gray-500 italic">
+                          Send all materials as one purchase
+                        </span>
+                        <Button
+                          onClick={() => {
+                            setSendSeparately(false);
+                            handleSubmit();
+                          }}
+                          disabled={selectedCount === 0 || isSubmitting}
+                          className="px-6 bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                          {isSubmitting && !sendSeparately ? (
+                            <>
+                              <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              {isTechnicalDirector ? 'Approving...' : 'Submitting...'}
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="w-4 h-4 mr-2" />
+                              {isTechnicalDirector ? 'Approve All' : 'Submit for TD Approval'}
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )
                   )}
                 </div>
               </div>
