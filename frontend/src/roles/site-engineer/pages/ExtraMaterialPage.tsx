@@ -706,7 +706,7 @@ const ExtraMaterialPage: React.FC = () => {
                             className="bg-[#243d8a] hover:bg-[#1e3270] text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <PaperAirplaneIcon className="w-4 h-4" />
-                            {sendingRequestId === request.id ? 'Sending...' : 'Send'}
+                            {sendingRequestId === request.id ? 'Sending...' : 'Send to PM'}
                           </button>
                           <button
                             onClick={() => handleDelete(request.id)}
@@ -791,7 +791,7 @@ const ExtraMaterialPage: React.FC = () => {
                                 className="text-[#243d8a] hover:text-[#1e3270] font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 <PaperAirplaneIcon className="w-4 h-4 inline mr-1" />
-                                {sendingRequestId === request.id ? 'Sending...' : 'Send'}
+                                {sendingRequestId === request.id ? 'Sending...' : 'Send to PM'}
                               </button>
                               <button
                                 onClick={() => handleDelete(request.id)}
