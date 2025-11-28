@@ -28,6 +28,45 @@
 import { useMutation, useQueryClient, UseMutationOptions } from '@tanstack/react-query';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
+/**
+ * Helper to get auth headers including viewing-as context for admin
+ */
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('access_token');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  // Add viewing context for admin role (same as apiClient interceptor)
+  const adminViewStore = localStorage.getItem('admin-view-storage');
+  if (adminViewStore) {
+    try {
+      const viewState = JSON.parse(adminViewStore);
+      const viewingAsRole = viewState?.state?.viewingAsRole;
+      const viewingAsRoleId = viewState?.state?.viewingAsRoleId;
+      const viewingAsUserId = viewState?.state?.viewingAsUserId;
+
+      if (viewingAsRole && viewingAsRole !== 'admin') {
+        headers['X-Viewing-As-Role'] = viewingAsRole;
+        if (viewingAsRoleId) {
+          headers['X-Viewing-As-Role-Id'] = String(viewingAsRoleId);
+        }
+        if (viewingAsUserId) {
+          headers['X-Viewing-As-User-Id'] = String(viewingAsUserId);
+        }
+      }
+    } catch (e) {
+      // Ignore parsing errors
+    }
+  }
+
+  return headers;
+}
+
 interface OptimisticMutationOptions<TData = any, TVariables = any, TContext = any> {
   /**
    * The mutation function to call
@@ -193,7 +232,7 @@ export function useApproveChangeRequest() {
     mutationFn: async ({ id, ...data }: any) => {
       const response = await fetch(`/api/change-requests/${id}/approve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(data),
       });
       return response.json();
@@ -219,7 +258,7 @@ export function useRejectChangeRequest() {
     mutationFn: async ({ id, reason, ...data }: any) => {
       const response = await fetch(`/api/change-requests/${id}/reject`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ reason, ...data }),
       });
       return response.json();
@@ -245,7 +284,7 @@ export function useUpdateBOQ() {
     mutationFn: async ({ boqId, ...data }: any) => {
       const response = await fetch(`/api/boq/${boqId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(data),
       });
       return response.json();
@@ -272,7 +311,7 @@ export function useCreateItem<T = any>(endpoint: string, queryKey: string[]) {
     mutationFn: async (data: T) => {
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(data),
       });
       return response.json();
@@ -295,6 +334,7 @@ export function useDeleteItem(endpoint: string, queryKey: string[]) {
     mutationFn: async (id: number | string) => {
       const response = await fetch(`${endpoint}/${id}`, {
         method: 'DELETE',
+        headers: getAuthHeaders(),
       });
       return response.json();
     },

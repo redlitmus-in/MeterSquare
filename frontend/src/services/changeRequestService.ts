@@ -171,12 +171,35 @@ export interface CreateChangeRequestData {
 class ChangeRequestService {
   private getAuthHeaders() {
     const token = localStorage.getItem('access_token');
-    return {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
     };
+
+    // Add viewing context for admin role (same as apiClient interceptor)
+    const adminViewStore = localStorage.getItem('admin-view-storage');
+    if (adminViewStore) {
+      try {
+        const viewState = JSON.parse(adminViewStore);
+        const viewingAsRole = viewState?.state?.viewingAsRole;
+        const viewingAsRoleId = viewState?.state?.viewingAsRoleId;
+        const viewingAsUserId = viewState?.state?.viewingAsUserId;
+
+        if (viewingAsRole && viewingAsRole !== 'admin') {
+          headers['X-Viewing-As-Role'] = viewingAsRole;
+          if (viewingAsRoleId) {
+            headers['X-Viewing-As-Role-Id'] = String(viewingAsRoleId);
+          }
+          if (viewingAsUserId) {
+            headers['X-Viewing-As-User-Id'] = String(viewingAsUserId);
+          }
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+
+    return { headers };
   }
 
 

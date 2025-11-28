@@ -1246,44 +1246,61 @@ def get_all_change_requests():
             # 3. Completed purchases from their projects (to see pricing history)
             from sqlalchemy import or_, and_
 
-            log.info(f"Estimator filter - user_id: {user_id}")
+            log.info(f"Estimator filter - user_id: {user_id}, is_admin_viewing: {is_admin_viewing}")
 
-            # Regular estimator: filter by assigned projects
-            estimator_projects = Project.query.filter_by(estimator_id=user_id, is_deleted=False).all()
-            estimator_project_ids = [p.project_id for p in estimator_projects]
-
-            log.info(f"Regular Estimator {user_id} - has {len(estimator_project_ids)} assigned projects: {estimator_project_ids}")
-
-            if estimator_project_ids:
-                # Estimator sees requests from their assigned projects only
+            if is_admin_viewing:
+                # Admin viewing as Estimator - show ALL estimator-relevant requests
+                # This includes: requests needing estimator approval, send_to_est, approved by any estimator, completed purchases
+                log.info(f"Admin viewing as Estimator - showing ALL estimator-relevant requests")
                 query = query.filter(
                     or_(
-                        and_(
-                            ChangeRequest.approval_required_from == 'estimator',
-                            ChangeRequest.project_id.in_(estimator_project_ids)
-                        ),
-                        ChangeRequest.approved_by_user_id == user_id,
-                        and_(
-                            ChangeRequest.status == 'purchase_completed',
-                            ChangeRequest.project_id.in_(estimator_project_ids)
-                        ),
-                        and_(
-                            ChangeRequest.status == 'under_review',
-                            ChangeRequest.approval_required_from == 'estimator',
-                            ChangeRequest.project_id.in_(estimator_project_ids)
-                        ),
-                        and_(
-                            ChangeRequest.status == 'pending_td_approval',
-                            ChangeRequest.project_id.in_(estimator_project_ids)
-                        )
+                        ChangeRequest.approval_required_from == 'estimator',  # Pending estimator approval
+                        ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_EST,  # Sent to estimator
+                        ChangeRequest.approved_by_user_id.isnot(None),  # Approved by any estimator
+                        ChangeRequest.status == 'purchase_completed',  # Completed purchases
+                        ChangeRequest.status == 'send_to_buyer',  # Sent to buyer after estimator approval
+                        ChangeRequest.status == 'pending_td_approval',  # Pending TD approval
+                        ChangeRequest.status == 'rejected',  # Rejected requests
+                        ChangeRequest.status == 'split_to_sub_crs'  # Split to sub-CRs
                     )
                 )
             else:
-                # If estimator has no assigned projects, show only their own requests
-                log.warning(f"Estimator {user_id} has no assigned projects, showing only their own requests")
-                query = query.filter(
-                    ChangeRequest.requested_by_user_id == user_id
-                )
+                # Regular estimator: filter by assigned projects
+                estimator_projects = Project.query.filter_by(estimator_id=user_id, is_deleted=False).all()
+                estimator_project_ids = [p.project_id for p in estimator_projects]
+
+                log.info(f"Regular Estimator {user_id} - has {len(estimator_project_ids)} assigned projects: {estimator_project_ids}")
+
+                if estimator_project_ids:
+                    # Estimator sees requests from their assigned projects only
+                    query = query.filter(
+                        or_(
+                            and_(
+                                ChangeRequest.approval_required_from == 'estimator',
+                                ChangeRequest.project_id.in_(estimator_project_ids)
+                            ),
+                            ChangeRequest.approved_by_user_id == user_id,
+                            and_(
+                                ChangeRequest.status == 'purchase_completed',
+                                ChangeRequest.project_id.in_(estimator_project_ids)
+                            ),
+                            and_(
+                                ChangeRequest.status == 'under_review',
+                                ChangeRequest.approval_required_from == 'estimator',
+                                ChangeRequest.project_id.in_(estimator_project_ids)
+                            ),
+                            and_(
+                                ChangeRequest.status == 'pending_td_approval',
+                                ChangeRequest.project_id.in_(estimator_project_ids)
+                            )
+                        )
+                    )
+                else:
+                    # If estimator has no assigned projects, show only their own requests
+                    log.warning(f"Estimator {user_id} has no assigned projects, showing only their own requests")
+                    query = query.filter(
+                        ChangeRequest.requested_by_user_id == user_id
+                    )
         elif user_role in ['technical_director', 'technicaldirector']:
             # TD sees:
             # 1. Requests where approval_required_from = 'technical_director' (pending TD approval)
