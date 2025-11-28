@@ -25,7 +25,8 @@ import {
   Phone,
   X,
   MessageSquare,
-  Pencil
+  Pencil,
+  Loader2
 } from 'lucide-react';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -92,6 +93,18 @@ const PurchaseOrders: React.FC = () => {
     staleTime: 30000, // 30 seconds
   });
 
+  // Fetch POChildren pending TD approval (for Pending Approval tab)
+  const { data: pendingPOChildrenData, isLoading: isPendingPOChildrenLoading, refetch: refetchPendingPOChildren } = useAutoSync<{
+    success: boolean;
+    pending_count: number;
+    po_children: POChild[];
+  }>({
+    queryKey: ['buyer-pending-po-children'],
+    fetchFn: () => buyerService.getBuyerPendingPOChildren(),
+    realtimeTables: ['po_child', 'change_requests'],
+    staleTime: 30000,
+  });
+
   // Helper function for processing purchases (po_children are embedded in parent CR response)
   const processPurchases = (purchases: Purchase[]): Purchase[] => {
     return purchases;
@@ -110,6 +123,11 @@ const PurchaseOrders: React.FC = () => {
   const completedPurchases: Purchase[] = useMemo(() => {
     const raw = (completedData?.completed_purchases || []).map(p => ({ ...p, status: 'completed' as const }));
     return processPurchases(raw);
+  }, [completedData]);
+
+  // Completed POChildren (vendor-split purchases)
+  const completedPOChildren: POChild[] = useMemo(() => {
+    return completedData?.completed_po_children || [];
   }, [completedData]);
 
   const rejectedPurchases: Purchase[] = useMemo(() => {
@@ -133,6 +151,11 @@ const PurchaseOrders: React.FC = () => {
   const approvedPOChildren: POChild[] = useMemo(() => {
     return approvedPOChildrenData?.po_children || [];
   }, [approvedPOChildrenData]);
+
+  // Pending POChildren (sent to TD, waiting for approval)
+  const pendingPOChildren: POChild[] = useMemo(() => {
+    return pendingPOChildrenData?.po_children || [];
+  }, [pendingPOChildrenData]);
 
   // Pending Approval tab: Show sub-POs as SEPARATE cards (not grouped under parent)
   const pendingApprovalPurchases = useMemo(() => {
@@ -176,11 +199,11 @@ const PurchaseOrders: React.FC = () => {
       ongoing: pendingPurchaseItems.length + vendorApprovedItems.length + approvedPOChildren.length,
       pendingPurchase: pendingPurchaseItems.length,
       vendorApproved: vendorApprovedItems.length + approvedPOChildren.length,
-      pendingApproval: pendingApprovalPurchases.length,
-      completed: completedPurchases.length,
+      pendingApproval: pendingApprovalPurchases.length + pendingPOChildren.length,
+      completed: completedPurchases.length + completedPOChildren.length,
       rejected: rejectedPurchases.length
     };
-  }, [pendingPurchaseItems, vendorApprovedItems, approvedPOChildren, pendingApprovalPurchases, completedPurchases, rejectedPurchases]);
+  }, [pendingPurchaseItems, vendorApprovedItems, approvedPOChildren, pendingApprovalPurchases, pendingPOChildren, completedPurchases, completedPOChildren, rejectedPurchases]);
 
   const handleViewDetails = (purchase: Purchase) => {
     setSelectedPurchase(purchase);
@@ -494,7 +517,7 @@ const PurchaseOrders: React.FC = () => {
 
         {/* Content */}
         <div className="space-y-4">
-          {filteredPurchases.length === 0 && !(activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved' && approvedPOChildren.length > 0) ? (
+          {filteredPurchases.length === 0 && !(activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved' && approvedPOChildren.length > 0) && !(activeTab === 'completed' && completedPOChildren.length > 0) && !(activeTab === 'pending_approval' && pendingPOChildren.length > 0) ? (
             <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-12 text-center">
               <ShoppingCart className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 text-lg">
@@ -989,9 +1012,87 @@ const PurchaseOrders: React.FC = () => {
 
                     {/* Action Buttons */}
                     <div className="flex flex-col gap-1.5 mt-auto">
+                      {/* Show Send Email button if email not sent yet */}
+                      {!poChild.vendor_email_sent ? (
+                        <Button
+                          onClick={() => {
+                            // Convert POChild to Purchase format for email modal
+                            const purchaseLike: Purchase = {
+                              cr_id: poChild.parent_cr_id,
+                              formatted_cr_id: poChild.formatted_id,
+                              project_id: poChild.project_id || 0,
+                              project_name: poChild.project_name || 'Unknown Project',
+                              project_code: poChild.project_code,
+                              client: poChild.client || '',
+                              location: poChild.location || '',
+                              boq_id: poChild.boq_id || 0,
+                              boq_name: poChild.boq_name || '',
+                              item_name: poChild.item_name || '',
+                              sub_item_name: '',
+                              request_type: '',
+                              reason: '',
+                              materials: poChild.materials || [],
+                              materials_count: poChild.materials_count || poChild.materials?.length || 0,
+                              total_cost: poChild.materials_total_cost || 0,
+                              approved_by: 0,
+                              approved_at: null,
+                              created_at: poChild.created_at || '',
+                              status: 'pending',
+                              vendor_id: poChild.vendor_id,
+                              vendor_name: poChild.vendor_name,
+                              po_child_id: poChild.id,  // Pass POChild ID for email API
+                            };
+                            setSelectedPurchase(purchaseLike);
+                            setIsVendorEmailModalOpen(true);
+                          }}
+                          className="w-full bg-blue-900 hover:bg-blue-800 text-white text-xs"
+                          size="sm"
+                        >
+                          <Mail className="w-3.5 h-3.5 mr-1.5" />
+                          Send Email to Vendor
+                        </Button>
+                      ) : (
+                        <>
+                          {/* Email Sent Status */}
+                          <div className="w-full h-7 bg-green-50 border border-green-200 rounded flex items-center justify-center text-xs font-medium text-green-700 px-2 py-1">
+                            <CheckCircle className="w-3 h-3 mr-1" />
+                            Email Sent to Vendor
+                          </div>
+                          {/* Complete Purchase Button */}
+                          <Button
+                            onClick={async () => {
+                              try {
+                                setCompletingPurchaseId(poChild.id);
+                                await buyerService.completePOChildPurchase(poChild.id);
+                                showSuccess('Purchase marked as complete!');
+                                refetchApprovedPOChildren();
+                              } catch (error: any) {
+                                showError(error.message || 'Failed to complete purchase');
+                              } finally {
+                                setCompletingPurchaseId(null);
+                              }
+                            }}
+                            disabled={completingPurchaseId === poChild.id}
+                            className="w-full bg-green-600 hover:bg-green-700 text-white text-xs"
+                            size="sm"
+                          >
+                            {completingPurchaseId === poChild.id ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                Completing...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
+                                Complete Purchase
+                              </>
+                            )}
+                          </Button>
+                        </>
+                      )}
                       <Button
                         onClick={() => {
-                          // Convert POChild to Purchase format for email modal
+                          // View details - convert to Purchase format
                           const purchaseLike: Purchase = {
                             cr_id: poChild.parent_cr_id,
                             formatted_cr_id: poChild.formatted_id,
@@ -1017,17 +1118,133 @@ const PurchaseOrders: React.FC = () => {
                             vendor_name: poChild.vendor_name,
                           };
                           setSelectedPurchase(purchaseLike);
-                          setIsVendorEmailModalOpen(true);
+                          setIsDetailsModalOpen(true);
                         }}
-                        className="w-full bg-blue-900 hover:bg-blue-800 text-white text-xs"
+                        variant="outline"
+                        className="w-full text-xs"
                         size="sm"
                       >
-                        <Mail className="w-3.5 h-3.5 mr-1.5" />
-                        Send Email to Vendor
+                        <Eye className="w-3.5 h-3.5 mr-1.5" />
+                        View Details
                       </Button>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+
+              {/* Pending POChildren Cards (when on Pending Approval tab) */}
+              {activeTab === 'pending_approval' && pendingPOChildren
+                .filter(poChild =>
+                  (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  (poChild.vendor_name || '').toLowerCase().includes(searchTerm.toLowerCase())
+                )
+                .map((poChild) => (
+                <motion.div
+                  key={`pending-po-child-${poChild.id}`}
+                  initial={false}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white rounded-xl border shadow-sm hover:shadow-md transition-all flex flex-col border-amber-300"
+                >
+                  {/* Card Header */}
+                  <div className="px-4 py-3 border-b bg-gradient-to-r from-amber-50 to-amber-100 border-amber-200">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h3 className="text-base font-bold text-gray-900 line-clamp-1">{poChild.project_name || 'Unknown Project'}</h3>
+                      <Badge className="bg-amber-100 text-amber-800 text-xs whitespace-nowrap">
+                        {poChild.formatted_id}
+                      </Badge>
+                    </div>
+                    <div className="space-y-1 text-xs text-gray-600">
+                      {poChild.project_code && (
+                        <div className="flex items-center gap-1.5">
+                          <FileText className="w-3 h-3 flex-shrink-0 text-blue-600" />
+                          <span className="truncate font-semibold text-blue-900">Project Code: {poChild.project_code}</span>
+                        </div>
+                      )}
+                      {poChild.client && (
+                        <div className="flex items-center gap-1.5">
+                          <Building2 className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{poChild.client}</span>
+                        </div>
+                      )}
+                      {poChild.location && (
+                        <div className="flex items-center gap-1.5">
+                          <MapPin className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{poChild.location}</span>
+                        </div>
+                      )}
+                      {poChild.boq_name && (
+                        <div className="flex items-center gap-1.5">
+                          <FileText className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{poChild.boq_name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Card Body */}
+                  <div className="px-4 py-3 flex-1 flex flex-col">
+                    {/* Vendor Info */}
+                    {poChild.vendor_name && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                        <div className="text-xs text-amber-600 mb-1">Selected Vendor</div>
+                        <div className="flex items-center gap-2">
+                          <Store className="w-4 h-4 text-amber-700" />
+                          <span className="text-sm font-semibold text-amber-900">{poChild.vendor_name}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Item */}
+                    {poChild.item_name && (
+                      <div className="mb-3">
+                        <div className="text-xs text-gray-500 mb-1">Item</div>
+                        <div className="font-medium text-sm">{poChild.item_name}</div>
+                      </div>
+                    )}
+
+                    {/* Details Row */}
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">Created</div>
+                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                          <Calendar className="w-3 h-3" />
+                          {poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">Materials</div>
+                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                          <Package className="w-3 h-3" />
+                          {poChild.materials_count || poChild.materials_data?.length || 0} items
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Total Cost */}
+                    <div className="mb-3">
+                      <div className="text-xs text-gray-500 mb-1">Total Cost</div>
+                      <div className="text-lg font-bold text-amber-700">
+                        {formatCurrency(poChild.materials_total_cost || 0)}
+                      </div>
+                    </div>
+
+                    {/* Pending TD Approval Status */}
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-amber-600" />
+                        <div>
+                          <div className="text-xs font-semibold text-amber-900">Pending TD Approval</div>
+                          <div className="text-xs text-amber-700">
+                            Waiting for Technical Director to approve vendor selection
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* View Details Button */}
+                    <div className="flex flex-col gap-1.5 mt-auto">
                       <Button
                         onClick={() => {
-                          // View details - convert to Purchase format
                           const purchaseLike: Purchase = {
                             cr_id: poChild.parent_cr_id,
                             formatted_cr_id: poChild.formatted_id,
@@ -1043,12 +1260,169 @@ const PurchaseOrders: React.FC = () => {
                             request_type: '',
                             reason: '',
                             materials: poChild.materials || [],
-                            materials_count: poChild.materials_count || poChild.materials?.length || 0,
+                            materials_count: poChild.materials_count || poChild.materials_data?.length || 0,
                             total_cost: poChild.materials_total_cost || 0,
                             approved_by: 0,
                             approved_at: null,
                             created_at: poChild.created_at || '',
                             status: 'pending',
+                            vendor_id: poChild.vendor_id,
+                            vendor_name: poChild.vendor_name,
+                          };
+                          setSelectedPurchase(purchaseLike);
+                          setIsDetailsModalOpen(true);
+                        }}
+                        variant="outline"
+                        className="w-full text-xs"
+                        size="sm"
+                      >
+                        <Eye className="w-3.5 h-3.5 mr-1.5" />
+                        View Details
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+
+              {/* Completed PO Children Cards (when on Completed tab) */}
+              {activeTab === 'completed' && completedPOChildren
+                .filter(poChild =>
+                  (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  (poChild.vendor_name || '').toLowerCase().includes(searchTerm.toLowerCase())
+                )
+                .map((poChild) => (
+                <motion.div
+                  key={`completed-po-child-${poChild.id}`}
+                  initial={false}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white rounded-xl border shadow-sm hover:shadow-md transition-all flex flex-col border-green-300"
+                >
+                  {/* Card Header */}
+                  <div className="px-4 py-3 border-b bg-gradient-to-r from-green-50 to-green-100 border-green-200">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h3 className="text-base font-bold text-gray-900 line-clamp-1">{poChild.project_name || 'Unknown Project'}</h3>
+                      <Badge className="bg-green-100 text-green-800 text-xs whitespace-nowrap">
+                        {poChild.formatted_id}
+                      </Badge>
+                    </div>
+                    <div className="space-y-1 text-xs text-gray-600">
+                      {poChild.project_code && (
+                        <div className="flex items-center gap-1.5">
+                          <FileText className="w-3 h-3 flex-shrink-0 text-blue-600" />
+                          <span className="truncate font-semibold text-blue-900">Project Code: {poChild.project_code}</span>
+                        </div>
+                      )}
+                      {poChild.client && (
+                        <div className="flex items-center gap-1.5">
+                          <Building2 className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{poChild.client}</span>
+                        </div>
+                      )}
+                      {poChild.location && (
+                        <div className="flex items-center gap-1.5">
+                          <MapPin className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{poChild.location}</span>
+                        </div>
+                      )}
+                      {poChild.boq_name && (
+                        <div className="flex items-center gap-1.5">
+                          <FileText className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{poChild.boq_name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Card Body */}
+                  <div className="px-4 py-3 flex-1 flex flex-col">
+                    {/* Vendor Info */}
+                    {poChild.vendor_name && (
+                      <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-3">
+                        <div className="text-xs text-green-600 mb-1">Vendor</div>
+                        <div className="flex items-center gap-2">
+                          <Store className="w-4 h-4 text-green-700" />
+                          <span className="text-sm font-semibold text-green-900">{poChild.vendor_name}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Item */}
+                    {poChild.item_name && (
+                      <div className="mb-3">
+                        <div className="text-xs text-gray-500 mb-1">Item</div>
+                        <div className="font-medium text-sm">{poChild.item_name}</div>
+                      </div>
+                    )}
+
+                    {/* Details Row */}
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">Created</div>
+                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                          <Calendar className="w-3 h-3" />
+                          {poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">Materials</div>
+                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                          <Package className="w-3 h-3" />
+                          {poChild.materials_count || poChild.materials_data?.length || 0} items
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Total Cost */}
+                    <div className="mb-3">
+                      <div className="text-xs text-gray-500 mb-1">Total Cost</div>
+                      <div className="text-lg font-bold text-green-700">
+                        {formatCurrency(poChild.materials_total_cost || 0)}
+                      </div>
+                    </div>
+
+                    {/* Completed Status */}
+                    <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4 text-green-600" />
+                        <div>
+                          <div className="text-xs font-semibold text-green-900">Purchase Completed</div>
+                          {poChild.purchase_completed_by_name && (
+                            <div className="text-xs text-green-700">
+                              By {poChild.purchase_completed_by_name}
+                              {poChild.purchase_completion_date && (
+                                <> on {new Date(poChild.purchase_completion_date).toLocaleDateString()}</>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* View Details Button */}
+                    <div className="flex flex-col gap-1.5 mt-auto">
+                      <Button
+                        onClick={() => {
+                          const purchaseLike: Purchase = {
+                            cr_id: poChild.parent_cr_id,
+                            formatted_cr_id: poChild.formatted_id,
+                            project_id: poChild.project_id || 0,
+                            project_name: poChild.project_name || 'Unknown Project',
+                            project_code: poChild.project_code,
+                            client: poChild.client || '',
+                            location: poChild.location || '',
+                            boq_id: poChild.boq_id || 0,
+                            boq_name: poChild.boq_name || '',
+                            item_name: poChild.item_name || '',
+                            sub_item_name: '',
+                            request_type: '',
+                            reason: '',
+                            materials: poChild.materials || [],
+                            materials_count: poChild.materials_count || poChild.materials_data?.length || 0,
+                            total_cost: poChild.materials_total_cost || 0,
+                            approved_by: 0,
+                            approved_at: null,
+                            created_at: poChild.created_at || '',
+                            status: 'completed',
                             vendor_id: poChild.vendor_id,
                             vendor_name: poChild.vendor_name,
                           };

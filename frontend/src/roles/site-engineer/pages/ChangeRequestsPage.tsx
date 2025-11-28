@@ -17,12 +17,27 @@ import { useChangeRequestsAutoSync } from '@/hooks/useAutoSync';
 import { changeRequestService } from '@/services/changeRequestService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
+interface POChildInfo {
+  id: number;
+  formatted_id: string;
+  suffix: string;
+  vendor_id: number | null;
+  vendor_name: string | null;
+  status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'rejected';
+  vendor_selection_status: 'pending_td_approval' | 'approved' | 'rejected';
+  materials_count: number;
+  materials_total_cost: number;
+  vendor_email_sent: boolean;
+  purchase_completion_date: string | null;
+}
+
 interface ChangeRequest {
   cr_id: number;
   project_id: number;
   boq_id: number;
   item_id: string;
   item_name: string;
+  area?: string | null;
   status: string;
   justification: string;
   percentage_of_item_overhead: number;
@@ -30,6 +45,9 @@ interface ChangeRequest {
   created_at: string;
   current_approver_role?: string;
   approval_required_from?: string;
+  has_po_children?: boolean;
+  po_children_count?: number;
+  po_children?: POChildInfo[];
 }
 
 const ChangeRequestsPage: React.FC = () => {
@@ -205,6 +223,9 @@ const ChangeRequestsPage: React.FC = () => {
                         Item
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Area
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Total Cost
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -212,6 +233,9 @@ const ChangeRequestsPage: React.FC = () => {
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Vendor Splits
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Pending With
@@ -227,11 +251,14 @@ const ChangeRequestsPage: React.FC = () => {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {changeRequests.map((request) => (
                       <tr key={request.cr_id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-indigo-600">
                           PO-{request.cr_id}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                           {request.item_name}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-600 font-medium">
+                          {request.area || '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                           AED{request.materials_total_cost.toLocaleString()}
@@ -250,6 +277,31 @@ const ChangeRequestsPage: React.FC = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           {getStatusBadge(request.status)}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          {request.has_po_children && request.po_children && request.po_children.length > 0 ? (
+                            <div className="space-y-1">
+                              {request.po_children.map((child) => (
+                                <div key={child.id} className="flex items-center gap-1.5 text-xs">
+                                  <span className="font-medium text-indigo-600">{child.formatted_id}</span>
+                                  <span className="text-gray-400">→</span>
+                                  <span className="text-gray-600 truncate max-w-[80px]">{child.vendor_name || 'No vendor'}</span>
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                    child.status === 'purchase_completed' ? 'bg-green-100 text-green-700' :
+                                    child.status === 'vendor_approved' ? 'bg-blue-100 text-blue-700' :
+                                    child.status === 'pending_td_approval' ? 'bg-yellow-100 text-yellow-700' :
+                                    'bg-red-100 text-red-700'
+                                  }`}>
+                                    {child.status === 'purchase_completed' ? 'Done' :
+                                     child.status === 'vendor_approved' ? 'Approved' :
+                                     child.status === 'pending_td_approval' ? 'Pending' : 'Rejected'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400 text-xs">-</span>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                           {request.current_approver_role || request.approval_required_from || '-'}
