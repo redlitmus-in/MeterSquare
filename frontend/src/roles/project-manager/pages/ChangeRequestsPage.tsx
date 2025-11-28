@@ -33,7 +33,8 @@ import {
   Plus,
   Box,
   Pencil,
-  GitBranch
+  GitBranch,
+  MapPin
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
@@ -767,8 +768,14 @@ const ChangeRequestsPage: React.FC = () => {
                             )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                              <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                             </div>
+                            {request.area && (
+                              <div className="flex items-center gap-1.5">
+                                <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                              </div>
+                            )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
@@ -925,8 +932,14 @@ const ChangeRequestsPage: React.FC = () => {
                             )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                              <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                             </div>
+                            {request.area && (
+                              <div className="flex items-center gap-1.5">
+                                <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                              </div>
+                            )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
@@ -1012,8 +1025,14 @@ const ChangeRequestsPage: React.FC = () => {
                             )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                              <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                             </div>
+                            {request.area && (
+                              <div className="flex items-center gap-1.5">
+                                <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                              </div>
+                            )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
@@ -1095,8 +1114,14 @@ const ChangeRequestsPage: React.FC = () => {
                             )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                              <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                             </div>
+                            {request.area && (
+                              <div className="flex items-center gap-1.5">
+                                <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                              </div>
+                            )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
@@ -1184,8 +1209,14 @@ const ChangeRequestsPage: React.FC = () => {
                               )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                                <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                               </div>
+                              {request.area && (
+                                <div className="flex items-center gap-1.5">
+                                  <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                  <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                                </div>
+                              )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
                                 <span className="truncate">By: {request.requested_by_name}</span>
@@ -1369,8 +1400,14 @@ const ChangeRequestsPage: React.FC = () => {
                                   )}
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
-                                    <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                                    <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                                   </div>
+                                  {request.area && (
+                                    <div className="flex items-center gap-1.5">
+                                      <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                      <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                                    </div>
+                                  )}
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
                                     <span className="truncate">By: {request.requested_by_name}</span>
@@ -1480,8 +1517,14 @@ const ChangeRequestsPage: React.FC = () => {
                                   )}
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
-                                    <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                                    <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                                   </div>
+                                  {request.area && (
+                                    <div className="flex items-center gap-1.5">
+                                      <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                      <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                                    </div>
+                                  )}
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
                                     <span className="truncate">By: {request.requested_by_name}</span>
@@ -1567,8 +1610,14 @@ const ChangeRequestsPage: React.FC = () => {
                                   )}
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
-                                    <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                                    <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                                   </div>
+                                  {request.area && (
+                                    <div className="flex items-center gap-1.5">
+                                      <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                      <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                                    </div>
+                                  )}
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
                                     <span className="truncate">By: {request.requested_by_name}</span>
@@ -1652,8 +1701,14 @@ const ChangeRequestsPage: React.FC = () => {
                               )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                                <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                               </div>
+                              {request.area && (
+                                <div className="flex items-center gap-1.5">
+                                  <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                  <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                                </div>
+                              )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
                                 <span className="truncate">By: {request.requested_by_name}</span>
@@ -1731,8 +1786,14 @@ const ChangeRequestsPage: React.FC = () => {
                               )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                                <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                               </div>
+                              {request.area && (
+                                <div className="flex items-center gap-1.5">
+                                  <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                  <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                                </div>
+                              )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
                                 <span className="truncate">By: {request.requested_by_name}</span>
@@ -1810,8 +1871,14 @@ const ChangeRequestsPage: React.FC = () => {
                               )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate font-semibold">PO-{request.cr_id}</span>
+                                <span className="truncate font-semibold text-indigo-600">PO-{request.cr_id}</span>
                               </div>
+                              {request.area && (
+                                <div className="flex items-center gap-1.5">
+                                  <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                                  <span className="truncate font-medium text-emerald-600">{request.area}</span>
+                                </div>
+                              )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
                                 <span className="truncate">By: {request.requested_by_name}</span>

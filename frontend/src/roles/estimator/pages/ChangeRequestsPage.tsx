@@ -28,7 +28,8 @@ import {
   List,
   Pencil,
   GitBranch,
-  MapPin
+  MapPin,
+  DollarSign
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
@@ -192,6 +193,12 @@ const ChangeRequestsPage: React.FC = () => {
       console.error('Error loading change request for edit:', error);
       showError('Failed to load change request details');
     }
+  };
+
+  // Format currency for display
+  const formatCurrency = (amount: number | undefined | null) => {
+    if (amount === undefined || amount === null) return 'AED 0';
+    return `AED ${amount.toLocaleString('en-AE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
   };
 
   const getStatusColor = (status: string) => {
@@ -493,9 +500,17 @@ const ChangeRequestsPage: React.FC = () => {
                         </div>
 
                         {/* Stats */}
-                        <div className="px-4 pb-3 text-center text-sm">
-                          <span className="font-bold text-blue-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
+                        <div className="px-4 pb-3 flex justify-center gap-4 text-sm">
+                          <div className="text-center">
+                            <span className="font-bold text-blue-600 text-lg">{(request.materials_data?.length || 0)}</span>
+                            <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
+                          </div>
+                          <div className="text-center border-l pl-4">
+                            <div className="flex items-center gap-1">
+                              <DollarSign className="h-4 w-4 text-green-600" />
+                              <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
+                            </div>
+                          </div>
                         </div>
 
                         {/* POChildren (Vendor Splits) Info */}
@@ -602,9 +617,17 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="px-4 pb-3 text-center text-sm">
-                          <span className="font-bold text-green-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
+                        <div className="px-4 pb-3 flex justify-center gap-4 text-sm">
+                          <div className="text-center">
+                            <span className="font-bold text-green-600 text-lg">{(request.materials_data?.length || 0)}</span>
+                            <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
+                          </div>
+                          <div className="text-center border-l pl-4">
+                            <div className="flex items-center gap-1">
+                              <DollarSign className="h-4 w-4 text-green-600" />
+                              <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
+                            </div>
+                          </div>
                         </div>
 
                         {/* POChildren (Vendor Splits) Info */}
@@ -675,9 +698,17 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="px-4 pb-3 text-center text-sm">
-                          <span className="font-bold text-green-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
+                        <div className="px-4 pb-3 flex justify-center gap-4 text-sm">
+                          <div className="text-center">
+                            <span className="font-bold text-green-600 text-lg">{(request.materials_data?.length || 0)}</span>
+                            <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
+                          </div>
+                          <div className="text-center border-l pl-4">
+                            <div className="flex items-center gap-1">
+                              <DollarSign className="h-4 w-4 text-green-600" />
+                              <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
+                            </div>
+                          </div>
                         </div>
 
                         {/* POChildren (Vendor Splits) Info */}
@@ -748,9 +779,17 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="px-4 pb-3 text-center text-sm">
-                          <span className="font-bold text-red-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
+                        <div className="px-4 pb-3 flex justify-center gap-4 text-sm">
+                          <div className="text-center">
+                            <span className="font-bold text-red-600 text-lg">{(request.materials_data?.length || 0)}</span>
+                            <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
+                          </div>
+                          <div className="text-center border-l pl-4">
+                            <div className="flex items-center gap-1">
+                              <DollarSign className="h-4 w-4 text-red-600" />
+                              <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
+                            </div>
+                          </div>
                         </div>
 
                         {/* POChildren (Vendor Splits) Info */}

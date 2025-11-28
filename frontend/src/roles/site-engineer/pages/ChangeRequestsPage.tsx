@@ -37,6 +37,7 @@ interface ChangeRequest {
   boq_id: number;
   item_id: string;
   item_name: string;
+  area?: string | null;
   status: string;
   justification: string;
   percentage_of_item_overhead: number;
