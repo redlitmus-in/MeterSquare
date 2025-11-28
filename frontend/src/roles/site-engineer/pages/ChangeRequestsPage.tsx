@@ -223,6 +223,9 @@ const ChangeRequestsPage: React.FC = () => {
                         Item
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Area
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Total Cost
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -248,11 +251,14 @@ const ChangeRequestsPage: React.FC = () => {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {changeRequests.map((request) => (
                       <tr key={request.cr_id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-indigo-600">
                           PO-{request.cr_id}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                           {request.item_name}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-600 font-medium">
+                          {request.area || '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                           AED{request.materials_total_cost.toLocaleString()}
