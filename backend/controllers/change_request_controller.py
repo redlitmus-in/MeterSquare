@@ -2876,27 +2876,22 @@ def reject_change_request(cr_id):
         # Normalize role for consistent comparison
         normalized_role = workflow_service.normalize_role(approver_role)
 
-        # Admin has full rejection authority
+        # Admin, Estimator, PM, and TD have full rejection authority
         is_admin = approver_role in ['admin'] or normalized_role == 'admin'
+        is_estimator = normalized_role in ['estimator']
+        is_pm = normalized_role == 'projectmanager'
+        is_td = normalized_role == 'technicaldirector'
 
-        # PM can reject requests that are under_review from SE
-        if normalized_role in ['projectmanager'] and change_request.status == 'under_review':
-            # PM can reject requests from Site Engineers
-            if change_request.requested_by_role and 'site' in change_request.requested_by_role.lower():
-                # This is a valid PM rejection scenario
-                pass
-            elif change_request.approval_required_from == 'project_manager':
-                # This is explicitly assigned to PM
-                pass
-            else:
-                return jsonify({"error": f"PM cannot reject this request. Current approver: {change_request.approval_required_from}"}), 403
-        else:
-            # Check if request is under review (can reject at any stage)
+        # Roles that can bypass status checks
+        can_bypass_status = is_admin or is_estimator or is_pm or is_td
+
+        if not can_bypass_status:
+            # Check if request is under review (can reject at any stage) - Privileged roles bypass this check
             if change_request.status not in ['under_review', 'approved_by_pm', 'approved_by_td']:
                 return jsonify({"error": "Request must be under review to reject"}), 400
 
-        # For other roles, check if user has permission to reject (admin bypasses this check)
-        if normalized_role not in ['projectmanager'] and not is_admin:
+        # For other roles, check if user has permission to reject (privileged roles bypass this check)
+        if not can_bypass_status:
             required_approver = change_request.approval_required_from
             if not workflow_service.can_approve(approver_role, required_approver):
                 return jsonify({"error": f"You don't have permission to reject this request. Required: {required_approver}, Your role: {approver_role}"}), 403
@@ -3024,6 +3019,77 @@ def reject_change_request(cr_id):
     except Exception as e:
         db.session.rollback()
         log.error(f"Error rejecting change request {cr_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+def resend_change_request(cr_id):
+    """
+    Resend/resubmit a rejected change request
+    PUT /api/change-request/{cr_id}/resend
+    """
+    try:
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({"error": "User not authenticated"}), 401
+
+        user_id = current_user.get('user_id')
+        user_name = current_user.get('full_name') or current_user.get('username') or 'User'
+
+        # Get change request
+        change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        if not change_request:
+            return jsonify({"error": "Change request not found"}), 404
+
+        # Only allow resending rejected CRs
+        if change_request.status != 'rejected' and change_request.vendor_selection_status != 'rejected':
+            return jsonify({"error": "Only rejected requests can be resent"}), 400
+
+        # Determine what type of rejection this was and reset appropriately
+        if change_request.vendor_selection_status == 'rejected':
+            # Vendor was rejected - reset vendor selection fields but keep CR approved
+            change_request.vendor_selection_status = None
+            change_request.selected_vendor_id = None
+            change_request.selected_vendor_name = None
+            change_request.vendor_rejection_reason = None
+            change_request.vendor_approved_by_td_id = None
+            change_request.vendor_approved_by_td_name = None
+            change_request.vendor_approval_date = None
+            change_request.vendor_selected_by_buyer_id = None
+            change_request.vendor_selected_by_buyer_name = None
+            change_request.vendor_selection_date = None
+            # Keep status as assigned_to_buyer so buyer can select new vendor
+            if change_request.status == 'rejected':
+                change_request.status = 'assigned_to_buyer'
+        else:
+            # CR was rejected - reset to under_review for resubmission
+            change_request.status = 'under_review'
+            change_request.rejected_by_user_id = None
+            change_request.rejected_by_name = None
+            change_request.rejection_reason = None
+            change_request.rejected_at_stage = None
+
+        change_request.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Change request resent successfully",
+            "cr_id": cr_id,
+            "new_status": change_request.status,
+            "vendor_selection_status": change_request.vendor_selection_status
+        }), 200
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        log.error(f"Database error resending change request {cr_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error resending change request {cr_id}: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500

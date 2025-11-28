@@ -249,7 +249,7 @@ export default M2StorePurchaseFlow;
  * const [showPurchaseFlow, setShowPurchaseFlow] = useState(false);
  *
  * <M2StorePurchaseFlow
- *   changeRequestId="CR-2025-001"
+ *   changeRequestId="PO-2025-001"
  *   materials={[
  *     {
  *       materialId: 1,

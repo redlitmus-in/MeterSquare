@@ -12,12 +12,16 @@ import {
   ChevronDown,
   ChevronUp,
   Edit,
-  Sparkles
+  Sparkles,
+  Mail,
+  Phone,
+  MapPin,
+  User
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Purchase, buyerService, MaterialVendorSelection, SubCR } from '../services/buyerService';
+import { Purchase, buyerService, MaterialVendorSelection } from '../services/buyerService';
 import { buyerVendorService, Vendor, VendorProduct } from '../services/buyerVendorService';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
@@ -173,21 +177,21 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     if (isOpen) {
       loadVendors();
 
-      // Initialize sent vendor IDs ONLY from existing sub-CRs (not material_vendor_selections)
+      // Initialize sent vendor IDs ONLY from existing PO children or sub-CRs (not material_vendor_selections)
       const existingSentVendorIds = new Set<number>();
 
-      // Check purchase.sub_crs for vendors already sent to TD
-      if (purchase.sub_crs && purchase.sub_crs.length > 0) {
-        purchase.sub_crs.forEach(subCR => {
-          if (subCR.vendor_id) {
-            existingSentVendorIds.add(subCR.vendor_id);
+      // Check purchase.po_children first (new system)
+      if (purchase.po_children && purchase.po_children.length > 0) {
+        purchase.po_children.forEach(poChild => {
+          if (poChild.vendor_id) {
+            existingSentVendorIds.add(poChild.vendor_id);
           }
         });
       }
 
       setSentVendorIds(existingSentVendorIds);
     }
-  }, [isOpen, purchase.sub_crs]);
+  }, [isOpen, purchase.po_children]);
 
   // Helper function to check if a product matches a material
   const isProductMatchingMaterial = (
@@ -388,7 +392,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   };
 
   const handleSelectVendorForMaterial = (materialName: string, vendorId: number, vendorName: string) => {
-    // TD mode with sub-CRs: allow different vendors - backend will split the sub-CR if needed
+    // TD mode with sub-POs: allow different vendors - backend will split the sub-PO if needed
     // No longer auto-selecting same vendor for all materials
 
     setMaterialVendors(prev => prev.map(m => {
@@ -611,7 +615,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       toast.warning(`${unselectedMaterials.length} material(s) without vendors will be skipped: ${unselectedMaterials.map(m => m.material_name).join(', ')}`);
     }
 
-    // For buyer mode: Check if full purchase to single vendor (no sub-CR needed)
+    // For buyer mode: Check if full purchase to single vendor (no sub-PO needed)
     // or partial/multiple vendors (create sub-CRs)
     if (viewMode === 'buyer') {
       // Group materials by vendor
@@ -628,7 +632,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       const uniqueVendorCount = vendorGroupsMap.size;
       const allMaterialsSelected = selectedMaterials.length === materialVendors.length;
 
-      // FULL PURCHASE TO SINGLE VENDOR: Update parent CR directly (no sub-CR)
+      // FULL PURCHASE TO SINGLE VENDOR: Update parent PO directly (no sub-PO)
       if (uniqueVendorCount === 1 && allMaterialsSelected) {
         // Show confirmation dialog for full purchase
         setShowConfirmation(true);
@@ -639,7 +643,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       try {
         setIsSubmitting(true);
 
-        // Prepare vendor groups data for sub-CR creation
+        // Prepare vendor groups data for sub-PO creation
         const vendorGroups = Array.from(vendorGroupsMap.entries()).map(([vendorId, materials]) => ({
           vendor_id: vendorId,
           vendor_name: materials[0].selected_vendors[0].vendor_name,
@@ -655,8 +659,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         // Generate submission group ID
         const submissionGroupId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-        // Call API to create sub-CRs
-        const response = await buyerService.createSubCRs(
+        // Call API to create PO children
+        const response = await buyerService.createPOChildren(
           purchase.cr_id,
           vendorGroups,
           submissionGroupId
@@ -664,18 +668,18 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
         toast.success(response.message || `Sent to TD for approval!`);
 
-        // Show individual sub-CR IDs created
-        if (response.sub_crs && response.sub_crs.length > 0) {
-          const subCRsList = response.sub_crs.map((sub: any) =>
-            `${sub.formatted_cr_id} (${sub.vendor_name})`
+        // Show individual PO child IDs created
+        if (response.po_children && response.po_children.length > 0) {
+          const poChildrenList = response.po_children.map((po: any) =>
+            `${po.formatted_id} (${po.vendor_name})`
           ).join(', ');
-          toast.info(`Purchase Order: ${subCRsList}`, { duration: 5000 });
+          toast.info(`Purchase Orders Created: ${poChildrenList}`, { duration: 5000 });
         }
 
         onVendorSelected?.();
         onClose();
       } catch (error: any) {
-        console.error('Error creating sub-CRs:', error);
+        console.error('Error creating PO children:', error);
         toast.error(error.message || 'Failed to submit for approval');
       } finally {
         setIsSubmitting(false);
@@ -723,16 +727,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
       // Show different message based on mode and response type
       if (viewMode === 'td') {
-        // Check if this was a sub-CR split
+        // Check if this was a multi-vendor split
         if (response.split_result) {
-          const newSubCRs = response.split_result.new_sub_crs || [];
-          toast.success(`Order split into ${newSubCRs.length} new purchase orders!`);
-          // Show the new sub-CR IDs
-          if (newSubCRs.length > 0) {
-            const subCRsList = newSubCRs.map((sub: any) =>
-              `${sub.formatted_cr_id} (${sub.vendor_name})`
+          const newPOChildren = response.split_result.po_children || [];
+          toast.success(`Order split into ${newPOChildren.length} new purchase orders!`);
+          // Show the new PO IDs
+          if (newPOChildren.length > 0) {
+            const poList = newPOChildren.map((po: any) =>
+              `${po.formatted_id} (${po.vendor_name})`
             ).join(', ');
-            toast.info(`New Orders: ${subCRsList}`, { duration: 5000 });
+            toast.info(`New Orders: ${poList}`, { duration: 5000 });
           }
         } else {
           toast.success('Vendor Changed Successfully!');
@@ -750,37 +754,34 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     }
   };
 
-  // Check if a material is actually in a pending sub-CR (locked)
-  // IMPORTANT: Only lock if the material is EXPLICITLY in a sub-CR's materials list
+  // Check if a material is actually in a pending PO child (locked)
+  // IMPORTANT: Only lock if the material is EXPLICITLY in a PO child's materials list
   const isMaterialActuallyLocked = (materialName: string): boolean => {
-    // If no sub_crs exist, nothing is locked
-    if (!purchase.sub_crs || purchase.sub_crs.length === 0) {
-      return false;
-    }
+    // Check po_children first (new system)
+    if (purchase.po_children && purchase.po_children.length > 0) {
+      for (const poChild of purchase.po_children) {
+        // Only check pending PO children
+        if (poChild.vendor_selection_status !== 'pending_td_approval') {
+          continue;
+        }
 
-    // Check each sub-CR to see if this specific material was included
-    for (const subCR of purchase.sub_crs) {
-      // Only check pending sub-CRs
-      if (subCR.vendor_selection_status !== 'pending_td_approval') {
-        continue;
-      }
+        // Skip if PO child has no materials array
+        if (!poChild.materials || !Array.isArray(poChild.materials)) {
+          continue;
+        }
 
-      // Skip if sub-CR has no materials array (shouldn't happen but safety check)
-      if (!subCR.materials || !Array.isArray(subCR.materials)) {
-        continue;
-      }
+        // Check if this material name is in the PO child's materials
+        const materialInPOChild = poChild.materials.find(m =>
+          m.material_name === materialName
+        );
 
-      // Check if this material name is in the sub-CR's materials
-      const materialInSubCR = subCR.materials.find(m =>
-        m.material_name === materialName
-      );
-
-      if (materialInSubCR) {
-        return true; // Found in a pending sub-CR
+        if (materialInPOChild) {
+          return true; // Found in a pending PO child
+        }
       }
     }
 
-    return false; // Not found in any pending sub-CR
+    return false; // Not found in any pending PO
   };
 
   // Exclude locked materials (actually in pending sub-CRs) from counts
@@ -826,7 +827,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       </h2>
                     </div>
                     <div className="text-sm text-gray-600">
-                      <span className="font-medium">Purchase Order:</span> CR #{purchase.cr_id} - {purchase.item_name}
+                      <span className="font-medium">Purchase Order:</span> PO #{purchase.cr_id} - {purchase.item_name}
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
                       {viewMode === 'td'
@@ -1045,10 +1046,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                           TD Vendor Change Mode
                         </p>
                         <p className="text-xs text-purple-700 mt-1">
-                          {purchase.is_sub_cr
-                            ? 'You can select different vendors for each material. If you select different vendors, this order will be split into multiple purchase orders (one per vendor).'
-                            : 'Select different vendors for the materials below. Changes will be applied immediately.'
-                          }
+                          You can select different vendors for each material. If you select different vendors, this order will be split into multiple purchase orders (one per vendor).
                         </p>
                       </div>
                     </div>
@@ -1070,31 +1068,42 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       const existingSelection = purchase.material_vendor_selections?.[material.material_name];
                       const selectionStatus = existingSelection?.selection_status;
 
-                      // Check if material is ACTUALLY in a pending sub-CR (not just material_vendor_selections status)
-                      // A material is locked only if it exists in an actual sub-CR that's pending TD approval
-                      const isMaterialInPendingSubCR = purchase.sub_crs?.some(subCR =>
-                        subCR.vendor_selection_status === 'pending_td_approval' &&
-                        subCR.materials?.some(m => m.material_name === material.material_name)
+                      // Check if material is ACTUALLY in a pending PO (not just material_vendor_selections status)
+                      // A material is locked only if it exists in an actual PO child that's pending TD approval
+                      const isMaterialInPendingPO = purchase.po_children?.some(poChild =>
+                        poChild.vendor_selection_status === 'pending_td_approval' &&
+                        poChild.materials?.some(m => m.material_name === material.material_name)
                       ) || false;
 
-                      const isMaterialLocked = isMaterialInPendingSubCR;
+                      // Check if material is in an approved PO child
+                      const isMaterialApproved = purchase.po_children?.some(poChild =>
+                        poChild.vendor_selection_status === 'approved' &&
+                        poChild.materials?.some(m => m.material_name === material.material_name)
+                      ) || false;
+
+                      // Lock material if it's in pending or approved PO
+                      const isMaterialLocked = isMaterialInPendingPO || isMaterialApproved;
 
                       return (
                         <div
                           key={materialIdx}
                           className={`border-2 rounded-xl overflow-hidden ${
-                            isMaterialLocked
-                              ? 'border-amber-300 bg-amber-50/30'
-                              : 'border-gray-200'
+                            isMaterialApproved
+                              ? 'border-green-300 bg-green-50/30'
+                              : isMaterialLocked
+                                ? 'border-amber-300 bg-amber-50/30'
+                                : 'border-gray-200'
                           }`}
                         >
                           {/* Material Header - Clickable to expand/collapse (disabled if locked) */}
                           <div
                             onClick={() => !isMaterialLocked && handleToggleMaterialExpand(material.material_name)}
                             className={`px-4 py-3 border-b transition-colors ${
-                              isMaterialLocked
-                                ? 'bg-amber-50 border-amber-200 cursor-not-allowed'
-                                : 'bg-gray-50 border-gray-200 cursor-pointer hover:bg-gray-100'
+                              isMaterialApproved
+                                ? 'bg-green-50 border-green-200 cursor-not-allowed'
+                                : isMaterialLocked
+                                  ? 'bg-amber-50 border-amber-200 cursor-not-allowed'
+                                  : 'bg-gray-50 border-gray-200 cursor-pointer hover:bg-gray-100'
                             }`}
                           >
                             <div className="flex items-center justify-between gap-3">
@@ -1171,16 +1180,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                           )}
                                         </div>
                                       ))}
-                                      {/* Only show Pending TD Approval if material is ACTUALLY in a pending sub-CR */}
-                                      {isMaterialInPendingSubCR && (
+                                      {/* Only show Pending TD Approval if material is ACTUALLY in a pending PO */}
+                                      {isMaterialInPendingPO && (
                                         <Badge className="bg-orange-100 text-orange-800 text-xs">
                                           Pending TD Approval
                                         </Badge>
                                       )}
-                                      {/* Show Approved only if material is in an approved sub-CR */}
-                                      {purchase.sub_crs?.some(subCR =>
-                                        subCR.vendor_selection_status === 'approved' &&
-                                        subCR.materials?.some(m => m.material_name === material.material_name)
+                                      {/* Show Approved only if material is in an approved PO child */}
+                                      {purchase.po_children?.some(poChild =>
+                                        poChild.vendor_selection_status === 'approved' &&
+                                        poChild.materials?.some(m => m.material_name === material.material_name)
                                       ) && (
                                         <Badge className="bg-green-100 text-green-800 text-xs">
                                           Approved
@@ -1198,7 +1207,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
                               <div className="flex items-center gap-2 flex-shrink-0">
                                 {/* Expand/Collapse Indicator or Locked Status */}
-                                {isMaterialLocked ? (
+                                {isMaterialApproved ? (
+                                  <div className="flex items-center gap-2 px-3 py-1.5 border border-green-400 rounded-md bg-green-100 text-sm font-medium text-green-800">
+                                    <CheckCircle className="w-4 h-4" />
+                                    Approved
+                                  </div>
+                                ) : isMaterialLocked ? (
                                   <div className="flex items-center gap-2 px-3 py-1.5 border border-amber-400 rounded-md bg-amber-100 text-sm font-medium text-amber-800">
                                     <AlertCircle className="w-4 h-4" />
                                     Locked - Awaiting TD
@@ -1293,10 +1307,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                         const isExpanded = expandedVendorRow?.materialName === material.material_name &&
                                                           expandedVendorRow?.vendorId === vendor.vendor_id;
 
-                                        // Check if this vendor is already in a pending sub-CR (sent to TD)
-                                        const isVendorSentToTD = purchase.sub_crs?.some(subCR =>
-                                          subCR.vendor_id === vendor.vendor_id &&
-                                          subCR.vendor_selection_status === 'pending_td_approval'
+                                        // Check if this vendor is already in a pending PO child (sent to TD)
+                                        const isVendorSentToTD = purchase.po_children?.some(poChild =>
+                                          poChild.vendor_id === vendor.vendor_id &&
+                                          poChild.vendor_selection_status === 'pending_td_approval'
                                         ) || false;
 
                                         return (
@@ -1314,6 +1328,13 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                   vendor.company_name
                                                 );
                                               }}
+                                              onDoubleClick={(e) => {
+                                                e.stopPropagation();
+                                                setExpandedVendorRow(isExpanded
+                                                  ? null
+                                                  : { materialName: material.material_name, vendorId: vendor.vendor_id! }
+                                                );
+                                              }}
                                               className={`flex items-center gap-3 px-3 py-2 border-b border-gray-100 transition-colors ${
                                                 isVendorSentToTD
                                                   ? 'bg-amber-50 cursor-not-allowed opacity-70'
@@ -1322,6 +1343,26 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                     : 'bg-white hover:bg-gray-50 cursor-pointer'
                                               }`}
                                             >
+                                              {/* Edit Button - Moved to left */}
+                                              {isSelected && (
+                                                <div className="flex-shrink-0">
+                                                  <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      const currentPrice = negotiatedPrice ||
+                                                                         (matchingProducts.length > 0 ? matchingProducts[0].unit_price : undefined);
+                                                      handleStartEditPrice(material.material_name, vendor.vendor_id!, currentPrice);
+                                                    }}
+                                                    className="h-7 w-7 p-0"
+                                                    title="Edit price"
+                                                  >
+                                                    <Edit className="w-3.5 h-3.5 text-gray-600" />
+                                                  </Button>
+                                                </div>
+                                              )}
+
                                               {/* Checkbox/Radio */}
                                               <div className="flex-shrink-0">
                                                 {isVendorSentToTD ? (
@@ -1405,44 +1446,6 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                   <div className="text-xs text-gray-400">-</div>
                                                 )}
                                               </div>
-
-                                              {/* Action Buttons */}
-                                              <div className="flex items-center gap-1 flex-shrink-0">
-                                                {isSelected && (
-                                                  <>
-                                                    <Button
-                                                      size="sm"
-                                                      variant="ghost"
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        const currentPrice = negotiatedPrice ||
-                                                                           (matchingProducts.length > 0 ? matchingProducts[0].unit_price : undefined);
-                                                        handleStartEditPrice(material.material_name, vendor.vendor_id!, currentPrice);
-                                                      }}
-                                                      className="h-7 w-7 p-0"
-                                                      title="Edit price"
-                                                    >
-                                                      <Edit className="w-3.5 h-3.5 text-gray-600" />
-                                                    </Button>
-                                                    <Button
-                                                      size="sm"
-                                                      variant="ghost"
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setExpandedVendorRow(isExpanded
-                                                          ? null
-                                                          : { materialName: material.material_name, vendorId: vendor.vendor_id! }
-                                                        );
-                                                      }}
-                                                      className="h-7 w-7 p-0"
-                                                      title={isExpanded ? "Hide details" : "Show details"}
-                                                    >
-                                                      <ChevronDown className={`w-4 h-4 text-gray-600 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                                                    </Button>
-                                                  </>
-                                                )}
-                                                {isSelected && <CheckCircle className="w-5 h-5 text-blue-500" />}
-                                              </div>
                                             </div>
 
                                             {/* Expanded Details Section */}
@@ -1511,6 +1514,43 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                       </div>
                                                     ) : (
                                                       <>
+                                                        {/* Vendor Contact Details */}
+                                                        <div className="bg-white p-3 rounded border border-gray-200">
+                                                          <div className="text-xs font-medium text-gray-700 mb-2">
+                                                            Vendor Details
+                                                          </div>
+                                                          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                                            {vendor.contact_person_name && (
+                                                              <div className="flex items-center gap-2 text-xs">
+                                                                <User className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                                                                <span className="text-gray-700 truncate">{vendor.contact_person_name}</span>
+                                                              </div>
+                                                            )}
+                                                            {vendor.email && (
+                                                              <div className="flex items-center gap-2 text-xs">
+                                                                <Mail className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                                                                <span className="text-gray-700 truncate">{vendor.email}</span>
+                                                              </div>
+                                                            )}
+                                                            {vendor.phone && (
+                                                              <div className="flex items-center gap-2 text-xs">
+                                                                <Phone className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                                                                <span className="text-gray-700">
+                                                                  {vendor.phone_code ? `+${vendor.phone_code} ` : ''}{vendor.phone}
+                                                                </span>
+                                                              </div>
+                                                            )}
+                                                            {(vendor.street_address || vendor.city || vendor.country) && (
+                                                              <div className="flex items-start gap-2 text-xs">
+                                                                <MapPin className="w-3.5 h-3.5 text-gray-500 flex-shrink-0 mt-0.5" />
+                                                                <span className="text-gray-700">
+                                                                  {[vendor.street_address, vendor.city, vendor.state, vendor.country].filter(Boolean).join(', ')}
+                                                                </span>
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        </div>
+
                                                         {/* Matching Products List */}
                                                         <div className="bg-white p-3 rounded border border-gray-200">
                                                           <div className="text-xs font-medium text-gray-700 mb-2">
@@ -1603,17 +1643,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         total_amount: number;
                       }>();
 
-                      // Group materials by their selected vendor (exclude materials actually in pending sub-CRs)
+                      // Group materials by their selected vendor (exclude materials actually in pending PO children)
                       // Also exclude vendors that are already sent to TD
                       materialVendors.filter(m => {
                         if (m.selected_vendors.length === 0) return false;
-                        // Exclude materials that are actually in a pending sub-CR
+                        // Exclude materials that are actually in a pending PO child
                         if (isMaterialActuallyLocked(m.material_name)) return false;
                         // Exclude if selected vendor is already sent to TD
                         const selectedVendorId = m.selected_vendors[0]?.vendor_id;
-                        const isVendorAlreadySent = purchase.sub_crs?.some(subCR =>
-                          subCR.vendor_id === selectedVendorId &&
-                          subCR.vendor_selection_status === 'pending_td_approval'
+                        const isVendorAlreadySent = purchase.po_children?.some(poChild =>
+                          poChild.vendor_id === selectedVendorId &&
+                          poChild.vendor_selection_status === 'pending_td_approval'
                         ) || sentVendorIds.has(selectedVendorId);
                         if (isVendorAlreadySent) return false;
                         return true;
@@ -2225,7 +2265,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
                             const submissionGroupId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-                            const response = await buyerService.createSubCRs(
+                            const response = await buyerService.createPOChildren(
                               purchase.cr_id,
                               [{
                                 vendor_id: sentVendorId,
@@ -2238,29 +2278,33 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             // Show success immediately
                             toast.success(response.message || `Sent to TD for approval: ${sentVendorName}!`);
 
-                            if (response.sub_crs && response.sub_crs.length > 0) {
-                              toast.info(`Purchase Order: ${response.sub_crs[0].formatted_cr_id}`, { duration: 5000 });
+                            if (response.po_children && response.po_children.length > 0) {
+                              toast.info(`Purchase Order: ${response.po_children[0].formatted_id}`, { duration: 5000 });
 
-                              // Optimistically update purchase.sub_crs locally for immediate UI feedback
-                              const newSubCR: SubCR = {
-                                cr_id: response.sub_crs[0].cr_id,
-                                formatted_cr_id: response.sub_crs[0].formatted_cr_id,
-                                cr_number_suffix: response.sub_crs[0].cr_number_suffix,
+                              // Optimistically update purchase.po_children locally for immediate UI feedback
+                              const newPOChild = {
+                                id: response.po_children[0].id,
+                                parent_cr_id: purchase.cr_id,
+                                formatted_id: response.po_children[0].formatted_id,
+                                suffix: `.${(purchase.po_children?.length || 0) + 1}`,
                                 vendor_id: sentVendorId,
                                 vendor_name: sentVendorName,
-                                vendor_selection_status: 'pending_td_approval',
+                                vendor_selection_status: 'pending_td_approval' as const,
+                                status: 'pending_td_approval' as const,
                                 materials: materials.map(m => ({
                                   material_name: m.material_name,
                                   quantity: m.quantity,
-                                  unit: m.unit
+                                  unit: m.unit,
+                                  unit_price: m.negotiated_price || 0,
+                                  total_price: (m.negotiated_price || 0) * m.quantity
                                 }))
                               };
 
-                              // Update the purchase object's sub_crs array
-                              if (!purchase.sub_crs) {
-                                purchase.sub_crs = [];
+                              // Update the purchase object's po_children array
+                              if (!purchase.po_children) {
+                                purchase.po_children = [];
                               }
-                              purchase.sub_crs.push(newSubCR);
+                              purchase.po_children.push(newPOChild);
                             }
 
                             // Mark this vendor as sent (updates UI immediately)

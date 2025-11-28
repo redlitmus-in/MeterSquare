@@ -120,6 +120,16 @@ def get_buyer_completed_purchases_route():
     return get_buyer_completed_purchases()
 
 
+@buyer_routes.route('/rejected-purchases', methods=['GET'])
+@jwt_required
+def get_buyer_rejected_purchases_route():
+    """Get rejected purchases (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_buyer_rejected_purchases()
+
+
 @buyer_routes.route('/complete-purchase', methods=['POST'])
 @jwt_required
 def complete_purchase_route():
@@ -163,11 +173,21 @@ def select_vendor_for_material_route(cr_id):
 @buyer_routes.route('/purchase/<int:cr_id>/create-sub-crs', methods=['POST'])
 @jwt_required
 def create_sub_crs_route(cr_id):
-    """Create separate sub-CRs for each vendor group (Buyer, TD, or Admin)"""
+    """Create separate sub-CRs for each vendor group (Buyer, TD, or Admin) - DEPRECATED, use create-po-children"""
     access_check = check_buyer_td_or_admin_access()
     if access_check:
         return access_check
     return create_sub_crs_for_vendor_groups(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/create-po-children', methods=['POST'])
+@jwt_required
+def create_po_children_route(cr_id):
+    """Create POChild records for each vendor group (Buyer, TD, or Admin)"""
+    access_check = check_buyer_td_or_admin_access()
+    if access_check:
+        return access_check
+    return create_po_children(cr_id)
 
 
 @buyer_routes.route('/purchase/<int:cr_id>/update', methods=['PUT'])
@@ -208,6 +228,55 @@ def td_reject_vendor_route(cr_id):
     if access_check:
         return access_check
     return td_reject_vendor(cr_id)
+
+
+# POChild routes
+@buyer_routes.route('/po-children/pending', methods=['GET'])
+@jwt_required
+def get_pending_po_children_route():
+    """Get all POChild records pending TD approval (TD or Admin)"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_pending_po_children()
+
+
+@buyer_routes.route('/po-children/approved', methods=['GET'])
+@jwt_required
+def get_approved_po_children_route():
+    """Get all POChild records with approved vendor (Buyer, TD, or Admin)"""
+    from controllers.buyer_controller import get_approved_po_children
+    return get_approved_po_children()
+
+
+@buyer_routes.route('/po-child/<int:po_child_id>/td-approve', methods=['POST'])
+@jwt_required
+def td_approve_po_child_route(po_child_id):
+    """TD or Admin approves vendor selection for POChild"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return td_approve_po_child(po_child_id)
+
+
+@buyer_routes.route('/po-child/<int:po_child_id>/td-reject', methods=['POST'])
+@jwt_required
+def td_reject_po_child_route(po_child_id):
+    """TD or Admin rejects vendor selection for POChild"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return td_reject_po_child(po_child_id)
+
+
+@buyer_routes.route('/po-child/<int:po_child_id>/complete', methods=['POST'])
+@jwt_required
+def complete_po_child_purchase_route(po_child_id):
+    """Complete purchase for POChild (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return complete_po_child_purchase(po_child_id)
 
 
 @buyer_routes.route('/purchase/<int:cr_id>/preview-vendor-email', methods=['GET'])

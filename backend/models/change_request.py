@@ -172,17 +172,18 @@ class ChangeRequest(db.Model):
     project = db.relationship("Project", backref=db.backref("change_requests", lazy=True))
     vendor = db.relationship("Vendor", backref=db.backref("change_requests", lazy=True))
 
-    # Self-referential relationship for parent-child CRs
-    parent_cr = db.relationship("ChangeRequest", remote_side=[cr_id], backref="sub_crs", foreign_keys=[parent_cr_id])
+    # Self-referential relationship for parent-child CRs (DEPRECATED - use po_children instead)
+    parent_cr_ref = db.relationship("ChangeRequest", remote_side=[cr_id], backref="sub_crs", foreign_keys=[parent_cr_id])
+    # NOTE: po_children relationship is defined in POChild model with backref
 
     def get_formatted_cr_id(self):
         """
-        Get formatted CR ID with suffix for display
-        Returns: "CR-123" for parent, "CR-123.1" for sub-CRs
+        Get formatted PO ID with suffix for display
+        Returns: "PO-123" for parent, "PO-123.1" for sub-POs
         """
         if self.is_sub_cr and self.cr_number_suffix:
-            return f"CR-{self.parent_cr_id}{self.cr_number_suffix}"
-        return f"CR-{self.cr_id}"
+            return f"PO-{self.parent_cr_id}{self.cr_number_suffix}"
+        return f"PO-{self.cr_id}"
 
     def calculate_recommended_routing(self):
         """

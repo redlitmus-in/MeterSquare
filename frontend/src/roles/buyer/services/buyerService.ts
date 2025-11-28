@@ -31,34 +31,58 @@ export interface PurchaseMaterial {
   master_material_id?: number | null;  // Null for NEW materials, number for existing BOQ materials
 }
 
-// Sub-CR type for tracking which materials have been sent to TD
-export interface SubCR {
-  cr_id: number;
-  formatted_cr_id: string;  // "CR-100.1", "CR-100.2", etc.
-  cr_number_suffix?: string | null;  // ".1", ".2", etc.
+// POChild type for tracking vendor-specific purchase order splits
+export interface POChild {
+  id: number;
+  parent_cr_id: number;
+  formatted_id: string;  // "PO-100.1", "PO-100.2", etc.
+  suffix: string;  // ".1", ".2", etc.
+  boq_id?: number | null;
+  project_id?: number | null;
+  item_id?: string | null;
+  item_name?: string | null;
+  submission_group_id?: string | null;
   vendor_id?: number | null;
   vendor_name?: string | null;
   vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
-  status?: string;
-  // Materials included in this sub-CR (used to determine which materials are locked)
-  materials?: Array<{
+  vendor_selected_by_buyer_id?: number | null;
+  vendor_selected_by_buyer_name?: string | null;
+  vendor_selection_date?: string | null;
+  vendor_approved_by_td_id?: number | null;
+  vendor_approved_by_td_name?: string | null;
+  vendor_approval_date?: string | null;
+  vendor_email_sent?: boolean;
+  vendor_email_sent_date?: string | null;
+  status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'rejected';
+  rejection_reason?: string | null;
+  purchase_completed_by_user_id?: number | null;
+  purchase_completed_by_name?: string | null;
+  purchase_completion_date?: string | null;
+  materials: Array<{
     material_name: string;
-    quantity?: number;
-    unit?: string;
-    unit_price?: number;
-    total_price?: number;
+    sub_item_name?: string;
+    quantity: number;
+    unit: string;
+    unit_price: number;
+    total_price: number;
+    master_material_id?: number | null;
   }>;
-  // Optional - used when displaying sub-CRs in UI (from frontend grouping)
   materials_count?: number;
+  materials_total_cost?: number;
+  created_at?: string;
+  updated_at?: string;
+  // Extra fields from API with project info
+  project_name?: string;
+  project_code?: string;
+  client?: string;
+  location?: string;
+  boq_name?: string;
 }
 
 export interface Purchase {
   cr_id: number;
-  formatted_cr_id?: string;  // "CR-100" or "CR-100.1" for sub-CRs
-  is_sub_cr?: boolean;  // True if this is a sub-CR (child)
-  parent_cr_id?: number | null;  // Parent CR ID for sub-CRs
-  cr_number_suffix?: string | null;  // ".1", ".2", etc.
-  submission_group_id?: string | null;  // UUID grouping related sub-CRs
+  formatted_cr_id?: string;  // "CR-100"
+  submission_group_id?: string | null;  // UUID grouping related PO children
   project_id: number;
   project_name: string;
   project_code?: string;
@@ -106,9 +130,8 @@ export interface Purchase {
     balance_type: 'positive' | 'negative';
     balance_amount: number;
   };
-  // For hierarchical display - sub-CRs attached to parent with their materials
-  // Can be either SubCR (from backend API with materials tracking) or Purchase (from frontend grouping)
-  sub_crs?: (SubCR | Purchase)[];
+  // POChild records for vendor splits
+  po_children?: POChild[];
 }
 
 export interface SelectVendorRequest {
@@ -121,12 +144,12 @@ export interface SelectVendorResponse {
   message: string;
   purchase?: Purchase;
   error?: string;
-  // For TD sub-CR splitting (when TD selects different vendors for materials)
+  // For TD vendor selection when multiple vendors are selected
   split_result?: {
-    original_sub_cr: string;
-    new_sub_crs: Array<{
-      cr_id: number;
-      formatted_cr_id: string;
+    original_cr: string;
+    po_children: Array<{
+      id: number;
+      formatted_id: string;
       vendor_id: number;
       vendor_name: string;
       materials_count: number;
@@ -261,6 +284,51 @@ class BuyerService {
         throw new Error('Authentication required. Please login again.');
       }
       throw new Error(error.response?.data?.error || 'Failed to fetch completed purchases');
+    }
+  }
+
+  async getRejectedPurchases(): Promise<PurchaseListResponse> {
+    try {
+      const response = await axios.get<PurchaseListResponse>(
+        `${API_URL}/buyer/rejected-purchases`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error('Failed to fetch rejected purchases');
+    } catch (error: any) {
+      console.error('Error fetching rejected purchases:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to fetch rejected purchases');
+    }
+  }
+
+  // Resend rejected change request
+  async resendChangeRequest(crId: number): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await axios.put<{ success: boolean; message: string; error?: string }>(
+        `${API_URL}/change-request/${crId}/resend`,
+        {},
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to resend change request');
+    } catch (error: any) {
+      console.error('Error resending change request:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Change request not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to resend change request');
     }
   }
 
@@ -752,8 +820,8 @@ class BuyerService {
     }
   }
 
-  // Create separate sub-CRs for each vendor group
-  async createSubCRs(
+  // Create POChild records for each vendor group
+  async createPOChildren(
     crId: number,
     vendorGroups: Array<{
       vendor_id: number;
@@ -772,9 +840,9 @@ class BuyerService {
     message: string;
     parent_cr_id: number;
     submission_group_id: string;
-    sub_crs: Array<{
-      cr_id: number;
-      formatted_cr_id: string;
+    po_children: Array<{
+      id: number;
+      formatted_id: string;
       vendor_id: number;
       vendor_name: string;
       materials_count: number;
@@ -783,7 +851,7 @@ class BuyerService {
   }> {
     try {
       const response = await axios.post(
-        `${API_URL}/buyer/purchase/${crId}/create-sub-crs`,
+        `${API_URL}/buyer/purchase/${crId}/create-po-children`,
         {
           vendor_groups: vendorGroups,
           submission_group_id: submissionGroupId
@@ -794,9 +862,9 @@ class BuyerService {
       if (response.data.success) {
         return response.data;
       }
-      throw new Error(response.data.error || 'Failed to create sub-CRs');
+      throw new Error(response.data.error || 'Failed to create PO children');
     } catch (error: any) {
-      console.error('Error creating sub-CRs:', error);
+      console.error('Error creating PO children:', error);
       if (error.response?.status === 401) {
         throw new Error('Authentication required. Please login again.');
       }
@@ -804,6 +872,144 @@ class BuyerService {
         throw new Error('Purchase not found');
       }
       throw new Error(error.response?.data?.error || 'Failed to create separate purchase orders');
+    }
+  }
+
+  // Get pending POChild records (for TD approval)
+  async getPendingPOChildren(): Promise<{
+    success: boolean;
+    pending_count: number;
+    po_children: POChild[];
+  }> {
+    try {
+      const response = await axios.get(
+        `${API_URL}/buyer/po-children/pending`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to fetch pending PO children');
+    } catch (error: any) {
+      console.error('Error fetching pending PO children:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to fetch pending PO children');
+    }
+  }
+
+  // Get approved POChild records (for buyer to complete purchase)
+  async getApprovedPOChildren(): Promise<{
+    success: boolean;
+    approved_count: number;
+    po_children: POChild[];
+  }> {
+    try {
+      const response = await axios.get(
+        `${API_URL}/buyer/po-children/approved`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to fetch approved PO children');
+    } catch (error: any) {
+      console.error('Error fetching approved PO children:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to fetch approved PO children');
+    }
+  }
+
+  // TD approves POChild vendor selection
+  async tdApprovePOChild(poChildId: number): Promise<{
+    success: boolean;
+    message: string;
+    po_child: POChild;
+  }> {
+    try {
+      const response = await axios.post(
+        `${API_URL}/buyer/po-child/${poChildId}/td-approve`,
+        {},
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to approve vendor selection');
+    } catch (error: any) {
+      console.error('Error approving PO child vendor:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('PO child not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to approve vendor selection');
+    }
+  }
+
+  // TD rejects POChild vendor selection
+  async tdRejectPOChild(poChildId: number, reason: string): Promise<{
+    success: boolean;
+    message: string;
+    po_child: POChild;
+  }> {
+    try {
+      const response = await axios.post(
+        `${API_URL}/buyer/po-child/${poChildId}/td-reject`,
+        { reason },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to reject vendor selection');
+    } catch (error: any) {
+      console.error('Error rejecting PO child vendor:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('PO child not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to reject vendor selection');
+    }
+  }
+
+  // Complete POChild purchase
+  async completePOChildPurchase(poChildId: number, notes?: string): Promise<{
+    success: boolean;
+    message: string;
+    po_child: POChild;
+    all_po_children_completed: boolean;
+  }> {
+    try {
+      const response = await axios.post(
+        `${API_URL}/buyer/po-child/${poChildId}/complete`,
+        { notes: notes || '' },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to complete purchase');
+    } catch (error: any) {
+      console.error('Error completing PO child purchase:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('PO child not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to complete purchase');
     }
   }
 }

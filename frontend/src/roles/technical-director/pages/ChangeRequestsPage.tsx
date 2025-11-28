@@ -32,7 +32,7 @@ import {
   ShoppingCart
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
-import { buyerService, Purchase } from '@/roles/buyer/services/buyerService';
+import { buyerService, Purchase, POChild } from '@/roles/buyer/services/buyerService';
 import { buyerVendorService, Vendor, VendorProduct } from '@/roles/buyer/services/buyerVendorService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -48,11 +48,13 @@ import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('pending');
-  const [approvedSubTab, setApprovedSubTab] = useState<'purchase_approved' | 'vendor_approved'>('purchase_approved');
+  const [vendorApprovalsSubTab, setVendorApprovalsSubTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [changeRequests, setChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [vendorApprovals, setVendorApprovals] = useState<Purchase[]>([]);
+  const [pendingPOChildren, setPendingPOChildren] = useState<POChild[]>([]);
+  const [approvedPOChildren, setApprovedPOChildren] = useState<POChild[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -77,6 +79,8 @@ const ChangeRequestsPage: React.FC = () => {
     // Initial load with loading spinner
     loadChangeRequests(true);
     loadVendorApprovals();
+    loadPendingPOChildren();
+    loadApprovedPOChildren();
 
     // NO POLLING! Real-time subscriptions in realtimeSubscriptions.ts
     // automatically invalidate queries when change_requests table changes.
@@ -90,6 +94,8 @@ const ChangeRequestsPage: React.FC = () => {
 
     loadChangeRequests(false); // Silent reload without loading spinner
     loadVendorApprovals(); // Also reload vendor approvals
+    loadPendingPOChildren(); // Also reload PO children
+    loadApprovedPOChildren(); // Also reload approved PO children
   }, [changeRequestUpdateTimestamp]); // Reload whenever timestamp changes
 
   const loadChangeRequests = async (showLoadingSpinner = false) => {
@@ -128,33 +134,24 @@ const ChangeRequestsPage: React.FC = () => {
         console.log('🔍 All change requests:', response.data);
         console.log('📊 Total change requests:', response.data.length);
 
-        // Filter for change requests with vendor selection pending TD approval
-        // Include:
-        // 1. Regular CRs (status='assigned_to_buyer') with vendor_selection_status='pending_td_approval'
-        // 2. Sub-CRs (status='pending_td_approval', is_sub_cr=true)
-        // 3. Full purchase parent CRs (status='pending_td_approval', is_sub_cr=false) - when buyer sends all materials to single vendor
+        // Filter for change requests with vendor selection (pending, approved, or rejected)
+        // Include ALL CRs that have a vendor_selection_status
         const pendingVendorApprovals = response.data.filter(
           (cr: ChangeRequestItem) => {
-            const status = cr.status?.trim(); // Trim to handle trailing spaces
-            const isRegularCRPending = status === 'assigned_to_buyer' && cr.vendor_selection_status === 'pending_td_approval';
-            const isSubCRPending = cr.is_sub_cr && status === 'pending_td_approval' && cr.vendor_selection_status === 'pending_td_approval';
-            // Full purchase parent CR: status='pending_td_approval', is_sub_cr=false, vendor_selection_status='pending_td_approval'
-            const isFullPurchaseParentCR = !cr.is_sub_cr && status === 'pending_td_approval' && cr.vendor_selection_status === 'pending_td_approval';
+            const vendorStatus = cr.vendor_selection_status;
+
+            // Check if this CR has a vendor selection status (pending, approved, or rejected)
+            const hasVendorSelection = vendorStatus && ['pending_td_approval', 'approved', 'rejected'].includes(vendorStatus);
 
             console.log(`CR-${cr.cr_id}:`, {
               status: cr.status,
-              trimmedStatus: status,
               vendor_selection_status: cr.vendor_selection_status,
               selected_vendor_name: cr.selected_vendor_name,
-              is_sub_cr: cr.is_sub_cr,
               formatted_cr_id: cr.formatted_cr_id,
-              isRegularCRPending,
-              isSubCRPending,
-              isFullPurchaseParentCR,
-              matches: isRegularCRPending || isSubCRPending || isFullPurchaseParentCR
+              hasVendorSelection
             });
 
-            return isRegularCRPending || isSubCRPending || isFullPurchaseParentCR;
+            return hasVendorSelection;
           }
         );
 
@@ -163,10 +160,7 @@ const ChangeRequestsPage: React.FC = () => {
         // Map to Purchase format for compatibility
         const mappedApprovals: Purchase[] = pendingVendorApprovals.map((cr: ChangeRequestItem) => ({
           cr_id: cr.cr_id,
-          formatted_cr_id: cr.formatted_cr_id || `CR-${cr.cr_id}`,  // Include formatted CR ID for sub-CRs
-          is_sub_cr: cr.is_sub_cr || false,
-          parent_cr_id: cr.parent_cr_id,
-          cr_number_suffix: cr.cr_number_suffix,
+          formatted_cr_id: cr.formatted_cr_id || `PO-${cr.cr_id}`,
           project_id: cr.project_id,
           project_name: cr.project_name || cr.boq_name || 'Unknown Project',
           client: cr.project_client || '',
@@ -205,6 +199,187 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
+  // Load PO children pending TD approval (new system)
+  const loadPendingPOChildren = async () => {
+    try {
+      const response = await buyerService.getPendingPOChildren();
+      if (response.success) {
+        console.log('🔍 Pending PO Children:', response.po_children);
+        setPendingPOChildren(response.po_children || []);
+      }
+    } catch (error) {
+      console.error('Error loading pending PO children:', error);
+    }
+  };
+
+  // Load approved PO children (for approved sub-tab)
+  const loadApprovedPOChildren = async () => {
+    try {
+      console.log('📥 Loading approved PO children for TD...');
+      const response = await buyerService.getApprovedPOChildren();
+      console.log('📥 Approved PO Children response:', response);
+      if (response.success) {
+        console.log('✅ Approved PO Children loaded:', response.po_children?.length || 0, 'items');
+        setApprovedPOChildren(response.po_children || []);
+      } else {
+        console.warn('⚠️ Approved PO Children response not successful:', response);
+        setApprovedPOChildren([]);
+      }
+    } catch (error: any) {
+      console.error('❌ Error loading approved PO children:', error);
+      // Don't show error toast, just set empty state to avoid breaking UI
+      setApprovedPOChildren([]);
+    }
+  };
+
+  // Handle PO child approval
+  const handleApprovePOChild = async (poChildId: number) => {
+    try {
+      const response = await buyerService.tdApprovePOChild(poChildId);
+      if (response.success) {
+        showSuccess(response.message || 'Vendor selection approved!');
+        loadPendingPOChildren();
+        loadApprovedPOChildren();
+        loadVendorApprovals();
+      }
+    } catch (error: any) {
+      showError(error.message || 'Failed to approve vendor selection');
+    }
+  };
+
+  // Handle PO child rejection
+  const handleRejectPOChild = async (poChildId: number, reason: string) => {
+    try {
+      const response = await buyerService.tdRejectPOChild(poChildId, reason);
+      if (response.success) {
+        showSuccess(response.message || 'Vendor selection rejected');
+        loadPendingPOChildren();
+        loadVendorApprovals();
+      }
+    } catch (error: any) {
+      showError(error.message || 'Failed to reject vendor selection');
+    }
+  };
+
+  // Handle viewing vendor info for PO child
+  const handleViewPOChildVendorInfo = async (poChild: POChild) => {
+    // Convert POChild to Purchase-like object for the vendor info modal
+    const purchaseLike: Purchase = {
+      cr_id: poChild.parent_cr_id,
+      formatted_cr_id: poChild.formatted_id,
+      project_id: poChild.project_id || 0,
+      project_name: poChild.project_name || 'Unknown Project',
+      client: '',
+      location: '',
+      boq_id: poChild.boq_id || 0,
+      boq_name: '',
+      item_name: poChild.item_name || '',
+      sub_item_name: '',
+      request_type: '',
+      reason: '',
+      materials: poChild.materials || [],
+      materials_count: poChild.materials_count || poChild.materials?.length || 0,
+      total_cost: poChild.materials_total_cost || 0,
+      approved_by: 0,
+      approved_at: null,
+      created_at: poChild.created_at || '',
+      status: 'pending',
+      vendor_id: poChild.vendor_id,
+      vendor_name: poChild.vendor_name,
+      vendor_selection_status: poChild.vendor_selection_status,
+    };
+
+    setSelectedVendorPurchase(purchaseLike);
+    setShowVendorInfoModal(true);
+
+    // Fetch full vendor details
+    if (poChild.vendor_id) {
+      try {
+        setLoadingVendorDetails(true);
+        const [vendor, products] = await Promise.all([
+          buyerVendorService.getVendorById(poChild.vendor_id),
+          buyerVendorService.getVendorProducts(poChild.vendor_id)
+        ]);
+        setVendorDetails(vendor);
+
+        // Filter products to only show those that match materials in this PO child
+        const materialNames = (poChild.materials || []).map(m =>
+          m.material_name?.toLowerCase().trim() || ''
+        );
+
+        const relevantProducts = products.filter(product => {
+          const productName = product.product_name?.toLowerCase().trim() || '';
+          const productCategory = product.category?.toLowerCase().trim() || '';
+
+          return materialNames.some(materialName => {
+            if (!materialName) return false;
+            return productName.includes(materialName) ||
+              materialName.includes(productName) ||
+              productCategory.includes(materialName);
+          });
+        });
+
+        setVendorProducts(relevantProducts.length > 0 ? relevantProducts : products.slice(0, 5));
+      } catch (error) {
+        console.error('Error loading vendor details:', error);
+        setVendorDetails(null);
+        setVendorProducts([]);
+      } finally {
+        setLoadingVendorDetails(false);
+      }
+    }
+  };
+
+  // Handle viewing PO child details (shows only PO child's materials, not parent CR)
+  const handleViewPOChildDetails = (poChild: POChild) => {
+    // Convert POChild to ChangeRequestItem format for the details modal
+    // Map PO child status to CR status for display
+    const mappedStatus = poChild.vendor_selection_status === 'pending_td_approval'
+      ? 'pending'
+      : poChild.vendor_selection_status === 'approved'
+        ? 'approved'
+        : poChild.status === 'purchase_completed'
+          ? 'purchase_completed'
+          : 'pending';
+
+    // Map materials to match ChangeRequestItem format
+    const mappedMaterials = (poChild.materials || []).map(m => ({
+      material_name: m.material_name,
+      quantity: m.quantity,
+      unit: m.unit,
+      unit_price: m.unit_price,
+      total_price: m.total_price,
+      master_material_id: m.master_material_id || undefined,
+    }));
+
+    const poChildAsChangeRequest: ChangeRequestItem = {
+      cr_id: poChild.parent_cr_id,
+      formatted_cr_id: poChild.formatted_id,
+      project_id: poChild.project_id || 0,
+      project_name: poChild.project_name || 'Unknown Project',
+      boq_id: poChild.boq_id || 0,
+      boq_name: '',
+      item_name: poChild.item_name || '',
+      request_type: 'EXTRA_MATERIALS',
+      justification: '',
+      status: mappedStatus as ChangeRequestItem['status'],
+      requested_by_user_id: 0,
+      requested_by_name: poChild.vendor_selected_by_buyer_name || '',
+      requested_by_role: 'buyer',
+      created_at: poChild.created_at || '',
+      // Use PO child's materials only
+      materials_data: mappedMaterials,
+      materials_total_cost: poChild.materials_total_cost || 0,
+      // Vendor info
+      selected_vendor_id: poChild.vendor_id,
+      selected_vendor_name: poChild.vendor_name,
+      vendor_selection_status: poChild.vendor_selection_status,
+    };
+
+    setSelectedChangeRequest(poChildAsChangeRequest);
+    setShowDetailsModal(true);
+  };
+
   const handleApprove = (crId: number) => {
     // Show buyer selection modal before approving
     setApprovingCrId(crId);
@@ -226,17 +401,51 @@ const ChangeRequestsPage: React.FC = () => {
     if (!rejectingCrId) return;
 
     try {
-      const response = await changeRequestService.reject(rejectingCrId, reason);
-      if (response.success) {
-        showSuccess('Change request rejected');
-        loadChangeRequests();
-        setShowRejectionModal(false);
-        setRejectingCrId(null);
+      // Check if this is a vendor selection rejection (from vendor approvals tab)
+      const isVendorRejection = vendorApprovals.some(p => p.cr_id === rejectingCrId);
+
+      if (isVendorRejection) {
+        // Reject vendor selection
+        const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+        const token = localStorage.getItem('access_token');
+
+        const response = await fetch(`${apiUrl}/buyer/purchase/${rejectingCrId}/td-reject-vendor`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ reason })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Failed to reject vendor selection');
+        }
+
+        showSuccess('Vendor selection rejected. Buyer has been notified to select a new vendor.');
+
+        // Reload data
+        await Promise.all([
+          loadVendorApprovals(),
+          loadChangeRequests()
+        ]);
       } else {
-        showError(response.message);
+        // Regular change request rejection
+        const response = await changeRequestService.reject(rejectingCrId, reason);
+        if (response.success) {
+          showSuccess('Change request rejected');
+          loadChangeRequests();
+        } else {
+          showError(response.message);
+        }
       }
-    } catch (error) {
-      showError('Failed to reject change request');
+
+      setShowRejectionModal(false);
+      setRejectingCrId(null);
+    } catch (error: any) {
+      showError(error.message || 'Failed to reject');
     }
   };
 
@@ -356,40 +565,51 @@ const ChangeRequestsPage: React.FC = () => {
 
     if (activeTab === 'pending') {
       // Pending tab: Items awaiting TD approval
-      // EXCLUDE items with vendor_selection_status='pending_td_approval' (they belong in Vendor Approvals tab)
       matchesTab = ['under_review', 'approved_by_pm', 'pending'].includes(status);
     } else if (activeTab === 'approved') {
-      // Filter by sub-tab when in approved tab
-      if (approvedSubTab === 'purchase_approved') {
-        // Purchase approved: TD approved purchase, buyer needs to select vendor
-        // Exclude items with vendor_selection_status='approved' (they belong in vendor_approved tab)
-        // Also exclude items that have a selected vendor
-        matchesTab = (status === 'assigned_to_buyer' || status === 'send_to_buyer') &&
-                     !req.selected_vendor_id &&
-                     (!req.vendor_selection_status || req.vendor_selection_status !== 'approved') &&
-                     !req.vendor_approved_by_td_id;
-      } else if (approvedSubTab === 'vendor_approved') {
-        // Vendor approved: TD approved vendor selection, buyer hasn't completed purchase yet
-        // Once purchase is completed (status = purchase_completed), it moves to Completed tab
-        // Include ONLY items where vendor_selection_status='approved' (NOT 'pending_td_approval')
-        matchesTab = (
-          status === 'vendor_approved' ||
-          (
-            (status === 'assigned_to_buyer' || status === 'send_to_buyer' || status === 'pending_td_approval') &&
-            !!req.selected_vendor_id &&
-            req.vendor_selection_status === 'approved' &&
-            (!!req.vendor_approval_date || !!req.vendor_approved_by_td_id)
-          )
-        );
-      }
+      // Approved tab: CRs approved by TD, buyer selecting vendor
+      matchesTab = status === 'assigned_to_buyer' && !req.vendor_selection_status;
     } else if (activeTab === 'completed') {
       // Only show truly completed purchases (purchase_completed status)
       matchesTab = status === 'purchase_completed';
-    } else if (activeTab === 'rejected') {
-      matchesTab = status === 'rejected';
     }
+    // vendor_approvals tab uses vendorApprovals data, not changeRequests
 
     return matchesSearch && matchesTab;
+  });
+
+  // Filter vendor approvals for vendor_approvals tab with sub-tabs
+  const filteredVendorApprovals = vendorApprovals.filter(purchase => {
+    const matchesSearch = purchase.project_name.toLowerCase().includes(searchTerm.toLowerCase());
+
+    if (vendorApprovalsSubTab === 'pending') {
+      // Show pending vendor approvals (waiting for TD approval)
+      return matchesSearch && purchase.vendor_selection_status === 'pending_td_approval';
+    } else if (vendorApprovalsSubTab === 'approved') {
+      // Show approved vendor selections
+      return matchesSearch && purchase.vendor_selection_status === 'approved';
+    } else if (vendorApprovalsSubTab === 'rejected') {
+      // Show rejected vendor selections
+      return matchesSearch && purchase.vendor_selection_status === 'rejected';
+    }
+    return matchesSearch;
+  });
+
+  // Filter PO children for vendor_approvals tab (new system)
+  const filteredPOChildren = pendingPOChildren.filter(poChild => {
+    const matchesSearch = (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+
+    if (vendorApprovalsSubTab === 'pending') {
+      return matchesSearch && poChild.vendor_selection_status === 'pending_td_approval';
+    }
+    // For approved/rejected, PO children are not in this list anymore (they've been processed)
+    return false;
+  });
+
+  // Filter approved PO children for approved sub-tab
+  const filteredApprovedPOChildren = approvedPOChildren.filter(poChild => {
+    const matchesSearch = (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesSearch;
   });
 
   const handleApproveVendor = async (crId: number) => {
@@ -420,15 +640,20 @@ const ChangeRequestsPage: React.FC = () => {
         loadChangeRequests()
       ]);
 
-      // Switch to approved tab and vendor_approved sub-tab to show the updated item
-      setActiveTab('approved');
-      setApprovedSubTab('vendor_approved');
+      // Switch to vendor_approvals tab and approved sub-tab to show the updated item
+      setActiveTab('vendor_approvals');
+      setVendorApprovalsSubTab('approved');
     } catch (error: any) {
       console.error('Error approving vendor:', error);
       showError(error.message || 'Failed to approve vendor');
     } finally {
       setApprovingVendorId(null);
     }
+  };
+
+  const handleRejectVendorSelection = async (crId: number) => {
+    setRejectingCrId(crId);
+    setShowRejectionModal(true);
   };
 
   const handleReviewVendorApproval = async (crId: number) => {
@@ -493,34 +718,19 @@ const ChangeRequestsPage: React.FC = () => {
   const stats = {
     pending: changeRequests.filter(r => {
       const status = r.status?.trim();
-      // EXCLUDE items with vendor_selection_status='pending_td_approval' (they belong in Vendor Approvals tab)
       return ['under_review', 'approved_by_pm', 'pending'].includes(status);
     }).length,
-    approved: changeRequests.filter(r =>
-      (r.status?.trim() === 'assigned_to_buyer' || r.status?.trim() === 'send_to_buyer') // Count items in assigned_to_buyer or send_to_buyer status
-    ).length,
-    purchaseApproved: changeRequests.filter(r => {
+    approved: changeRequests.filter(r => {
       const status = r.status?.trim();
-      return (status === 'assigned_to_buyer' || status === 'send_to_buyer') &&
-             !r.selected_vendor_id &&
-             (!r.vendor_selection_status || r.vendor_selection_status !== 'approved') &&
-             !r.vendor_approved_by_td_id;
+      return status === 'assigned_to_buyer' && !r.vendor_selection_status;
     }).length,
-    vendorApproved: changeRequests.filter(r => {
-      const status = r.status?.trim();
-      return (
-        status === 'vendor_approved' ||
-        (
-          (status === 'assigned_to_buyer' || status === 'send_to_buyer' || status === 'pending_td_approval') &&
-          !!r.selected_vendor_id &&
-          r.vendor_selection_status === 'approved' &&
-          (!!r.vendor_approval_date || !!r.vendor_approved_by_td_id)
-        )
-      );
-    }).length,
-    completed: changeRequests.filter(r => r.status?.trim() === 'purchase_completed').length,
-    rejected: changeRequests.filter(r => r.status?.trim() === 'rejected').length,
-    vendorApprovals: vendorApprovals.length
+    vendorApprovals: vendorApprovals.length + pendingPOChildren.length + approvedPOChildren.length, // Total vendor approvals including PO children
+    vendorApprovalsPending: vendorApprovals.filter(p => p.vendor_selection_status === 'pending_td_approval').length + pendingPOChildren.filter(p => p.vendor_selection_status === 'pending_td_approval').length,
+    vendorApprovalsApproved: vendorApprovals.filter(p => p.vendor_selection_status === 'approved').length + approvedPOChildren.length,
+    vendorApprovalsRejected: vendorApprovals.filter(p => p.vendor_selection_status === 'rejected').length,
+    poChildrenPending: pendingPOChildren.filter(p => p.vendor_selection_status === 'pending_td_approval').length,
+    poChildrenApproved: approvedPOChildren.length,
+    completed: changeRequests.filter(r => r.status?.trim() === 'purchase_completed').length
   };
 
   if (loading) {
@@ -599,7 +809,7 @@ const ChangeRequestsPage: React.FC = () => {
             <div className="p-1.5 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
               <FolderOpen className="w-4 h-4 text-red-600" />
             </div>
-            <h1 className="text-lg font-bold text-[#243d8a]">Change Requests</h1>
+            <h1 className="text-lg font-bold text-[#243d8a]">Purchase Orders</h1>
           </div>
         </div>
       </div>
@@ -658,21 +868,21 @@ const ChangeRequestsPage: React.FC = () => {
                 <span className="ml-1 text-gray-400">({stats.pending})</span>
               </TabsTrigger>
               <TabsTrigger
-                value="vendor-approvals"
+                value="approved"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
+              >
+                <ShoppingCart className="w-3 h-3 mr-1" />
+                Approved
+                <span className="ml-1 text-gray-400">({stats.approved})</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="vendor_approvals"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:text-orange-600 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
               >
                 <Store className="w-3 h-3 mr-1" />
                 <span className="hidden sm:inline">Vendor Approvals</span>
                 <span className="sm:hidden">Vendors</span>
                 <span className="ml-1 text-gray-400">({stats.vendorApprovals})</span>
-              </TabsTrigger>
-              <TabsTrigger
-                value="approved"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-400 data-[state=active]:text-blue-500 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
-              >
-                <CheckCircle className="w-3 h-3 mr-1" />
-                Approved
-                <span className="ml-1 text-gray-400">({stats.approved})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="completed"
@@ -682,46 +892,55 @@ const ChangeRequestsPage: React.FC = () => {
                 Completed
                 <span className="ml-1 text-gray-400">({stats.completed})</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="rejected"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
-              >
-                <XCircle className="w-3 h-3 mr-1" />
-                Rejected
-                <span className="ml-1 text-gray-400">({stats.rejected})</span>
-              </TabsTrigger>
             </TabsList>
-            {/* Sub-tabs for Approved */}
-            {activeTab === 'approved' && (
-              <div className="mb-2 p-2 bg-blue-50 rounded-lg">
+            {/* Sub-tabs for Vendor Approvals */}
+            {activeTab === 'vendor_approvals' && (
+              <div className="mb-2 p-2 bg-orange-50 rounded-lg">
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setApprovedSubTab('purchase_approved')}
+                    onClick={() => setVendorApprovalsSubTab('pending')}
                     className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
-                      approvedSubTab === 'purchase_approved'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-blue-700 hover:bg-blue-100'
+                      vendorApprovalsSubTab === 'pending'
+                        ? 'bg-orange-600 text-white'
+                        : 'text-orange-700 hover:bg-orange-100'
                     }`}
                   >
-                    <ShoppingCart className="w-3 h-3 inline mr-1" />
-                    Purchase Approved ({stats.purchaseApproved})
+                    <AlertTriangle className="w-3 h-3 inline mr-1" />
+                    Pending ({stats.vendorApprovalsPending})
                   </button>
                   <button
-                    onClick={() => setApprovedSubTab('vendor_approved')}
+                    onClick={() => {
+                      setVendorApprovalsSubTab('approved');
+                      // Reload approved PO children when switching to approved tab
+                      loadApprovedPOChildren();
+                    }}
                     className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
-                      approvedSubTab === 'vendor_approved'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-blue-700 hover:bg-blue-100'
+                      vendorApprovalsSubTab === 'approved'
+                        ? 'bg-green-600 text-white'
+                        : 'text-green-700 hover:bg-green-100'
                     }`}
                   >
-                    <Store className="w-3 h-3 inline mr-1" />
-                    Vendor Approved ({stats.vendorApproved})
+                    <CheckCircle className="w-3 h-3 inline mr-1" />
+                    Approved ({stats.vendorApprovalsApproved})
+                  </button>
+                  <button
+                    onClick={() => setVendorApprovalsSubTab('rejected')}
+                    className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
+                      vendorApprovalsSubTab === 'rejected'
+                        ? 'bg-red-600 text-white'
+                        : 'text-red-700 hover:bg-red-100'
+                    }`}
+                  >
+                    <XCircle className="w-3 h-3 inline mr-1" />
+                    Rejected ({stats.vendorApprovalsRejected})
                   </button>
                 </div>
                 <div className="text-[10px] text-gray-600 mt-1">
-                  {approvedSubTab === 'purchase_approved'
-                    ? 'Approved purchases. Buyers will select vendors.'
-                    : 'Vendor selections approved. Buyers can complete purchases.'}
+                  {vendorApprovalsSubTab === 'pending'
+                    ? 'Vendor selections waiting for TD approval. Review and approve/reject.'
+                    : vendorApprovalsSubTab === 'approved'
+                    ? 'Vendor selections approved by TD. Buyers can complete purchases.'
+                    : 'Vendor selections rejected by TD. Buyers need to select new vendors.'}
                 </div>
               </div>
             )}
@@ -795,9 +1014,9 @@ const ChangeRequestsPage: React.FC = () => {
                               </button>
                               <button
                                 onClick={() => handleEdit(request.cr_id)}
-                                disabled={request.status === 'pending_td_approval' || request.vendor_selection_status === 'pending_td_approval' || request.is_sub_cr}
+                                disabled={request.status === 'pending_td_approval' || request.vendor_selection_status === 'pending_td_approval'}
                                 className={`text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold ${
-                                  request.status === 'pending_td_approval' || request.vendor_selection_status === 'pending_td_approval' || request.is_sub_cr
+                                  request.status === 'pending_td_approval' || request.vendor_selection_status === 'pending_td_approval'
                                     ? 'bg-gray-400 cursor-not-allowed'
                                     : 'bg-blue-600 hover:bg-blue-700'
                                 }`}
@@ -833,17 +1052,296 @@ const ChangeRequestsPage: React.FC = () => {
               </div>
             </TabsContent>
 
-            <TabsContent value="vendor-approvals" className="mt-0 p-0">
+            <TabsContent value="approved" className="mt-0 p-0">
+              <div className="space-y-2">
+                <h2 className="text-sm font-bold text-gray-900">Approved - Buyer Selecting Vendor</h2>
+                {filteredRequests.length === 0 ? (
+                  <div className="text-center py-8">
+                    <ShoppingCart className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">No approved requests found</p>
+                  </div>
+                ) : viewMode === 'table' ? (
+                  <RequestsTable requests={filteredRequests} />
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                    {filteredRequests.map((request, index) => (
+                      <motion.div
+                        key={request.cr_id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.02 * index }}
+                        className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-blue-300"
+                      >
+                        {/* Header - Compact */}
+                        <div className="p-2">
+                          <div className="flex items-start justify-between mb-1">
+                            <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{request.project_name}</h3>
+                            <Badge className="bg-blue-100 text-blue-800 text-[9px] px-1 py-0">
+                              APPROVED
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-0.5 text-[10px] text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Package className="h-2.5 w-2.5 text-gray-400" />
+                              <span className="truncate">By: {request.requested_by_name}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-2.5 w-2.5 text-gray-400" />
+                              <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <ShoppingCart className="h-2.5 w-2.5 text-blue-500" />
+                              <span className="truncate text-blue-700 font-medium">Buyer selecting vendor</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Stats - Compact */}
+                        <div className="px-2 pb-1 text-center text-[10px]">
+                          <span className="font-bold text-blue-600 text-sm">{(request.materials_data?.length || 0)}</span>
+                          <span className="text-gray-600 ml-0.5">Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                        </div>
+
+                        {/* Financial Impact - Compact */}
+                        <div className="px-2 pb-2 space-y-0.5 text-[9px]">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Total Cost:</span>
+                            <span className="font-bold text-gray-900">{formatCurrency(request.materials_total_cost)}</span>
+                          </div>
+                        </div>
+
+                        {/* Actions - Compact */}
+                        <div className="border-t border-gray-200 p-1.5">
+                          <button
+                            onClick={() => handleReview(request.cr_id)}
+                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
+                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                          >
+                            <Eye className="h-3 w-3" />
+                            <span>View Details</span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="vendor_approvals" className="mt-0 p-0">
               <div className="space-y-2">
                 <h2 className="text-sm font-bold text-gray-900">Vendor Selection Approvals</h2>
-                {vendorApprovals.length === 0 ? (
+                {filteredVendorApprovals.length === 0 && filteredPOChildren.length === 0 && (vendorApprovalsSubTab !== 'approved' || filteredApprovedPOChildren.length === 0) ? (
                   <div className="text-center py-8">
                     <Store className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                    <p className="text-gray-500 text-sm">No vendor approvals pending</p>
+                    <p className="text-gray-500 text-sm">
+                      {vendorApprovalsSubTab === 'pending'
+                        ? 'No vendor approvals pending'
+                        : vendorApprovalsSubTab === 'approved'
+                          ? 'No approved vendor selections'
+                          : 'No rejected vendor selections'}
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                    {vendorApprovals.map((purchase, index) => (
+                    {/* Approved PO Children FIRST (for Approved sub-tab) - Show at TOP */}
+                    {vendorApprovalsSubTab === 'approved' && filteredApprovedPOChildren.map((poChild, index) => (
+                      <motion.div
+                        key={`approved-po-${poChild.id}`}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.02 * index }}
+                        className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border-2 border-green-400 ring-2 ring-green-100"
+                      >
+                        <div className="p-2 bg-gradient-to-r from-green-50 to-emerald-50">
+                          <div className="flex items-start justify-between mb-1">
+                            <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{poChild.project_name || poChild.item_name}</h3>
+                            <Badge className="text-[9px] px-1.5 py-0.5 bg-green-600 text-white font-bold">
+                              {poChild.formatted_id}
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-0.5 text-[10px] text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Package className="h-2.5 w-2.5 text-gray-400" />
+                              <span className="truncate">{poChild.item_name || 'N/A'}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-2.5 w-2.5 text-gray-400" />
+                              <span className="truncate">{poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Store className="h-2.5 w-2.5 text-green-500" />
+                              <span className="truncate font-semibold text-green-900">{poChild.vendor_name || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Materials List */}
+                        <div className="px-2 pb-2">
+                          <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
+                            <Package className="h-2.5 w-2.5" />
+                            Materials ({poChild.materials?.length || 0})
+                          </div>
+                          <div className="bg-gray-50 rounded border border-gray-200 max-h-24 overflow-y-auto">
+                            {poChild.materials && poChild.materials.length > 0 ? (
+                              <div className="divide-y divide-gray-100">
+                                {poChild.materials.map((material, idx) => (
+                                  <div key={idx} className="px-1.5 py-1 text-[9px]">
+                                    <div className="flex justify-between items-start gap-1">
+                                      <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
+                                      <span className="text-green-700 font-bold whitespace-nowrap">
+                                        AED {(material.unit_price || 0).toLocaleString()}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between text-gray-500 mt-0.5">
+                                      <span>{material.quantity} {material.unit}</span>
+                                      <span className="font-semibold text-gray-700">
+                                        = AED {(material.total_price || 0).toLocaleString()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="px-2 py-2 text-[9px] text-gray-400 text-center">
+                                No materials data
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex justify-between mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
+                            <span className="text-gray-600 font-semibold">Total Cost:</span>
+                            <span className="font-bold text-green-700">AED {(poChild.materials_total_cost || 0).toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        {/* Status and Actions */}
+                        <div className="border-t border-green-200 p-1.5 flex flex-col gap-1 bg-green-50/50">
+                          <button
+                            onClick={() => handleViewPOChildDetails(poChild)}
+                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
+                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                          >
+                            <Eye className="h-3 w-3" />
+                            <span>Details</span>
+                          </button>
+                          <div className="bg-green-100 border border-green-300 rounded px-2 py-1 text-[9px] text-green-800 font-bold text-center">
+                            <CheckCircle className="h-3 w-3 inline mr-1" />
+                            ✓ NEW PO Child - Awaiting Buyer
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+
+                    {/* Pending PO Children (new system) */}
+                    {filteredPOChildren.map((poChild, index) => (
+                      <motion.div
+                        key={`po-${poChild.id}`}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.02 * index }}
+                        className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-blue-300"
+                      >
+                        <div className="p-2">
+                          <div className="flex items-start justify-between mb-1">
+                            <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{poChild.project_name || poChild.item_name}</h3>
+                            <Badge className="text-[9px] px-1 py-0 bg-blue-100 text-blue-800">
+                              {poChild.formatted_id}
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-0.5 text-[10px] text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Package className="h-2.5 w-2.5 text-gray-400" />
+                              <span className="truncate">{poChild.item_name || 'N/A'}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-2.5 w-2.5 text-gray-400" />
+                              <span className="truncate">{poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Store className="h-2.5 w-2.5 text-blue-500" />
+                              <span className="truncate font-semibold text-blue-900">{poChild.vendor_name || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Materials List */}
+                        <div className="px-2 pb-2">
+                          <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
+                            <Package className="h-2.5 w-2.5" />
+                            Materials ({poChild.materials?.length || 0})
+                          </div>
+                          <div className="bg-gray-50 rounded border border-gray-200 max-h-24 overflow-y-auto">
+                            {poChild.materials && poChild.materials.length > 0 ? (
+                              <div className="divide-y divide-gray-100">
+                                {poChild.materials.map((material, idx) => (
+                                  <div key={idx} className="px-1.5 py-1 text-[9px]">
+                                    <div className="flex justify-between items-start gap-1">
+                                      <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
+                                      <span className="text-blue-700 font-bold whitespace-nowrap">
+                                        AED {(material.unit_price || 0).toLocaleString()}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between text-gray-500 mt-0.5">
+                                      <span>{material.quantity} {material.unit}</span>
+                                      <span className="font-semibold text-gray-700">
+                                        = AED {(material.total_price || 0).toLocaleString()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="px-2 py-2 text-[9px] text-gray-400 text-center">
+                                No materials data
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex justify-between mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
+                            <span className="text-gray-600 font-semibold">Total Cost:</span>
+                            <span className="font-bold text-green-700">AED {(poChild.materials_total_cost || 0).toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
+                          {/* View Details */}
+                          <button
+                            onClick={() => handleViewPOChildDetails(poChild)}
+                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
+                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                          >
+                            <Eye className="h-3 w-3" />
+                            <span>Details</span>
+                          </button>
+                          {/* Second Row: Approve/Reject */}
+                          <div className="grid grid-cols-2 gap-1">
+                            <button
+                              onClick={() => handleApprovePOChild(poChild.id)}
+                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold bg-green-600"
+                            >
+                              <Check className="h-3 w-3" />
+                              <span>Approve</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                const reason = prompt('Enter rejection reason:');
+                                if (reason) handleRejectPOChild(poChild.id, reason);
+                              }}
+                              className="bg-red-600 hover:bg-red-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
+                            >
+                              <X className="h-3 w-3" />
+                              <span>Reject</span>
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+
+                    {/* Legacy Vendor Approvals */}
+                    {filteredVendorApprovals.map((purchase, index) => (
                       <motion.div
                         key={purchase.cr_id}
                         initial={{ opacity: 0, y: 10 }}
@@ -855,12 +1353,8 @@ const ChangeRequestsPage: React.FC = () => {
                         <div className="p-2">
                           <div className="flex items-start justify-between mb-1">
                             <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{purchase.project_name}</h3>
-                            <Badge className={`text-[9px] px-1 py-0 ${
-                              purchase.is_sub_cr
-                                ? 'bg-blue-100 text-blue-800'
-                                : 'bg-orange-100 text-orange-800'
-                            }`}>
-                              {purchase.formatted_cr_id || `CR-${purchase.cr_id}`}
+                            <Badge className="text-[9px] px-1 py-0 bg-orange-100 text-orange-800">
+                              {purchase.formatted_cr_id || `PO-${purchase.cr_id}`}
                             </Badge>
                           </div>
 
@@ -921,125 +1415,56 @@ const ChangeRequestsPage: React.FC = () => {
 
                         {/* Actions - Compact */}
                         <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
-                          {/* First Row: View Details and Vendor Info */}
-                          <div className="grid grid-cols-2 gap-1">
-                            <button
-                              onClick={() => handleReviewVendorApproval(purchase.cr_id)}
-                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-3 w-3" />
-                              <span>Details</span>
-                            </button>
-                            <button
-                              onClick={() => handleViewVendorInfo(purchase)}
-                              className="bg-purple-600 hover:bg-purple-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
-                            >
-                              <Store className="h-3 w-3" />
-                              <span>Vendor</span>
-                            </button>
-                          </div>
-
-                          {/* Second Row: Approve Vendor (Full Width) */}
+                          {/* View Details */}
                           <button
-                            onClick={() => handleApproveVendor(purchase.cr_id)}
-                            disabled={approvingVendorId === purchase.cr_id}
-                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {approvingVendorId === purchase.cr_id ? (
-                              <>
-                                <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                <span className="text-[8px]">Approving...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Check className="h-3 w-3" />
-                                <span>Approve Vendor</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="approved" className="mt-0 p-0">
-              <div className="space-y-2">
-                {filteredRequests.length === 0 ? (
-                  <div className="text-center py-8">
-                    <CheckCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                    <p className="text-gray-500 text-sm">No approved requests found</p>
-                  </div>
-                ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                    {filteredRequests.map((request, index) => (
-                      <motion.div
-                        key={request.cr_id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.02 * index }}
-                        className="bg-white rounded-lg border border-blue-200 shadow-sm hover:shadow-md transition-all duration-200"
-                      >
-                        <div className="p-2">
-                          <div className="flex items-start justify-between mb-1">
-                            <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{request.project_name}</h3>
-                            <Badge className={`text-[9px] px-1.5 py-0.5 ${
-                              request.is_sub_cr
-                                ? 'bg-purple-100 text-purple-800'
-                                : 'bg-blue-100 text-blue-800'
-                            }`}>
-                              {request.formatted_cr_id || `CR-${request.cr_id}`}
-                            </Badge>
-                          </div>
-
-                          <div className="space-y-0.5 text-[10px] text-gray-600">
-                            <div className="flex items-center gap-1">
-                              <Package className="h-2.5 w-2.5 text-gray-400" />
-                              <span className="truncate">By: {request.requested_by_name}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <Calendar className="h-2.5 w-2.5 text-gray-400" />
-                              <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
-                            </div>
-                            {request.selected_vendor_name && (
-                              <div className="flex items-center gap-1">
-                                <Store className="h-2.5 w-2.5 text-green-500" />
-                                <span className="truncate font-medium text-green-700">{request.selected_vendor_name}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="px-2 pb-1 text-center text-[10px]">
-                          <span className="font-bold text-blue-600 text-sm">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-0.5">Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
-                        </div>
-
-                        <div className="px-2 pb-2 space-y-0.5 text-[9px]">
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Cost:</span>
-                            <span className="font-bold text-blue-600">{formatCurrency(request.materials_total_cost)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Item:</span>
-                            <span className="font-semibold text-gray-700 truncate ml-1">{request.item_name}</span>
-                          </div>
-                        </div>
-
-                        <div className="border-t border-gray-200 p-1.5">
-                          <button
-                            onClick={() => handleReview(request.cr_id)}
+                            onClick={() => handleReviewVendorApproval(purchase.cr_id)}
                             className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
                             style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                           >
                             <Eye className="h-3 w-3" />
-                            <span>View Details</span>
+                            <span>Details</span>
                           </button>
+
+                          {/* Second Row: Status badge for approved/rejected, or Approve/Reject buttons */}
+                          {purchase.vendor_selection_status === 'approved' ? (
+                            <div className="bg-green-50 border border-green-200 rounded px-2 py-1 text-[9px] text-green-700 font-semibold text-center">
+                              <CheckCircle className="h-3 w-3 inline mr-1" />
+                              Approved
+                            </div>
+                          ) : purchase.vendor_selection_status === 'rejected' ? (
+                            <div className="bg-red-50 border border-red-200 rounded px-2 py-1 text-[9px] text-red-700 font-semibold text-center">
+                              <XCircle className="h-3 w-3 inline mr-1" />
+                              Rejected
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-1">
+                              <button
+                                onClick={() => handleApproveVendor(purchase.cr_id)}
+                                disabled={approvingVendorId === purchase.cr_id}
+                                className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {approvingVendorId === purchase.cr_id ? (
+                                  <>
+                                    <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    <span className="text-[8px]">Approving...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Check className="h-3 w-3" />
+                                    <span>Approve</span>
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                onClick={() => handleRejectVendorSelection(purchase.cr_id)}
+                                disabled={approvingVendorId === purchase.cr_id}
+                                className="bg-red-600 hover:bg-red-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <X className="h-3 w-3" />
+                                <span>Reject</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </motion.div>
                     ))}
@@ -1048,7 +1473,7 @@ const ChangeRequestsPage: React.FC = () => {
               </div>
             </TabsContent>
 
-            <TabsContent value="completed" className="mt-0 p-0">
+                        <TabsContent value="completed" className="mt-0 p-0">
               <div className="space-y-2">
                 <h2 className="text-sm font-bold text-gray-900">Completed Requests (Final Approval)</h2>
                 {filteredRequests.length === 0 ? (
@@ -1121,77 +1546,7 @@ const ChangeRequestsPage: React.FC = () => {
               </div>
             </TabsContent>
 
-            <TabsContent value="rejected" className="mt-0 p-0">
-              <div className="space-y-2">
-                <h2 className="text-sm font-bold text-gray-900">Rejected Requests</h2>
-                {filteredRequests.length === 0 ? (
-                  <div className="text-center py-8">
-                    <XCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                    <p className="text-gray-500 text-sm">No rejected requests found</p>
-                  </div>
-                ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                    {filteredRequests.map((request, index) => (
-                      <motion.div
-                        key={request.cr_id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.02 * index }}
-                        className="bg-white rounded-lg border border-red-200 shadow-sm hover:shadow-md transition-all duration-200 opacity-75"
-                      >
-                        <div className="p-2">
-                          <div className="flex items-start justify-between mb-1">
-                            <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{request.project_name}</h3>
-                            <Badge className="bg-red-100 text-red-800 text-[9px] px-1 py-0">REJECTED</Badge>
-                          </div>
-
-                          <div className="space-y-0.5 text-[10px] text-gray-600">
-                            <div className="flex items-center gap-1">
-                              <Package className="h-2.5 w-2.5 text-gray-400" />
-                              <span className="truncate">By: {request.requested_by_name}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <Calendar className="h-2.5 w-2.5 text-gray-400" />
-                              <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="px-2 pb-1 text-center text-[10px]">
-                          <span className="font-bold text-red-600 text-sm">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-0.5">Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
-                        </div>
-
-                        <div className="px-2 pb-2 space-y-0.5 text-[9px]">
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Cost:</span>
-                            <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Increase:</span>
-                            <span className="font-semibold text-red-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
-                          </div>
-                        </div>
-
-                        <div className="border-t border-gray-200 p-1.5">
-                          <button
-                            onClick={() => handleReview(request.cr_id)}
-                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
-                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                          >
-                            <Eye className="h-3 w-3" />
-                            <span>View Details</span>
-                          </button>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-          </Tabs>
+                     </Tabs>
         </div>
       </div>
 
@@ -1230,7 +1585,7 @@ const ChangeRequestsPage: React.FC = () => {
             setApprovingCrId(null);
           }}
           crId={approvingCrId}
-          crName={`CR-${approvingCrId}`}
+          crName={`PO-${approvingCrId}`}
           onSuccess={handleApprovalSuccess}
         />
       )}
@@ -1263,7 +1618,7 @@ const ChangeRequestsPage: React.FC = () => {
                       </div>
                       <div>
                         <h3 className="text-2xl font-bold text-gray-900">Vendor Details</h3>
-                        <p className="text-sm text-gray-600 mt-0.5">{selectedVendorPurchase.formatted_cr_id || `CR-${selectedVendorPurchase.cr_id}`} - {selectedVendorPurchase.project_name}</p>
+                        <p className="text-sm text-gray-600 mt-0.5">{selectedVendorPurchase.formatted_cr_id || `PO-${selectedVendorPurchase.cr_id}`} - {selectedVendorPurchase.project_name}</p>
                       </div>
                     </div>
                   </div>

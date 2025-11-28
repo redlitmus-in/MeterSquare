@@ -71,7 +71,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       purchase_completed: 'PURCHASE COMPLETED',
       pending_td_approval: 'PENDING TD APPROVAL',
       vendor_approved: 'VENDOR APPROVED',
-      split_to_sub_crs: 'SPLIT TO SUB-CRs'
+      split_to_po_children: 'SPLIT TO VENDORS'
     };
     return labels[status] || status.toUpperCase().replace(/_/g, ' ');
   };

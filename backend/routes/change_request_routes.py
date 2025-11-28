@@ -106,6 +106,17 @@ def reject_change_request_route(cr_id):
     return reject_change_request(cr_id)
 
 
+# Resend rejected change request (Creator/Buyer/Admin)
+@change_request_routes.route('/change-request/<int:cr_id>/resend', methods=['PUT'])
+@jwt_required
+def resend_change_request_route(cr_id):
+    """Resend/resubmit rejected change request"""
+    access_check = check_cr_access()
+    if access_check:
+        return access_check
+    return resend_change_request(cr_id)
+
+
 # Send for review (PM/SE/Admin sends request to next approver)
 @change_request_routes.route('/change-request/<int:cr_id>/send-for-review', methods=['POST'])
 @jwt_required

@@ -529,7 +529,7 @@ const ChangeRequestsPage: React.FC = () => {
                 {isExtraMaterial ? <Box className="w-8 h-8 text-white" /> : <FileText className="w-8 h-8 text-white" />}
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">{isExtraMaterial ? "Material Purchase" : "Change Requests"}</h1>
+                <h1 className="text-2xl font-bold text-gray-900">{isExtraMaterial ? "Material Purchase" : "Purchase Orders"}</h1>
                 <p className="text-sm text-gray-600 mt-1">
                   {isExtraMaterial ? "Manage extra sub-items for approved BOQs" : "Material additions to existing approved projects"}
                 </p>
@@ -714,7 +714,7 @@ const ChangeRequestsPage: React.FC = () => {
                             )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                              <span className="truncate font-semibold">PO-{request.cr_id}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
@@ -869,7 +869,7 @@ const ChangeRequestsPage: React.FC = () => {
                             )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                              <span className="truncate font-semibold">PO-{request.cr_id}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
@@ -953,7 +953,7 @@ const ChangeRequestsPage: React.FC = () => {
                             )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                              <span className="truncate font-semibold">PO-{request.cr_id}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
@@ -1033,7 +1033,7 @@ const ChangeRequestsPage: React.FC = () => {
                             )}
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                              <span className="truncate font-semibold">PO-{request.cr_id}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
@@ -1118,7 +1118,7 @@ const ChangeRequestsPage: React.FC = () => {
                               )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                                <span className="truncate font-semibold">PO-{request.cr_id}</span>
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
@@ -1303,7 +1303,7 @@ const ChangeRequestsPage: React.FC = () => {
                                   )}
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
-                                    <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                                    <span className="truncate font-semibold">PO-{request.cr_id}</span>
                                   </div>
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
@@ -1414,7 +1414,7 @@ const ChangeRequestsPage: React.FC = () => {
                                   )}
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
-                                    <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                                    <span className="truncate font-semibold">PO-{request.cr_id}</span>
                                   </div>
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
@@ -1498,7 +1498,7 @@ const ChangeRequestsPage: React.FC = () => {
                                   )}
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
-                                    <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                                    <span className="truncate font-semibold">PO-{request.cr_id}</span>
                                   </div>
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
@@ -1580,7 +1580,7 @@ const ChangeRequestsPage: React.FC = () => {
                               )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                                <span className="truncate font-semibold">PO-{request.cr_id}</span>
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
@@ -1655,7 +1655,7 @@ const ChangeRequestsPage: React.FC = () => {
                               )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                                <span className="truncate font-semibold">PO-{request.cr_id}</span>
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
@@ -1730,7 +1730,7 @@ const ChangeRequestsPage: React.FC = () => {
                               )}
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                                <span className="truncate font-semibold">PO-{request.cr_id}</span>
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
