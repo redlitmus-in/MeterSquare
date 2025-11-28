@@ -513,7 +513,7 @@ const ExtraMaterialPage: React.FC = () => {
                 className="inline-flex items-center px-4 py-2 bg-[#243d8a] text-white rounded-lg hover:bg-[#1e3270] transition-colors shadow-md"
               >
                 <PlusIcon className="w-5 h-5 mr-2" />
-                NEW MATERIAL PURCHASE
+                MATERIAL PURCHASE
               </button>
             </div>
           </div>
@@ -636,7 +636,7 @@ const ExtraMaterialPage: React.FC = () => {
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
                 <CubeIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No Pending Requests</h3>
-                <p className="text-gray-500">Click "NEW MATERIAL PURCHASE" to create your first request</p>
+                <p className="text-gray-500">Click "MATERIAL PURCHASE" to create your first request</p>
               </div>
             ) : viewMode === 'card' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
