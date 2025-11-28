@@ -480,7 +480,6 @@ const EstimatorHub: React.FC = () => {
 
   useEffect(() => {
     const abortController = new AbortController();
-    let isPolling = false; // Prevent overlapping requests
 
     const fetchData = async () => {
       try {
@@ -497,40 +496,8 @@ const EstimatorHub: React.FC = () => {
 
     fetchData();
 
-    // Smart background polling - only when tab is visible
-    const silentRefresh = async () => {
-      // Skip if already polling or tab is hidden
-      if (isPolling || document.hidden) return;
-
-      isPolling = true;
-      try {
-        await Promise.all([
-          loadBOQs(false),  // Silent refresh - no loading spinner
-          loadProjects(currentPage)
-        ]);
-      } catch (error) {
-        // Silent fail - don't show errors for background refresh
-        console.debug('Background refresh failed:', error);
-      } finally {
-        isPolling = false;
-      }
-    };
-
-    // Poll every 5 seconds for responsive updates
-    const intervalId = setInterval(silentRefresh, 5000);
-
-    // Also refresh when tab becomes visible again
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        silentRefresh();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
     return () => {
       abortController.abort();
-      clearInterval(intervalId);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [currentPage]);
 
@@ -557,6 +524,17 @@ const EstimatorHub: React.FC = () => {
     if (activeTab === 'projects') {
       let filteredProj = [...projects];
 
+      // ✅ Apply "pending projects" filter FIRST (projects with no BOQ or only draft BOQ)
+      // This is now done HERE instead of at render time - like other tabs do
+      filteredProj = filteredProj.filter(project => {
+        const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+        return projectBoqs.length === 0 || projectBoqs.every(boq => {
+          const status = boq.status?.toLowerCase() || '';
+          return !status || status === 'draft';
+        });
+      });
+
+      // Then apply search filter
       if (searchTerm) {
         filteredProj = filteredProj.filter(project =>
           project.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -675,54 +653,9 @@ const EstimatorHub: React.FC = () => {
         });
 
         setBOQs(sortedBOQs);
-
-        // Immediately update filtered BOQs based on current tab
-        if (activeTab !== 'projects') {
-          let filtered = [...sortedBOQs];
-
-          // Apply tab-specific filtering
-          if (activeTab === 'sent') {
-            filtered = filtered.filter(boq => {
-              const status = boq.status?.toLowerCase();
-              return status === 'pending' || status === 'pending_pm_approval';
-            });
-          } else if (activeTab === 'approved') {
-            filtered = filtered.filter(boq => {
-              const status = boq.status?.toLowerCase();
-              return (status === 'pm_approved' || status === 'pending_td_approval' || status === 'approved' || status === 'revision_approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
-            });
-          } else if (activeTab === 'rejected') {
-            filtered = filtered.filter(boq => {
-              const status = boq.status?.toLowerCase();
-              return status === 'rejected' || status === 'client_rejected' || status === 'pm_rejected' || status === 'internal_revision_pending';
-            });
-          } else if (activeTab === 'revisions') {
-            filtered = filtered.filter(boq => {
-              const status = boq.status?.toLowerCase();
-              const revisionNumber = boq.revision_number || 0;
-              if (revisionNumber > 0) return true;
-              return status === 'under_revision' || status === 'pending_revision' || status === 'revision_approved';
-            });
-          } else if (activeTab === 'completed') {
-            filtered = filtered.filter(boq => boq.status?.toLowerCase() === 'completed' || boq.pm_assigned === true);
-          } else if (activeTab === 'cancelled') {
-            filtered = filtered.filter(boq => boq.status?.toLowerCase() === 'client_cancelled');
-          }
-
-          // Apply search filter
-          if (searchTerm) {
-            filtered = filtered.filter(boq =>
-              boq.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              boq.project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              boq.project.client.toLowerCase().includes(searchTerm.toLowerCase())
-            );
-          }
-
-          setFilteredBOQs(filtered);
-        }
+        // Note: filteredBOQs is handled by useEffect when boqs change
       } else {
         setBOQs([]);
-        setFilteredBOQs([]);
       }
     } catch (error: any) {
       console.error('Error loading BOQs:', error);
@@ -730,7 +663,6 @@ const EstimatorHub: React.FC = () => {
         showError('Failed to load BOQs');
       }
       setBOQs([]);
-      setFilteredBOQs([]);
     } finally {
       if (showLoadingSpinner) {
         setLoading(false);
@@ -742,23 +674,9 @@ const EstimatorHub: React.FC = () => {
     try {
       const response = await estimatorService.getProjectsPaginated(page, 10);
       if (response.success) {
-        const newProjects = response.projects;
-        setProjects(newProjects);
+        setProjects(response.projects);
         setTotalProjects(response.total);
-        // Immediately update filtered projects if on projects tab
-        if (activeTab === 'projects') {
-          let filteredProj = [...newProjects];
-          if (searchTerm) {
-            filteredProj = filteredProj.filter(project =>
-              project.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              project.client?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              project.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              project.description?.toLowerCase().includes(searchTerm.toLowerCase())
-            );
-          }
-          setFilteredProjects(filteredProj);
-        }
-        setRefreshKey(prev => prev + 1); // Force re-render
+        // Note: filteredProjects is handled by useEffect when projects/boqs change
       }
     } catch (error) {
       console.error('Error loading projects:', error);
@@ -828,24 +746,29 @@ const EstimatorHub: React.FC = () => {
         showSuccess(response.message);
 
         // ✅ OPTIMISTIC UPDATE: Instantly add new project to UI
+        // Only update 'projects' state - useEffect will auto-update 'filteredProjects'
         if (!editingProject && response.project) {
           const newProject = response.project;
           setProjects(prev => [newProject, ...prev]);
-          setFilteredProjects(prev => [newProject, ...prev]);
+          setTotalProjects(prev => prev + 1);
         }
 
         // Close dialog immediately for better UX
         setShowProjectDialog(false);
         setEditingProject(null);
 
-        // Reset to page 1 and reload data in background
+        // Reset to page 1
         setCurrentPage(1);
-        await Promise.all([
-          loadProjects(1),
-          loadBOQs(false)
-        ]);
+
         // Trigger realtime update for other components
         useRealtimeUpdateStore.getState().triggerBOQUpdate();
+
+        // Background sync with server (don't await - let optimistic show first)
+        Promise.all([
+          loadProjects(1),
+          loadBOQs(false)
+        ]).catch(err => console.debug('Background sync:', err));
+
         return response.project;
       } else {
         showError(response.message);
@@ -869,19 +792,21 @@ const EstimatorHub: React.FC = () => {
         showSuccess(response.message);
 
         // ✅ OPTIMISTIC UPDATE: Instantly remove project from UI
+        // Only update 'projects' state - useEffect will auto-update 'filteredProjects'
         setProjects(prev => prev.filter(p => p.project_id !== projectIdToDelete));
-        setFilteredProjects(prev => prev.filter(p => p.project_id !== projectIdToDelete));
+        setTotalProjects(prev => Math.max(0, prev - 1));
 
         // Close modal immediately
         setDeletingProject(null);
 
-        // Reload data in background to sync with server
-        await Promise.all([
-          loadProjects(currentPage),
-          loadBOQs(false)
-        ]);
         // Trigger realtime update for other components
         useRealtimeUpdateStore.getState().triggerBOQUpdate();
+
+        // Background sync with server (don't await - let optimistic show first)
+        Promise.all([
+          loadProjects(currentPage),
+          loadBOQs(false)
+        ]).catch(err => console.debug('Background sync:', err));
       } else {
         showError(response.message);
       }
@@ -2893,16 +2818,8 @@ const EstimatorHub: React.FC = () => {
                     <>
                       {viewMode === 'cards' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                  {filteredProjects
-                    .filter(project => {
-                      // Only show projects that have NO BOQs or only have draft BOQs
-                      const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
-                      return projectBoqs.length === 0 || projectBoqs.every(boq => {
-                        const status = boq.status?.toLowerCase() || '';
-                        return !status || status === 'draft';
-                      });
-                    })
-                    .map((project, index) => {
+                  {/* ✅ filteredProjects is now pre-filtered in useEffect - no need for render-time filter */}
+                  {filteredProjects.map((project, index) => {
                     // Count BOQs for this project
                     const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
                     const boqCount = projectBoqs.length;
@@ -3158,18 +3075,8 @@ const EstimatorHub: React.FC = () => {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          filteredProjects
-                            .filter(project => {
-                              // Filter out projects with sent BOQs from All Projects tab
-                              const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
-                              const hasSentBoq = projectBoqs.some(boq =>
-                                boq.email_sent === true ||
-                                boq.status?.toLowerCase() === 'pending' ||
-                                boq.status?.toLowerCase() === 'sent_for_confirmation'
-                              );
-                              return !hasSentBoq;
-                            })
-                            .map((project) => {
+                          /* ✅ filteredProjects is now pre-filtered in useEffect - no need for render-time filter */
+                          filteredProjects.map((project) => {
                             const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
                             const boqCount = projectBoqs.length;
                             const hasSentBoq = projectBoqs.some(boq =>

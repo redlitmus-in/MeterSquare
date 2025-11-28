@@ -278,7 +278,6 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   // Multiple materials support
   const [materials, setMaterials] = useState<MaterialItem[]>([]);
   const [remarks, setRemarks] = useState('');
-  const [justification, setJustification] = useState('');
 
   // Overhead calculations
   const [itemOverhead, setItemOverhead] = useState<{
@@ -367,8 +366,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
               setSelectedSubItems(subItems);
             }
 
-            // Pre-fill justification and remarks
-            setJustification(initialData.justification || '');
+            // Pre-fill remarks
             setRemarks(initialData.remarks || '');
 
             // Pre-fill materials using sub_items_data
@@ -705,12 +703,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         showError(`Material "${material.materialName}" quantity (${material.quantity}) exceeds BOQ allocated quantity (${material.originalBoqQuantity} ${material.unit})`);
         return false;
       }
-    }
 
-    // Validate justification
-    if (!justification || justification.trim().length < 20) {
-      showError('Please provide a justification (minimum 20 characters)');
-      return false;
+      // Validate per-material justification
+      if (!material.justification || material.justification.trim().length < 10) {
+        showError(`Please provide justification for "${material.materialName}" (minimum 10 characters)`);
+        return false;
+      }
     }
 
     return true;
@@ -735,6 +733,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       is_new: m.master_material_id === null
     })));
 
+    // Combine all per-material justifications for the request-level justification
+    const combinedJustification = materials
+      .map(m => `${m.materialName}: ${m.justification}`)
+      .join('; ');
+
     return {
       project_id: selectedProject!.project_id,
       area_id: selectedArea!.area_id,
@@ -742,18 +745,23 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       boq_item_id: selectedItem!.item_id,
       boq_item_name: selectedItem!.item_name,
       materials: transformedMaterials,
-      justification,
+      justification: combinedJustification,
       remarks
     };
   };
 
   // Helper function to handle update (edit mode)
   const handleUpdateChangeRequest = async (crId: number) => {
+    // Combine all per-material justifications for the request-level justification
+    const combinedJustification = materials
+      .map(m => `${m.materialName}: ${m.justification}`)
+      .join('; ');
+
     const updatePayload = {
       boq_id: selectedBoq!.boq_id,
       item_id: selectedItem?.item_id || null,
       item_name: selectedItem?.item_name || null,
-      justification: justification || remarks,
+      justification: combinedJustification || remarks,
       remarks: remarks,
       materials: transformMaterialsForPayload(materials)
     };
@@ -773,11 +781,16 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
   // Helper function to handle new change request creation
   const handleCreateChangeRequest = async () => {
+    // Combine all per-material justifications for the request-level justification
+    const combinedJustification = materials
+      .map(m => `${m.materialName}: ${m.justification}`)
+      .join('; ');
+
     const changeRequestPayload = {
       boq_id: selectedBoq!.boq_id,
       item_id: selectedItem?.item_id || null,
       item_name: selectedItem?.item_name || null,
-      justification: justification || remarks,
+      justification: combinedJustification || remarks,
       materials: transformMaterialsForPayload(materials)
     };
 
@@ -2001,6 +2014,30 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           )}
                         </div>
                       </div>
+
+                      {/* Per-Material Justification */}
+                      <div className="mt-3">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          Justification for {material.materialName || 'this material'} <span className="text-red-500">*</span>
+                        </label>
+                        <textarea
+                          value={material.justification || ''}
+                          onChange={(e) => updateMaterial(material.id, { justification: e.target.value })}
+                          className={`w-full px-2 py-1.5 text-xs border rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
+                            material.justification && material.justification.trim().length > 0 && material.justification.trim().length < 10
+                              ? 'border-red-500'
+                              : 'border-gray-300'
+                          }`}
+                          rows={2}
+                          placeholder="Provide justification for requesting this material (minimum 10 characters)"
+                          required
+                        />
+                        {material.justification && material.justification.trim().length > 0 && material.justification.trim().length < 10 && (
+                          <p className="text-[10px] text-red-600 mt-0.5">
+                            Minimum 10 characters required ({10 - material.justification.trim().length} more needed)
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}
@@ -2009,32 +2046,6 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           ))}
 
         </motion.div>
-      )}
-
-      {/* Justification */}
-      {selectedSubItems.length > 0 && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Justification <span className="text-red-500">*</span>
-          </label>
-          <textarea
-            value={justification}
-            onChange={(e) => setJustification(e.target.value)}
-            className={`w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
-              justification.trim().length > 0 && justification.trim().length < 20
-                ? 'border-red-500'
-                : 'border-gray-300'
-            }`}
-            rows={3}
-            placeholder="Please provide a detailed justification for this extra material request (minimum 20 characters)"
-            required
-          />
-          {justification.trim().length > 0 && justification.trim().length < 20 && (
-            <p className="text-sm text-red-600 mt-1">
-              Justification must be at least 20 characters ({20 - justification.trim().length} more needed)
-            </p>
-          )}
-        </div>
       )}
 
       {/* Remarks */}

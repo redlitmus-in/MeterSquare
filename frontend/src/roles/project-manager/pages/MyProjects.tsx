@@ -153,6 +153,8 @@ const MyProjects: React.FC = () => {
   const [showEditBOQModal, setShowEditBOQModal] = useState(false);
   const [showFullScreenBOQ, setShowFullScreenBOQ] = useState(false);
   const [fullScreenBoqMode, setFullScreenBoqMode] = useState<'view' | 'edit'>('view');
+  const [editingBoq, setEditingBoq] = useState<any>(null);
+  const [isLoadingBoqForEdit, setIsLoadingBoqForEdit] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showCreateBOQModal, setShowCreateBOQModal] = useState(false);
   const [showItemAssignmentModal, setShowItemAssignmentModal] = useState(false);
@@ -296,42 +298,6 @@ const MyProjects: React.FC = () => {
     // Silent reload without loading spinner when timestamp changes
     refetch().catch(err => console.error('Refetch error (non-critical):', err));
   }, [boqUpdateTimestamp, refetch]);
-
-  // ✅ SMART BACKGROUND POLLING - Ensures UI stays fresh even if real-time fails
-  useEffect(() => {
-    let isPolling = false;
-
-    const silentRefresh = async () => {
-      // Skip if already polling or tab is hidden
-      if (isPolling || document.hidden) return;
-
-      isPolling = true;
-      try {
-        await refetch();
-      } catch (error) {
-        // Silent fail for background refresh
-        console.debug('Background refresh failed:', error);
-      } finally {
-        isPolling = false;
-      }
-    };
-
-    // Poll every 5 seconds for responsive updates
-    const intervalId = setInterval(silentRefresh, 5000);
-
-    // Also refresh when tab becomes visible again
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        silentRefresh();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      clearInterval(intervalId);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [refetch]);
 
   const loadAvailableSEs = async () => {
     try {
@@ -793,6 +759,16 @@ const MyProjects: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
+      {/* Loading overlay when loading BOQ for edit */}
+      {isLoadingBoqForEdit && (
+        <div className="fixed inset-0 bg-white/80 z-50 flex items-center justify-center">
+          <div className="text-center">
+            <ModernLoadingSpinners variant="pulse-wave" />
+            <p className="mt-4 text-gray-600 font-medium">Loading BOQ for editing...</p>
+          </div>
+        </div>
+      )}
+
       {!showFullScreenBOQ && (
         <>
           {/* Header - Match Estimator/TD Style */}
@@ -2847,9 +2823,26 @@ const MyProjects: React.FC = () => {
             boq_id: selectedProject.boq_id,
             boq_name: selectedProject.projectName
           }}
-          onEdit={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? () => {
-            setShowFullScreenBOQ(false);
-            setShowEditBOQModal(true);
+          onEdit={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? async () => {
+            // Load full BOQ data and switch to full-screen edit mode (like Estimator)
+            if (selectedProject?.boq_id) {
+              setIsLoadingBoqForEdit(true);
+              try {
+                const result = await estimatorService.getBOQById(selectedProject.boq_id);
+                if (result.success && result.data) {
+                  setEditingBoq(result.data);
+                  setFullScreenBoqMode('edit');
+                  // Keep showFullScreenBOQ true to show the full-screen edit
+                } else {
+                  showError('Failed to load BOQ details for editing');
+                }
+              } catch (error) {
+                console.error('Error loading BOQ for edit:', error);
+                showError('Failed to load BOQ details');
+              } finally {
+                setIsLoadingBoqForEdit(false);
+              }
+            }
           } : undefined}
           onApprove={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? async () => {
             if (selectedProject?.boq_id) {
@@ -2867,6 +2860,156 @@ const MyProjects: React.FC = () => {
             setShowFullScreenBOQ(false);
           } : undefined}
         />
+      )}
+
+      {/* Full Screen BOQ Edit Mode - Same as Estimator */}
+      {showFullScreenBOQ && fullScreenBoqMode === 'edit' && editingBoq && (
+        <div className="w-full min-h-screen relative">
+          {/* Header for Edit Mode */}
+          <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
+            <div className="max-w-7xl mx-auto px-6 py-5">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setFullScreenBoqMode('view');
+                    setEditingBoq(null);
+                  }}
+                  className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  <ArrowRight className="w-6 h-6 text-gray-600 transform rotate-180" />
+                </button>
+                <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
+                  <PencilIcon className="w-6 h-6 text-blue-600" />
+                </div>
+                <h1 className="text-2xl font-bold text-[#243d8a]">Edit BOQ</h1>
+              </div>
+            </div>
+          </div>
+
+          {/* Custom wrapper to override modal styling for full-screen */}
+          <style>{`
+            .full-screen-boq-wrapper .fixed.inset-0.z-50 {
+              position: relative !important;
+              z-index: auto !important;
+              min-height: 100vh !important;
+            }
+            .full-screen-boq-wrapper .fixed.inset-0 {
+              position: relative !important;
+              min-height: 100vh !important;
+            }
+            .full-screen-boq-wrapper .bg-black\\/50,
+            .full-screen-boq-wrapper .bg-black\\/60 {
+              display: none !important;
+            }
+            .full-screen-boq-wrapper .max-w-6xl,
+            .full-screen-boq-wrapper .max-w-7xl {
+              max-width: 100% !important;
+              min-height: 100vh !important;
+            }
+            .full-screen-boq-wrapper .max-h-\\[90vh\\],
+            .full-screen-boq-wrapper .max-h-\\[95vh\\] {
+              max-height: none !important;
+              min-height: 100vh !important;
+            }
+            .full-screen-boq-wrapper .rounded-xl,
+            .full-screen-boq-wrapper .rounded-2xl {
+              border-radius: 0 !important;
+            }
+            .full-screen-boq-wrapper > div > div:first-child {
+              align-items: flex-start !important;
+              min-height: 100vh !important;
+              padding: 0 !important;
+            }
+            .full-screen-boq-wrapper > div > div:first-child > div:last-child {
+              position: relative !important;
+              margin: 0 !important;
+              max-width: 100% !important;
+              width: 100% !important;
+              max-height: none !important;
+              min-height: 100vh !important;
+              box-shadow: none !important;
+            }
+            /* Hide internal form header - keep only main page header */
+            .full-screen-boq-wrapper [class*="bg-gradient-to-r"][class*="border-b"][class*="border-blue-100"] {
+              display: flex !important;
+              justify-content: flex-end !important;
+              background: transparent !important;
+              border: none !important;
+              padding: 1rem !important;
+            }
+            /* Hide the BOQ title and icon in header, but keep action buttons */
+            .full-screen-boq-wrapper [class*="bg-gradient-to-r"][class*="border-b"] > div:first-child > div:first-child {
+              display: none !important;
+            }
+            /* Hide the close (X) button in header */
+            .full-screen-boq-wrapper [class*="bg-gradient-to-r"][class*="border-b"] button[title="Close"] {
+              display: none !important;
+            }
+            /* Also hide by direct structure - flex-shrink-0 for form headers */
+            .full-screen-boq-wrapper .flex-shrink-0:first-of-type:not([aria-label="Drag to reorder"]) {
+              display: none !important;
+            }
+            /* Hide the close (X) button in top-right corner for forms */
+            .full-screen-boq-wrapper button.absolute[class*="top-4"][class*="right-4"] {
+              display: none !important;
+            }
+            .full-screen-boq-wrapper [aria-label="Close dialog"] {
+              display: none !important;
+            }
+            /* Ensure content fills full height */
+            .full-screen-boq-wrapper .overflow-y-auto {
+              padding-top: 0 !important;
+              min-height: 100vh !important;
+            }
+            /* Make wrapper fill height */
+            .full-screen-boq-wrapper {
+              min-height: 100vh !important;
+            }
+          `}</style>
+
+          <div className="full-screen-boq-wrapper">
+            <BOQCreationForm
+              isOpen={true}
+              onClose={() => {
+                setFullScreenBoqMode('view');
+                setEditingBoq(null);
+              }}
+              editMode={true}
+              existingBoqData={editingBoq}
+              selectedProject={editingBoq?.project ? {
+                project_id: editingBoq.project.project_id || editingBoq.project_id,
+                project_name: editingBoq.project.name || editingBoq.project.project_name || '',
+                client_name: editingBoq.project.client || '',
+                location: editingBoq.project.location || '',
+                area: editingBoq.project.area || '',
+              } : selectedProject ? {
+                project_id: selectedProject.project_id,
+                project_name: selectedProject.project_name,
+                client_name: selectedProject.client || '',
+                location: selectedProject.location || '',
+                area: selectedProject.area || '',
+              } : null}
+              onSubmit={async (boqId) => {
+                const savedBoqId = boqId || editingBoq?.boq_id;
+
+                showSuccess('BOQ updated successfully');
+
+                // Reload BOQ details to show updated data
+                if (savedBoqId) {
+                  await loadBOQDetails(savedBoqId);
+                }
+
+                // Refresh projects list
+                refetch();
+
+                // Clear edit state and go back to view mode
+                setEditingBoq(null);
+                setFullScreenBoqMode('view');
+              }}
+              hideTemplate={true}
+            />
+          </div>
+        </div>
       )}
 
       {/* Day Extension Request Modal */}

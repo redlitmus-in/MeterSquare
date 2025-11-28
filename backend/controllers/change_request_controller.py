@@ -242,6 +242,7 @@ def create_change_request():
                     'original_unit_price': unit_price,  # Store original for comparison
                     'original_total_price': total_price,  # Store original for comparison
                     'cost_difference': 0.0,  # Difference from original (positive = increased)
+                    'justification': mat.get('justification', ''),  # Per-material justification
                     'reason': mat.get('reason'),
                     'brand': brand,  # Brand for materials (from request or BOQ)
                     'specification': specification,  # Specification for materials (from request or BOQ)

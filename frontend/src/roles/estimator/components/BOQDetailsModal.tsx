@@ -163,6 +163,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
               {/* Header */}
               <div className={`bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 border-b border-blue-100 px-6 py-5 ${fullScreen ? 'sticky top-0 z-50 bg-white' : ''}`}>
                 <div className="flex items-center justify-between">
+                  {/* Left side: Back button, Icon, Title, and Action Buttons */}
                   <div className="flex items-center gap-4">
                     {/* Back button - Show on LEFT in fullScreen mode */}
                     {fullScreen && (
@@ -183,65 +184,71 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                         <p className="text-sm text-gray-600">{displayData.boq_name || displayData.title || 'Unnamed BOQ'}</p>
                       )}
                     </div>
+
+                    {/* Action Buttons - Moved to LEFT side after title */}
+                    <div className="flex items-center gap-2 ml-4">
+                      {/* Edit Button */}
+                      {onEdit && (() => {
+                        const status = displayData?.status?.toLowerCase() || '';
+                        const canEdit = !status ||
+                          status === 'draft' ||
+                          status === 'sent_for_confirmation' ||
+                          status === 'under_revision' ||
+                          status === 'pending_revision' ||
+                          status === 'pending_pm_approval' ||
+                          status === 'pending';
+                        return canEdit;
+                      })() && (
+                        <button
+                          onClick={onEdit}
+                          className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors flex items-center gap-2 font-medium"
+                          title="Edit BOQ"
+                        >
+                          <Edit className="w-5 h-5" />
+                          Edit
+                        </button>
+                      )}
+
+                      {/* Approve Button - For TD/PM */}
+                      {onApprove && (
+                        <button
+                          onClick={onApprove}
+                          className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors flex items-center gap-2 font-medium"
+                          title="Approve BOQ"
+                        >
+                          <CheckCircleIcon className="w-5 h-5" />
+                          Approve
+                        </button>
+                      )}
+
+                      {/* Reject Button - For TD/PM */}
+                      {onReject && (
+                        <button
+                          onClick={onReject}
+                          className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors flex items-center gap-2 font-medium"
+                          title="Reject BOQ"
+                        >
+                          <XCircleIcon className="w-5 h-5" />
+                          Reject
+                        </button>
+                      )}
+
+                      {/* Request Extension Button - For PM on approved projects */}
+                      {onRequestExtension && (
+                        <button
+                          onClick={onRequestExtension}
+                          className="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg transition-colors flex items-center gap-2 font-medium shadow-sm"
+                          title="Request Day Extension"
+                        >
+                          <Calendar className="w-5 h-5" />
+                          Request Extension
+                        </button>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Right side: Only Download and Close buttons */}
                   <div className="flex items-center gap-2">
-                    {/* Approve Button - For TD/PM */}
-                    {onApprove && (
-                      <button
-                        onClick={onApprove}
-                        className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors flex items-center gap-2 font-medium"
-                        title="Approve BOQ"
-                      >
-                        <CheckCircleIcon className="w-5 h-5" />
-                        Approve
-                      </button>
-                    )}
-
-                    {/* Reject Button - For TD/PM */}
-                    {onReject && (
-                      <button
-                        onClick={onReject}
-                        className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors flex items-center gap-2 font-medium"
-                        title="Reject BOQ"
-                      >
-                        <XCircleIcon className="w-5 h-5" />
-                        Reject
-                      </button>
-                    )}
-
-                    {/* Request Extension Button - For PM on approved projects */}
-                    {onRequestExtension && (
-                      <button
-                        onClick={onRequestExtension}
-                        className="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg transition-colors flex items-center gap-2 font-medium shadow-sm"
-                        title="Request Day Extension"
-                      >
-                        <Calendar className="w-5 h-5" />
-                        Request Extension
-                      </button>
-                    )}
-
-                    {onEdit && (() => {
-                      const status = displayData?.status?.toLowerCase() || '';
-                      // Can edit if: draft, sent_for_confirmation, under_revision, pending_revision, pending_pm_approval, pending
-                      // Cannot edit if: approved, revision_approved, client_confirmed, rejected, completed, client_rejected, client_cancelled
-                      const canEdit = !status ||
-                        status === 'draft' ||
-                        status === 'sent_for_confirmation' ||
-                        status === 'under_revision' ||
-                        status === 'pending_revision' ||
-                        status === 'pending_pm_approval' ||
-                        status === 'pending';
-                      return canEdit;
-                    })() && (
-                      <button
-                        onClick={onEdit}
-                        className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
-                        title="Edit BOQ"
-                      >
-                        <Edit className="w-5 h-5" />
-                      </button>
-                    )}
                     {onDownload && (
                       <button
                         onClick={(e) => {

@@ -269,11 +269,17 @@ const ExtraMaterialPage: React.FC = () => {
   const handleSubmitExtraMaterial = async (data: any) => {
     try {
       // Use the main change request API endpoint with proper structure
+      // Combine all per-material justifications for the request-level justification
+      const combinedJustification = data.materials
+        .filter((mat: any) => mat.justification)
+        .map((mat: any) => `${mat.materialName || mat.material_name}: ${mat.justification}`)
+        .join('; ') || data.justification || data.remarks || 'Extra materials required';
+
       const changeRequestPayload = {
         boq_id: data.boq_id,
         item_id: data.boq_item_id,  // Include item_id
         item_name: data.boq_item_name,  // Include item_name
-        justification: data.justification || data.remarks || 'Extra materials required',
+        justification: combinedJustification,
         materials: data.materials.map((mat: any) => ({
           material_name: mat.materialName || mat.material_name,  // Actual material name like "Bubble Wrap"
           sub_item_id: mat.subItemId || mat.sub_item_id,  // Sub-item ID like "subitem_331_1_3"
@@ -283,6 +289,7 @@ const ExtraMaterialPage: React.FC = () => {
           unit_price: mat.unit_rate || mat.unitRate,
           master_material_id: mat.materialId || mat.master_material_id || null,  // Material ID
           reason: mat.reason || mat.reasonForNew || null,
+          justification: mat.justification || '',  // Per-material justification
           brand: mat.brand || null,  // Brand for all materials
           specification: mat.specification || null,  // Specification for all materials
           size: mat.size || null  // Size for all materials

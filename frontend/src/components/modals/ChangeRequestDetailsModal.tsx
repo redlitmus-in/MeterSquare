@@ -26,9 +26,23 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 }) => {
   const { user } = useAuthStore();
   const [showEditModal, setShowEditModal] = useState(false);
+  const [expandedJustifications, setExpandedJustifications] = useState<Set<number>>(new Set());
 
   // State to track edited materials with updated prices
   const [editedMaterials, setEditedMaterials] = useState<any[]>([]);
+
+  // Toggle justification expansion
+  const toggleJustification = (idx: number) => {
+    setExpandedJustifications(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(idx)) {
+        newSet.delete(idx);
+      } else {
+        newSet.add(idx);
+      }
+      return newSet;
+    });
+  };
 
   // Initialize edited materials when modal opens or changeRequest changes
   // Use isOpen and changeRequest as dependencies to ensure fresh data on every open
@@ -147,91 +161,79 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   return (
     <AnimatePresence>
       <>
-        {/* Backdrop */}
+        {/* Full Page View */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-          onClick={onClose}
-        />
-
-        {/* Modal */}
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 pointer-events-none overflow-y-auto">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="bg-white rounded-lg sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden pointer-events-auto my-4 sm:my-0"
-          >
-            {/* Header - Responsive */}
-            <div className="px-4 sm:px-6 py-4 sm:py-5 border-b-2 bg-gradient-to-r from-purple-500 to-purple-600">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                  <div className="p-1.5 sm:p-2 bg-white/20 rounded-lg flex-shrink-0">
-                    <Package className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+          className="fixed inset-0 z-50 bg-gray-100"
+        >
+          <div className="h-full flex flex-col">
+            {/* Header - Fixed at top */}
+            <div className="px-6 py-4 bg-gradient-to-r from-purple-600 to-purple-700 shadow-lg flex-shrink-0">
+              <div className="max-w-7xl mx-auto flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="p-2 bg-white/20 rounded-lg">
+                    <Package className="w-6 h-6 text-white" />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <h2 className="text-lg sm:text-2xl font-bold text-white truncate">
-                      CR-{changeRequest.cr_id || 'N/A'}
-                    </h2>
-                    <p className="text-xs sm:text-sm text-white/90 mt-0.5 sm:mt-1 truncate">
-                      BOQ {changeRequest.boq_name ? `#${changeRequest.boq_name}` : (changeRequest.boq_id ? `#${changeRequest.boq_id}` : 'N/A')}
+                  <div>
+                    <h1 className="text-2xl font-bold text-white">
+                      Change Request CR-{changeRequest.cr_id || 'N/A'}
+                    </h1>
+                    <p className="text-sm text-white/80 mt-1">
+                      BOQ: {changeRequest.boq_name || `#${changeRequest.boq_id}` || 'N/A'}
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={onClose}
-                  className="p-1.5 sm:p-2 hover:bg-white/10 rounded-lg transition-colors flex-shrink-0"
+                  className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-white"
                 >
-                  <X className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+                  <X className="w-5 h-5" />
+                  <span className="font-medium">Close</span>
                 </button>
               </div>
             </div>
 
-            {/* Content - Responsive */}
-            <div className="p-4 sm:p-6 overflow-y-auto max-h-[calc(95vh-160px)] sm:max-h-[calc(90vh-200px)]">
-              {/* Status & Info - Responsive Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <div className="bg-gray-50 rounded-lg p-3 sm:p-4 border border-gray-200">
-                  <p className="text-xs text-gray-600 mb-1">Status</p>
-                  <div className={`inline-flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-semibold border ${getStatusColor(changeRequest.status || 'pending')}`}>
-                    {getStatusIcon(changeRequest.status || 'pending')}
-                    {getStatusLabel(changeRequest.status || 'pending')}
+            {/* Content - Scrollable */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="max-w-7xl mx-auto">
+                {/* Info Cards Row */}
+                <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
+                  <div className="flex flex-wrap items-center gap-6">
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-gray-500">Status:</span>
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold border ${getStatusColor(changeRequest.status || 'pending')}`}>
+                        {getStatusIcon(changeRequest.status || 'pending')}
+                        {getStatusLabel(changeRequest.status || 'pending')}
+                      </span>
+                    </div>
+                    <div className="h-6 w-px bg-gray-300"></div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-500">Requested By:</span>
+                      <span className="text-sm font-semibold text-gray-900">{changeRequest.requested_by_name || 'N/A'}</span>
+                      <span className="text-sm text-gray-400">({changeRequest.requested_by_role?.replace('_', ' ').replace('siteEngineer', 'Site Engineer') || 'N/A'})</span>
+                    </div>
+                    <div className="h-6 w-px bg-gray-300"></div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-500">Date:</span>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {changeRequest.created_at ? new Date(changeRequest.created_at).toLocaleDateString('en-US', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric'
+                        }) : 'N/A'}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="bg-gray-50 rounded-lg p-3 sm:p-4 border border-gray-200">
-                  <p className="text-xs text-gray-600 mb-1">Requested By</p>
-                  <p className="text-sm sm:text-lg font-bold text-gray-900 truncate">{changeRequest.requested_by_name || 'N/A'}</p>
-                  <p className="text-xs text-gray-500 capitalize">{changeRequest.requested_by_role?.replace('_', ' ').replace('siteEngineer', 'Site Engineer') || 'N/A'}</p>
-                </div>
 
-                <div className="bg-gray-50 rounded-lg p-3 sm:p-4 border border-gray-200 sm:col-span-2 lg:col-span-1">
-                  <p className="text-xs text-gray-600 mb-1">Request Date</p>
-                  <p className="text-sm sm:text-lg font-bold text-gray-900">
-                    {changeRequest.created_at ? new Date(changeRequest.created_at).toLocaleDateString('en-US', {
-                      day: '2-digit',
-                      month: 'short',
-                      year: 'numeric'
-                    }) : 'N/A'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Justification */}
-              <div className="mb-4 sm:mb-6">
-                <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2">Justification</h3>
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
-                  <p className="text-sm sm:text-base text-gray-800 break-words">{changeRequest.justification}</p>
-                </div>
-              </div>
-
-              {/* Approval Trail */}
-              {(changeRequest.pm_approval_date || changeRequest.td_approval_date || changeRequest.approval_date || changeRequest.rejection_reason) && (
-                <div className="mb-4 sm:mb-6">
-                  <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-3">Approval History</h3>
-                  <div className="space-y-3">
+                {/* Approval Trail */}
+                {(changeRequest.pm_approval_date || changeRequest.td_approval_date || changeRequest.approval_date || changeRequest.rejection_reason) && (
+                  <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Approval History</h3>
+                    <div className="space-y-3">
                     {/* PM Approval */}
                     {changeRequest.pm_approval_date && (
                       <div className="flex items-start gap-3 bg-green-50 border border-green-200 rounded-lg p-3">
@@ -294,43 +296,44 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                     )}
 
                     {/* Rejection */}
-                    {changeRequest.rejection_reason && (
-                      <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-3">
-                        <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-red-900">Rejected</p>
-                          {changeRequest.rejected_by_name && (
-                            <p className="text-xs text-red-700">By: {changeRequest.rejected_by_name}</p>
-                          )}
-                          {changeRequest.rejected_at_stage && (
-                            <p className="text-xs text-red-600 capitalize">At: {changeRequest.rejected_at_stage.replace('_', ' ')} stage</p>
-                          )}
-                          <p className="text-xs text-red-800 mt-2 italic">&quot;{changeRequest.rejection_reason}&quot;</p>
+                      {changeRequest.rejection_reason && (
+                        <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-3">
+                          <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-red-900">Rejected</p>
+                            {changeRequest.rejected_by_name && (
+                              <p className="text-xs text-red-700">By: {changeRequest.rejected_by_name}</p>
+                            )}
+                            {changeRequest.rejected_at_stage && (
+                              <p className="text-xs text-red-600 capitalize">At: {changeRequest.rejected_at_stage.replace('_', ' ')} stage</p>
+                            )}
+                            <p className="text-xs text-red-800 mt-2 italic">&quot;{changeRequest.rejection_reason}&quot;</p>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Materials Requested - Responsive Table */}
-              <div className="mb-4 sm:mb-6">
-                <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3">Materials Requested</h3>
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                {/* Materials Requested - Full Width Table */}
+                <div className="bg-white rounded-lg shadow-sm overflow-hidden mb-6">
+                  <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                    <h3 className="text-lg font-semibold text-gray-800">Materials Requested</h3>
+                  </div>
+                  <div className="overflow-x-auto">
                   <table className="w-full table-fixed">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-gray-100 border-b border-gray-200">
                       <tr>
-                        <th className="px-1.5 py-1.5 text-left text-[11px] font-semibold text-gray-600 w-[18%]">Material</th>
-                        <th className="px-1.5 py-1.5 text-left text-[11px] font-semibold text-gray-600 w-[12%]">Brand</th>
-                        <th className="px-1.5 py-1.5 text-left text-[11px] font-semibold text-gray-600 w-[14%]">Size/Spec</th>
-                        <th className="px-1.5 py-1.5 text-left text-[11px] font-semibold text-gray-600 w-[16%]">Sub-Item</th>
-                        <th className="px-1.5 py-1.5 text-left text-[11px] font-semibold text-gray-600 w-[14%]">For Item</th>
-                        <th className="px-1.5 py-1.5 text-right text-[11px] font-semibold text-gray-600 w-[12%]">Quantity</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[15%]">Material</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[10%]">Brand</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[10%]">Size/Spec</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[10%]">Sub-Item</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider w-[8%]">Qty</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[27%]">Justification</th>
                         {shouldShowPricing && (
                           <>
-                            <th className="px-1.5 py-1.5 text-right text-[11px] font-semibold text-gray-600 w-[14%]">Unit Price</th>
-                            <th className="px-1.5 py-1.5 text-right text-[11px] font-semibold text-gray-600 w-[14%]">Total</th>
-                            <th className="px-1.5 py-1.5 text-right text-[11px] font-semibold text-gray-600 w-[14%]">Cost Change</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider w-[10%]">Unit Price</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider w-[10%]">Total</th>
                           </>
                         )}
                       </tr>
@@ -344,282 +347,241 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                                                    material.master_material_id.startsWith('mat_');
                         const isNewMaterial = !hasValidMaterialId;
                         return (
-                          <tr key={idx} className="hover:bg-gray-50">
-                            <td className="px-1.5 py-1.5 text-[11px] font-medium text-gray-900 truncate">
-                              <div className="flex items-center gap-1">
-                                <span className="truncate">{material.material_name}</span>
+                          <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                            {/* Material Name */}
+                            <td className="px-4 py-3 text-sm text-gray-900">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium truncate" title={material.material_name}>{material.material_name}</span>
                                 {isNewMaterial && (
-                                  <span className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300 flex-shrink-0">
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-300 flex-shrink-0">
                                     NEW
                                   </span>
                                 )}
                               </div>
                             </td>
-                            <td className="px-1.5 py-1.5 text-[11px] text-gray-600 truncate">
-                              {material.brand || '-'}
+                            {/* Brand */}
+                            <td className="px-4 py-3 text-sm text-gray-600 truncate" title={material.brand || ''}>
+                              {material.brand || <span className="text-gray-400">-</span>}
                             </td>
-                            <td className="px-1.5 py-1.5 text-[11px] text-gray-600 truncate">
-                              {material.size || material.specification || '-'}
+                            {/* Size/Spec */}
+                            <td className="px-4 py-3 text-sm text-gray-600 truncate" title={material.size || material.specification || ''}>
+                              {material.size || material.specification || <span className="text-gray-400">-</span>}
                             </td>
-                          <td className="px-1.5 py-1.5 text-[11px] text-gray-600 truncate">
-                            {material.sub_item_name ? (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-800 truncate">
-                                {material.sub_item_name}
-                              </span>
-                            ) : '-'}
-                          </td>
-                          <td className="px-1.5 py-1.5 text-[11px] text-gray-600 truncate">
-                            {changeRequest.item_name ? (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-800 truncate">
-                                {changeRequest.item_name}
-                              </span>
-                            ) : '-'}
-                          </td>
-                          <td className="px-1.5 py-1.5 text-[11px] text-gray-600 text-right whitespace-nowrap">
-                            {material.quantity} {material.unit}
-                          </td>
-                          {shouldShowPricing && (
-                            <>
-                              <td className="px-1.5 py-1.5 text-[11px] text-gray-600 text-right whitespace-nowrap">
-                                {canEditPrices && isNewMaterial ? (
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={material.unit_price || 0}
-                                    onChange={(e) => handlePriceChange(idx, e.target.value)}
-                                    className="w-20 px-1.5 py-1 text-[11px] text-right border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50 text-gray-900 font-medium"
-                                    placeholder="0.00"
-                                  />
-                                ) : (
-                                  formatCurrency(material.unit_price || 0)
-                                )}
-                              </td>
-                              <td className="px-1.5 py-1.5 text-[11px] font-semibold text-gray-900 text-right whitespace-nowrap">
-                                {formatCurrency(material.total_price || (material.quantity * material.unit_price) || 0)}
-                              </td>
-                              <td className="px-1.5 py-1.5 text-[11px] text-right whitespace-nowrap">
-                                {material.cost_difference !== undefined && material.cost_difference !== 0 ? (
-                                  <div className="flex flex-col items-end">
-                                    <span className={`font-semibold ${material.cost_difference > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                      {material.cost_difference > 0 ? '+' : ''}{formatCurrency(material.cost_difference)}
-                                    </span>
-                                    {material.is_extra_cost && (
-                                      <span className="text-[9px] px-1 py-0.5 bg-red-100 text-red-700 rounded font-medium">
-                                        EXTRA
-                                      </span>
-                                    )}
-                                    {material.original_total_price !== undefined && (
-                                      <span className="text-[9px] text-gray-500">
-                                        was {formatCurrency(material.original_total_price)}
-                                      </span>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-gray-400">-</span>
-                                )}
-                              </td>
-                            </>
-                          )}
-                        </tr>
+                            {/* Sub-Item */}
+                            <td className="px-4 py-3 text-sm">
+                              {material.sub_item_name ? (
+                                <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-800 truncate max-w-full" title={material.sub_item_name}>
+                                  {material.sub_item_name}
+                                </span>
+                              ) : <span className="text-gray-400">-</span>}
+                            </td>
+                            {/* Quantity */}
+                            <td className="px-4 py-3 text-sm text-gray-900 text-center whitespace-nowrap font-medium">
+                              {material.quantity} <span className="text-gray-500 font-normal">{material.unit}</span>
+                            </td>
+                            {/* Justification */}
+                            <td className="px-4 py-3 text-sm" style={{ maxWidth: '280px', minWidth: '200px' }}>
+                              {material.justification ? (
+                                <div className="w-full">
+                                  {material.justification.length > 100 ? (
+                                    <div>
+                                      {expandedJustifications.has(idx) ? (
+                                        <>
+                                          <p className="text-sm text-gray-700 leading-relaxed break-words whitespace-pre-wrap">
+                                            {material.justification}
+                                          </p>
+                                          <button
+                                            onClick={() => toggleJustification(idx)}
+                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2 hover:underline inline-flex items-center gap-1"
+                                          >
+                                            ↑ Show less
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <p className="text-sm text-gray-700 leading-relaxed break-words">
+                                            {material.justification.substring(0, 100)}...
+                                          </p>
+                                          <button
+                                            onClick={() => toggleJustification(idx)}
+                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-1 hover:underline inline-flex items-center gap-1"
+                                          >
+                                            See more ↓
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-gray-700 leading-relaxed break-words">
+                                      {material.justification}
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400 italic">No justification</span>
+                              )}
+                            </td>
+                            {shouldShowPricing && (
+                              <>
+                                {/* Unit Price */}
+                                <td className="px-4 py-3 text-sm text-gray-600 text-right whitespace-nowrap">
+                                  {canEditPrices && isNewMaterial ? (
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={material.unit_price || 0}
+                                      onChange={(e) => handlePriceChange(idx, e.target.value)}
+                                      className="w-24 px-2 py-1 text-sm text-right border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50 text-gray-900 font-medium"
+                                      placeholder="0.00"
+                                    />
+                                  ) : (
+                                    formatCurrency(material.unit_price || 0)
+                                  )}
+                                </td>
+                                {/* Total */}
+                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
+                                  {formatCurrency(material.total_price || (material.quantity * material.unit_price) || 0)}
+                                </td>
+                              </>
+                            )}
+                          </tr>
                         );
                       })}
                       {shouldShowPricing && (
-                        <>
-                          <tr className="bg-purple-50 font-bold">
-                            <td colSpan={7} className="px-1.5 py-1.5 text-[11px] text-purple-900 text-right">
-                              Total Cost:
-                            </td>
-                            <td className="px-1.5 py-1.5 text-xs font-bold text-purple-900 text-right whitespace-nowrap">
-                              {formatCurrency(totalMaterialsCost)}
-                            </td>
-                            <td className="px-1.5 py-1.5 text-[11px] text-right whitespace-nowrap">
-                              {(() => {
-                                const totalCostDiff = materialsData.reduce((sum: number, mat: any) =>
-                                  sum + (mat.cost_difference || 0), 0
-                                );
-                                if (totalCostDiff !== 0) {
-                                  return (
-                                    <span className={`font-bold ${totalCostDiff > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                      {totalCostDiff > 0 ? '+' : ''}{formatCurrency(totalCostDiff)}
-                                    </span>
-                                  );
-                                }
-                                return null;
-                              })()}
-                            </td>
-                          </tr>
-                          {/* Show original vs new cost comparison if there are changes */}
-                          {materialsData.some((mat: any) => mat.cost_difference !== undefined && mat.cost_difference !== 0) && (
-                            <tr className="bg-amber-50">
-                              <td colSpan={9} className="px-1.5 py-2">
-                                <div className="flex items-center justify-end gap-4 text-[11px]">
-                                  <span className="text-gray-600">
-                                    Original: <span className="font-semibold text-gray-800">
-                                      {formatCurrency(materialsData.reduce((sum: number, mat: any) =>
-                                        sum + (mat.original_total_price || mat.total_price || 0), 0
-                                      ))}
-                                    </span>
-                                  </span>
-                                  <span className="text-gray-400">→</span>
-                                  <span className="text-gray-600">
-                                    Current: <span className="font-semibold text-gray-800">
-                                      {formatCurrency(totalMaterialsCost)}
-                                    </span>
-                                  </span>
-                                  {(() => {
-                                    const totalIncrease = materialsData.reduce((sum: number, mat: any) =>
-                                      sum + (mat.cost_difference > 0 ? mat.cost_difference : 0), 0
-                                    );
-                                    if (totalIncrease > 0) {
-                                      return (
-                                        <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded font-semibold">
-                                          Extra Cost: +{formatCurrency(totalIncrease)}
-                                        </span>
-                                      );
-                                    }
-                                    return null;
-                                  })()}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </>
+                        <tr className="bg-gray-100 border-t-2 border-gray-300">
+                          <td colSpan={6} className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
+                            Total Cost:
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700 text-right"></td>
+                          <td className="px-4 py-3 text-base font-bold text-purple-700 text-right whitespace-nowrap">
+                            {formatCurrency(totalMaterialsCost)}
+                          </td>
+                        </tr>
                       )}
                     </tbody>
                   </table>
+                  </div>
                 </div>
-              </div>
 
-              {/* Negotiable Margin Summary - Only show for NEW materials and hide from Site Engineers */}
-              {!userIsSiteEngineer && changeRequest.negotiable_margin_analysis && materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined) && (() => {
-                // Check if budget is invalid (zero or negative allocation)
-                const hasInvalidBudget = changeRequest.negotiable_margin_analysis.original_allocated <= 0;
+                {/* Negotiable Margin Summary - Only show for NEW materials and hide from Site Engineers */}
+                {!userIsSiteEngineer && changeRequest.negotiable_margin_analysis && materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined) && (() => {
+                  // Check if budget is invalid (zero or negative allocation)
+                  const hasInvalidBudget = changeRequest.negotiable_margin_analysis.original_allocated <= 0;
 
-                return (
-                  <div className={`mb-4 sm:mb-6 p-3 sm:p-4 rounded-lg border ${
-                    hasInvalidBudget
-                      ? 'bg-gradient-to-br from-red-50 to-orange-50 border-red-300'
-                      : 'bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200'
-                  }`}>
-                    {/* Warning Banner for Invalid Budget */}
-                    {hasInvalidBudget && (
-                      <div className="mb-3 p-2 sm:p-3 bg-red-100 border border-red-300 rounded-lg">
-                        <div className="flex items-start gap-2">
-                          <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                          <div className="flex-1">
-                            <p className="text-xs sm:text-sm font-bold text-red-900">
-                              No Negotiable Margin Budget Available
-                            </p>
-                            <p className="text-[10px] sm:text-xs text-red-700 mt-1">
-                              Current Allocation: {formatCurrency(changeRequest.negotiable_margin_analysis.original_allocated)}
-                            </p>
-                            <p className="text-[10px] sm:text-xs text-red-600 mt-1">
-                              This budget shows invalid or insufficient allocation for change requests.
-                            </p>
+                  return (
+                    <div className={`bg-white rounded-lg shadow-sm p-4 mb-6 ${hasInvalidBudget ? 'border-l-4 border-red-500' : 'border-l-4 border-purple-500'}`}>
+                      {/* Warning Banner for Invalid Budget */}
+                      {hasInvalidBudget && (
+                        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                          <div className="flex items-start gap-3">
+                            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                              <p className="text-sm font-bold text-red-900">
+                                No Negotiable Margin Budget Available
+                              </p>
+                              <p className="text-sm text-red-700 mt-1">
+                                Current Allocation: {formatCurrency(changeRequest.negotiable_margin_analysis.original_allocated)}
+                              </p>
+                              <p className="text-sm text-red-600 mt-1">
+                                This budget shows invalid or insufficient allocation for change requests.
+                              </p>
+                            </div>
                           </div>
                         </div>
+                      )}
+
+                      <h3 className={`text-sm font-semibold mb-4 ${hasInvalidBudget ? 'text-red-900' : 'text-purple-900'}`}>
+                        Negotiable Margin Summary
+                      </h3>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <span className={`text-xs ${hasInvalidBudget ? 'text-red-600' : 'text-purple-600'}`}>
+                            Original Allocated:
+                          </span>
+                          <p className={`font-bold text-sm ${hasInvalidBudget ? 'text-red-900' : 'text-purple-900'}`}>
+                            {formatCurrency(changeRequest.negotiable_margin_analysis.original_allocated || 0)}
+                          </p>
+                          {changeRequest.negotiable_margin_analysis.discount_applied > 0 && (
+                            <p className={`text-xs ${hasInvalidBudget ? 'text-red-500' : 'text-purple-500'}`}>
+                              (Discount: {formatCurrency(changeRequest.negotiable_margin_analysis.discount_applied)})
+                            </p>
+                          )}
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <span className={`text-xs ${hasInvalidBudget ? 'text-red-600' : 'text-purple-600'}`}>
+                            Already Consumed:
+                          </span>
+                          <p className="font-bold text-sm text-orange-600">
+                            {formatCurrency(changeRequest.negotiable_margin_analysis.already_consumed || 0)}
+                          </p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <span className={`text-xs ${hasInvalidBudget ? 'text-red-600' : 'text-purple-600'}`}>
+                            This Request:
+                          </span>
+                          <p className="font-bold text-sm text-blue-600">
+                            {formatCurrency(changeRequest.negotiable_margin_analysis.this_request || 0)}
+                          </p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <span className={`text-xs ${hasInvalidBudget ? 'text-red-600' : 'text-purple-600'}`}>
+                            Remaining After:
+                          </span>
+                          <p className={`font-bold text-sm ${
+                            changeRequest.negotiable_margin_analysis.remaining_after < 0
+                              ? 'text-red-600'
+                              : 'text-green-600'
+                          }`}>
+                            {formatCurrency(changeRequest.negotiable_margin_analysis.remaining_after)}
+                          </p>
+                        </div>
                       </div>
-                    )}
 
-                    <h3 className={`text-xs sm:text-sm font-semibold mb-2 sm:mb-3 ${
-                      hasInvalidBudget ? 'text-red-900' : 'text-purple-900'
-                    }`}>
-                      Negotiable Margin Summary
-                    </h3>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
-                      <div>
-                        <span className={`text-[10px] sm:text-xs ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
-                          Original Allocated:
-                        </span>
-                        <p className={`font-bold text-xs sm:text-sm ${
-                          hasInvalidBudget ? 'text-red-900' : 'text-purple-900'
-                        }`}>
-                          {formatCurrency(changeRequest.negotiable_margin_analysis.original_allocated || 0)}
-                        </p>
-                        {changeRequest.negotiable_margin_analysis.discount_applied > 0 && (
-                          <p className={`text-[9px] sm:text-xs ${hasInvalidBudget ? 'text-red-600' : 'text-purple-600'}`}>
-                            (Discount: {formatCurrency(changeRequest.negotiable_margin_analysis.discount_applied)})
+                      <div className={`mt-4 pt-4 border-t ${hasInvalidBudget ? 'border-red-200' : 'border-purple-200'}`}>
+                        <div className="flex justify-between items-center">
+                          <span className={`text-sm ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
+                            Total Consumption:
+                          </span>
+                          <span className={`text-xl font-bold ${
+                            changeRequest.negotiable_margin_analysis.exceeds_60_percent
+                              ? 'text-red-600'
+                              : 'text-green-600'
+                          }`}>
+                            {changeRequest.negotiable_margin_analysis.consumption_percentage.toFixed(1)}%
+                          </span>
+                        </div>
+                        {changeRequest.negotiable_margin_analysis.exceeds_60_percent && (
+                          <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+                            <AlertCircle className="w-4 h-4" />
+                            <span>Warning: Consumption exceeds 60% threshold</span>
                           </p>
                         )}
                       </div>
-                      <div>
-                        <span className={`text-[10px] sm:text-xs ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
-                          Already Consumed:
-                        </span>
-                        <p className="font-bold text-orange-600 text-xs sm:text-sm">
-                          {formatCurrency(changeRequest.negotiable_margin_analysis.already_consumed || 0)}
-                        </p>
-                      </div>
-                      <div>
-                        <span className={`text-[10px] sm:text-xs ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
-                          This Request:
-                        </span>
-                        <p className="font-bold text-blue-600 text-xs sm:text-sm">
-                          {formatCurrency(changeRequest.negotiable_margin_analysis.this_request || 0)}
-                        </p>
-                      </div>
-                      <div>
-                        <span className={`text-[10px] sm:text-xs ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
-                          Remaining After:
-                        </span>
-                        <p className={`font-bold text-xs sm:text-sm ${
-                          changeRequest.negotiable_margin_analysis.remaining_after < 0
-                            ? 'text-red-600'
-                            : 'text-green-600'
-                        }`}>
-                          {formatCurrency(changeRequest.negotiable_margin_analysis.remaining_after)}
-                        </p>
-                      </div>
                     </div>
+                  );
+                })()}
 
-                    <div className={`mt-2 sm:mt-3 pt-2 sm:pt-3 border-t ${
-                      hasInvalidBudget ? 'border-red-300' : 'border-purple-300'
-                    }`}>
-                      <div className="flex justify-between items-center">
-                        <span className={`text-xs sm:text-sm ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
-                          Total Consumption:
-                        </span>
-                        <span className={`text-base sm:text-lg font-bold ${
-                          changeRequest.negotiable_margin_analysis.exceeds_60_percent
-                            ? 'text-red-600'
-                            : 'text-green-600'
-                        }`}>
-                          {changeRequest.negotiable_margin_analysis.consumption_percentage.toFixed(1)}%
-                        </span>
+                {/* Vendor Details - Only show if TD approved vendor */}
+                {changeRequest.vendor_approved_by_td_id && (
+                  <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                      <Package className="w-4 h-4" />
+                      Vendor Details
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-blue-50 rounded-lg p-3">
+                        <p className="text-xs text-blue-600 mb-1">Selected Vendor</p>
+                        <p className="text-sm font-bold text-gray-900">{changeRequest.selected_vendor_name || 'N/A'}</p>
                       </div>
-                      {changeRequest.negotiable_margin_analysis.exceeds_60_percent && (
-                        <p className="text-[10px] sm:text-xs text-red-600 mt-1 flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3" />
-                          <span>Warning: Consumption exceeds 60% threshold</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Vendor Details - Only show if TD approved vendor */}
-              {changeRequest.vendor_approved_by_td_id && (
-                <div className="mb-4 sm:mb-6">
-                  <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                    <Package className="w-3 h-3 sm:w-4 sm:h-4" />
-                    Vendor Details
-                  </h3>
-                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-300 rounded-lg p-3">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="bg-white/70 rounded p-2">
-                        <p className="text-xs text-blue-700 mb-1">Selected Vendor</p>
-                        <p className="text-sm font-bold text-blue-900">{changeRequest.selected_vendor_name || 'N/A'}</p>
+                      <div className="bg-blue-50 rounded-lg p-3">
+                        <p className="text-xs text-blue-600 mb-1">Approved By TD</p>
+                        <p className="text-sm font-bold text-gray-900">{changeRequest.vendor_approved_by_td_name || 'N/A'}</p>
                       </div>
-                      <div className="bg-white/70 rounded p-2">
-                        <p className="text-xs text-blue-700 mb-1">Approved By TD</p>
-                        <p className="text-sm font-bold text-blue-900">{changeRequest.vendor_approved_by_td_name || 'N/A'}</p>
-                      </div>
-                      <div className="bg-white/70 rounded p-2">
-                        <p className="text-xs text-blue-700 mb-1">Approval Date</p>
-                        <p className="text-sm font-bold text-blue-900">
+                      <div className="bg-blue-50 rounded-lg p-3">
+                        <p className="text-xs text-blue-600 mb-1">Approval Date</p>
+                        <p className="text-sm font-bold text-gray-900">
                           {changeRequest.vendor_approval_date
                             ? new Date(changeRequest.vendor_approval_date).toLocaleDateString('en-US', {
                                 day: '2-digit',
@@ -631,78 +593,68 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Approval Info */}
-              {isHighValue && (
-                <div className="mb-3 sm:mb-4 p-3 sm:p-4 bg-blue-50 border-l-4 border-blue-500 rounded">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-semibold text-blue-900 text-xs sm:text-sm">Technical Director Approval Required</p>
-                      <p className="text-[10px] sm:text-xs text-blue-700 mt-1">
-                        This request exceeds AED 50,000 and requires approval from the Technical Director
-                      </p>
+                {/* TD Approval Required Info */}
+                {isHighValue && (
+                  <div className="bg-white rounded-lg shadow-sm p-4 mb-6 border-l-4 border-blue-500">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-blue-900 text-sm">Technical Director Approval Required</p>
+                        <p className="text-sm text-blue-700 mt-1">
+                          This request exceeds AED 50,000 and requires approval from the Technical Director
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Rejection Reason */}
-              {changeRequest.status === 'rejected' && changeRequest.rejection_reason && (
-                <div className="mb-3 sm:mb-4 p-3 sm:p-4 bg-red-50 border-l-4 border-red-500 rounded">
-                  <p className="font-semibold text-red-900 text-xs sm:text-sm mb-1">Rejection Reason:</p>
-                  <p className="text-xs sm:text-sm text-red-700 break-words">{changeRequest.rejection_reason}</p>
-                  {changeRequest.approved_by_name && (
-                    <p className="text-xs text-red-600 mt-2">- {changeRequest.approved_by_name}</p>
-                  )}
-                </div>
-              )}
+                {/* Rejection Reason */}
+                {changeRequest.status === 'rejected' && changeRequest.rejection_reason && (
+                  <div className="bg-white rounded-lg shadow-sm p-4 border-l-4 border-red-500 mb-6">
+                    <p className="font-semibold text-red-900 text-sm mb-2">Rejection Reason:</p>
+                    <p className="text-sm text-red-700 break-words">{changeRequest.rejection_reason}</p>
+                    {changeRequest.approved_by_name && (
+                      <p className="text-xs text-red-600 mt-2">- {changeRequest.approved_by_name}</p>
+                    )}
+                  </div>
+                )}
 
-              {/* Approval Info */}
-              {changeRequest.status === 'approved' && changeRequest.approved_by_name && (
-                <div className="mb-3 sm:mb-4 p-3 sm:p-4 bg-green-50 border-l-4 border-green-500 rounded">
-                  <p className="font-semibold text-green-900 text-xs sm:text-sm break-words">
-                    Approved by {changeRequest.approved_by_name} on{' '}
-                    {changeRequest.approval_date && new Date(changeRequest.approval_date).toLocaleDateString()}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Footer - Responsive Actions */}
-            {/* Hide footer completely if in final state */}
-            {!isFinalStatus && (
-              <div className="border-t border-gray-200 px-4 sm:px-6 py-3 sm:py-4 bg-gray-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3">
-                {canApproveReject ? (
-                  <>
-                    <button
-                      onClick={onReject}
-                      className="w-full sm:w-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium text-sm sm:text-base"
-                    >
-                      Reject
-                    </button>
-                    <button
-                      onClick={handleApproveWithUpdatedPrices}
-                      className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base"
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      Approve Request
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    onClick={onClose}
-                    className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium text-sm sm:text-base"
-                  >
-                    Close
-                  </button>
+                {/* Approval Info */}
+                {changeRequest.status === 'approved' && changeRequest.approved_by_name && (
+                  <div className="bg-white rounded-lg shadow-sm p-4 border-l-4 border-green-500">
+                    <p className="font-semibold text-green-900 text-sm">
+                      Approved by {changeRequest.approved_by_name} on{' '}
+                      {changeRequest.approval_date && new Date(changeRequest.approval_date).toLocaleDateString()}
+                    </p>
+                  </div>
                 )}
               </div>
+            </div>
+
+            {/* Footer - Only show if can approve/reject */}
+            {!isFinalStatus && canApproveReject && (
+              <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex-shrink-0">
+                <div className="max-w-7xl mx-auto flex items-center justify-end gap-4">
+                  <button
+                    onClick={onReject}
+                    className="px-6 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium"
+                  >
+                    Reject
+                  </button>
+                  <button
+                    onClick={handleApproveWithUpdatedPrices}
+                    className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center gap-2"
+                  >
+                    <CheckCircle className="w-5 h-5" />
+                    Approve Request
+                  </button>
+                </div>
+              </div>
             )}
-          </motion.div>
-        </div>
+          </div>
+        </motion.div>
 
         {/* Edit Change Request Modal */}
         {showEditModal && (
