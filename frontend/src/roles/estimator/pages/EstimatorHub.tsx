@@ -33,6 +33,7 @@ import RevisionComparisonPage from '../components/RevisionComparisonPage';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { estimatorService } from '../services/estimatorService';
+import { clearCache } from '@/api/config';
 import { BOQ, BOQFilter, BOQStatus } from '../types';
 import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
@@ -763,6 +764,10 @@ const EstimatorHub: React.FC = () => {
         // Trigger realtime update for other components
         useRealtimeUpdateStore.getState().triggerBOQUpdate();
 
+        // Clear cache before fetching fresh data
+        clearCache('all_project');
+        clearCache('all_boq');
+
         // Background sync with server (don't await - let optimistic show first)
         Promise.all([
           loadProjects(1),
@@ -792,8 +797,8 @@ const EstimatorHub: React.FC = () => {
         showSuccess(response.message);
 
         // ✅ OPTIMISTIC UPDATE: Instantly remove project from UI
-        // Only update 'projects' state - useEffect will auto-update 'filteredProjects'
         setProjects(prev => prev.filter(p => p.project_id !== projectIdToDelete));
+        setFilteredProjects(prev => prev.filter(p => p.project_id !== projectIdToDelete));
         setTotalProjects(prev => Math.max(0, prev - 1));
 
         // Close modal immediately
@@ -801,6 +806,10 @@ const EstimatorHub: React.FC = () => {
 
         // Trigger realtime update for other components
         useRealtimeUpdateStore.getState().triggerBOQUpdate();
+
+        // Clear cache before fetching fresh data
+        clearCache('all_project');
+        clearCache('all_boq');
 
         // Background sync with server (don't await - let optimistic show first)
         Promise.all([
@@ -966,7 +975,7 @@ const EstimatorHub: React.FC = () => {
     setShowFullScreenBOQ(true);
   };
 
-  const handleBOQCreated = (boqId: number) => {
+  const handleBOQCreated = async (boqId: number) => {
     showSuccess('BOQ created successfully!');
     setShowFullScreenBOQ(false);
 
@@ -985,7 +994,11 @@ const EstimatorHub: React.FC = () => {
     setHasSavedDraft(false);
     setDraftData(null);
 
-    loadBOQs(); // Refresh the BOQ list
+    // Clear cache before fetching fresh data
+    clearCache('all_boq');
+    clearCache('all_project');
+
+    await loadBOQs(); // Refresh the BOQ list immediately
   };
 
   const handleSendToTD = async (project: any) => {
@@ -1019,6 +1032,9 @@ const EstimatorHub: React.FC = () => {
 
       if (successCount > 0) {
         showSuccess(`Successfully sent ${successCount} BOQ(s) via email to Technical Director`);
+        // Clear cache before fetching fresh data
+        clearCache('all_boq');
+        clearCache('all_project');
         // Refresh both BOQs and projects to update UI immediately
         await Promise.all([loadBOQs(), loadProjects(currentPage)]);
         // Trigger realtime update for other components (e.g., TD page)
@@ -1059,6 +1075,9 @@ const EstimatorHub: React.FC = () => {
 
           if (response.success) {
             showSuccess('Successfully resent BOQ to Project Manager');
+            // Clear cache before fetching fresh data
+            clearCache('all_boq');
+            clearCache('all_project');
             // Refresh both BOQs and projects to update UI immediately
             await Promise.all([loadBOQs(), loadProjects(currentPage)]);
             // Trigger realtime update for other components
@@ -1123,6 +1142,9 @@ const EstimatorHub: React.FC = () => {
         setShowPMSelectionModal(false);
         setSelectedPM(null);
         setProjectToSendToPM(null);
+        // Clear cache before fetching fresh data
+        clearCache('all_boq');
+        clearCache('all_project');
         // Refresh both BOQs and projects to update UI immediately
         await Promise.all([loadBOQs(), loadProjects(currentPage)]);
         // Trigger realtime update for other components (e.g., PM page)
@@ -1146,6 +1168,9 @@ const EstimatorHub: React.FC = () => {
       if (response.success) {
         showSuccess('BOQ deleted successfully');
         setDeletingBoq(null);
+        // Clear cache before fetching fresh data
+        clearCache('all_boq');
+        clearCache('all_project');
         // Refresh both BOQs and projects to update UI immediately
         await Promise.all([loadBOQs(), loadProjects(currentPage)]);
         // Trigger realtime update for other components
@@ -1171,6 +1196,9 @@ const EstimatorHub: React.FC = () => {
         setShowClientRejectionModal(false);
         setBoqToReject(null);
         setRejectionReason('');
+        // Clear cache before fetching fresh data
+        clearCache('all_boq');
+        clearCache('all_project');
         // Refresh both BOQs and projects to update UI immediately
         await Promise.all([loadBOQs(), loadProjects(currentPage)]);
         // Trigger realtime update for other components
@@ -1196,6 +1224,9 @@ const EstimatorHub: React.FC = () => {
         setShowCancelModal(false);
         setBoqToCancel(null);
         setCancellationReason('');
+        // Clear cache before fetching fresh data
+        clearCache('all_boq');
+        clearCache('all_project');
         // Refresh both BOQs and projects to update UI immediately
         await Promise.all([loadBOQs(), loadProjects(currentPage)]);
         // Trigger realtime update for other components

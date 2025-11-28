@@ -28,8 +28,7 @@ import {
   List,
   Pencil,
   GitBranch,
-  MapPin,
-  DollarSign
+  MapPin
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
@@ -506,10 +505,7 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
                           </div>
                           <div className="text-center border-l pl-4">
-                            <div className="flex items-center gap-1">
-                              <DollarSign className="h-4 w-4 text-green-600" />
-                              <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
-                            </div>
+                            <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
                           </div>
                         </div>
 
@@ -623,10 +619,7 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
                           </div>
                           <div className="text-center border-l pl-4">
-                            <div className="flex items-center gap-1">
-                              <DollarSign className="h-4 w-4 text-green-600" />
-                              <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
-                            </div>
+                            <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
                           </div>
                         </div>
 
@@ -704,10 +697,7 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
                           </div>
                           <div className="text-center border-l pl-4">
-                            <div className="flex items-center gap-1">
-                              <DollarSign className="h-4 w-4 text-green-600" />
-                              <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
-                            </div>
+                            <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
                           </div>
                         </div>
 
@@ -785,10 +775,7 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
                           </div>
                           <div className="text-center border-l pl-4">
-                            <div className="flex items-center gap-1">
-                              <DollarSign className="h-4 w-4 text-red-600" />
-                              <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
-                            </div>
+                            <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
                           </div>
                         </div>
 

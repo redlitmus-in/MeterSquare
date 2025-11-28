@@ -1091,7 +1091,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                             <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
                                           </div>
                                           <div className="flex justify-between">
-                                            <span className="text-gray-800 font-medium">Negotiable Margins:</span>
+                                            <span className="text-gray-800 font-medium">Negotiable Margin:</span>
                                             <span className={`font-bold ${negotiableMargin >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
                                               {formatCurrency(negotiableMargin)}
                                             </span>
@@ -1209,7 +1209,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                   <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
                                 </div>
                                 <div className={`flex justify-between items-center pt-2 border-t-2 border-blue-400 rounded px-2 ${marginChanged ? 'bg-yellow-200' : ''}`}>
-                                  <span className="text-gray-900 font-bold">Project Margin:</span>
+                                  <span className="text-gray-900 font-bold">Negotiable Margin:</span>
                                   <div className="text-right">
                                     <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                       {formatCurrency(projectMargin)}
@@ -1422,7 +1422,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                     </span>
                                   </div>
                                   <div className="flex justify-between items-center pt-2 border-t border-gray-300">
-                                    <span className="text-gray-700 font-medium">Negotiable Margins:</span>
+                                    <span className="text-gray-700 font-medium">Total Margin:</span>
                                     <div className="flex items-center gap-2">
                                       <span className="text-gray-500 line-through">
                                         AED {totalActualProfit.toFixed(2)}
@@ -2209,7 +2209,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                                       <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
                                                     </div>
                                                     <div className="flex justify-between">
-                                                      <span className="text-gray-800 font-medium">Negotiable Margins:</span>
+                                                      <span className="text-gray-800 font-medium">Negotiable Margin:</span>
                                                       <span className={`font-bold ${negotiableMargin >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
                                                         {formatCurrency(negotiableMargin)}
                                                       </span>
@@ -2294,7 +2294,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                           <div className={`text-sm font-bold flex justify-between rounded px-2 py-1 mt-2 ${
                                             itemActualProfit >= itemOpAmount ? 'bg-green-100 text-green-900' : 'bg-yellow-100 text-yellow-900'
                                           }`}>
-                                            <span>💎 Negotiable Margins:</span>
+                                            <span>💎 Total Margin:</span>
                                             <span>AED {itemActualProfit.toFixed(2)} ({itemProfitMargin.toFixed(1)}%)</span>
                                           </div>
                                           {itemOpAmount > 0 && (

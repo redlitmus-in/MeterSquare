@@ -706,7 +706,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   <span className="font-semibold text-red-600">AED {totalInternalCost.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between pt-1.5 border-t border-gray-300">
-                  <span className="text-gray-700 font-medium">Negotiable Margins (After Discount):</span>
+                  <span className="text-gray-700 font-medium">Total Margin (After Discount):</span>
                   <span className={`font-bold ${negotiableMarginAfterDiscount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     AED {negotiableMarginAfterDiscount.toFixed(2)}
                   </span>
@@ -1049,7 +1049,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                                     <span className="font-semibold text-blue-600">AED {plannedProfit.toFixed(2)}</span>
                                   </div>
                                   <div className="flex justify-between">
-                                    <span className="text-gray-800 font-medium">Negotiable Margins:</span>
+                                    <span className="text-gray-800 font-medium">Negotiable Margin:</span>
                                     <span className={`font-bold ${negotiableMargin >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
                                       AED {negotiableMargin.toFixed(2)}
                                     </span>
@@ -1211,7 +1211,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                           <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
                         </div>
                         <div className={`flex justify-between items-center pt-2 border-t-2 border-blue-400 rounded px-2 ${marginChanged ? 'bg-yellow-200' : ''}`}>
-                          <span className="text-gray-900 font-bold">Project Margin:</span>
+                          <span className="text-gray-900 font-bold">Negotiable Margin:</span>
                           <div className="text-right">
                             <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                               {formatCurrency(projectMargin)}
@@ -1767,7 +1767,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                                     </span>
                                   </div>
                                   <div className="flex justify-between items-center pt-2 border-t border-gray-300">
-                                    <span className="text-gray-700 font-medium">Negotiable Margins:</span>
+                                    <span className="text-gray-700 font-medium">Total Margin:</span>
                                     <div className="flex items-center gap-2">
                                       <span className="text-gray-500 line-through">
                                         AED {totalActualProfit.toFixed(2)}

@@ -3919,7 +3919,7 @@ const ProjectApprovals: React.FC = () => {
                                   </div>
                                 </div>
                                 <div className="flex justify-between pt-2 border-t border-blue-300">
-                                  <span className="font-bold">Project Margin:</span>
+                                  <span className="font-bold">Negotiable Margin:</span>
                                   <div className="text-right">
                                     <div className={`font-bold ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                       {formatCurrency(projectMargin)}
@@ -3939,7 +3939,7 @@ const ProjectApprovals: React.FC = () => {
                                   <span className="font-semibold text-blue-600">{formatCurrency(totalPlannedProfit)}</span>
                                 </div>
                                 <div className="flex justify-between">
-                                  <span className="text-gray-700">Negotiable Margins:</span>
+                                  <span className="text-gray-700">Total Margin:</span>
                                   <span className={`font-bold ${totalActualProfit >= totalPlannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
                                     {formatCurrency(totalActualProfit)}
                                   </span>
@@ -4003,7 +4003,7 @@ const ProjectApprovals: React.FC = () => {
                                         </span>
                                       </div>
                                       <div className="flex justify-between items-center pt-2 border-t border-gray-300">
-                                        <span className="text-gray-700 font-medium">Negotiable Margins:</span>
+                                        <span className="text-gray-700 font-medium">Total Margin:</span>
                                         <div className="flex items-center gap-2">
                                           <span className="text-gray-500 line-through">
                                             {formatCurrency(totalActualProfit)}
@@ -5396,7 +5396,7 @@ const ProjectApprovals: React.FC = () => {
                                   </div>
                                 </div>
                                 <div className="flex justify-between pt-2 border-t border-blue-300">
-                                  <span className="font-bold">Project Margin:</span>
+                                  <span className="font-bold">Negotiable Margin:</span>
                                   <div className="text-right">
                                     <div className={`font-bold ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                       {formatCurrency(projectMargin)}

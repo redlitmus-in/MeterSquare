@@ -912,7 +912,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                           <p className="text-gray-700 mt-1">= Overhead & Profit amount</p>
                                                         </div>
                                                         <div className="bg-emerald-50 p-2 rounded border-2 border-emerald-200">
-                                                          <strong className="text-emerald-900">Negotiable Margins:</strong>
+                                                          <strong className="text-emerald-900">Negotiable Margin:</strong>
                                                           <p className="text-gray-700 mt-1">= Client Amount - Internal Cost (Total)</p>
                                                           <p className="text-gray-500 text-xs mt-0.5 italic">Shows actual profit after all costs including O&P</p>
                                                         </div>
@@ -967,7 +967,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                         <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
                                                       </div>
                                                       <div className="flex justify-between">
-                                                        <span className="text-gray-800 font-medium">Negotiable Margins:</span>
+                                                        <span className="text-gray-800 font-medium">Negotiable Margin:</span>
                                                         <span className={`font-bold ${negotiableMargin >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
                                                           {formatCurrency(negotiableMargin)}
                                                         </span>
@@ -1014,7 +1014,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                 <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
                                               </div>
                                               <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
-                                                <span className="text-gray-900 font-bold">Project Margin:</span>
+                                                <span className="text-gray-900 font-bold">Negotiable Margin:</span>
                                                 <div className="text-right">
                                                   <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                     {formatCurrency(projectMargin)}
@@ -1192,7 +1192,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                 <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
                                               </div>
                                               <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
-                                                <span className="text-gray-900 font-bold">Project Margin:</span>
+                                                <span className="text-gray-900 font-bold">Negotiable Margin:</span>
                                                 <div className="text-right">
                                                   <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                     {formatCurrency(projectMargin)}
@@ -1394,7 +1394,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
                                           </div>
                                           <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
-                                            <span className="text-gray-900 font-bold">Project Margin:</span>
+                                            <span className="text-gray-900 font-bold">Negotiable Margin:</span>
                                             <div className="text-right">
                                               <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                 {formatCurrency(projectMargin)}
@@ -1516,7 +1516,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                       <span className="font-semibold text-indigo-600">{boqItemsPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                                     </div>
                                     <div className="flex justify-between">
-                                      <span className="text-gray-600">Negotiable Margins:</span>
+                                      <span className="text-gray-600">Total Margin:</span>
                                       <span className={`font-semibold ${boqItemsNegotiableMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                         {boqItemsNegotiableMargin.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                       </span>
@@ -1543,7 +1543,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                       <span className="font-semibold text-indigo-600">{preliminaryPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                                     </div>
                                     <div className="flex justify-between">
-                                      <span className="text-gray-600">Negotiable Margins:</span>
+                                      <span className="text-gray-600">Total Margin:</span>
                                       <span className={`font-semibold ${preliminaryNegotiableMargin >= preliminaryPlannedProfit ? 'text-green-600' : 'text-red-600'}`}>
                                         {preliminaryNegotiableMargin.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                       </span>
@@ -1571,7 +1571,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                     <p className="text-lg font-bold text-indigo-600">{combinedPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                                   </div>
                                   <div className="text-center">
-                                    <p className="text-xs text-gray-600 mb-1">Negotiable Margins</p>
+                                    <p className="text-xs text-gray-600 mb-1">Total Margin</p>
                                     <p className={`text-lg font-bold ${combinedNegotiableMargin >= combinedPlannedProfit ? 'text-green-600' : 'text-red-600'}`}>
                                       {combinedNegotiableMargin.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                     </p>
@@ -1689,8 +1689,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 <>
                                   {/* BOQ Financials */}
                                   <div className="bg-white rounded-lg p-5 border-2 border-blue-300 shadow-sm">
-                                    <h4 className="font-bold text-blue-900 mb-4 flex items-center gap-2">
-                                      <DollarSign className="w-5 h-5" />
+                                    <h4 className="font-bold text-blue-900 mb-4">
                                       BOQ Financials
                                     </h4>
                                     <div className="space-y-3">
@@ -1725,7 +1724,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                         </div>
                                       </div>
                                       <div className="flex justify-between items-center pt-3 border-t-2 border-blue-300">
-                                        <span className="text-gray-900 font-bold">Project Margin:</span>
+                                        <span className="text-gray-900 font-bold">Total Margin:</span>
                                         <div className="text-right">
                                           <div className={`text-xl font-bold ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                             {formatCurrency(projectMargin)}
@@ -1750,7 +1749,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                         <span className="text-base font-semibold text-blue-600">{formatCurrency(totalPlannedProfit)}</span>
                                       </div>
                                       <div className="flex justify-between items-center">
-                                        <span className="text-gray-700 font-medium">Negotiable Margins:</span>
+                                        <span className="text-gray-700 font-medium">Total Margin:</span>
                                         <span className={`text-xl font-bold ${totalActualProfit >= totalPlannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
                                           {formatCurrency(totalActualProfit)}
                                         </span>
@@ -1900,7 +1899,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             </span>
                                           </div>
                                           <div className="flex justify-between items-center pt-2 border-t border-gray-300">
-                                            <span className="text-gray-700 font-medium">Negotiable Margins:</span>
+                                            <span className="text-gray-700 font-medium">Total Margin:</span>
                                             <div className="flex items-center gap-2">
                                               <span className="text-gray-500 line-through">
                                                 {formatCurrency(totalActualProfit)}

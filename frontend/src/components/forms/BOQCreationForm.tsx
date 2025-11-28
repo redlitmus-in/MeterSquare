@@ -303,13 +303,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [preliminaryNotes, setPreliminaryNotes] = useState('');
 
   // Separate cost details state (independent from checkboxes)
-  const [costQuantity, setCostQuantity] = useState<number>(1);
+  const [costQuantity, setCostQuantity] = useState<number | undefined>(undefined);
   const [costUnit, setCostUnit] = useState<string>('nos');
-  const [costRate, setCostRate] = useState<number>(0);
+  const [costRate, setCostRate] = useState<number | undefined>(undefined);
   const [costAmount, setCostAmount] = useState<number>(0);
 
   // Preliminary internal costing
-  const [preliminaryInternalCost, setPreliminaryInternalCost] = useState<number>(0);
+  const [preliminaryInternalCost, setPreliminaryInternalCost] = useState<number | undefined>(undefined);
   const [preliminaryMiscPercentage, setPreliminaryMiscPercentage] = useState<number>(10);
   const [preliminaryOverheadProfitPercentage, setPreliminaryOverheadProfitPercentage] = useState<number>(25);
   const [preliminaryTransportPercentage, setPreliminaryTransportPercentage] = useState<number>(5);
@@ -490,14 +490,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       setOverallProfit(original.overallProfit || 15);
       setOverallDiscount(original.overallDiscount || 0);
       setPreliminaries(original.preliminaries || []);
-      setCostQuantity(original.costQuantity || 1);
+      setCostQuantity(original.costQuantity ?? undefined);
       setCostUnit(original.costUnit || 'nos');
-      setCostRate(original.costRate || 0);
-      setCostAmount(original.costAmount || 0);
-      setPreliminaryInternalCost(original.preliminaryInternalCost || 0);
-      setPreliminaryMiscPercentage(original.preliminaryMiscPercentage || 10);
-      setPreliminaryOverheadProfitPercentage(original.preliminaryOverheadProfitPercentage || 25);
-      setPreliminaryTransportPercentage(original.preliminaryTransportPercentage || 5);
+      setCostRate(original.costRate ?? undefined);
+      setCostAmount(original.costAmount ?? 0);
+      setPreliminaryInternalCost(original.preliminaryInternalCost ?? undefined);
+      setPreliminaryMiscPercentage(original.preliminaryMiscPercentage ?? 10);
+      setPreliminaryOverheadProfitPercentage(original.preliminaryOverheadProfitPercentage ?? 25);
+      setPreliminaryTransportPercentage(original.preliminaryTransportPercentage ?? 5);
       setPreliminaryNotes(original.preliminaryNotes || '');
       setTermsConditions(original.termsConditions || []);
 
@@ -577,14 +577,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         setOverallProfit(actualData.overallProfit || 15);
         setOverallDiscount(actualData.overallDiscount || 0);
         setPreliminaries(actualData.preliminaries || []);
-        setCostQuantity(actualData.costQuantity || 1);
+        setCostQuantity(actualData.costQuantity ?? undefined);
         setCostUnit(actualData.costUnit || 'nos');
-        setCostRate(actualData.costRate || 0);
-        setCostAmount(actualData.costAmount || 0);
-        setPreliminaryInternalCost(actualData.preliminaryInternalCost || 0);
-        setPreliminaryMiscPercentage(actualData.preliminaryMiscPercentage || 10);
-        setPreliminaryOverheadProfitPercentage(actualData.preliminaryOverheadProfitPercentage || 25);
-        setPreliminaryTransportPercentage(actualData.preliminaryTransportPercentage || 5);
+        setCostRate(actualData.costRate ?? undefined);
+        setCostAmount(actualData.costAmount ?? 0);
+        setPreliminaryInternalCost(actualData.preliminaryInternalCost ?? undefined);
+        setPreliminaryMiscPercentage(actualData.preliminaryMiscPercentage ?? 10);
+        setPreliminaryOverheadProfitPercentage(actualData.preliminaryOverheadProfitPercentage ?? 25);
+        setPreliminaryTransportPercentage(actualData.preliminaryTransportPercentage ?? 5);
         setPreliminaryNotes(actualData.preliminaryNotes || '');
         setTermsConditions(actualData.termsConditions || []);
 
@@ -608,11 +608,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         setOverallProfit(15);
         setOverallDiscount(0);
         setPreliminaries([]);
-        setCostQuantity(1);
+        setCostQuantity(undefined);
         setCostUnit('nos');
-        setCostRate(0);
+        setCostRate(undefined);
         setCostAmount(0);
-        setPreliminaryInternalCost(0);
+        setPreliminaryInternalCost(undefined);
         setPreliminaryMiscPercentage(10);
         setPreliminaryOverheadProfitPercentage(25);
         setPreliminaryTransportPercentage(5);
@@ -699,14 +699,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       setOverallProfit(actualData.overallProfit || 15);
       setOverallDiscount(actualData.overallDiscount || 0);
       setPreliminaries(actualData.preliminaries || []);
-      setCostQuantity(actualData.costQuantity || 1);
+      setCostQuantity(actualData.costQuantity ?? undefined);
       setCostUnit(actualData.costUnit || 'nos');
-      setCostRate(actualData.costRate || 0);
-      setCostAmount(actualData.costAmount || 0);
-      setPreliminaryInternalCost(actualData.preliminaryInternalCost || 0);
-      setPreliminaryMiscPercentage(actualData.preliminaryMiscPercentage || 10);
-      setPreliminaryOverheadProfitPercentage(actualData.preliminaryOverheadProfitPercentage || 25);
-      setPreliminaryTransportPercentage(actualData.preliminaryTransportPercentage || 5);
+      setCostRate(actualData.costRate ?? undefined);
+      setCostAmount(actualData.costAmount ?? 0);
+      setPreliminaryInternalCost(actualData.preliminaryInternalCost ?? undefined);
+      setPreliminaryMiscPercentage(actualData.preliminaryMiscPercentage ?? 10);
+      setPreliminaryOverheadProfitPercentage(actualData.preliminaryOverheadProfitPercentage ?? 25);
+      setPreliminaryTransportPercentage(actualData.preliminaryTransportPercentage ?? 5);
       setPreliminaryNotes(actualData.preliminaryNotes || '');
       setTermsConditions(actualData.termsConditions || []);
 
@@ -2452,11 +2452,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               isCustom: p.isCustom || false
             })),
             cost_details: {
-              quantity: costQuantity,
+              quantity: costQuantity ?? 0,
               unit: costUnit,
-              rate: costRate,
+              rate: costRate ?? 0,
               amount: costAmount,
-              internal_cost: preliminaryInternalCost,
+              internal_cost: preliminaryInternalCost ?? 0,
               misc_percentage: preliminaryMiscPercentage,
               overhead_profit_percentage: preliminaryOverheadProfitPercentage,
               transport_percentage: preliminaryTransportPercentage,
@@ -2464,7 +2464,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               overhead_profit_amount: (costAmount * preliminaryOverheadProfitPercentage) / 100,
               transport_amount: (costAmount * preliminaryTransportPercentage) / 100,
               planned_profit: (costAmount * preliminaryOverheadProfitPercentage) / 100,
-              actual_profit: costAmount - (preliminaryInternalCost + (costAmount * preliminaryMiscPercentage) / 100 + (costAmount * preliminaryOverheadProfitPercentage) / 100 + (costAmount * preliminaryTransportPercentage) / 100)
+              actual_profit: costAmount - ((preliminaryInternalCost ?? 0) + (costAmount * preliminaryMiscPercentage) / 100 + (costAmount * preliminaryOverheadProfitPercentage) / 100 + (costAmount * preliminaryTransportPercentage) / 100)
             },
             notes: preliminaryNotes
           },
@@ -2755,11 +2755,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               isCustom: p.isCustom || false
             })),
             cost_details: {
-              quantity: costQuantity,
+              quantity: costQuantity ?? 0,
               unit: costUnit,
-              rate: costRate,
+              rate: costRate ?? 0,
               amount: costAmount,
-              internal_cost: preliminaryInternalCost,
+              internal_cost: preliminaryInternalCost ?? 0,
               misc_percentage: preliminaryMiscPercentage,
               overhead_profit_percentage: preliminaryOverheadProfitPercentage,
               transport_percentage: preliminaryTransportPercentage,
@@ -2767,7 +2767,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               overhead_profit_amount: (costAmount * preliminaryOverheadProfitPercentage) / 100,
               transport_amount: (costAmount * preliminaryTransportPercentage) / 100,
               planned_profit: (costAmount * preliminaryOverheadProfitPercentage) / 100,
-              actual_profit: costAmount - (preliminaryInternalCost + (costAmount * preliminaryMiscPercentage) / 100 + (costAmount * preliminaryOverheadProfitPercentage) / 100 + (costAmount * preliminaryTransportPercentage) / 100)
+              actual_profit: costAmount - ((preliminaryInternalCost ?? 0) + (costAmount * preliminaryMiscPercentage) / 100 + (costAmount * preliminaryOverheadProfitPercentage) / 100 + (costAmount * preliminaryTransportPercentage) / 100)
             },
             notes: preliminaryNotes
           },
@@ -2980,11 +2980,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               isCustom: p.isCustom || false
             })),
             cost_details: {
-              quantity: costQuantity,
+              quantity: costQuantity ?? 0,
               unit: costUnit,
-              rate: costRate,
+              rate: costRate ?? 0,
               amount: costAmount,
-              internal_cost: preliminaryInternalCost,
+              internal_cost: preliminaryInternalCost ?? 0,
               misc_percentage: preliminaryMiscPercentage,
               overhead_profit_percentage: preliminaryOverheadProfitPercentage,
               transport_percentage: preliminaryTransportPercentage,
@@ -2992,7 +2992,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               overhead_profit_amount: (costAmount * preliminaryOverheadProfitPercentage) / 100,
               transport_amount: (costAmount * preliminaryTransportPercentage) / 100,
               planned_profit: (costAmount * preliminaryOverheadProfitPercentage) / 100,
-              actual_profit: costAmount - (preliminaryInternalCost + (costAmount * preliminaryMiscPercentage) / 100 + (costAmount * preliminaryOverheadProfitPercentage) / 100 + (costAmount * preliminaryTransportPercentage) / 100)
+              actual_profit: costAmount - ((preliminaryInternalCost ?? 0) + (costAmount * preliminaryMiscPercentage) / 100 + (costAmount * preliminaryOverheadProfitPercentage) / 100 + (costAmount * preliminaryTransportPercentage) / 100)
             },
             notes: preliminaryNotes
           },
@@ -3534,15 +3534,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           <input
                             type="number"
                             placeholder="Enter quantity"
-                            value={costQuantity}
+                            value={costQuantity ?? ''}
                             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                             min="0"
                             step="0.01"
                             disabled={isSubmitting}
                             onChange={(e) => {
-                              const qty = parseFloat(e.target.value) || 0;
-                              setCostQuantity(qty);
-                              setCostAmount(qty * costRate);
+                              const value = e.target.value;
+                              if (value === '') {
+                                setCostQuantity(undefined);
+                                setCostAmount(0);
+                              } else {
+                                const qty = parseFloat(value);
+                                setCostQuantity(qty);
+                                setCostAmount(qty * (costRate ?? 0));
+                              }
                             }}
                           />
                         </div>
@@ -3574,15 +3580,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           <input
                             type="number"
                             placeholder="Enter rate"
-                            value={costRate}
+                            value={costRate ?? ''}
                             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                             min="0"
                             step="0.01"
                             disabled={isSubmitting}
                             onChange={(e) => {
-                              const rate = parseFloat(e.target.value) || 0;
-                              setCostRate(rate);
-                              setCostAmount(costQuantity * rate);
+                              const value = e.target.value;
+                              if (value === '') {
+                                setCostRate(undefined);
+                                setCostAmount(0);
+                              } else {
+                                const rate = parseFloat(value);
+                                setCostRate(rate);
+                                setCostAmount((costQuantity ?? 0) * rate);
+                              }
                             }}
                           />
                         </div>
@@ -3608,12 +3620,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           <input
                             type="number"
                             placeholder="Enter internal cost"
-                            value={preliminaryInternalCost}
+                            value={preliminaryInternalCost ?? ''}
                             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                             min="0"
                             step="0.01"
                             disabled={isSubmitting}
-                            onChange={(e) => setPreliminaryInternalCost(parseFloat(e.target.value) || 0)}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === '') {
+                                setPreliminaryInternalCost(undefined);
+                              } else {
+                                setPreliminaryInternalCost(parseFloat(value));
+                              }
+                            }}
                           />
                         </div>
                       </div>
@@ -3675,7 +3694,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                       const opAmount = (costAmount * preliminaryOverheadProfitPercentage) / 100;
                       const transportAmount = (costAmount * preliminaryTransportPercentage) / 100;
                       const plannedProfit = opAmount;
-                      const totalInternalCost = preliminaryInternalCost + miscAmount + opAmount + transportAmount;
+                      const totalInternalCost = (preliminaryInternalCost ?? 0) + miscAmount + opAmount + transportAmount;
                       const negotiableMargin = costAmount - totalInternalCost;
 
                       return (
@@ -3689,7 +3708,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               </p>
                             </div>
                             <div className={`p-3 rounded-lg ${negotiableMargin >= plannedProfit ? 'bg-green-50' : 'bg-red-50'}`}>
-                              <p className="text-xs text-gray-600">Negotiable Margins</p>
+                              <p className="text-xs text-gray-600">Total Margin</p>
                               <p className={`text-lg font-bold ${negotiableMargin >= plannedProfit ? 'text-green-600' : 'text-red-600'}`}>
                                 AED {negotiableMargin.toFixed(2)}
                               </p>
@@ -4967,7 +4986,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                     <p className="text-gray-700 mt-1">= Overhead & Profit amount</p>
                                                   </div>
                                                   <div className="bg-emerald-50 p-2 rounded border-2 border-emerald-200">
-                                                    <strong className="text-emerald-900">Negotiable Margins:</strong>
+                                                    <strong className="text-emerald-900">Negotiable Margin:</strong>
                                                     <p className="text-gray-700 mt-1">= Client Amount - Internal Cost (Total)</p>
                                                     <p className="text-gray-500 text-xs mt-0.5 italic">Shows actual profit after all costs including O&P</p>
                                                   </div>
@@ -5024,7 +5043,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           {/* Negotiable Margins - Moved below Planned Profit */}
                                           <div className="flex justify-between items-center p-2 bg-white/60 rounded">
                                             <div>
-                                              <span className="font-medium text-gray-700">Negotiable Margins</span>
+                                              <span className="font-medium text-gray-700">Negotiable Margin</span>
                                               <span className="ml-2 text-gray-500 italic">(Client - Internal Cost Total)</span>
                                             </div>
                                             <span className={`font-bold ${subItemCalc.negotiableMargin >= subItemCalc.plannedProfit ? 'text-emerald-700' : 'text-red-600'}`}>
@@ -5035,7 +5054,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           {/* Alert if actual < planned */}
                                           {subItemCalc.negotiableMargin < subItemCalc.plannedProfit && (
                                             <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-red-800">
-                                              <strong>⚠️ Warning:</strong> Negotiable Margins is lower than planned! Review material/labour costs.
+                                              <strong>⚠️ Warning:</strong> Negotiable Margin is lower than planned! Review material/labour costs.
                                             </div>
                                           )}
                                         </div>
@@ -5114,7 +5133,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           <p className="text-gray-500 text-xs mt-0.5 italic">Includes ALL operational costs and planned profit</p>
                                         </div>
                                         <div className="bg-green-50 p-2 rounded">
-                                          <strong className="text-green-900">Project Margin:</strong>
+                                          <strong className="text-green-900">Negotiable Margin:</strong>
                                           <p className="text-gray-700 mt-1">= Client Cost - Internal Cost</p>
                                           <p className="text-gray-500 text-xs mt-0.5 italic">Should be near zero in a well-planned BOQ</p>
                                         </div>
@@ -5124,7 +5143,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           <p className="text-gray-500 text-xs mt-0.5 italic">Target profit from Overhead & Profit %</p>
                                         </div>
                                         <div className="bg-emerald-50 p-2 rounded border-2 border-emerald-200">
-                                          <strong className="text-emerald-900">Negotiable Margins:</strong>
+                                          <strong className="text-emerald-900">Total Margin:</strong>
                                           <p className="text-gray-700 mt-1">= Client Cost - Internal Cost (Total)</p>
                                           <p className="text-gray-500 text-xs mt-0.5 italic">Real profit after all operational costs including O&P</p>
                                         </div>
@@ -5160,7 +5179,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 </div>
                                 <div className="flex justify-between items-center py-2">
                                   <div>
-                                    <span className="text-sm font-semibold text-gray-700">Project Margin</span>
+                                    <span className="text-sm font-semibold text-gray-700">Negotiable Margin</span>
                                     <div className="text-xs text-gray-500 italic">(Excluding planned profit of {costs.totalPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED)</div>
                                   </div>
                                   <span className={`text-lg font-bold ${costs.projectMargin >= 0 ? 'text-green-700' : 'text-red-600'}`}>
@@ -5188,13 +5207,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     <span>{costs.totalPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                   </div>
                                   <div className="flex justify-between font-semibold text-emerald-700">
-                                    <span>Total Negotiable Margins {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
+                                    <span>Total Margin {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
                                     <span>{costs.totalActualProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                   </div>
 
                                   {overallDiscount > 0 && (
                                     <div className="flex justify-between font-semibold text-indigo-700 bg-indigo-50 rounded px-2 py-1">
-                                      <span>Negotiable Margins (After Discount):</span>
+                                      <span>Total Margin (After Discount):</span>
                                       <span className={negotiableMarginAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}>
                                         {negotiableMarginAfterDiscount.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                       </span>
@@ -5268,7 +5287,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               const preliminaryOPAmount = (costAmount * preliminaryOverheadProfitPercentage) / 100;
               const preliminaryTransportAmount = (costAmount * preliminaryTransportPercentage) / 100;
               const preliminaryPlannedProfit = preliminaryOPAmount;
-              const preliminaryTotalInternalCost = preliminaryInternalCost + preliminaryMiscAmount + preliminaryOPAmount + preliminaryTransportAmount;
+              const preliminaryTotalInternalCost = (preliminaryInternalCost ?? 0) + preliminaryMiscAmount + preliminaryOPAmount + preliminaryTransportAmount;
               const preliminaryActualProfit = costAmount - preliminaryTotalInternalCost;
 
               // Combined totals (calculate before using in discount calculations)
@@ -5323,7 +5342,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 </span>
                               </div>
                               <div className="flex justify-between">
-                                <span className="text-gray-600">Negotiable Margins:</span>
+                                <span className="text-gray-600">Total Margin:</span>
                                 <span className={`font-semibold ${totalActualProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                   {totalActualProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                 </span>
@@ -5350,7 +5369,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 <span className="font-semibold text-indigo-600">{preliminaryPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between">
-                                <span className="text-gray-600">Negotiable Margins:</span>
+                                <span className="text-gray-600">Total Margin:</span>
                                 <span className={`font-semibold ${preliminaryActualProfit >= preliminaryPlannedProfit ? 'text-green-600' : 'text-red-600'}`}>
                                   {preliminaryActualProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                 </span>
@@ -5378,7 +5397,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               <p className="text-lg font-bold text-indigo-600">{combinedPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                             </div>
                             <div className="text-center">
-                              <p className="text-xs text-gray-600 mb-1">Negotiable Margins</p>
+                              <p className="text-xs text-gray-600 mb-1">Total Margin</p>
                               <p className={`text-lg font-bold ${combinedActualProfit >= combinedPlannedProfit ? 'text-green-600' : 'text-red-600'}`}>
                                 {combinedActualProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </p>
@@ -5507,7 +5526,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             </span>
                           </div>
                           <div className="flex justify-between items-center pt-2 border-t border-gray-300">
-                            <span className="text-gray-700 font-medium">Negotiable Margins:</span>
+                            <span className="text-gray-700 font-medium">Total Margin:</span>
                             <div className="flex items-center gap-2">
                               <span className="text-gray-500 line-through">
                                 {combinedActualProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}

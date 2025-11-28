@@ -179,7 +179,7 @@ export const generateInternalHTML = (data: BOQData): string => `
           <td class="right" style="color:#c62828;">${Math.round(data.internalCost || 0)}</td>
         </tr>
         <tr>
-          <td>Project Margin ( Excluding planned profit of ${Math.round(data.totalPlannedProfit || 0)} AED)</td>
+          <td>Negotiable Margin ( Excluding planned profit of ${Math.round(data.totalPlannedProfit || 0)} AED)</td>
           <td class="right" style="color:#2e7d32;">${Math.round(data.projectMargin || 0)}</td>
         </tr>
       </table>

@@ -617,7 +617,7 @@ function addCostAnalysis(doc: any, clientCost: number, internalCost: number, pla
       { content: formatCurrency(internalCost), styles: { halign: 'right', textColor: [220, 38, 38] } }
     ],
     [
-      { content: `Project Margin ( Excluding planned profit of ${formatCurrency(plannedProfit)} AED)`, styles: { fontStyle: 'bold', textColor: [0, 128, 0] } },
+      { content: `Negotiable Margin ( Excluding planned profit of ${formatCurrency(plannedProfit)} AED)`, styles: { fontStyle: 'bold', textColor: [0, 128, 0] } },
       { content: formatCurrency(negotiableMargin), styles: { halign: 'right', fontStyle: 'bold', textColor: [0, 128, 0] } }
     ]
   ];
