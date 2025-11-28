@@ -4,7 +4,7 @@ Admin Routes - Comprehensive system administration endpoints
 
 from flask import Blueprint
 from controllers.admin_controller import *
-from controllers.settings_controller import get_settings, update_settings
+from controllers.settings_controller import get_settings, update_settings, upload_signature, delete_signature
 from controllers.auth_controller import jwt_required
 from controllers.admin_controller import (
     get_all_boqs_admin,
@@ -106,6 +106,18 @@ def get_settings_route():
 def update_settings_route():
     """Update system settings"""
     return update_settings()
+
+@admin_routes.route('/settings/signature', methods=['POST'])
+@jwt_required
+def upload_signature_route():
+    """Upload signature image for PDF generation"""
+    return upload_signature()
+
+@admin_routes.route('/settings/signature', methods=['DELETE'])
+@jwt_required
+def delete_signature_route():
+    """Delete signature image"""
+    return delete_signature()
 
 # ============================================
 # BOQ MANAGEMENT ROUTES

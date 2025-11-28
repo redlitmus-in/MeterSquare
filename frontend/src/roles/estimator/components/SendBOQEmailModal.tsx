@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send, Mail, User, MessageSquare, AlertCircle, CheckCircle, Download, FileText, FileSpreadsheet, Edit3, Eye, EyeOff, FileCheck } from 'lucide-react';
+import { X, Send, Mail, User, MessageSquare, AlertCircle, CheckCircle, Download, FileText, FileSpreadsheet, Edit3, Eye, EyeOff, FileCheck, PenTool } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -53,6 +53,8 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
 
   // Cover page state
   const [showCoverPageEditor, setShowCoverPageEditor] = useState(false);
+  // Signature state - estimator can choose to include admin signature from settings
+  const [includeSignature, setIncludeSignature] = useState(false);
   const [coverPageData, setCoverPageData] = useState({
     reference_number: '',
     date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
@@ -266,7 +268,9 @@ MeterSquare Interiors LLC`;
           formats: selectedFormats,
           custom_email_body: emailTemplate.trim() || undefined,
           // Include cover page data if any field is filled
-          cover_page: (coverPageData.reference_number || coverPageData.subject) ? coverPageData : undefined
+          cover_page: (coverPageData.reference_number || coverPageData.subject) ? coverPageData : undefined,
+          // Include signature from admin settings if checkbox is checked
+          include_signature: includeSignature
         });
 
         // Track sent/failed counts from response
@@ -324,8 +328,9 @@ MeterSquare Interiors LLC`;
     // Reset template editor
     setShowTemplateEditor(false);
     setEmailTemplate('');
-    // Reset cover page editor
+    // Reset cover page editor and signature checkbox
     setShowCoverPageEditor(false);
+    setIncludeSignature(false);
     setCoverPageData({
       reference_number: '',
       date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
@@ -839,6 +844,32 @@ MeterSquare Interiors LLC`;
                                       />
                                     </div>
                                   </div>
+
+                                  {/* Include Signature Checkbox */}
+                                  <div className="mt-3 p-3 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-200">
+                                    <div className="flex items-center space-x-3">
+                                      <Checkbox
+                                        id="include-signature"
+                                        checked={includeSignature}
+                                        onCheckedChange={(checked) => setIncludeSignature(checked === true)}
+                                        disabled={isSending}
+                                        className="data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600"
+                                      />
+                                      <label
+                                        htmlFor="include-signature"
+                                        className="flex items-center gap-2 cursor-pointer"
+                                      >
+                                        <PenTool className="w-4 h-4 text-indigo-600" />
+                                        <div>
+                                          <p className="font-medium text-gray-900 text-sm">Include Authorized Signature</p>
+                                          <p className="text-xs text-gray-500">Add the company signature to the PDF quotation</p>
+                                        </div>
+                                      </label>
+                                    </div>
+                                    {!includeSignature && (
+                                      <p className="text-xs text-gray-400 mt-2 ml-7">Leave unchecked if client will sign manually</p>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             ) : (
@@ -847,6 +878,7 @@ MeterSquare Interiors LLC`;
                                   <p><strong>Ref:</strong> {coverPageData.reference_number || 'Not set'}</p>
                                   <p><strong>To:</strong> {coverPageData.recipient_name}, {coverPageData.client_company || 'Client'}</p>
                                   <p><strong>Subject:</strong> {coverPageData.subject || 'Not set'}</p>
+                                  <p><strong>Signature:</strong> {includeSignature ? <span className="text-green-600">Will be included</span> : <span className="text-gray-400">Manual signing</span>}</p>
                                 </div>
                                 <p className="text-xs text-green-600 mt-2">Click "Edit" to customize cover page details</p>
                               </div>
@@ -949,7 +981,7 @@ MeterSquare Interiors LLC`;
                                 onClick={async () => {
                                   try {
                                     showLoading('Generating PDF preview...');
-                                    const pdfUrl = await previewClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined);
+                                    const pdfUrl = await previewClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined, includeSignature);
                                     setPreviewPDFUrl(pdfUrl);
                                     setShowPDFPreview(true);
                                     dismissToast();
@@ -992,7 +1024,7 @@ MeterSquare Interiors LLC`;
                               onClick={async () => {
                                 try {
                                   showLoading('Generating PDF file...');
-                                  await downloadClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined);
+                                  await downloadClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined, includeSignature);
                                   dismissToast();
                                   showSuccess('PDF file downloaded successfully');
                                 } catch (error) {

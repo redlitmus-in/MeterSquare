@@ -176,6 +176,18 @@ export const adminApi = {
     return response.data;
   },
 
+  // Upload signature image (base64)
+  async uploadSignature(signatureImage: string): Promise<{ success: boolean; message: string; signatureEnabled: boolean }> {
+    const response = await axios.post(`${API_URL}/admin/settings/signature`, { signatureImage }, getAuthHeaders());
+    return response.data;
+  },
+
+  // Delete signature image
+  async deleteSignature(): Promise<{ success: boolean; message: string }> {
+    const response = await axios.delete(`${API_URL}/admin/settings/signature`, getAuthHeaders());
+    return response.data;
+  },
+
   // ============================================
   // BOQ MANAGEMENT
   // ============================================
@@ -316,6 +328,20 @@ export interface SystemSettings {
   autoAssignProjects: boolean;
   requireApproval: boolean;
   budgetAlertThreshold: number;
+
+  // Document/Signature Settings
+  signatureImage?: string | null;
+  signatureEnabled?: boolean;
+
+  // LPO Signature Settings
+  mdSignatureImage?: string | null;
+  mdName?: string;
+  tdSignatureImage?: string | null;
+  tdName?: string;
+  companyStampImage?: string | null;
+  companyTrn?: string;
+  companyFax?: string;
+  defaultPaymentTerms?: string;
 }
 
 export interface BOQItem {

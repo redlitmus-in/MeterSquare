@@ -10,6 +10,7 @@ from models.user import User
 from utils.authentication import jwt_required
 import logging
 from datetime import datetime
+import base64
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +98,21 @@ def get_settings():
                 "defaultProjectDuration": settings.default_project_duration,
                 "autoAssignProjects": settings.auto_assign_projects,
                 "requireApproval": settings.require_approval,
-                "budgetAlertThreshold": settings.budget_alert_threshold
+                "budgetAlertThreshold": settings.budget_alert_threshold,
+
+                # Signature Settings
+                "signatureImage": settings.signature_image if hasattr(settings, 'signature_image') else None,
+                "signatureEnabled": settings.signature_enabled if hasattr(settings, 'signature_enabled') else False,
+
+                # LPO Signature Settings
+                "mdSignatureImage": getattr(settings, 'md_signature_image', None),
+                "mdName": getattr(settings, 'md_name', 'Managing Director') or 'Managing Director',
+                "tdSignatureImage": getattr(settings, 'td_signature_image', None),
+                "tdName": getattr(settings, 'td_name', 'Technical Director') or 'Technical Director',
+                "companyStampImage": getattr(settings, 'company_stamp_image', None),
+                "companyTrn": getattr(settings, 'company_trn', '') or '',
+                "companyFax": getattr(settings, 'company_fax', '') or '',
+                "defaultPaymentTerms": getattr(settings, 'default_payment_terms', '100% after delivery') or '100% after delivery'
             }
         }), 200
 
@@ -186,6 +201,30 @@ def update_settings():
         if "budgetAlertThreshold" in data:
             settings.budget_alert_threshold = data["budgetAlertThreshold"]
 
+        # Signature Settings (for BOQ PDFs)
+        if "signatureImage" in data:
+            settings.signature_image = data["signatureImage"]
+        if "signatureEnabled" in data:
+            settings.signature_enabled = data["signatureEnabled"]
+
+        # LPO Signature Settings
+        if "mdSignatureImage" in data:
+            settings.md_signature_image = data["mdSignatureImage"]
+        if "mdName" in data:
+            settings.md_name = data["mdName"]
+        if "tdSignatureImage" in data:
+            settings.td_signature_image = data["tdSignatureImage"]
+        if "tdName" in data:
+            settings.td_name = data["tdName"]
+        if "companyStampImage" in data:
+            settings.company_stamp_image = data["companyStampImage"]
+        if "companyTrn" in data:
+            settings.company_trn = data["companyTrn"]
+        if "companyFax" in data:
+            settings.company_fax = data["companyFax"]
+        if "defaultPaymentTerms" in data:
+            settings.default_payment_terms = data["defaultPaymentTerms"]
+
         settings.updated_at = datetime.utcnow()
         db.session.commit()
 
@@ -227,7 +266,21 @@ def update_settings():
                 "defaultProjectDuration": settings.default_project_duration,
                 "autoAssignProjects": settings.auto_assign_projects,
                 "requireApproval": settings.require_approval,
-                "budgetAlertThreshold": settings.budget_alert_threshold
+                "budgetAlertThreshold": settings.budget_alert_threshold,
+
+                # Signature Settings
+                "signatureImage": settings.signature_image if hasattr(settings, 'signature_image') else None,
+                "signatureEnabled": settings.signature_enabled if hasattr(settings, 'signature_enabled') else False,
+
+                # LPO Signature Settings
+                "mdSignatureImage": getattr(settings, 'md_signature_image', None),
+                "mdName": getattr(settings, 'md_name', 'Managing Director') or 'Managing Director',
+                "tdSignatureImage": getattr(settings, 'td_signature_image', None),
+                "tdName": getattr(settings, 'td_name', 'Technical Director') or 'Technical Director',
+                "companyStampImage": getattr(settings, 'company_stamp_image', None),
+                "companyTrn": getattr(settings, 'company_trn', '') or '',
+                "companyFax": getattr(settings, 'company_fax', '') or '',
+                "defaultPaymentTerms": getattr(settings, 'default_payment_terms', '100% after delivery') or '100% after delivery'
             }
         }), 200
 
@@ -235,3 +288,154 @@ def update_settings():
         db.session.rollback()
         log.error(f"Error updating settings: {str(e)}")
         return jsonify({"error": f"Failed to update settings: {str(e)}"}), 500
+
+
+@jwt_required
+def upload_signature():
+    """
+    Upload signature image (admin only)
+    Accepts base64 encoded image or file upload
+    """
+    try:
+        current_user = g.get("user")
+
+        # Verify admin role
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        # Get settings
+        settings = SystemSettings.query.first()
+        if not settings:
+            return jsonify({"error": "Settings not found. Please initialize settings first."}), 404
+
+        # Check if it's a file upload or JSON with base64
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # File upload
+            if 'signature' not in request.files:
+                return jsonify({"error": "No signature file provided"}), 400
+
+            file = request.files['signature']
+            if file.filename == '':
+                return jsonify({"error": "No file selected"}), 400
+
+            # Validate file type
+            allowed_extensions = {'png', 'jpg', 'jpeg', 'gif'}
+            file_ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+            if file_ext not in allowed_extensions:
+                return jsonify({"error": f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"}), 400
+
+            # Read and convert to base64
+            file_content = file.read()
+            base64_image = base64.b64encode(file_content).decode('utf-8')
+            mime_type = f"image/{file_ext}" if file_ext != 'jpg' else 'image/jpeg'
+            signature_data = f"data:{mime_type};base64,{base64_image}"
+
+        else:
+            # JSON with base64 image
+            data = request.get_json()
+            if not data or 'signatureImage' not in data:
+                return jsonify({"error": "No signature image provided"}), 400
+
+            signature_data = data.get('signatureImage')
+
+            # Validate base64 format
+            if not signature_data or not signature_data.startswith('data:image/'):
+                return jsonify({"error": "Invalid image format. Expected base64 data URL"}), 400
+
+        # Save signature to database
+        settings.signature_image = signature_data
+        settings.signature_enabled = True  # Auto-enable when uploading
+        settings.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        log.info(f"Signature uploaded by admin user {current_user.get('user_id')}")
+
+        return jsonify({
+            "success": True,
+            "message": "Signature uploaded successfully",
+            "signatureEnabled": True
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error uploading signature: {str(e)}")
+        return jsonify({"error": f"Failed to upload signature: {str(e)}"}), 500
+
+
+@jwt_required
+def delete_signature():
+    """
+    Delete signature image (admin only)
+    """
+    try:
+        current_user = g.get("user")
+
+        # Verify admin role
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        # Get settings
+        settings = SystemSettings.query.first()
+        if not settings:
+            return jsonify({"error": "Settings not found"}), 404
+
+        # Clear signature
+        settings.signature_image = None
+        settings.signature_enabled = False
+        settings.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        log.info(f"Signature deleted by admin user {current_user.get('user_id')}")
+
+        return jsonify({
+            "success": True,
+            "message": "Signature deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error deleting signature: {str(e)}")
+        return jsonify({"error": f"Failed to delete signature: {str(e)}"}), 500
+
+
+def get_signature_for_pdf():
+    """
+    Get signature image for PDF generation (internal use)
+    Returns the signature image data if enabled, None otherwise
+    """
+    try:
+        settings = SystemSettings.query.first()
+        if not settings:
+            return None
+
+        if not getattr(settings, 'signature_enabled', False):
+            return None
+
+        return getattr(settings, 'signature_image', None)
+
+    except Exception as e:
+        log.error(f"Error getting signature for PDF: {str(e)}")
+        return None
+
+
+def get_signatures_for_pdf():
+    """
+    Get both MD and authorized signature images for PDF generation (internal use)
+    Returns dict with md_signature and authorized_signature if enabled, None values otherwise
+    """
+    try:
+        settings = SystemSettings.query.first()
+        if not settings:
+            return {'md_signature': None, 'authorized_signature': None}
+
+        if not getattr(settings, 'signature_enabled', False):
+            return {'md_signature': None, 'authorized_signature': None}
+
+        return {
+            'md_signature': getattr(settings, 'md_signature_image', None),
+            'authorized_signature': getattr(settings, 'signature_image', None)
+        }
+
+    except Exception as e:
+        log.error(f"Error getting signatures for PDF: {str(e)}")
+        return {'md_signature': None, 'authorized_signature': None}

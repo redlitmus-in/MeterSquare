@@ -12,6 +12,7 @@ from models.inventory import InventoryMaterial, InternalMaterialRequest
 from config.logging import get_logger
 from datetime import datetime
 import os
+import json
 from supabase import create_client, Client
 from utils.comprehensive_notification_service import notification_service
 
@@ -956,9 +957,11 @@ def get_buyer_pending_purchases():
                 cr.vendor_selection_status == 'pending_td_approval'
             )
 
-            # Get vendor phone from Vendor table if vendor is selected
+            # Get vendor details from Vendor table if vendor is selected
             vendor_phone = None
             vendor_contact_person = None
+            vendor_trn = None
+            vendor_email = None
             if cr.selected_vendor_id:
                 from models.vendor import Vendor
                 vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
@@ -969,6 +972,8 @@ def get_buyer_pending_purchases():
                     elif vendor.phone:
                         vendor_phone = vendor.phone
                     vendor_contact_person = vendor.contact_person_name
+                    vendor_trn = vendor.gst_number or ""
+                    vendor_email = vendor.email or ""
 
             # Check if materials have been requested from store
             store_requests = InternalMaterialRequest.query.filter_by(cr_id=cr.cr_id).all()
@@ -1051,6 +1056,8 @@ def get_buyer_pending_purchases():
                 "vendor_name": cr.selected_vendor_name,
                 "vendor_phone": vendor_phone,
                 "vendor_contact_person": vendor_contact_person,
+                "vendor_trn": vendor_trn,
+                "vendor_email": vendor_email,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
                 "vendor_selection_status": cr.vendor_selection_status,  # 'pending_td_approval', 'approved', 'rejected'
                 "vendor_email_sent": cr.vendor_email_sent or False,
@@ -1201,9 +1208,11 @@ def get_buyer_completed_purchases():
                 cr.vendor_selection_status == 'pending_td_approval'
             )
 
-            # Get vendor phone from Vendor table if vendor is selected
+            # Get vendor details from Vendor table if vendor is selected
             vendor_phone = None
             vendor_contact_person = None
+            vendor_trn = None
+            vendor_email = None
             if cr.selected_vendor_id:
                 from models.vendor import Vendor
                 vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
@@ -1214,6 +1223,8 @@ def get_buyer_completed_purchases():
                     elif vendor.phone:
                         vendor_phone = vendor.phone
                     vendor_contact_person = vendor.contact_person_name
+                    vendor_trn = vendor.gst_number or ""
+                    vendor_email = vendor.email or ""
 
             completed_purchases.append({
                 "cr_id": cr.cr_id,
@@ -1243,6 +1254,8 @@ def get_buyer_completed_purchases():
                 "vendor_name": cr.selected_vendor_name,
                 "vendor_phone": vendor_phone,
                 "vendor_contact_person": vendor_contact_person,
+                "vendor_trn": vendor_trn,
+                "vendor_email": vendor_email,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
             })
 
@@ -4163,7 +4176,7 @@ def preview_po_child_vendor_email(po_child_id):
 
 
 def send_vendor_email(cr_id):
-    """Send purchase order email to vendor"""
+    """Send purchase order email to vendor with optional LPO PDF attachment"""
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
@@ -4171,11 +4184,14 @@ def send_vendor_email(cr_id):
 
         data = request.get_json()
         vendor_email = data.get('vendor_email')
-        custom_email_body = data.get('custom_email_body')
         custom_email_body = data.get('custom_email_body')  # Optional custom HTML body
         vendor_company_name = data.get('vendor_company_name')  # Update company name
         vendor_contact_person = data.get('vendor_contact_person')  # Update contact person
         vendor_phone = data.get('vendor_phone')  # Update phone
+
+        # LPO PDF options
+        include_lpo_pdf = data.get('include_lpo_pdf', False)  # Whether to attach LPO PDF
+        lpo_data = data.get('lpo_data')  # Editable LPO data from frontend
 
         if not vendor_email:
             return jsonify({"error": "Vendor email is required"}), 400
@@ -4367,6 +4383,25 @@ def send_vendor_email(cr_id):
 
             except Exception as e:
                 log.error(f"Error processing attachments for CR-{cr_id}: {str(e)}")
+
+        # Generate and attach LPO PDF if requested
+        if include_lpo_pdf and lpo_data:
+            try:
+                from utils.lpo_pdf_generator import LPOPDFGenerator
+                generator = LPOPDFGenerator()
+                pdf_bytes = generator.generate_lpo_pdf(lpo_data)
+
+                # Create filename for LPO PDF
+                project_name_clean = project.project_name.replace(' ', '_')[:20] if project else 'Project'
+                lpo_filename = f"LPO-{cr_id}-{project_name_clean}.pdf"
+
+                # Add LPO PDF to attachments
+                attachments.append((lpo_filename, pdf_bytes, 'application/pdf'))
+                log.info(f"LPO PDF generated and attached: {lpo_filename}")
+            except Exception as e:
+                log.error(f"Error generating LPO PDF for CR-{cr_id}: {str(e)}")
+                # Continue sending email even if LPO PDF generation fails
+
         # Continue sending email even if attachments fail
         # Send email to vendor(s) (with optional custom body)
         # ✅ PERFORMANCE FIX: Use async email sending (15s → 0.1s response time)
@@ -6105,3 +6140,236 @@ def update_vendor_price(vendor_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to update vendor price: {str(e)}"}), 500
+
+
+# ============================================================================
+# LPO PDF Generation Functions
+# ============================================================================
+
+def get_lpo_settings():
+    """Get LPO settings (signatures, company info) for PDF generation"""
+    try:
+        from models.system_settings import SystemSettings
+
+        settings = SystemSettings.query.first()
+        if not settings:
+            return jsonify({
+                "success": True,
+                "settings": {
+                    "company_name": "Meter Square Interiors LLC",
+                    "company_email": "",
+                    "company_phone": "",
+                    "company_fax": "",
+                    "company_trn": "",
+                    "company_address": "",
+                    "md_name": "Managing Director",
+                    "md_signature_image": None,
+                    "td_name": "Technical Director",
+                    "td_signature_image": None,
+                    "company_stamp_image": None,
+                    "default_payment_terms": "100% after delivery",
+                    "lpo_header_image": None
+                }
+            }), 200
+
+        return jsonify({
+            "success": True,
+            "settings": {
+                "company_name": settings.company_name or "Meter Square Interiors LLC",
+                "company_email": settings.company_email or "",
+                "company_phone": settings.company_phone or "",
+                "company_fax": getattr(settings, 'company_fax', '') or "",
+                "company_trn": getattr(settings, 'company_trn', '') or "",
+                "company_address": settings.company_address or "",
+                "md_name": getattr(settings, 'md_name', 'Managing Director') or "Managing Director",
+                "md_signature_image": getattr(settings, 'md_signature_image', None),
+                "td_name": getattr(settings, 'td_name', 'Technical Director') or "Technical Director",
+                "td_signature_image": getattr(settings, 'td_signature_image', None),
+                "company_stamp_image": getattr(settings, 'company_stamp_image', None),
+                "default_payment_terms": getattr(settings, 'default_payment_terms', '100% after delivery') or "100% after delivery",
+                "lpo_header_image": getattr(settings, 'lpo_header_image', None)
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error getting LPO settings: {str(e)}")
+        return jsonify({"error": f"Failed to get LPO settings: {str(e)}"}), 500
+
+
+def preview_lpo_pdf(cr_id):
+    """Preview LPO PDF data before generation - returns editable data"""
+    try:
+        from models.system_settings import SystemSettings
+        from models.vendor import Vendor
+
+        current_user = g.user
+        buyer_id = current_user['user_id']
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Get vendor details
+        vendor = None
+        if cr.selected_vendor_id:
+            vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
+
+        # Get project details
+        project = Project.query.get(cr.project_id)
+
+        # Get buyer details
+        buyer = User.query.filter_by(user_id=buyer_id).first()
+
+        # Get system settings
+        settings = SystemSettings.query.first()
+
+        # Process materials with negotiated prices
+        materials_list, cr_total = process_materials_with_negotiated_prices(cr)
+
+        # Calculate totals
+        subtotal = 0
+        items = []
+        for i, material in enumerate(materials_list, 1):
+            # Use negotiated price if available, otherwise use original unit price
+            rate = material.get('negotiated_price') if material.get('negotiated_price') is not None else material.get('unit_price', 0)
+            qty = material.get('quantity', 0)
+            amount = float(qty) * float(rate)
+            subtotal += amount
+
+            items.append({
+                "sl_no": i,
+                "description": material.get('material_name', '') or material.get('sub_item_name', ''),
+                "qty": qty,
+                "unit": material.get('unit', 'Nos'),
+                "rate": round(rate, 2),
+                "amount": round(amount, 2)
+            })
+
+        vat_percent = 5
+        vat_amount = subtotal * (vat_percent / 100)
+        grand_total = subtotal + vat_amount
+
+        # Default company TRN
+        DEFAULT_COMPANY_TRN = "100223723600003"
+
+        # Get vendor phone with code
+        vendor_phone = ""
+        if vendor:
+            if hasattr(vendor, 'phone_code') and vendor.phone_code and vendor.phone:
+                vendor_phone = f"{vendor.phone_code} {vendor.phone}"
+            elif vendor.phone:
+                vendor_phone = vendor.phone
+
+        # Get vendor TRN (try trn field first, then gst_number)
+        vendor_trn = ""
+        if vendor:
+            vendor_trn = getattr(vendor, 'trn', '') or getattr(vendor, 'gst_number', '') or ""
+
+        # Build preview data
+        lpo_preview = {
+            "vendor": {
+                "company_name": vendor.company_name if vendor else "",
+                "contact_person": vendor.contact_person_name if vendor else "",
+                "phone": vendor_phone,
+                "fax": getattr(vendor, 'fax', '') if vendor else "",
+                "email": vendor.email if vendor else "",
+                "trn": vendor_trn,
+                "project": project.project_name if project else "",
+                "subject": cr.item_name or cr.justification or ""
+            },
+            "company": {
+                "name": settings.company_name if settings else "Meter Square Interiors LLC",
+                "contact_person": buyer.full_name if buyer else "Procurement Team",
+                "division": "Admin",
+                "phone": settings.company_phone if settings else "",
+                "fax": getattr(settings, 'company_fax', '') if settings else "",
+                "email": settings.company_email if settings else "",
+                "trn": getattr(settings, 'company_trn', '') or DEFAULT_COMPANY_TRN if settings else DEFAULT_COMPANY_TRN
+            },
+            "lpo_info": {
+                "lpo_number": f"MS/PO/{cr.cr_id}",
+                "lpo_date": datetime.now().strftime('%d.%m.%Y'),
+                "quotation_ref": ""
+            },
+            "items": items,
+            "totals": {
+                "subtotal": round(subtotal, 2),
+                "vat_percent": vat_percent,
+                "vat_amount": round(vat_amount, 2),
+                "grand_total": round(grand_total, 2)
+            },
+            "terms": {
+                "payment_terms": getattr(settings, 'default_payment_terms', '100% after delivery') if settings else "100% after delivery",
+                "completion_terms": "As agreed",
+                "general_terms": json.loads(getattr(settings, 'lpo_general_terms', '[]') or '[]') if settings else [],
+                "payment_terms_list": json.loads(getattr(settings, 'lpo_payment_terms_list', '[]') or '[]') if settings else []
+            },
+            "signatures": {
+                "md_name": getattr(settings, 'md_name', 'Managing Director') if settings else "Managing Director",
+                "md_signature": getattr(settings, 'md_signature_image', None) if settings else None,
+                "td_name": getattr(settings, 'td_name', 'Technical Director') if settings else "Technical Director",
+                "td_signature": getattr(settings, 'td_signature_image', None) if settings else None,
+                "stamp_image": getattr(settings, 'company_stamp_image', None) if settings else None,
+                "is_system_signature": True  # Mark as system-generated signature
+            },
+            "header_image": getattr(settings, 'lpo_header_image', None) if settings else None
+        }
+
+        return jsonify({
+            "success": True,
+            "lpo_data": lpo_preview,
+            "cr_id": cr_id
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error previewing LPO PDF: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to preview LPO PDF: {str(e)}"}), 500
+
+
+def generate_lpo_pdf(cr_id):
+    """Generate LPO PDF with editable data from frontend"""
+    try:
+        from utils.lpo_pdf_generator import LPOPDFGenerator
+        from flask import Response
+
+        current_user = g.user
+
+        # Get the change request to verify it exists
+        cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Get LPO data from request body (editable by buyer)
+        data = request.get_json()
+        lpo_data = data.get('lpo_data')
+
+        if not lpo_data:
+            return jsonify({"error": "LPO data is required"}), 400
+
+        # Generate PDF
+        generator = LPOPDFGenerator()
+        pdf_bytes = generator.generate_lpo_pdf(lpo_data)
+
+        # Get project for filename
+        project = Project.query.get(cr.project_id)
+        project_name = project.project_name.replace(' ', '_')[:20] if project else 'Project'
+        filename = f"LPO-{cr_id}-{project_name}.pdf"
+
+        # Return PDF as downloadable file
+        return Response(
+            pdf_bytes,
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Type': 'application/pdf'
+            }
+        )
+
+    except Exception as e:
+        log.error(f"Error generating LPO PDF: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to generate LPO PDF: {str(e)}"}), 500

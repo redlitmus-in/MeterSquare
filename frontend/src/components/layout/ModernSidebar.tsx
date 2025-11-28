@@ -24,7 +24,8 @@ import {
   ExclamationTriangleIcon,
   ClockIcon,
   UserGroupIcon,
-  Cog6ToothIcon as Settings
+  Cog6ToothIcon as Settings,
+  PencilSquareIcon as PencilIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -39,7 +40,8 @@ import {
   CubeIcon as CubeSolid,
   ExclamationTriangleIcon as ExclamationTriangleSolid,
   UserIcon as UserCheck,
-  CheckCircleIcon as CheckCircleSolid
+  CheckCircleIcon as CheckCircleSolid,
+  PencilSquareIcon as PencilSolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
@@ -523,7 +525,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
-    // Admin specific navigation items - Only User Management
+    // Admin specific navigation items - User Management and Signature Upload
     // Admin accesses vendor section through role switching (viewing as Technical Director)
     const adminItems: NavigationItem[] = [
       {
@@ -532,6 +534,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: UsersIcon,
         iconSolid: UsersSolid,
         color: 'text-[#243d8a]'
+      },
+      {
+        name: 'Signature Upload',
+        href: buildPath('/signature-upload'),
+        icon: PencilIcon,
+        iconSolid: PencilSolid,
+        color: 'text-indigo-600'
       }
     ];
 

@@ -59,20 +59,25 @@ export const downloadInternalBOQPDF = async (boqId: number): Promise<void> => {
 /**
  * Download Client BOQ PDF (clean view)
  * For client presentation - shows only items, sub-items, and final prices
+ * @param boqId - BOQ ID
+ * @param termsText - Optional custom terms text
+ * @param coverPage - Optional cover page data
+ * @param includeSignature - Whether to include admin signature from settings
  */
-export const downloadClientBOQPDF = async (boqId: number, termsText?: string, coverPage?: any): Promise<void> => {
+export const downloadClientBOQPDF = async (boqId: number, termsText?: string, coverPage?: any, includeSignature?: boolean): Promise<void> => {
   try {
     const token = localStorage.getItem('access_token');
 
     let response;
 
-    // If coverPage is provided, use POST request
-    if (coverPage) {
+    // If coverPage is provided or signature is requested, use POST request
+    if (coverPage || includeSignature) {
       response = await axios.post(
         `${API_URL}/boq/download/client/${boqId}`,
         {
           cover_page: coverPage,
-          terms_text: termsText
+          terms_text: termsText,
+          include_signature: includeSignature || false
         },
         {
           headers: {
@@ -134,18 +139,23 @@ export const downloadClientBOQPDF = async (boqId: number, termsText?: string, co
 /**
  * Preview Client BOQ PDF in modal/new tab (with custom terms)
  * Returns blob URL for display in iframe or new tab
+ * @param boqId - BOQ ID
+ * @param termsText - Optional custom terms text
+ * @param coverPage - Optional cover page data
+ * @param includeSignature - Whether to include admin signature from settings
  */
-export const previewClientBOQPDF = async (boqId: number, termsText?: string, coverPage?: any): Promise<string> => {
+export const previewClientBOQPDF = async (boqId: number, termsText?: string, coverPage?: any, includeSignature?: boolean): Promise<string> => {
   try {
     const token = localStorage.getItem('access_token');
 
-    // If coverPage is provided, use POST request
-    if (coverPage) {
+    // If coverPage is provided or signature is requested, use POST request
+    if (coverPage || includeSignature) {
       const response = await axios.post(
         `${API_URL}/boq/preview/client/${boqId}`,
         {
           cover_page: coverPage,
-          terms_text: termsText
+          terms_text: termsText,
+          include_signature: includeSignature || false
         },
         {
           headers: {

@@ -109,6 +109,8 @@ export interface Purchase {
   vendor_name?: string | null;
   vendor_phone?: string | null;
   vendor_contact_person?: string | null;
+  vendor_trn?: string | null;
+  vendor_email?: string | null;
   vendor_selection_pending_td_approval?: boolean;
   vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
   vendor_email_sent?: boolean;
@@ -200,6 +202,108 @@ export interface SendVendorEmailRequest {
   vendor_company_name?: string;
   vendor_contact_person?: string;
   vendor_phone?: string;
+  include_lpo_pdf?: boolean;
+  lpo_data?: LPOData;
+}
+
+// LPO PDF Data Types
+export interface LPOVendorData {
+  company_name: string;
+  contact_person: string;
+  phone: string;
+  fax: string;
+  email: string;
+  trn: string;
+  project: string;
+  subject: string;
+}
+
+export interface LPOCompanyData {
+  name: string;
+  contact_person: string;
+  division: string;
+  phone: string;
+  fax: string;
+  email: string;
+  trn: string;
+}
+
+export interface LPOInfo {
+  lpo_number: string;
+  lpo_date: string;
+  quotation_ref: string;
+}
+
+export interface LPOItem {
+  sl_no: number;
+  description: string;
+  qty: number;
+  unit: string;
+  rate: number;
+  amount: number;
+}
+
+export interface LPOTotals {
+  subtotal: number;
+  vat_percent: number;
+  vat_amount: number;
+  grand_total: number;
+}
+
+export interface LPOTerms {
+  payment_terms: string;
+  completion_terms: string;
+  general_terms?: string[];  // Array of general terms and conditions
+  payment_terms_list?: string[];  // Array of payment terms like "50% Advance", "40% On Delivery"
+}
+
+export interface LPOSignatures {
+  md_name: string;
+  md_signature: string | null;
+  td_name: string;
+  td_signature: string | null;
+  stamp_image: string | null;
+  is_system_signature?: boolean;  // Flag to show "System Generated" text on PDF
+}
+
+export interface LPOData {
+  vendor: LPOVendorData;
+  company: LPOCompanyData;
+  lpo_info: LPOInfo;
+  items: LPOItem[];
+  totals: LPOTotals;
+  terms: LPOTerms;
+  signatures: LPOSignatures;
+  header_image?: string | null;
+}
+
+export interface LPOSettings {
+  company_name: string;
+  company_email: string;
+  company_phone: string;
+  company_fax: string;
+  company_trn: string;
+  company_address: string;
+  md_name: string;
+  md_signature_image: string | null;
+  td_name: string;
+  td_signature_image: string | null;
+  company_stamp_image: string | null;
+  default_payment_terms: string;
+  lpo_header_image: string | null;
+}
+
+export interface LPOSettingsResponse {
+  success: boolean;
+  settings: LPOSettings;
+  error?: string;
+}
+
+export interface LPOPreviewResponse {
+  success: boolean;
+  lpo_data: LPOData;
+  cr_id: number;
+  error?: string;
 }
 
 export interface SendVendorEmailResponse {
@@ -560,6 +664,13 @@ class BuyerService {
       if (data.vendor_phone) {
         payload.vendor_phone = data.vendor_phone;
       }
+      // LPO PDF options
+      if (data.include_lpo_pdf) {
+        payload.include_lpo_pdf = data.include_lpo_pdf;
+      }
+      if (data.lpo_data) {
+        payload.lpo_data = data.lpo_data;
+      }
 
       const response = await axios.post<SendVendorEmailResponse>(
         `${API_URL}/buyer/purchase/${crId}/send-vendor-email`,
@@ -592,6 +703,77 @@ class BuyerService {
         throw new Error(errorMsg);
       }
       throw new Error(error.response?.data?.error || error.response?.data?.message || 'Failed to send email to vendor');
+    }
+  }
+
+  // Get LPO settings (signatures, company info) for PDF generation
+  async getLPOSettings(): Promise<LPOSettingsResponse> {
+    try {
+      const response = await axios.get<LPOSettingsResponse>(
+        `${API_URL}/buyer/lpo-settings`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to get LPO settings');
+    } catch (error: any) {
+      console.error('Error getting LPO settings:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to get LPO settings');
+    }
+  }
+
+  // Preview LPO PDF data (get editable data before generation)
+  async previewLPOPdf(crId: number): Promise<LPOPreviewResponse> {
+    try {
+      const response = await axios.post<LPOPreviewResponse>(
+        `${API_URL}/buyer/purchase/${crId}/preview-lpo-pdf`,
+        {},
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to preview LPO PDF');
+    } catch (error: any) {
+      console.error('Error previewing LPO PDF:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to preview LPO PDF');
+    }
+  }
+
+  // Generate LPO PDF (returns blob for download)
+  async generateLPOPdf(crId: number, lpoData: LPOData): Promise<Blob> {
+    try {
+      const response = await axios.post(
+        `${API_URL}/buyer/purchase/${crId}/generate-lpo-pdf`,
+        { lpo_data: lpoData },
+        {
+          headers: this.getAuthHeaders(),
+          responseType: 'blob'
+        }
+      );
+
+      return response.data;
+    } catch (error: any) {
+      console.error('Error generating LPO PDF:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to generate LPO PDF');
     }
   }
 

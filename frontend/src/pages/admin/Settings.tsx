@@ -3,7 +3,7 @@
  * System configurations, preferences, and administrative settings
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Settings as SettingsIcon,
@@ -22,7 +22,10 @@ import {
   Eye,
   EyeOff,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  PenTool,
+  Upload,
+  Trash2
 } from 'lucide-react';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -63,13 +66,29 @@ interface SettingsData {
   autoAssignProjects: boolean;
   requireApproval: boolean;
   budgetAlertThreshold: number;
+
+  // Document/Signature Settings
+  signatureImage: string | null;
+  signatureEnabled: boolean;
+
+  // LPO Signature Settings
+  mdSignatureImage: string | null;
+  mdName: string;
+  tdSignatureImage: string | null;
+  tdName: string;
+  companyStampImage: string | null;
+  companyTrn: string;
+  companyFax: string;
+  defaultPaymentTerms: string;
 }
 
 const AdminSettings: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'notifications' | 'security' | 'system' | 'projects'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'notifications' | 'security' | 'system' | 'projects' | 'documents'>('general');
   const [showApiKey, setShowApiKey] = useState(false);
+  const [isUploadingSignature, setIsUploadingSignature] = useState(false);
+  const signatureInputRef = useRef<HTMLInputElement>(null);
 
   const [settings, setSettings] = useState<SettingsData>({
     // General
@@ -105,7 +124,21 @@ const AdminSettings: React.FC = () => {
     defaultProjectDuration: 90,
     autoAssignProjects: false,
     requireApproval: true,
-    budgetAlertThreshold: 80
+    budgetAlertThreshold: 80,
+
+    // Documents/Signature
+    signatureImage: null,
+    signatureEnabled: false,
+
+    // LPO Signatures
+    mdSignatureImage: null,
+    mdName: 'Managing Director',
+    tdSignatureImage: null,
+    tdName: 'Technical Director',
+    companyStampImage: null,
+    companyTrn: '',
+    companyFax: '',
+    defaultPaymentTerms: '100% after delivery'
   });
 
   useEffect(() => {
@@ -141,12 +174,72 @@ const AdminSettings: React.FC = () => {
     }
   };
 
+  // Handle signature file upload
+  const handleSignatureUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      showError('Please select an image file (PNG, JPG, etc.)');
+      return;
+    }
+
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      showError('Signature image should be less than 2MB');
+      return;
+    }
+
+    // Convert to base64
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64Image = reader.result as string;
+      setIsUploadingSignature(true);
+      try {
+        await adminApi.uploadSignature(base64Image);
+        setSettings(prev => ({ ...prev, signatureImage: base64Image, signatureEnabled: true }));
+        showSuccess('Signature uploaded successfully');
+      } catch (error: any) {
+        showError('Failed to upload signature', {
+          description: error.response?.data?.error || error.message
+        });
+      } finally {
+        setIsUploadingSignature(false);
+      }
+    };
+    reader.onerror = () => {
+      showError('Failed to read signature file');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle signature delete
+  const handleDeleteSignature = async () => {
+    setIsUploadingSignature(true);
+    try {
+      await adminApi.deleteSignature();
+      setSettings(prev => ({ ...prev, signatureImage: null, signatureEnabled: false }));
+      if (signatureInputRef.current) {
+        signatureInputRef.current.value = '';
+      }
+      showSuccess('Signature deleted successfully');
+    } catch (error: any) {
+      showError('Failed to delete signature', {
+        description: error.response?.data?.error || error.message
+      });
+    } finally {
+      setIsUploadingSignature(false);
+    }
+  };
+
   const tabs = [
     { id: 'general', label: 'General', icon: Globe },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'system', label: 'System', icon: Database },
-    { id: 'projects', label: 'Projects', icon: FileText }
+    { id: 'projects', label: 'Projects', icon: FileText },
+    { id: 'documents', label: 'Documents', icon: PenTool }
   ];
 
   return (
@@ -665,6 +758,148 @@ const AdminSettings: React.FC = () => {
                           />
                           <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#243d8a]"></div>
                         </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Documents Settings - Signature Upload */}
+                {activeTab === 'documents' && (
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+                      <PenTool className="w-6 h-6 text-[#243d8a]" />
+                      Document Settings
+                    </h2>
+
+                    <div className="space-y-6">
+                      {/* Company Signature Section */}
+                      <div className="p-6 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-200">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="p-2 bg-indigo-100 rounded-lg">
+                            <PenTool className="w-5 h-5 text-indigo-600" />
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-semibold text-gray-900">Company Authorized Signature</h3>
+                            <p className="text-sm text-gray-600">
+                              Upload the company signature to include in client PDF quotations
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Hidden file input */}
+                        <input
+                          ref={signatureInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleSignatureUpload}
+                          className="hidden"
+                          disabled={isUploadingSignature}
+                        />
+
+                        {settings.signatureImage ? (
+                          // Show uploaded signature preview
+                          <div className="bg-white rounded-lg border border-gray-200 p-6">
+                            <div className="flex items-start gap-6">
+                              <div className="flex-1">
+                                <p className="text-sm font-medium text-gray-700 mb-3">Current Signature:</p>
+                                <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 flex items-center justify-center">
+                                  <img
+                                    src={settings.signatureImage}
+                                    alt="Company Signature"
+                                    className="max-h-24 max-w-full object-contain"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex flex-col gap-2">
+                                <button
+                                  onClick={() => signatureInputRef.current?.click()}
+                                  disabled={isUploadingSignature}
+                                  className="flex items-center gap-2 px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors disabled:opacity-50"
+                                >
+                                  <Upload className="w-4 h-4" />
+                                  Change
+                                </button>
+                                <button
+                                  onClick={handleDeleteSignature}
+                                  disabled={isUploadingSignature}
+                                  className="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-50"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                            <div className="mt-4 flex items-center gap-2">
+                              <CheckCircle className="w-4 h-4 text-green-600" />
+                              <span className="text-sm text-green-700">
+                                Signature is active - Estimators can include it in client PDFs
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          // Show upload button
+                          <div className="bg-white rounded-lg border-2 border-dashed border-indigo-300 p-8">
+                            <div className="text-center">
+                              <div className="mx-auto w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mb-4">
+                                <Upload className="w-8 h-8 text-indigo-600" />
+                              </div>
+                              <h4 className="text-lg font-medium text-gray-900 mb-2">Upload Company Signature</h4>
+                              <p className="text-sm text-gray-500 mb-4">
+                                PNG, JPG or GIF - Max 2MB - Transparent background recommended
+                              </p>
+                              <button
+                                onClick={() => signatureInputRef.current?.click()}
+                                disabled={isUploadingSignature}
+                                className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                              >
+                                {isUploadingSignature ? (
+                                  <>
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                    Uploading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Upload className="w-4 h-4" />
+                                    Select Signature Image
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Info Box */}
+                      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+                          <div>
+                            <p className="font-medium text-blue-900">How Signatures Work</p>
+                            <ul className="text-sm text-blue-700 mt-2 space-y-1">
+                              <li>• Upload the company authorized signature here</li>
+                              <li>• When estimators send BOQ to clients, they can choose to include the signature</li>
+                              <li>• The signature will appear on both the cover page and quotation signature section</li>
+                              <li>• If no signature is uploaded, estimators won't see the include signature option</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* LPO Signatures Note */}
+                      <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="flex items-start gap-3">
+                          <FileText className="w-5 h-5 text-green-600 mt-0.5" />
+                          <div>
+                            <p className="font-medium text-green-900">LPO (Purchase Order) Signatures</p>
+                            <p className="text-sm text-green-700 mt-1">
+                              For LPO signatures (MD, TD, Company Seal), please use the dedicated{' '}
+                              <a href="/admin/signature-upload" className="underline font-medium hover:text-green-800">
+                                Signature Upload
+                              </a>{' '}
+                              page from the sidebar menu.
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>

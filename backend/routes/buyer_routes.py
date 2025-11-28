@@ -310,6 +310,36 @@ def send_vendor_email_route(cr_id):
     return send_vendor_email(cr_id)
 
 
+@buyer_routes.route('/purchase/<int:cr_id>/generate-lpo-pdf', methods=['POST'])
+@jwt_required
+def generate_lpo_pdf_route(cr_id):
+    """Generate LPO PDF for purchase order (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return generate_lpo_pdf(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/preview-lpo-pdf', methods=['POST'])
+@jwt_required
+def preview_lpo_pdf_route(cr_id):
+    """Preview LPO PDF data before generation (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return preview_lpo_pdf(cr_id)
+
+
+@buyer_routes.route('/lpo-settings', methods=['GET'])
+@jwt_required
+def get_lpo_settings_route():
+    """Get LPO settings (signatures, company info) for PDF generation (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_lpo_settings()
+
+
 @buyer_routes.route('/po-child/<int:po_child_id>/preview-vendor-email', methods=['GET'])
 @jwt_required
 def preview_po_child_vendor_email_route(po_child_id):

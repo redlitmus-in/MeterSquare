@@ -13,6 +13,7 @@ from io import BytesIO
 from datetime import date
 import os
 import requests
+import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -54,7 +55,7 @@ class ModernBOQPDFGenerator:
             except:
                 pass
 
-    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, selected_terms=None, include_images=True, cover_page=None):
+    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, selected_terms=None, include_images=True, cover_page=None, signature_image=None, md_signature_image=None, authorized_signature_image=None):
         """Generate clean CLIENT quotation PDF
 
         Args:
@@ -64,6 +65,9 @@ class ModernBOQPDFGenerator:
                            Each dict should have {'terms_text': '...'}
             include_images: If False, skip image loading for faster generation
             cover_page: Optional dict with cover page data for quotation letter
+            signature_image: Base64 encoded signature image (legacy - for backward compatibility)
+            md_signature_image: MD signature for cover page (new)
+            authorized_signature_image: Authorized signature for quotation section (new)
         """
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4,
@@ -71,9 +75,15 @@ class ModernBOQPDFGenerator:
                               leftMargin=30, rightMargin=30)
         elements = []
 
-        # Cover Page (if provided)
+        # Store authorized signature for use in quotation signature section
+        # Use new authorized_signature_image if provided, fallback to legacy signature_image
+        self.signature_image = authorized_signature_image or signature_image
+
+        # Cover Page (if provided) - use MD signature
         if cover_page:
-            elements.extend(self._generate_cover_page(cover_page, project))
+            # Use md_signature_image for cover page, fallback to legacy signature_image
+            cover_signature = md_signature_image or signature_image
+            elements.extend(self._generate_cover_page(cover_page, project, signature_image=cover_signature))
             elements.append(PageBreak())
 
         # Header
@@ -124,7 +134,7 @@ class ModernBOQPDFGenerator:
         buffer.seek(0)
         return buffer.read()
 
-    def _generate_cover_page(self, cover_page, project):
+    def _generate_cover_page(self, cover_page, project, signature_image=None):
         """Generate professional quotation cover page / letter
 
         Modern design with:
@@ -132,10 +142,19 @@ class ModernBOQPDFGenerator:
         - Thin separator line with brand colors
         - Soft gray background header section
         - Well-aligned content with professional typography
+        - Optional signature image uploaded by estimator
+
+        Args:
+            cover_page: Dict with cover page data
+            project: Project object
+            signature_image: Base64 encoded signature image (uploaded by estimator)
         """
         elements = []
         logo_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'logo.png')
         stamp_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'company_stamp.png')
+
+        # Use the signature image passed directly
+        signature_image_data = signature_image
 
         # Modern color palette
         primary_color = colors.HexColor('#1a365d')  # Dark blue
@@ -310,27 +329,59 @@ class ModernBOQPDFGenerator:
             except:
                 stamp_cell = ''
 
+        # Signature image from system settings (if enabled)
+        signature_cell = None
+        if signature_image_data:
+            try:
+                # Parse base64 data URL
+                if signature_image_data.startswith('data:image/'):
+                    # Extract base64 content after the data URL prefix
+                    header, encoded = signature_image_data.split(',', 1)
+                    signature_bytes = base64.b64decode(encoded)
+                    signature_buffer = BytesIO(signature_bytes)
+                    signature_cell = Image(signature_buffer, width=1.5*inch, height=0.6*inch, kind='proportional')
+            except Exception as e:
+                print(f"[PDF] Error rendering signature image: {e}")
+                signature_cell = None
+
         sig_name_style = ParagraphStyle('SigName', fontSize=11, fontName='Helvetica-Bold', textColor=primary_color)
 
         # Create signature text
         sig_text = Paragraph(f'<b>{signatory_name}</b><br/><font size="9" color="#6c757d">{signatory_title}</font>', sig_name_style)
 
-        if stamp_exists:
-            # Create aligned table with signature on left, stamp on right (same row)
+        # Build the signature section
+        if signature_cell or stamp_exists:
+            # Create multi-row layout with signature image, name, and stamp
+            sig_rows = []
+
+            if signature_cell:
+                # Add signature image row above name
+                sig_rows.append([signature_cell, stamp_cell if stamp_exists else ''])
+
+            # Add name/title row
+            sig_rows.append([sig_text, '' if signature_cell else (stamp_cell if stamp_exists else '')])
+
             sig_table = Table(
-                [[sig_text, stamp_cell]],
+                sig_rows,
                 colWidths=[2.8*inch, 1.5*inch]
             )
-            sig_table.setStyle(TableStyle([
-                ('VALIGN', (0, 0), (0, 0), 'BOTTOM'),  # Signature at bottom
-                ('VALIGN', (1, 0), (1, 0), 'MIDDLE'),  # Stamp centered vertically
-                ('ALIGN', (0, 0), (0, 0), 'LEFT'),
-                ('ALIGN', (1, 0), (1, 0), 'LEFT'),
-                ('LEFTPADDING', (1, 0), (1, 0), 15),   # Space between signature and stamp
-            ]))
+
+            table_style = [
+                ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+                ('LEFTPADDING', (1, 0), (1, -1), 15),   # Space between signature and stamp
+            ]
+
+            # If signature image is included, adjust stamp vertical alignment
+            if signature_cell and stamp_exists:
+                table_style.append(('VALIGN', (1, 0), (1, 0), 'MIDDLE'))  # Stamp centered
+                table_style.append(('SPAN', (1, 0), (1, -1)))  # Stamp spans all rows
+
+            sig_table.setStyle(TableStyle(table_style))
             elements.append(sig_table)
         else:
-            # Just signature without stamp
+            # Just signature text without images
             elements.append(sig_text)
 
         return elements
@@ -1497,17 +1548,47 @@ class ModernBOQPDFGenerator:
 
         elements.append(Spacer(1, 8))
 
-        # Signatures
-        sig_data = [[
-            Paragraph('<b>For MeterSquare Interiors LLC</b><br/><br/><br/>_____________________<br/>Authorized Signature',
-                     ParagraphStyle('S1', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER)),
-            Paragraph('<b>Client Acceptance</b><br/><br/><br/>_____________________<br/>Client Signature',
-                     ParagraphStyle('S2', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER))
-        ]]
+        # Signatures - Include uploaded signature image if available
+        # Build MeterSquare signature side
+        ms_header = Paragraph('<b>For MeterSquare Interiors LLC</b>',
+            ParagraphStyle('SigHeader', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER))
+
+        # Build signature image or space
+        sig_img_element = Spacer(1, 25)  # Default space for manual signature
+        if hasattr(self, 'signature_image') and self.signature_image:
+            try:
+                # Parse base64 data URL
+                if self.signature_image.startswith('data:image/'):
+                    header, encoded = self.signature_image.split(',', 1)
+                    sig_bytes = base64.b64decode(encoded)
+                    sig_buffer = BytesIO(sig_bytes)
+                    sig_img_element = Image(sig_buffer, width=1.2*inch, height=0.5*inch, kind='proportional')
+            except Exception as e:
+                print(f"[PDF] Error rendering signature in BOQ: {e}")
+
+        ms_line = Paragraph('_____________________<br/>Authorized Signature',
+            ParagraphStyle('SigLine', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER))
+
+        # Client signature side
+        client_header = Paragraph('<b>Client Acceptance</b>',
+            ParagraphStyle('ClientHeader', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER))
+        client_space = Spacer(1, 25)
+        client_line = Paragraph('_____________________<br/>Client Signature',
+            ParagraphStyle('ClientLine', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER))
+
+        # Create a single table with proper alignment
+        sig_data = [
+            [ms_header, client_header],
+            [sig_img_element, client_space],
+            [ms_line, client_line]
+        ]
 
         sig_table = Table(sig_data, colWidths=[3.25*inch, 3.25*inch])
         sig_table.setStyle(TableStyle([
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('TOPPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
         ]))
         elements.append(sig_table)
 

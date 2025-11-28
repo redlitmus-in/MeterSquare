@@ -866,7 +866,7 @@ class EstimatorService {
   // Send BOQ to Client (after TD approval)
   async sendBOQToClient(
     boqId: number,
-    params: { client_email?: string; message?: string; formats?: string[]; custom_email_body?: string; terms_text?: string; cover_page?: any }
+    params: { client_email?: string; message?: string; formats?: string[]; custom_email_body?: string; terms_text?: string; cover_page?: any; include_signature?: boolean }
   ): Promise<{ success: boolean; message: string; total_sent?: number; total_failed?: number }> {
     try {
       // Extended timeout for image processing (2 minutes to allow backend to fetch images)
@@ -877,7 +877,8 @@ class EstimatorService {
         formats: params.formats || ['excel', 'pdf'],
         custom_email_body: params.custom_email_body,
         terms_text: params.terms_text,
-        cover_page: params.cover_page  // Include cover page data for PDF
+        cover_page: params.cover_page,  // Include cover page data for PDF
+        include_signature: params.include_signature || false  // Include signature from admin settings
       }, {
         timeout: 120000  // 2 minutes (120 seconds) timeout for email with images
       });

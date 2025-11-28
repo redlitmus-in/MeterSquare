@@ -47,6 +47,27 @@ class SystemSettings(db.Model):
     require_approval = db.Column(db.Boolean, default=True)
     budget_alert_threshold = db.Column(db.Integer, default=80)  # percentage
 
+    # PDF Signature Settings (Admin uploads, Estimator selects to include)
+    signature_image = db.Column(db.Text)  # Base64 encoded signature image
+    signature_enabled = db.Column(db.Boolean, default=False)  # Whether signature is available
+
+    # LPO PDF Settings - Signatures (for Purchase Orders)
+    md_signature_image = db.Column(db.Text)  # Managing Director signature (base64)
+    md_name = db.Column(db.String(255), default='Managing Director')
+    td_signature_image = db.Column(db.Text)  # Technical Director signature (base64)
+    td_name = db.Column(db.String(255), default='Technical Director')
+    company_stamp_image = db.Column(db.Text)  # Company stamp/seal image (base64)
+
+    # LPO PDF Settings - Company Info
+    company_trn = db.Column(db.String(50))  # Company TRN number
+    company_fax = db.Column(db.String(50))  # Company fax number
+    default_payment_terms = db.Column(db.Text, default='100% after delivery')
+    lpo_header_image = db.Column(db.Text)  # Custom LPO header image (base64)
+
+    # LPO Terms and Conditions (stored as JSON)
+    lpo_general_terms = db.Column(db.Text)  # JSON array of general terms
+    lpo_payment_terms_list = db.Column(db.Text)  # JSON array of payment terms like "50% Advance"
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
