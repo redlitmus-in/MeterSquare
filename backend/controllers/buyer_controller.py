@@ -1013,6 +1013,18 @@ def get_buyer_pending_purchases():
                     "purchase_completion_date": po_child.purchase_completion_date.isoformat() if po_child.purchase_completion_date else None
                 })
 
+            # Check if ALL children are pending TD approval OR all approved (for admin view - parent should be hidden)
+            all_children_sent_to_td_or_approved = False
+            if po_children_for_parent:
+                all_children_sent_to_td_or_approved = all(
+                    po_child.vendor_selection_status in ['pending_td_approval', 'approved']
+                    for po_child in po_children_for_parent
+                )
+
+            # For admin view: Skip parent PO if all children are sent for TD approval or approved
+            if is_admin_viewing and all_children_sent_to_td_or_approved:
+                continue
+
             pending_purchases.append({
                 "cr_id": cr.cr_id,
                 "formatted_cr_id": cr.get_formatted_cr_id(),
