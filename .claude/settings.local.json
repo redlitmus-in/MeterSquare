@@ -35,7 +35,8 @@
       "Bash(while read f)",
       "Bash(do basename \"$f\")",
       "Bash(/home/development1/Desktop/MeterSquare/backend/venv/bin/python:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(/home/development1/Desktop/MeterSquare/backend/venv/bin/python3:*)"
     ],
     "deny": [],
     "ask": []

@@ -449,9 +449,9 @@ def get_buyer_boq_materials():
 
 
 def get_buyer_dashboard():
-    """Get buyer dashboard statistics"""
+    """Get buyer dashboard statistics with detailed counts and workflow data"""
     try:
-        from sqlalchemy import or_, and_
+        from sqlalchemy import or_, and_, func, desc
         from utils.admin_viewing_context import get_effective_user_context
 
         current_user = g.user
@@ -465,87 +465,318 @@ def get_buyer_dashboard():
         # FORCE admin to see all data
         if user_role == 'admin':
             is_admin_viewing = True
-        # Get projects where BOTH buyer AND site_supervisor (SE) are assigned
-        # Admin viewing as buyer sees all projects
-        # ✅ PERFORMANCE FIX: Eager load BOQs (N+1 queries → 2)
-        if is_admin_viewing or user_role == 'admin':
-            projects = Project.query.options(
-                selectinload(Project.boqs)
-            ).filter(
-                Project.site_supervisor_id.isnot(None),
-                Project.is_deleted == False
-            ).all()
-        else:
-            projects = Project.query.options(
-                selectinload(Project.boqs)
-            ).filter(
-                Project.buyer_id == buyer_id,
-                Project.site_supervisor_id.isnot(None),
-                Project.is_deleted == False
-            ).all()
 
+        # Initialize detailed stats
+        stats = {
+            'total_materials': 0,
+            'pending_purchase': 0,
+            'ordered': 0,
+            'delivered': 0,
+            'total_projects': 0,
+            'total_cost': 0
+        }
+
+        # Workflow stages with detailed tracking
+        workflow_stats = {
+            'new_requests': 0,           # assigned_to_buyer (needs vendor selection)
+            'pending_td_approval': 0,    # pending_td_approval (waiting for TD)
+            'vendor_approved': 0,        # vendor_approved (ready to purchase)
+            'purchase_completed': 0,     # purchase_completed (done)
+            'total_orders': 0
+        }
+
+        # Cost breakdown by status
+        cost_breakdown = {
+            'pending_cost': 0,
+            'ordered_cost': 0,
+            'completed_cost': 0,
+            'total_cost': 0
+        }
+
+        # Materials by status
+        materials_breakdown = {
+            'pending_materials': 0,
+            'ordered_materials': 0,
+            'completed_materials': 0
+        }
+
+        project_ids = set()
+        project_data = {}  # Track per-project stats
         pending_purchases = []
-        total_cost = 0
+        recent_purchases = []
 
-        for project in projects:
-            # Get BOQs for this project (no query - already loaded via selectinload)
-            boqs = [boq for boq in project.boqs if not boq.is_deleted]
+        # Define status categories - Match Purchase Orders page statuses
+        # Pending: needs vendor selection
+        pending_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm', 'under_review']
+        # TD Approval: vendor selected, waiting for TD
+        td_approval_statuses = ['pending_td_approval']
+        # Vendor Approved: ready to complete purchase
+        ordered_statuses = ['vendor_approved']
+        # Completed
+        completed_statuses = ['purchase_completed']
 
-            if not boqs:
+        buyer_id_int = int(buyer_id)
+
+        # Get all CRs assigned to buyer (or all for admin) - same logic as Purchase Orders page
+        if is_admin_viewing or user_role == 'admin':
+            # Admin sees ALL CRs assigned to any buyer
+            change_requests = ChangeRequest.query.filter(
+                ChangeRequest.assigned_to_buyer_user_id.isnot(None),
+                ChangeRequest.is_deleted == False
+            ).order_by(desc(ChangeRequest.updated_at)).all()
+        else:
+            # Regular buyer sees only their assigned CRs
+            change_requests = ChangeRequest.query.filter(
+                or_(
+                    # Assigned to buyer statuses
+                    and_(
+                        func.trim(ChangeRequest.status).in_(pending_statuses + td_approval_statuses + ordered_statuses + completed_statuses),
+                        ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
+                    ),
+                    # Under review AND approval_required_from='buyer'
+                    and_(
+                        func.trim(ChangeRequest.status) == 'under_review',
+                        ChangeRequest.approval_required_from == 'buyer',
+                        ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
+                    )
+                ),
+                ChangeRequest.is_deleted == False
+            ).order_by(desc(ChangeRequest.updated_at)).all()
+
+        for cr in change_requests:
+            # Get BOQ and project info
+            boq = BOQ.query.filter_by(boq_id=cr.boq_id, is_deleted=False).first()
+            if not boq:
                 continue
 
-            # Get change requests assigned to buyer for these BOQs
-            # Include: CRs assigned to buyer or with vendor_approved status
-            # NOTE: Sub-CRs deprecated - now using po_child table for vendor splits
-            if is_admin_viewing:
-                change_requests = ChangeRequest.query.filter(
-                    ChangeRequest.boq_id.in_([boq.boq_id for boq in boqs]),
-                    ChangeRequest.status.in_(['assigned_to_buyer', 'vendor_approved']),
-                    ChangeRequest.is_deleted == False
-                ).all()
+            project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+            if not project:
+                continue
+
+            project_id = boq.project_id
+            project_ids.add(project_id)
+
+            # Initialize project data if not exists
+            if project_id not in project_data:
+                project_data[project_id] = {
+                    'project_id': project_id,
+                    'project_name': project.project_name,
+                    'total_orders': 0,
+                    'pending': 0,
+                    'completed': 0,
+                    'total_cost': 0
+                }
+
+            # Calculate materials count and cost
+            sub_items_data = cr.sub_items_data or cr.materials_data or []
+            cr_total = 0
+            materials_count = 0
+
+            if cr.sub_items_data:
+                for sub_item in sub_items_data:
+                    if isinstance(sub_item, dict):
+                        sub_materials = sub_item.get('materials', [])
+                        if sub_materials:
+                            materials_count += len(sub_materials)
+                            for material in sub_materials:
+                                cr_total += float(material.get('total_price', 0) or 0)
+                        else:
+                            materials_count += 1
+                            cr_total += float(sub_item.get('total_price', 0) or 0)
             else:
-                change_requests = ChangeRequest.query.filter(
-                    ChangeRequest.boq_id.in_([boq.boq_id for boq in boqs]),
-                    ChangeRequest.status.in_(['assigned_to_buyer', 'vendor_approved']),
-                    ChangeRequest.assigned_to_buyer_user_id == buyer_id,
-                    ChangeRequest.is_deleted == False
-                ).all()
+                materials_count = len(sub_items_data)
+                for material in sub_items_data:
+                    cr_total += float(material.get('total_price', 0) or 0)
 
-            for cr in change_requests:
-                sub_items_data = cr.sub_items_data or cr.materials_data or []
-                cr_total = 0
-                materials_count = 0
+            # Update stats based on status
+            stats['total_materials'] += materials_count
+            stats['total_cost'] += cr_total
+            workflow_stats['total_orders'] += 1
+            project_data[project_id]['total_orders'] += 1
+            project_data[project_id]['total_cost'] += cr_total
 
-                # Count materials
-                if cr.sub_items_data:
-                    for sub_item in sub_items_data:
-                        if isinstance(sub_item, dict):
-                            sub_materials = sub_item.get('materials', [])
-                            if sub_materials:
-                                materials_count += len(sub_materials)
-                                for material in sub_materials:
-                                    cr_total += float(material.get('total_price', 0) or 0)
-                            else:
-                                materials_count += 1
-                                cr_total += float(sub_item.get('total_price', 0) or 0)
-                else:
-                    materials_count = len(sub_items_data)
-                    for material in sub_items_data:
-                        cr_total += float(material.get('total_price', 0) or 0)
+            cr_status = (cr.status or '').strip().lower()
 
-                total_cost += cr_total
+            # Workflow stage tracking - match all buyer-related statuses
+            if cr_status in ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm', 'under_review']:
+                # New requests - awaiting vendor selection
+                stats['pending_purchase'] += 1
+                workflow_stats['new_requests'] += 1
+                cost_breakdown['pending_cost'] += cr_total
+                materials_breakdown['pending_materials'] += materials_count
+                project_data[project_id]['pending'] += 1
+            elif cr_status == 'pending_td_approval':
+                # Vendor selected, waiting for TD approval
+                stats['ordered'] += 1
+                workflow_stats['pending_td_approval'] += 1
+                cost_breakdown['ordered_cost'] += cr_total
+                materials_breakdown['ordered_materials'] += materials_count
+            elif cr_status == 'vendor_approved':
+                # TD approved, ready to complete purchase
+                stats['ordered'] += 1
+                workflow_stats['vendor_approved'] += 1
+                cost_breakdown['ordered_cost'] += cr_total
+                materials_breakdown['ordered_materials'] += materials_count
+            elif cr_status == 'purchase_completed':
+                # Purchase completed
+                stats['delivered'] += 1
+                workflow_stats['purchase_completed'] += 1
+                cost_breakdown['completed_cost'] += cr_total
+                materials_breakdown['completed_materials'] += materials_count
+                project_data[project_id]['completed'] += 1
+            else:
+                # Any other status assigned to buyer - count as pending
+                stats['pending_purchase'] += 1
+                workflow_stats['new_requests'] += 1
+                cost_breakdown['pending_cost'] += cr_total
+                materials_breakdown['pending_materials'] += materials_count
+                project_data[project_id]['pending'] += 1
 
-                pending_purchases.append({
-                    "cr_id": cr.cr_id,
-                    "project_id": project.project_id,
-                    "materials_count": materials_count,
-                    "total_cost": round(cr_total, 2)
-                })
+            # Build purchase info
+            purchase_info = {
+                "cr_id": cr.cr_id,
+                "project_id": project_id,
+                "project_name": project.project_name,
+                "materials_count": materials_count,
+                "total_cost": round(cr_total, 2),
+                "status": cr.status,
+                "status_display": get_status_display(cr.status),
+                "created_at": cr.created_at.isoformat() if cr.created_at else None,
+                "updated_at": cr.updated_at.isoformat() if cr.updated_at else None,
+                "vendor_name": None
+            }
+
+            # Get vendor info if available
+            if cr.selected_vendor_id:
+                vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id).first()
+                if vendor:
+                    purchase_info['vendor_name'] = vendor.company_name
+
+            # Add to pending list if not completed
+            if cr_status != 'purchase_completed':
+                pending_purchases.append(purchase_info)
+
+            # Add to recent purchases (limit to 10)
+            if len(recent_purchases) < 10:
+                recent_purchases.append(purchase_info)
+
+        # Also count POChild records (split vendor orders like PO-400.1, PO-400.2)
+        po_children = POChild.query.filter(
+            POChild.is_deleted == False
+        ).all()
+
+        for po_child in po_children:
+            # Get parent CR to check if it's buyer-related
+            parent_cr = ChangeRequest.query.filter_by(cr_id=po_child.parent_cr_id, is_deleted=False).first()
+            if not parent_cr or not parent_cr.assigned_to_buyer_user_id:
+                continue
+
+            # For non-admin, check if assigned to current buyer
+            if not is_admin_viewing and user_role != 'admin':
+                if parent_cr.assigned_to_buyer_user_id != buyer_id_int:
+                    continue
+
+            # Calculate materials cost from POChild
+            po_child_materials = po_child.materials_data or []
+            po_child_total = sum(float(m.get('total_price', 0) or 0) for m in po_child_materials)
+            po_child_materials_count = len(po_child_materials)
+
+            po_child_status = (po_child.status or '').strip().lower()
+
+            # Count based on status - but don't double count if parent CR already counted
+            if po_child_status == 'pending_td_approval':
+                workflow_stats['pending_td_approval'] += 1
+                stats['ordered'] += 1
+                cost_breakdown['ordered_cost'] += po_child_total
+                materials_breakdown['ordered_materials'] += po_child_materials_count
+            elif po_child_status == 'vendor_approved':
+                workflow_stats['vendor_approved'] += 1
+                stats['ordered'] += 1
+                cost_breakdown['ordered_cost'] += po_child_total
+                materials_breakdown['ordered_materials'] += po_child_materials_count
+            elif po_child_status == 'purchase_completed':
+                workflow_stats['purchase_completed'] += 1
+                stats['delivered'] += 1
+                cost_breakdown['completed_cost'] += po_child_total
+                materials_breakdown['completed_materials'] += po_child_materials_count
+
+            workflow_stats['total_orders'] += 1
+            stats['total_materials'] += po_child_materials_count
+            stats['total_cost'] += po_child_total
+
+            # Get project info for POChild
+            if parent_cr.boq_id:
+                boq = BOQ.query.filter_by(boq_id=parent_cr.boq_id, is_deleted=False).first()
+                if boq:
+                    project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+                    if project:
+                        project_id = boq.project_id
+                        project_ids.add(project_id)
+
+                        if project_id not in project_data:
+                            project_data[project_id] = {
+                                'project_id': project_id,
+                                'project_name': project.project_name,
+                                'total_orders': 0,
+                                'pending': 0,
+                                'completed': 0,
+                                'total_cost': 0
+                            }
+
+                        project_data[project_id]['total_orders'] += 1
+                        project_data[project_id]['total_cost'] += po_child_total
+
+                        if po_child_status == 'purchase_completed':
+                            project_data[project_id]['completed'] += 1
+                        elif po_child_status not in ['vendor_approved', 'pending_td_approval']:
+                            project_data[project_id]['pending'] += 1
+
+                        # Add to recent purchases
+                        vendor = Vendor.query.filter_by(vendor_id=po_child.vendor_id).first() if po_child.vendor_id else None
+                        if len(recent_purchases) < 10:
+                            recent_purchases.append({
+                                "cr_id": po_child.parent_cr_id,
+                                "po_child_id": po_child.id,
+                                "formatted_id": f"PO-{po_child.parent_cr_id}{po_child.suffix or ''}",
+                                "project_id": project_id,
+                                "project_name": project.project_name,
+                                "materials_count": po_child_materials_count,
+                                "total_cost": round(po_child_total, 2),
+                                "status": po_child.status,
+                                "status_display": get_status_display(po_child.status),
+                                "created_at": po_child.created_at.isoformat() if po_child.created_at else None,
+                                "updated_at": po_child.updated_at.isoformat() if po_child.updated_at else None,
+                                "vendor_name": vendor.company_name if vendor else None
+                            })
+
+        stats['total_projects'] = len(project_ids)
+        stats['total_cost'] = round(stats['total_cost'], 2)
+        cost_breakdown['total_cost'] = round(cost_breakdown['pending_cost'] + cost_breakdown['ordered_cost'] + cost_breakdown['completed_cost'], 2)
+        cost_breakdown['pending_cost'] = round(cost_breakdown['pending_cost'], 2)
+        cost_breakdown['ordered_cost'] = round(cost_breakdown['ordered_cost'], 2)
+        cost_breakdown['completed_cost'] = round(cost_breakdown['completed_cost'], 2)
+
+        # Calculate completion rate
+        total_orders = workflow_stats['total_orders']
+        completion_rate = round((workflow_stats['purchase_completed'] / total_orders * 100), 1) if total_orders > 0 else 0
+
+        # Sort projects by total cost
+        projects_list = sorted(project_data.values(), key=lambda x: x['total_cost'], reverse=True)
+
+        # Sort recent purchases by updated_at descending
+        recent_purchases.sort(key=lambda x: x.get('updated_at') or '', reverse=True)
 
         return jsonify({
             "success": True,
+            "stats": stats,
+            "workflow_stats": workflow_stats,
+            "cost_breakdown": cost_breakdown,
+            "materials_breakdown": materials_breakdown,
+            "completion_rate": completion_rate,
+            "projects": projects_list[:5],  # Top 5 projects
+            "recent_purchases": recent_purchases,
             "pending_purchases": pending_purchases,
-            "total_cost": round(total_cost, 2)
+            "total_cost": stats['total_cost']
         }), 200
 
     except Exception as e:
@@ -553,6 +784,20 @@ def get_buyer_dashboard():
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to fetch dashboard: {str(e)}"}), 500
+
+
+def get_status_display(status):
+    """Convert status to user-friendly display text"""
+    status_map = {
+        'assigned_to_buyer': 'New - Awaiting Vendor Selection',
+        'send_to_buyer': 'New - Awaiting Vendor Selection',
+        'approved_by_pm': 'PM Approved - Awaiting Vendor',
+        'under_review': 'Under Review',
+        'pending_td_approval': 'Pending TD Approval',
+        'vendor_approved': 'Vendor Approved - Ready to Purchase',
+        'purchase_completed': 'Purchase Completed'
+    }
+    return status_map.get(status, status)
 
 
 def get_buyer_pending_purchases():
