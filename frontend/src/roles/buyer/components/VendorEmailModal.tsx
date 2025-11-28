@@ -159,6 +159,8 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       return;
     }
 
+    // Sync editedVendorEmail with user's input to ensure multi-email is used when sending
+    setEditedVendorEmail(vendorEmail);
     setEditedEmailContent(emailPreview);
     setStep('preview');
   };
