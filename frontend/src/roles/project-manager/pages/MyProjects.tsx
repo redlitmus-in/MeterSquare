@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   BuildingOfficeIcon,
@@ -30,6 +30,7 @@ import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMateria
 import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
+import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 import DayExtensionRequestModal from '../components/DayExtensionRequestModal';
 import AssignItemToSEModal from '@/components/modals/AssignItemToSEModal';
 
@@ -224,7 +225,7 @@ const MyProjects: React.FC = () => {
   // Other state variables
   const [availableSEs, setAvailableSEs] = useState<SiteEngineer[]>([]);
   const [loadingSEs, setLoadingSEs] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('pending');
+  const [filterStatus, setFilterStatus] = useState<'for_approval' | 'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('for_approval');
   const [selectedSE, setSelectedSE] = useState<SiteEngineer | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [seSearchQuery, setSeSearchQuery] = useState('');
@@ -277,6 +278,60 @@ const MyProjects: React.FC = () => {
   }, [showAssignModal]);
 
   // Removed loadProjects - now handled by useProjectsAutoSync hook
+
+  // ✅ LISTEN TO REAL-TIME UPDATES - This makes BOQs reload automatically when changes occur
+  const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
+
+  // Track if this is the initial mount to skip first render refetch
+  const isInitialMount = useRef(true);
+
+  // ✅ RELOAD data when real-time update is received (e.g., Estimator sends BOQ to PM)
+  useEffect(() => {
+    // Skip initial mount - useProjectsAutoSync already fetches on mount
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    // Silent reload without loading spinner when timestamp changes
+    refetch().catch(err => console.error('Refetch error (non-critical):', err));
+  }, [boqUpdateTimestamp, refetch]);
+
+  // ✅ SMART BACKGROUND POLLING - Ensures UI stays fresh even if real-time fails
+  useEffect(() => {
+    let isPolling = false;
+
+    const silentRefresh = async () => {
+      // Skip if already polling or tab is hidden
+      if (isPolling || document.hidden) return;
+
+      isPolling = true;
+      try {
+        await refetch();
+      } catch (error) {
+        // Silent fail for background refresh
+        console.debug('Background refresh failed:', error);
+      } finally {
+        isPolling = false;
+      }
+    };
+
+    // Poll every 5 seconds for responsive updates
+    const intervalId = setInterval(silentRefresh, 5000);
+
+    // Also refresh when tab becomes visible again
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        silentRefresh();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [refetch]);
 
   const loadAvailableSEs = async () => {
     try {
@@ -636,6 +691,11 @@ const MyProjects: React.FC = () => {
       if (!matchesSearch) return false;
     }
 
+    if (filterStatus === 'for_approval') {
+      const status = project.boq_status?.toLowerCase() || '';
+      // For Approval tab: BOQs sent by Estimator to PM for approval
+      return status === 'pending_pm_approval';
+    }
     if (filterStatus === 'pending') {
       const status = project.boq_status?.toLowerCase() || '';
       const hasItemsAssigned = (project.items_assigned_by_me || 0) > 0;
@@ -672,6 +732,10 @@ const MyProjects: React.FC = () => {
   });
 
   const getTabCounts = () => ({
+    for_approval: projects.filter(p => {
+      const status = p.boq_status?.toLowerCase() || '';
+      return status === 'pending_pm_approval';
+    }).length,
     pending: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
       const hasItemsAssigned = (p.items_assigned_by_me || 0) > 0;
@@ -791,7 +855,18 @@ const MyProjects: React.FC = () => {
       {/* Tab Filters */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
         <div className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6">
-          <div className="flex items-start justify-start gap-0 border-b border-gray-200 mb-6">
+          <div className="flex items-start justify-start gap-0 border-b border-gray-200 mb-6 overflow-x-auto">
+            <button
+              onClick={() => setFilterStatus('for_approval')}
+              className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${
+                filterStatus === 'for_approval'
+                  ? 'border-orange-600 text-orange-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              For Approval ({tabCounts.for_approval})
+            </button>
+
             <button
               onClick={() => setFilterStatus('pending')}
               className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${
@@ -2219,10 +2294,11 @@ const MyProjects: React.FC = () => {
                       setRejectionReason('');
                       setProcessingBOQ(false);
 
-                      // Refetch data in background
-                      setTimeout(() => {
-                        refetch().catch(err => console.error('Refetch error (non-critical):', err));
-                      }, 300);
+                      // Immediately refetch data to update UI
+                      await refetch();
+
+                      // Trigger realtime update for other components (e.g., Estimator page)
+                      useRealtimeUpdateStore.getState().triggerBOQUpdate();
 
                     } catch (error: any) {
                       console.error('Rejection error:', error);
@@ -2322,10 +2398,11 @@ const MyProjects: React.FC = () => {
                       setApprovalComments('');
                       setProcessingBOQ(false);
 
-                      // Refetch data in background
-                      setTimeout(() => {
-                        refetch().catch(err => console.error('Refetch error (non-critical):', err));
-                      }, 300);
+                      // Immediately refetch data to update UI
+                      await refetch();
+
+                      // Trigger realtime update for other components (e.g., Estimator page)
+                      useRealtimeUpdateStore.getState().triggerBOQUpdate();
 
                     } catch (error: any) {
                       console.error('Approval error:', error);

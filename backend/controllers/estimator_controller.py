@@ -532,6 +532,7 @@ def send_boq_to_project_manager():
         boq.last_modified_by = current_user_name
         boq.last_modified_at = datetime.utcnow()
         boq.email_sent = True
+        boq.last_pm_user_id = pm_id  # Store which PM this BOQ was sent to
 
         # NOTE: PM is NOT assigned to project here - only after client approval and TD assignment
 

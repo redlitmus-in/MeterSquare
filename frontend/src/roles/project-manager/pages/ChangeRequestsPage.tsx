@@ -541,7 +541,7 @@ const ChangeRequestsPage: React.FC = () => {
                 className="bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] hover:from-[#1e3270] hover:to-[#3d4f8a] text-white px-6 py-3 font-semibold shadow-md"
               >
                 <Plus className="w-5 h-5 mr-2" />
-                NEW MATERIAL PURCHASE
+                MATERIAL PURCHASE
               </Button>
             )}
           </div>

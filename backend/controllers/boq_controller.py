@@ -1933,6 +1933,11 @@ def get_all_boq():
                     if td_comments is not None:  # Allow empty string
                         break
 
+            # Get last PM name if available
+            last_pm_name = None
+            if hasattr(boq, 'last_pm') and boq.last_pm:
+                last_pm_name = boq.last_pm.full_name
+
             boq_summary = {
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
@@ -1951,7 +1956,9 @@ def get_all_boq():
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
                 "created_by": boq.created_by,
                 "client_rejection_reason": boq.client_rejection_reason,
-                "notes": td_comments  # TD approval/rejection comments
+                "notes": td_comments,  # TD approval/rejection comments
+                "last_pm_user_id": getattr(boq, 'last_pm_user_id', None),  # Last PM this BOQ was sent to
+                "last_pm_name": last_pm_name  # Name of last PM
             }
 
             complete_boqs.append(boq_summary)

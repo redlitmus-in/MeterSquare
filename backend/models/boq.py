@@ -21,8 +21,10 @@ class BOQ(db.Model):
     is_deleted = db.Column(db.Boolean, default=False, index=True)  # ✅ Added index (frequently filtered)
     email_sent = db.Column(db.Boolean, default=False)
     client_status = db.Column(db.Boolean, default=False)
+    last_pm_user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=True)  # Last PM this BOQ was sent to
 
     project = db.relationship("Project", backref=db.backref("boqs", lazy=True))
+    last_pm = db.relationship("User", foreign_keys=[last_pm_user_id], backref=db.backref("reviewed_boqs", lazy=True))
 
     # ✅ Composite indexes for common query patterns
     __table_args__ = (

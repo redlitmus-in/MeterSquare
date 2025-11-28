@@ -159,25 +159,44 @@ def get_all_pm_boqs():
 
             if user_role in ['projectmanager', 'mep']:
                 # PM and MEP Manager see BOQs sent to EITHER manager role
+                # Handle both array and scalar action values using UNION
                 boqs_for_approval_query = db.session.execute(
                     text("""
-                        SELECT DISTINCT bh.boq_id
-                        FROM boq_history bh,
-                             jsonb_array_elements(
+                        SELECT DISTINCT boq_id FROM (
+                            -- Handle array action values
+                            SELECT bh.boq_id
+                            FROM boq_history bh,
+                                 jsonb_array_elements(
                                 CASE
                                     WHEN jsonb_typeof(bh.action) = 'array' THEN bh.action
                                     ELSE '[]'::jsonb
                                 END
                              ) AS action_item
-                        WHERE (
-                            (action_item->>'receiver_role' IN ('project_manager', 'mep')
-                             AND (action_item->>'recipient_user_id')::INTEGER = :user_id
-                             AND action_item->>'type' IN ('sent_to_pm', 'sent_to_mep'))
-                            OR
-                            (action_item->>'sender_role' IN ('project_manager', 'mep')
-                             AND (action_item->>'decided_by_user_id')::INTEGER = :user_id
-                             AND action_item->>'type' = 'sent_to_estimator')
-                        )
+                            WHERE jsonb_typeof(bh.action) = 'array'
+                              AND (
+                                (action_item->>'receiver_role' IN ('project_manager', 'mep')
+                                 AND (action_item->>'recipient_user_id')::INTEGER = :user_id
+                                 AND action_item->>'type' IN ('sent_to_pm', 'sent_to_mep'))
+                                OR
+                                (action_item->>'sender_role' IN ('project_manager', 'mep')
+                                 AND (action_item->>'decided_by_user_id')::INTEGER = :user_id
+                                 AND action_item->>'type' = 'sent_to_estimator')
+                              )
+                            UNION
+                            -- Handle scalar action values
+                            SELECT bh.boq_id
+                            FROM boq_history bh
+                            WHERE jsonb_typeof(bh.action) = 'object'
+                              AND (
+                                (bh.action->>'receiver_role' IN ('project_manager', 'mep')
+                                 AND (bh.action->>'recipient_user_id')::INTEGER = :user_id
+                                 AND bh.action->>'type' IN ('sent_to_pm', 'sent_to_mep'))
+                                OR
+                                (bh.action->>'sender_role' IN ('project_manager', 'mep')
+                                 AND (bh.action->>'decided_by_user_id')::INTEGER = :user_id
+                                 AND bh.action->>'type' = 'sent_to_estimator')
+                              )
+                        ) AS combined
                     """),
                     {"user_id": user_id}
                 )
@@ -248,13 +267,16 @@ def get_all_pm_boqs():
             # Determine the correct status to display for Project Manager
             display_status = boq.status
 
-            # Preserve 'items_assigned' status when items have been assigned
-            # This ensures projects stay in the Assigned tab after item-level assignment
-            if display_status != 'items_assigned':
+            # Preserve special statuses that should not be overridden
+            # 'items_assigned' - keeps projects in Assigned tab
+            # 'Pending_PM_Approval' - keeps projects in For Approval tab
+            preserved_statuses = ['items_assigned', 'Pending_PM_Approval', 'pending_pm_approval']
+            if display_status not in preserved_statuses:
                 for h in history:
                     if h.receiver_role == 'projectManager':
-                        # If PM is receiver, show as pending
-                        display_status = 'pending'
+                        # If PM is receiver and status isn't Pending_PM_Approval, show as pending
+                        if boq.status not in ['Pending_PM_Approval', 'pending_pm_approval']:
+                            display_status = 'pending'
                         break
                     elif h.sender_role == 'projectManager':
                         # If PM is sender, show the original status
@@ -1610,8 +1632,10 @@ def send_boq_to_estimator():
             # If PM rejects, set to rejected
         if boq_status == 'approved':
             boq.status = 'PM_Approved'
+            boq.client_rejection_reason = None  # Clear any previous rejection reason
         else:
             boq.status = 'PM_Rejected'
+            boq.client_rejection_reason = rejection_reason  # Save PM rejection reason
         boq.last_modified_by = current_user_name
         boq.last_modified_at = datetime.utcnow()
         boq.email_sent = True

@@ -74,7 +74,8 @@ const ProjectCreationForm: React.FC<{
   onSubmit: (data: any) => void;
   onCancel: () => void;
   initialData?: any;
-}> = ({ onSubmit, onCancel, initialData }) => {
+  isLoading?: boolean;
+}> = ({ onSubmit, onCancel, initialData, isLoading = false }) => {
   const [formData, setFormData] = useState({
     project_name: initialData?.project_name || '',
     description: initialData?.description || '',
@@ -258,15 +259,23 @@ const ProjectCreationForm: React.FC<{
       </div>
 
       <div className="flex justify-end gap-2 pt-4">
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>
           Cancel
         </Button>
         <button
           type="submit"
-          className="px-6 py-2 text-white rounded-lg hover:opacity-90 transition-all font-semibold"
+          disabled={isLoading}
+          className="px-6 py-2 text-white rounded-lg hover:opacity-90 transition-all font-semibold disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
           style={{ backgroundColor: 'rgb(36, 61, 138)' }}
         >
-          {initialData ? 'Update Project' : 'Create Project'}
+          {isLoading ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              {initialData ? 'Updating...' : 'Creating...'}
+            </>
+          ) : (
+            initialData ? 'Update Project' : 'Create Project'
+          )}
         </button>
       </div>
     </form>
@@ -298,6 +307,7 @@ const EstimatorHub: React.FC = () => {
   const [deletingProject, setDeletingProject] = useState<any>(null);
   const [extractedBOQ, setExtractedBOQ] = useState<BOQ | null>(null);
   const [projects, setProjects] = useState<any[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0); // Force re-render when data changes
   const [searchTerm, setSearchTerm] = useState('');
   const [showBOQCreationDialog, setShowBOQCreationDialog] = useState(false);
   const [selectedProjectForBOQ, setSelectedProjectForBOQ] = useState<any>(null);
@@ -363,6 +373,8 @@ const EstimatorHub: React.FC = () => {
   const [selectedPM, setSelectedPM] = useState<number | null>(null);
   const [isSendingToPM, setIsSendingToPM] = useState(false);
   const [loadingPMs, setLoadingPMs] = useState(false);
+  const [savingProject, setSavingProject] = useState(false); // Loading state for create/update project
+  const [deletingProjectLoading, setDeletingProjectLoading] = useState(false); // Loading state for delete project
 
   // ✅ PERFORMANCE: useCallback handlers to prevent unnecessary re-renders
   // These handlers are used frequently in the UI and benefit from memoization
@@ -468,6 +480,7 @@ const EstimatorHub: React.FC = () => {
 
   useEffect(() => {
     const abortController = new AbortController();
+    let isPolling = false; // Prevent overlapping requests
 
     const fetchData = async () => {
       try {
@@ -484,24 +497,51 @@ const EstimatorHub: React.FC = () => {
 
     fetchData();
 
-    // DISABLED: Auto-refresh polling to prevent multiple overlapping requests
-    // TODO: Re-enable with longer interval (30s+) after backend optimization
-    // const intervalId = setInterval(() => {
-    //   loadBOQs(false); // Auto-refresh BOQs in background without showing loading spinner
-    // }, 2000); // 2 seconds for instant updates
+    // Smart background polling - only when tab is visible
+    const silentRefresh = async () => {
+      // Skip if already polling or tab is hidden
+      if (isPolling || document.hidden) return;
+
+      isPolling = true;
+      try {
+        await Promise.all([
+          loadBOQs(false),  // Silent refresh - no loading spinner
+          loadProjects(currentPage)
+        ]);
+      } catch (error) {
+        // Silent fail - don't show errors for background refresh
+        console.debug('Background refresh failed:', error);
+      } finally {
+        isPolling = false;
+      }
+    };
+
+    // Poll every 5 seconds for responsive updates
+    const intervalId = setInterval(silentRefresh, 5000);
+
+    // Also refresh when tab becomes visible again
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        silentRefresh();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       abortController.abort();
-      // clearInterval(intervalId);
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [currentPage]);
 
-  // ✅ RELOAD BOQs when real-time update is received (e.g., TD approves BOQ)
+  // ✅ RELOAD BOQs and Projects when real-time update is received (e.g., TD approves BOQ)
   useEffect(() => {
     // Skip initial mount (timestamp is set on mount)
     if (boqUpdateTimestamp === 0) return;
 
-    loadBOQs(false); // Silent reload without loading spinner
+    // Silent reload both BOQs and projects without loading spinner
+    loadBOQs(false);
+    loadProjects(currentPage);
 
     // If user is on revisions tab, also reload revision-specific data
     if (activeTab === 'revisions') {
@@ -510,10 +550,27 @@ const EstimatorHub: React.FC = () => {
         loadRevisionProjects(selectedRevisionTab); // Reload projects for selected revision tab
       }
     }
-  }, [boqUpdateTimestamp, activeTab, selectedRevisionTab]); // Reload whenever timestamp, tab, or revision tab changes
+  }, [boqUpdateTimestamp, activeTab, selectedRevisionTab, currentPage]); // Reload whenever timestamp, tab, revision tab, or page changes
 
   useEffect(() => {
-    applyFilters();
+    // Inline filter logic to avoid stale closure issues
+    if (activeTab === 'projects') {
+      let filteredProj = [...projects];
+
+      if (searchTerm) {
+        filteredProj = filteredProj.filter(project =>
+          project.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          project.client?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          project.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          project.description?.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+      }
+
+      setFilteredProjects(filteredProj);
+    } else {
+      // For other tabs, call applyFilters for BOQ filtering
+      applyFilters();
+    }
   }, [boqs, projects, searchTerm, activeTab]);
 
   // Reset BOQ pagination when tab changes
@@ -618,8 +675,54 @@ const EstimatorHub: React.FC = () => {
         });
 
         setBOQs(sortedBOQs);
+
+        // Immediately update filtered BOQs based on current tab
+        if (activeTab !== 'projects') {
+          let filtered = [...sortedBOQs];
+
+          // Apply tab-specific filtering
+          if (activeTab === 'sent') {
+            filtered = filtered.filter(boq => {
+              const status = boq.status?.toLowerCase();
+              return status === 'pending' || status === 'pending_pm_approval';
+            });
+          } else if (activeTab === 'approved') {
+            filtered = filtered.filter(boq => {
+              const status = boq.status?.toLowerCase();
+              return (status === 'pm_approved' || status === 'pending_td_approval' || status === 'approved' || status === 'revision_approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
+            });
+          } else if (activeTab === 'rejected') {
+            filtered = filtered.filter(boq => {
+              const status = boq.status?.toLowerCase();
+              return status === 'rejected' || status === 'client_rejected' || status === 'pm_rejected' || status === 'internal_revision_pending';
+            });
+          } else if (activeTab === 'revisions') {
+            filtered = filtered.filter(boq => {
+              const status = boq.status?.toLowerCase();
+              const revisionNumber = boq.revision_number || 0;
+              if (revisionNumber > 0) return true;
+              return status === 'under_revision' || status === 'pending_revision' || status === 'revision_approved';
+            });
+          } else if (activeTab === 'completed') {
+            filtered = filtered.filter(boq => boq.status?.toLowerCase() === 'completed' || boq.pm_assigned === true);
+          } else if (activeTab === 'cancelled') {
+            filtered = filtered.filter(boq => boq.status?.toLowerCase() === 'client_cancelled');
+          }
+
+          // Apply search filter
+          if (searchTerm) {
+            filtered = filtered.filter(boq =>
+              boq.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              boq.project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              boq.project.client.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+          }
+
+          setFilteredBOQs(filtered);
+        }
       } else {
         setBOQs([]);
+        setFilteredBOQs([]);
       }
     } catch (error: any) {
       console.error('Error loading BOQs:', error);
@@ -627,6 +730,7 @@ const EstimatorHub: React.FC = () => {
         showError('Failed to load BOQs');
       }
       setBOQs([]);
+      setFilteredBOQs([]);
     } finally {
       if (showLoadingSpinner) {
         setLoading(false);
@@ -638,8 +742,23 @@ const EstimatorHub: React.FC = () => {
     try {
       const response = await estimatorService.getProjectsPaginated(page, 10);
       if (response.success) {
-        setProjects(response.projects);
+        const newProjects = response.projects;
+        setProjects(newProjects);
         setTotalProjects(response.total);
+        // Immediately update filtered projects if on projects tab
+        if (activeTab === 'projects') {
+          let filteredProj = [...newProjects];
+          if (searchTerm) {
+            filteredProj = filteredProj.filter(project =>
+              project.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              project.client?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              project.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              project.description?.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+          }
+          setFilteredProjects(filteredProj);
+        }
+        setRefreshKey(prev => prev + 1); // Force re-render
       }
     } catch (error) {
       console.error('Error loading projects:', error);
@@ -699,6 +818,7 @@ const EstimatorHub: React.FC = () => {
   }, [selectedRevisionTab]);
 
   const handleCreateProject = async (projectData: any) => {
+    setSavingProject(true);
     try {
       const response = editingProject
         ? await estimatorService.updateProject(editingProject.project_id, projectData)
@@ -706,32 +826,69 @@ const EstimatorHub: React.FC = () => {
 
       if (response.success) {
         showSuccess(response.message);
+
+        // ✅ OPTIMISTIC UPDATE: Instantly add new project to UI
+        if (!editingProject && response.project) {
+          const newProject = response.project;
+          setProjects(prev => [newProject, ...prev]);
+          setFilteredProjects(prev => [newProject, ...prev]);
+        }
+
+        // Close dialog immediately for better UX
         setShowProjectDialog(false);
         setEditingProject(null);
-        await loadProjects();
+
+        // Reset to page 1 and reload data in background
+        setCurrentPage(1);
+        await Promise.all([
+          loadProjects(1),
+          loadBOQs(false)
+        ]);
+        // Trigger realtime update for other components
+        useRealtimeUpdateStore.getState().triggerBOQUpdate();
         return response.project;
       } else {
         showError(response.message);
       }
     } catch (error) {
       showError(editingProject ? 'Failed to update project' : 'Failed to create project');
+    } finally {
+      setSavingProject(false);
     }
   };
 
   const handleDeleteProject = async () => {
     if (!deletingProject) return;
 
+    const projectIdToDelete = deletingProject.project_id;
+
+    setDeletingProjectLoading(true);
     try {
-      const response = await estimatorService.deleteProject(deletingProject.project_id);
+      const response = await estimatorService.deleteProject(projectIdToDelete);
       if (response.success) {
         showSuccess(response.message);
+
+        // ✅ OPTIMISTIC UPDATE: Instantly remove project from UI
+        setProjects(prev => prev.filter(p => p.project_id !== projectIdToDelete));
+        setFilteredProjects(prev => prev.filter(p => p.project_id !== projectIdToDelete));
+
+        // Close modal immediately
         setDeletingProject(null);
-        await loadProjects();
+
+        // Reload data in background to sync with server
+        await Promise.all([
+          loadProjects(currentPage),
+          loadBOQs(false)
+        ]);
+        // Trigger realtime update for other components
+        useRealtimeUpdateStore.getState().triggerBOQUpdate();
       } else {
         showError(response.message);
       }
     } catch (error) {
       showError('Failed to delete project');
+    } finally {
+      setDeletingProjectLoading(false);
     }
   };
 
@@ -937,7 +1094,10 @@ const EstimatorHub: React.FC = () => {
 
       if (successCount > 0) {
         showSuccess(`Successfully sent ${successCount} BOQ(s) via email to Technical Director`);
-        await loadBOQs(); // Refresh the BOQ list to get updated email_sent status
+        // Refresh both BOQs and projects to update UI immediately
+        await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+        // Trigger realtime update for other components (e.g., TD page)
+        useRealtimeUpdateStore.getState().triggerBOQUpdate();
         setActiveTab('sent'); // Switch to "Send BOQ" tab
       }
 
@@ -963,7 +1123,34 @@ const EstimatorHub: React.FC = () => {
         return;
       }
 
-      // Store project and open PM selection modal
+      const boq = projectBoqs[0];
+
+      // Check if BOQ was previously sent to a PM (PM rejected case)
+      // If so, send directly to the same PM without showing selection modal
+      if (boq.last_pm_user_id) {
+        setIsSendingToPM(true);
+        try {
+          const response = await estimatorService.sendBOQToProjectManager(boq.boq_id, boq.last_pm_user_id);
+
+          if (response.success) {
+            showSuccess('Successfully resent BOQ to Project Manager');
+            // Refresh both BOQs and projects to update UI immediately
+            await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+            // Trigger realtime update for other components
+            useRealtimeUpdateStore.getState().triggerBOQUpdate();
+          } else {
+            showError(response.message || 'Failed to send BOQ to Project Manager');
+          }
+        } catch (error) {
+          console.error('Error sending BOQ to PM:', error);
+          showError('Failed to send BOQ to Project Manager');
+        } finally {
+          setIsSendingToPM(false);
+        }
+        return;
+      }
+
+      // No previous PM - show PM selection modal
       setProjectToSendToPM(project);
       setShowPMSelectionModal(true);
 
@@ -1011,7 +1198,10 @@ const EstimatorHub: React.FC = () => {
         setShowPMSelectionModal(false);
         setSelectedPM(null);
         setProjectToSendToPM(null);
-        await loadBOQs(); // Refresh BOQ list
+        // Refresh both BOQs and projects to update UI immediately
+        await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+        // Trigger realtime update for other components (e.g., PM page)
+        useRealtimeUpdateStore.getState().triggerBOQUpdate();
       } else {
         showError(response.message || 'Failed to send BOQ to Project Manager');
       }
@@ -1031,7 +1221,10 @@ const EstimatorHub: React.FC = () => {
       if (response.success) {
         showSuccess('BOQ deleted successfully');
         setDeletingBoq(null);
-        await loadBOQs(); // Refresh the BOQ list
+        // Refresh both BOQs and projects to update UI immediately
+        await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+        // Trigger realtime update for other components
+        useRealtimeUpdateStore.getState().triggerBOQUpdate();
       } else {
         showError(response.message || 'Failed to delete BOQ');
       }
@@ -1053,7 +1246,10 @@ const EstimatorHub: React.FC = () => {
         setShowClientRejectionModal(false);
         setBoqToReject(null);
         setRejectionReason('');
-        await loadBOQs(); // Refresh list
+        // Refresh both BOQs and projects to update UI immediately
+        await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+        // Trigger realtime update for other components
+        useRealtimeUpdateStore.getState().triggerBOQUpdate();
       } else {
         showError(result.message);
       }
@@ -1075,7 +1271,10 @@ const EstimatorHub: React.FC = () => {
         setShowCancelModal(false);
         setBoqToCancel(null);
         setCancellationReason('');
-        await loadBOQs(); // Refresh list
+        // Refresh both BOQs and projects to update UI immediately
+        await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+        // Trigger realtime update for other components
+        useRealtimeUpdateStore.getState().triggerBOQUpdate();
       } else {
         showError(result.message);
       }
@@ -1690,7 +1889,10 @@ const EstimatorHub: React.FC = () => {
                   const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                   if (result.success) {
                     showSuccess('BOQ sent to Technical Director successfully!');
-                    await loadBOQs();
+                    // Refresh both BOQs and projects to update UI immediately
+                    await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+                    // Trigger realtime update for other components
+                    useRealtimeUpdateStore.getState().triggerBOQUpdate();
                     // Switch to Revisions tab to see the sent BOQ
                     setActiveTab('revisions');
                   } else {
@@ -1748,7 +1950,10 @@ const EstimatorHub: React.FC = () => {
                     const result = await estimatorService.sendBOQToTechnicalDirector(boq.boq_id!);
                     if (result.success) {
                       showSuccess('BOQ sent to Technical Director successfully!');
-                      loadBOQs();
+                      // Refresh both BOQs and projects to update UI immediately
+                      await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+                      // Trigger realtime update for other components
+                      useRealtimeUpdateStore.getState().triggerBOQUpdate();
                     } else {
                       showError(result.message);
                     }
@@ -1810,7 +2015,10 @@ const EstimatorHub: React.FC = () => {
                   const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                   if (result.success) {
                     showSuccess('BOQ sent to Technical Director successfully!');
-                    await loadBOQs();
+                    // Refresh both BOQs and projects to update UI immediately
+                    await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+                    // Trigger realtime update for other components
+                    useRealtimeUpdateStore.getState().triggerBOQUpdate();
                     // Switch to Revisions tab to see the sent BOQ
                     setActiveTab('revisions');
                   } else {
@@ -1834,7 +2042,10 @@ const EstimatorHub: React.FC = () => {
                   const result = await estimatorService.confirmClientApproval(boq.boq_id!);
                   if (result.success) {
                     showSuccess(result.message);
-                    loadBOQs(); // Refresh list
+                    // Refresh both BOQs and projects to update UI immediately
+                    await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+                    // Trigger realtime update for other components
+                    useRealtimeUpdateStore.getState().triggerBOQUpdate();
                   } else {
                     showError(result.message);
                   }
@@ -1978,7 +2189,7 @@ const EstimatorHub: React.FC = () => {
               <span className="sm:hidden">Edit</span>
             </button>
           ) : isPMRejected ? (
-            /* PM Rejected - Can edit, send to PM, or send to TD */
+            /* PM Rejected - Can edit and resend to PM only */
             <>
               <button
                 className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
@@ -2003,28 +2214,18 @@ const EstimatorHub: React.FC = () => {
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                <span className="hidden sm:inline">Edit BOQ</span>
+                <span className="hidden sm:inline">Edit</span>
                 <span className="sm:hidden">Edit</span>
               </button>
               <button
-                className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
-                onClick={async () => {
-                  // Direct send to TD without email popup (like Internal Revisions)
-                  const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
-                  if (result.success) {
-                    showSuccess('BOQ sent to Technical Director successfully!');
-                    await loadBOQs();
-                    // Switch to Revisions tab to see the sent BOQ
-                    setActiveTab('revisions');
-                  } else {
-                    showError(result.message || 'Failed to send BOQ');
-                  }
-                }}
-                title="Send revised BOQ to Technical Director for approval"
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                onClick={() => handleSendToPM(boq.project)}
+                title={boq.last_pm_user_id ? `Resend to ${boq.last_pm_name || 'Project Manager'}` : "Send to Project Manager for re-approval"}
               >
-                <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                <span className="hidden sm:inline">Send to TD</span>
-                <span className="sm:hidden">TD</span>
+                <Users className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Resend PM</span>
+                <span className="sm:hidden">PM</span>
               </button>
             </>
           ) : isApprovedByTD || isRevisionApproved ? (
@@ -2173,7 +2374,8 @@ const EstimatorHub: React.FC = () => {
                               const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                               if (result.success) {
                                 showSuccess('Revision sent to Technical Director successfully!');
-                                loadBOQs();
+                                await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+                                useRealtimeUpdateStore.getState().triggerBOQUpdate();
                               } else {
                                 showError(result.message || 'Failed to send revision');
                               }
@@ -2193,7 +2395,8 @@ const EstimatorHub: React.FC = () => {
                               const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                               if (result.success) {
                                 showSuccess('BOQ sent to Technical Director successfully!');
-                                await loadBOQs();
+                                await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+                                useRealtimeUpdateStore.getState().triggerBOQUpdate();
                                 setActiveTab('revisions');
                               } else {
                                 showError(result.message || 'Failed to send BOQ');
@@ -2217,7 +2420,8 @@ const EstimatorHub: React.FC = () => {
                               const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending BOQ for review' });
                               if (result.success) {
                                 showSuccess('BOQ sent to Technical Director successfully!');
-                                await loadBOQs();
+                                await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+                                useRealtimeUpdateStore.getState().triggerBOQUpdate();
                                 setActiveTab('pending');
                               } else {
                                 showError(result.message || 'Failed to send BOQ');
@@ -2236,7 +2440,7 @@ const EstimatorHub: React.FC = () => {
                             <Button variant="ghost" size="sm" onClick={async () => { setIsLoadingBoqForEdit(true); try { if (boq.boq_id) { const result = await estimatorService.getBOQById(boq.boq_id); if (result.success && result.data) { setEditingBoq(result.data); setSelectedProjectForBOQ(result.data.project || boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); } else { showError('Failed to load BOQ details'); } } } finally { setIsLoadingBoqForEdit(false); } }} className="h-8 w-8 p-0" title="Edit BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { showSuccess(result.message); loadBOQs(); } else { showError(result.message); } }} className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
+                            <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { showSuccess(result.message); await Promise.all([loadBOQs(), loadProjects(currentPage)]); useRealtimeUpdateStore.getState().triggerBOQUpdate(); } else { showError(result.message); } }} className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
                               <CheckCircle className="h-4 w-4 mr-1" />
                               <span className="text-xs">Approved</span>
                             </Button>
@@ -2871,7 +3075,7 @@ const EstimatorHub: React.FC = () => {
                         {!hasSentBoq && boqCount > 0 ? (
                           <>
                             <button
-                              className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="flex-1 min-w-[65px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 disabled:opacity-50 disabled:cursor-not-allowed"
                               style={{ backgroundColor: 'rgb(22, 163, 74)' }}
                               onClick={() => handleSendToTD(project)}
                               disabled={sendingProjectId === project.project_id}
@@ -2882,7 +3086,6 @@ const EstimatorHub: React.FC = () => {
                                   <div className="scale-50">
                                     <ModernLoadingSpinners variant="dots" size="sm" color="white" />
                                   </div>
-                                  <span className="hidden sm:inline">Sending...</span>
                                   <span className="sm:hidden">...</span>
                                 </>
                               ) : (
@@ -2892,6 +3095,16 @@ const EstimatorHub: React.FC = () => {
                                   <span className="sm:hidden">TD</span>
                                 </>
                               )}
+                            </button>
+                            <button
+                              className="flex-1 min-w-[65px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                              onClick={() => handleSendToPM(project)}
+                              title="Send to Project Manager"
+                            >
+                              <Users className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                              <span className="hidden sm:inline">Send to PM</span>
+                              <span className="sm:hidden">PM</span>
                             </button>
                           </>
                         ) : null}
@@ -2920,7 +3133,7 @@ const EstimatorHub: React.FC = () => {
                   )}
                 </div>
                 ) : (
-                  <div className="overflow-x-auto bg-white rounded-lg shadow-sm">
+                  <div className="overflow-x-auto bg-white rounded-lg shadow-sm" key={`projects-container-${refreshKey}`}>
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-red-50/50 border-b-2 border-red-100">
@@ -3645,6 +3858,7 @@ const EstimatorHub: React.FC = () => {
               setEditingProject(null);
             }}
             initialData={editingProject}
+            isLoading={savingProject}
           />
         </DialogContent>
       </Dialog>
@@ -3969,14 +4183,23 @@ const EstimatorHub: React.FC = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setDeletingProject(null)}>
+            <Button variant="outline" onClick={() => setDeletingProject(null)} disabled={deletingProjectLoading}>
               Cancel
             </Button>
             <Button
               variant="destructive"
               onClick={handleDeleteProject}
+              disabled={deletingProjectLoading}
+              className="flex items-center gap-2"
             >
-              Delete Project
+              {deletingProjectLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  Deleting...
+                </>
+              ) : (
+                'Delete Project'
+              )}
             </Button>
           </div>
         </DialogContent>
