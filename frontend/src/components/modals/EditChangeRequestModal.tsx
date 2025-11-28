@@ -239,7 +239,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
         unit_price: m.unit_price,
         total_price: m.total_price,
         reason: m.reason,
-        master_material_id: m.master_material_id ? parseInt(m.master_material_id) : undefined
+        master_material_id: m.master_material_id || undefined
       }));
 
       const response = await changeRequestService.updateChangeRequest(changeRequest.cr_id, {
