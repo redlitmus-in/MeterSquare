@@ -88,6 +88,11 @@ class ChangeRequest(db.Model):
     # Approval workflow - Multi-stage
     approval_required_from = db.Column(db.String(50), nullable=True, index=True)  # ✅ PERFORMANCE: Added index
 
+    # PM Assignment (which specific PM should handle this request)
+    assigned_to_pm_user_id = db.Column(db.Integer, nullable=True, index=True)
+    assigned_to_pm_name = db.Column(db.String(255), nullable=True)
+    assigned_to_pm_date = db.Column(db.DateTime, nullable=True)
+
     # PM Approval
     pm_approved_by_user_id = db.Column(db.Integer, nullable=True)
     pm_approved_by_name = db.Column(db.String(255), nullable=True)
@@ -283,6 +288,11 @@ class ChangeRequest(db.Model):
             # Recommended routing (based on material type: 'buyer', 'estimator', or 'technical_director')
             'recommended_next_approver': recommended_route,
             'routing_type': routing_type,  # 'external_buy' or 'new_materials'
+
+            # PM Assignment
+            'assigned_to_pm_user_id': self.assigned_to_pm_user_id,
+            'assigned_to_pm_name': self.assigned_to_pm_name,
+            'assigned_to_pm_date': self.assigned_to_pm_date.isoformat() if self.assigned_to_pm_date else None,
 
             # PM Approval
             'pm_approved_by_user_id': self.pm_approved_by_user_id,

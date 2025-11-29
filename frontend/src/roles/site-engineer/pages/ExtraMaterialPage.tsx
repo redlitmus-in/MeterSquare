@@ -655,42 +655,31 @@ const ExtraMaterialPage: React.FC = () => {
                     className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
                   >
                     <div className="p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
-                          {request.project_code && (
-                            <span className="text-xs font-semibold text-black">
-                              {request.project_code}
-                            </span>
-                          )}
-                        </div>
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-bold text-gray-900">EM-{request.id}</h3>
                         {getStatusBadge(request.status)}
                       </div>
 
-                      <div className="space-y-2 text-sm text-gray-600 mb-4">
-                        <div>
-                          <p className="font-medium text-gray-900">{request.project_name}</p>
-                          <p className="text-xs text-gray-500">{request.area_name}</p>
-                        </div>
+                      {/* Project Info */}
+                      <p className="font-semibold text-gray-900 mb-1">{request.project_name}</p>
+                      {request.project_code && (
+                        <p className="text-xs text-gray-500 mb-3">Code: {request.project_code}</p>
+                      )}
+
+                      {/* Details */}
+                      <div className="space-y-1.5 text-sm mb-4">
                         <div>
                           <p className="text-xs text-gray-500">BOQ Item</p>
-                          <p className="font-medium">{request.boq_item_name}</p>
+                          <p className="font-medium text-gray-900">{request.boq_item_name}</p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500">Sub-Item</p>
-                          <p className="font-medium">{request.sub_item_name}</p>
-                          {request.materials_count && request.materials_count > 1 && (
-                            <p className="text-xs text-purple-600 mt-1">+ {request.materials_count - 1} more material(s)</p>
-                          )}
-                        </div>
-                        <div className="flex justify-between pt-2 border-t">
-                          <div>
-                            <p className="text-xs text-gray-500">Quantity</p>
-                            <p className="font-semibold">{request.quantity}</p>
-                          </div>
+                          <p className="font-medium text-gray-900">{request.sub_item_name || '-'}</p>
                         </div>
                       </div>
 
+                      {/* Actions */}
                       <div className="space-y-2">
                         <button
                           onClick={() => handleViewDetails(request.id)}
@@ -838,39 +827,27 @@ const ExtraMaterialPage: React.FC = () => {
                     className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
                   >
                     <div className="p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
-                          {request.project_code && (
-                            <span className="text-xs font-semibold text-black">
-                              {request.project_code}
-                            </span>
-                          )}
-                        </div>
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-bold text-gray-900">EM-{request.id}</h3>
                         {getStatusBadge(request.status)}
                       </div>
 
-                      <div className="space-y-2 text-sm text-gray-600 mb-4">
-                        <div>
-                          <p className="font-medium text-gray-900">{request.project_name}</p>
-                          <p className="text-xs text-gray-500">{request.area_name}</p>
-                        </div>
+                      {/* Project Info */}
+                      <p className="font-semibold text-gray-900 mb-1">{request.project_name}</p>
+                      {request.project_code && (
+                        <p className="text-xs text-gray-500 mb-3">Code: {request.project_code}</p>
+                      )}
+
+                      {/* Details */}
+                      <div className="space-y-1.5 text-sm mb-4">
                         <div>
                           <p className="text-xs text-gray-500">BOQ Item</p>
-                          <p className="font-medium">{request.boq_item_name}</p>
+                          <p className="font-medium text-gray-900">{request.boq_item_name}</p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500">Sub-Item</p>
-                          <p className="font-medium">{request.sub_item_name}</p>
-                        </div>
-                        <div className="flex justify-between pt-2 border-t">
-                          <div>
-                            <p className="text-xs text-gray-500">Quantity</p>
-                            <p className="font-semibold">{request.quantity}</p>
-                          </div>
-                        </div>
-                        <div className="text-xs text-gray-500 pt-2">
-                          Created: {new Date(request.created_at).toLocaleDateString()}
+                          <p className="font-medium text-gray-900">{request.sub_item_name || '-'}</p>
                         </div>
                       </div>
 
@@ -998,39 +975,27 @@ const ExtraMaterialPage: React.FC = () => {
                     className="bg-white rounded-lg border border-green-200 shadow-sm hover:shadow-lg transition-all duration-200"
                   >
                     <div className="p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
-                          {request.project_code && (
-                            <span className="text-xs font-semibold text-black">
-                              {request.project_code}
-                            </span>
-                          )}
-                        </div>
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-bold text-gray-900">EM-{request.id}</h3>
                         {getStatusBadge(request.status)}
                       </div>
 
-                      <div className="space-y-2 text-sm text-gray-600 mb-4">
-                        <div>
-                          <p className="font-medium text-gray-900">{request.project_name}</p>
-                          <p className="text-xs text-gray-500">{request.area_name}</p>
-                        </div>
+                      {/* Project Info */}
+                      <p className="font-semibold text-gray-900 mb-1">{request.project_name}</p>
+                      {request.project_code && (
+                        <p className="text-xs text-gray-500 mb-3">Code: {request.project_code}</p>
+                      )}
+
+                      {/* Details */}
+                      <div className="space-y-1.5 text-sm mb-4">
                         <div>
                           <p className="text-xs text-gray-500">BOQ Item</p>
-                          <p className="font-medium">{request.boq_item_name}</p>
+                          <p className="font-medium text-gray-900">{request.boq_item_name}</p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500">Sub-Item</p>
-                          <p className="font-medium">{request.sub_item_name}</p>
-                        </div>
-                        <div className="flex justify-between pt-2 border-t">
-                          <div>
-                            <p className="text-xs text-gray-500">Quantity</p>
-                            <p className="font-semibold">{request.quantity}</p>
-                          </div>
-                        </div>
-                        <div className="text-xs text-gray-500 pt-2">
-                          Approved: {new Date(request.created_at).toLocaleDateString()}
+                          <p className="font-medium text-gray-900">{request.sub_item_name || '-'}</p>
                         </div>
                       </div>
 
@@ -1151,51 +1116,42 @@ const ExtraMaterialPage: React.FC = () => {
                     className="bg-white rounded-lg border border-red-200 shadow-sm hover:shadow-lg transition-all duration-200"
                   >
                     <div className="p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
-                          {request.project_code && (
-                            <span className="text-xs font-semibold text-black">
-                              {request.project_code}
-                            </span>
-                          )}
-                        </div>
+                      {/* Header */}
+                      <div className="flex items-start justify-between mb-3">
+                        <h3 className="font-bold text-gray-900">EM-{request.id}</h3>
                         {getStatusBadge(request.status)}
                       </div>
 
-                      <div className="space-y-2 text-sm text-gray-600 mb-4">
-                        <div>
-                          <p className="font-medium text-gray-900">{request.project_name}</p>
-                          <p className="text-xs text-gray-500">{request.area_name}</p>
-                        </div>
+                      {/* Project Info */}
+                      <div className="mb-3">
+                        <p className="font-semibold text-gray-900">{request.project_name}</p>
+                        {request.project_code && (
+                          <p className="text-xs text-gray-500">Code: {request.project_code}</p>
+                        )}
+                      </div>
+
+                      {/* Details */}
+                      <div className="space-y-1.5 text-sm mb-3">
                         <div>
                           <p className="text-xs text-gray-500">BOQ Item</p>
-                          <p className="font-medium">{request.boq_item_name}</p>
+                          <p className="font-medium text-gray-900">{request.boq_item_name}</p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500">Sub-Item</p>
-                          <p className="font-medium">{request.sub_item_name}</p>
+                          <p className="font-medium text-gray-900">{request.sub_item_name || '-'}</p>
                         </div>
-                        <div className="flex justify-between pt-2 border-t">
-                          <div>
-                            <p className="text-xs text-gray-500">Quantity</p>
-                            <p className="font-semibold">{request.quantity}</p>
-                          </div>
-                        </div>
-
-                        {/* Rejection Details */}
-                        {request.rejection_reason && (
-                          <div className="pt-2 border-t bg-red-50 -mx-4 px-4 py-2 mt-3">
-                            <p className="text-xs font-medium text-red-900">Rejection Reason:</p>
-                            <p className="text-xs text-red-700 mt-1">{request.rejection_reason}</p>
-                          </div>
-                        )}
-                        {request.rejected_by && (
-                          <div className="text-xs text-gray-500">
-                            <p>Rejected by: <span className="font-medium text-red-700">{request.rejected_by}</span></p>
-                          </div>
-                        )}
                       </div>
+
+                      {/* Rejection Details */}
+                      {request.rejection_reason && (
+                        <div className="bg-red-50 rounded-lg px-3 py-2 mb-3">
+                          <p className="text-xs font-medium text-red-900">Rejection Reason:</p>
+                          <p className="text-xs text-red-700 mt-1">{request.rejection_reason}</p>
+                          {request.rejected_by && (
+                            <p className="text-xs text-red-600 mt-1">By: {request.rejected_by}</p>
+                          )}
+                        </div>
+                      )}
 
                       <div className="space-y-2">
                         <button
@@ -1205,15 +1161,13 @@ const ExtraMaterialPage: React.FC = () => {
                           <EyeIcon className="w-4 h-4" />
                           View Details
                         </button>
-                        <div className="grid grid-cols-1 gap-2">
-                          <button
-                            onClick={() => handleDelete(request.id)}
-                            className="bg-red-600 hover:bg-red-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
-                          >
-                            <TrashIcon className="w-4 h-4" />
-                            Delete
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => handleDelete(request.id)}
+                          className="w-full bg-red-600 hover:bg-red-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                          Delete
+                        </button>
                       </div>
                     </div>
                   </motion.div>
@@ -1339,57 +1293,55 @@ const ExtraMaterialPage: React.FC = () => {
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="bg-white rounded-lg border border-blue-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                    className="bg-white rounded-lg border border-green-200 shadow-sm hover:shadow-lg transition-all duration-200"
                   >
                     <div className="p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-blue-100 text-blue-700 border-blue-300">
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-bold text-gray-900">EM-{request.id}</h3>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-green-100 text-green-700 border-green-300">
                           <CheckBadgeIcon className="w-4 h-4" />
                           Complete
                         </span>
                       </div>
 
-                      <div className="space-y-2 text-sm text-gray-600 mb-4">
-                        <div>
-                          <p className="font-medium text-gray-900">{request.project_name}</p>
-                          <p className="text-xs text-gray-500">{request.area_name}</p>
-                        </div>
+                      {/* Project Info */}
+                      <p className="font-semibold text-gray-900 mb-1">{request.project_name}</p>
+                      {request.project_code && (
+                        <p className="text-xs text-gray-500 mb-3">Code: {request.project_code}</p>
+                      )}
+
+                      {/* Details */}
+                      <div className="space-y-1.5 text-sm mb-3">
                         <div>
                           <p className="text-xs text-gray-500">BOQ Item</p>
-                          <p className="font-medium">{request.boq_item_name}</p>
+                          <p className="font-medium text-gray-900">{request.boq_item_name}</p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500">Sub-Item</p>
-                          <p className="font-medium">{request.sub_item_name}</p>
+                          <p className="font-medium text-gray-900">{request.sub_item_name || '-'}</p>
                         </div>
-                        <div className="flex justify-between pt-2 border-t">
-                          <div>
-                            <p className="text-xs text-gray-500">Quantity</p>
-                            <p className="font-semibold">{request.quantity}</p>
-                          </div>
-                        </div>
+                      </div>
 
-                        {/* Purchase Completion Details */}
-                        <div className="pt-2 border-t bg-blue-50 -mx-4 px-4 py-2 mt-3">
-                          <p className="text-xs font-medium text-blue-900">Purchase Completed</p>
-                          {request.purchase_completed_by && (
-                            <p className="text-xs text-blue-700 mt-1">
-                              By: <span className="font-medium">{request.purchase_completed_by}</span>
-                            </p>
-                          )}
-                          {request.purchase_completion_date && (
-                            <p className="text-xs text-blue-600 mt-0.5">
-                              {new Date(request.purchase_completion_date).toLocaleString('en-US', {
-                                day: '2-digit',
-                                month: 'short',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
-                            </p>
-                          )}
-                        </div>
+                      {/* Purchase Completion Details */}
+                      <div className="bg-green-50 rounded-lg px-3 py-2 mb-3">
+                        <p className="text-xs font-medium text-green-900">Purchase Completed</p>
+                        {request.purchase_completed_by && (
+                          <p className="text-xs text-green-700 mt-1">
+                            By: <span className="font-medium">{request.purchase_completed_by}</span>
+                          </p>
+                        )}
+                        {request.purchase_completion_date && (
+                          <p className="text-xs text-green-600 mt-0.5">
+                            {new Date(request.purchase_completion_date).toLocaleString('en-US', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </p>
+                        )}
                       </div>
 
                       <button

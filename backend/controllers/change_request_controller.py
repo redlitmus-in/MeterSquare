@@ -818,11 +818,19 @@ def send_for_review(cr_id):
         elif next_role == CR_CONFIG.ROLE_PROJECT_MANAGER and normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
             # SS/SE sending to PM - set status to send_to_pm
             change_request.status = CR_CONFIG.STATUS_SEND_TO_PM
-            log.info(f"SS/SE sending CR {cr_id} to PM - status set to '{CR_CONFIG.STATUS_SEND_TO_PM}'")
+            # Store the specific PM who should handle this request (for proper routing)
+            change_request.assigned_to_pm_user_id = next_approver_id
+            change_request.assigned_to_pm_name = next_approver
+            change_request.assigned_to_pm_date = datetime.utcnow()
+            log.info(f"SS/SE sending CR {cr_id} to PM {next_approver} (user_id={next_approver_id}) - status set to '{CR_CONFIG.STATUS_SEND_TO_PM}'")
         elif next_role == CR_CONFIG.ROLE_MEP and normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
             # SS/SE sending to MEP - set status to send_to_mep
             change_request.status = CR_CONFIG.STATUS_SEND_TO_MEP
-            log.info(f"SS/SE sending CR {cr_id} to MEP - status set to '{CR_CONFIG.STATUS_SEND_TO_MEP}'")
+            # Store the specific MEP who should handle this request (using PM fields for MEP as well)
+            change_request.assigned_to_pm_user_id = next_approver_id
+            change_request.assigned_to_pm_name = next_approver
+            change_request.assigned_to_pm_date = datetime.utcnow()
+            log.info(f"SS/SE sending CR {cr_id} to MEP {next_approver} (user_id={next_approver_id}) - status set to '{CR_CONFIG.STATUS_SEND_TO_MEP}'")
         else:
             change_request.status = CR_CONFIG.STATUS_UNDER_REVIEW
 
@@ -1066,11 +1074,22 @@ def get_all_change_requests():
                 ChangeRequest.status.in_(['pending', 'pm_request'])
             )
 
-            # Filter for SS/SE requests sent to PM (status = 'send_to_pm')
-            send_to_pm_filter = ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_PM
+            # Filter for SS/SE requests sent to THIS specific PM (status = 'send_to_pm' AND assigned_to_pm_user_id = this PM)
+            # Only show requests where this PM was specifically assigned via pm_assign_ss
+            send_to_pm_filter = and_(
+                ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_PM,
+                ChangeRequest.assigned_to_pm_user_id == user_id  # Only show to the assigned PM
+            )
 
-            # Filter for approved/completed requests (to show in Accepted/Completed tabs)
+            # Filter for approved/completed requests that were assigned to this PM (to show in Accepted/Completed tabs)
+            # For SE-originated requests, only show to the PM who was originally assigned
             approved_status_filter = ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'pending_td_approval'])
+
+            # Filter for SE-originated requests that were assigned to this PM and have been processed
+            se_originated_assigned_to_this_pm = and_(
+                ChangeRequest.assigned_to_pm_user_id == user_id,  # Assigned to this PM
+                approved_status_filter
+            )
 
             # Admin raised requests as PM role - show to PM assigned to that project
             admin_as_pm_filter = and_(
@@ -1127,9 +1146,17 @@ def get_all_change_requests():
 
                 log.info(f"Applied filter: include admin/PM created + SS/SE sent for review, from PM-assigned projects")
             elif pm_project_ids:
-                # Regular PM - sees all requests from their assigned projects
+                # Regular PM - sees requests from their assigned projects
+                # IMPORTANT: For SE-originated requests, only show to the PM who was assigned
                 # Admin-created requests (any status) from PM's projects
                 admin_created_filter = func.lower(ChangeRequest.requested_by_role) == 'admin'
+
+                # PM-originated requests (not from SE) - show to all PMs on project
+                pm_originated_approved = and_(
+                    approved_status_filter,
+                    func.lower(ChangeRequest.requested_by_role).in_(['projectmanager', 'project_manager', 'pm', 'admin']),
+                    ChangeRequest.assigned_to_pm_user_id.is_(None)  # Not SE-originated
+                )
 
                 query = query.filter(
                     or_(
@@ -1143,11 +1170,15 @@ def get_all_change_requests():
                         ),
                         and_(
                             ChangeRequest.project_id.in_(pm_project_ids),  # Requests from assigned projects
-                            send_to_pm_filter  # SS/SE requests sent to PM
+                            send_to_pm_filter  # SS/SE requests sent to THIS PM specifically
                         ),
                         and_(
                             ChangeRequest.project_id.in_(pm_project_ids),  # Requests from assigned projects
-                            approved_status_filter  # Approved/completed/rejected requests
+                            se_originated_assigned_to_this_pm  # SE-originated requests assigned to this PM
+                        ),
+                        and_(
+                            ChangeRequest.project_id.in_(pm_project_ids),  # Requests from assigned projects
+                            pm_originated_approved  # PM/Admin originated approved requests
                         ),
                         ChangeRequest.requested_by_user_id == user_id  # Own requests
                     )
@@ -1188,10 +1219,12 @@ def get_all_change_requests():
                 ChangeRequest.requested_by_role.in_(['mep', 'mepsupervisor'])  # Only MEP created requests
             )
 
-            # Filter for requests sent by SE to MEP for approval
+            # Filter for requests sent by SE to THIS specific MEP for approval
+            # Only show requests where this MEP was specifically assigned
             se_to_mep_filter = and_(
                 ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_MEP,
-                ChangeRequest.current_approver_role == CR_CONFIG.ROLE_MEP
+                ChangeRequest.current_approver_role == CR_CONFIG.ROLE_MEP,
+                ChangeRequest.assigned_to_pm_user_id == user_id  # Only show to the assigned MEP
             )
 
             # Admin raised requests as MEP role - show to MEP assigned to that project
@@ -1199,9 +1232,20 @@ def get_all_change_requests():
                 ChangeRequest.requested_by_role == 'admin',
             )
 
-            # Approved/completed requests from MEP's projects
-            mep_approved_status_filter = and_(
-                ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer'])
+            # Approved/completed requests status filter
+            mep_approved_statuses = ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer'])
+
+            # SE-originated requests assigned to this MEP
+            se_originated_assigned_to_this_mep = and_(
+                ChangeRequest.assigned_to_pm_user_id == user_id,  # Assigned to this MEP
+                mep_approved_statuses
+            )
+
+            # MEP-originated approved requests (not from SE) - show to all MEPs on project
+            mep_originated_approved = and_(
+                mep_approved_statuses,
+                func.lower(ChangeRequest.requested_by_role).in_(['mep', 'mepsupervisor', 'admin']),
+                ChangeRequest.assigned_to_pm_user_id.is_(None)  # Not SE-originated
             )
 
             if is_admin_viewing:
@@ -1210,7 +1254,7 @@ def get_all_change_requests():
                 log.info(f"Admin viewing as MEP - showing ALL requests (no filtering)")
                 pass  # No additional filtering - admin sees everything
             elif mep_project_ids:
-                # Regular MEP - sees pending requests from MEPs + SE requests sent to MEP + approved/completed + own requests
+                # Regular MEP - sees pending requests from MEPs + SE requests sent to THIS MEP + approved/completed + own requests
                 query = query.filter(
                     or_(
                         and_(
@@ -1219,7 +1263,7 @@ def get_all_change_requests():
                         ),
                         and_(
                             ChangeRequest.project_id.in_(mep_project_ids),  # Requests from assigned projects
-                            se_to_mep_filter  # SE sent requests for MEP approval
+                            se_to_mep_filter  # SE sent requests for THIS MEP specifically
                         ),
                         and_(
                             ChangeRequest.project_id.in_(mep_project_ids),  # Requests from assigned projects
@@ -1227,7 +1271,11 @@ def get_all_change_requests():
                         ),
                         and_(
                             ChangeRequest.project_id.in_(mep_project_ids),  # Requests from assigned projects
-                            mep_approved_status_filter  # Approved/completed requests
+                            se_originated_assigned_to_this_mep  # SE-originated requests assigned to this MEP
+                        ),
+                        and_(
+                            ChangeRequest.project_id.in_(mep_project_ids),  # Requests from assigned projects
+                            mep_originated_approved  # MEP/Admin originated approved requests
                         ),
                         ChangeRequest.requested_by_user_id == user_id  # Own requests
                     )
