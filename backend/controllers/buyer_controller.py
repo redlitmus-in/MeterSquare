@@ -4165,6 +4165,15 @@ def get_approved_po_children():
             elif parent_cr and parent_cr.boq_id:
                 boq = BOQ.query.get(parent_cr.boq_id)
 
+            # Get vendor details for phone/email
+            vendor_phone = None
+            vendor_email = None
+            if po_child.vendor_id:
+                vendor = Vendor.query.filter_by(vendor_id=po_child.vendor_id, is_deleted=False).first()
+                if vendor:
+                    vendor_phone = vendor.phone
+                    vendor_email = vendor.email
+
             result.append({
                 **po_child.to_dict(),
                 'project_name': project.project_name if project else 'Unknown',
@@ -4173,7 +4182,9 @@ def get_approved_po_children():
                 'location': project.location if project else None,
                 'boq_name': boq.boq_name if boq else None,
                 'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
-                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None
+                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None,
+                'vendor_phone': vendor_phone,
+                'vendor_email': vendor_email
             })
 
         log.info(f"Returning {len(result)} approved PO children to user {user_id} (role: {user_role})")

@@ -44,6 +44,8 @@ export interface POChild {
   submission_group_id?: string | null;
   vendor_id?: number | null;
   vendor_name?: string | null;
+  vendor_phone?: string | null;
+  vendor_email?: string | null;
   vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
   vendor_selected_by_buyer_id?: number | null;
   vendor_selected_by_buyer_name?: string | null;

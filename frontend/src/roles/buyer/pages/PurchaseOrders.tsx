@@ -1034,45 +1034,78 @@ const PurchaseOrders: React.FC = () => {
 
                     {/* Action Buttons */}
                     <div className="flex flex-col gap-1.5 mt-auto">
-                      {/* Show Send Email button if email not sent yet */}
+                      {/* Show Send Email/WhatsApp buttons if email not sent yet */}
                       {!poChild.vendor_email_sent ? (
-                        <Button
-                          onClick={() => {
-                            // Convert POChild to Purchase format for email modal
-                            const purchaseLike: Purchase = {
-                              cr_id: poChild.parent_cr_id,
-                              formatted_cr_id: poChild.formatted_id,
-                              project_id: poChild.project_id || 0,
-                              project_name: poChild.project_name || 'Unknown Project',
-                              project_code: poChild.project_code,
-                              client: poChild.client || '',
-                              location: poChild.location || '',
-                              boq_id: poChild.boq_id || 0,
-                              boq_name: poChild.boq_name || '',
-                              item_name: poChild.item_name || '',
-                              sub_item_name: '',
-                              request_type: '',
-                              reason: '',
-                              materials: poChild.materials || [],
-                              materials_count: poChild.materials_count || poChild.materials?.length || 0,
-                              total_cost: poChild.materials_total_cost || 0,
-                              approved_by: 0,
-                              approved_at: null,
-                              created_at: poChild.created_at || '',
-                              status: 'pending',
-                              vendor_id: poChild.vendor_id,
-                              vendor_name: poChild.vendor_name,
-                              po_child_id: poChild.id,  // Pass POChild ID for email API
-                            };
-                            setSelectedPurchase(purchaseLike);
-                            setIsVendorEmailModalOpen(true);
-                          }}
-                          className="w-full bg-blue-900 hover:bg-blue-800 text-white text-xs"
-                          size="sm"
-                        >
-                          <Mail className="w-3.5 h-3.5 mr-1.5" />
-                          Send Email to Vendor
-                        </Button>
+                        <div className="flex gap-1.5 w-full">
+                          <Button
+                            onClick={() => {
+                              // Convert POChild to Purchase format for email modal
+                              const purchaseLike: Purchase = {
+                                cr_id: poChild.parent_cr_id,
+                                formatted_cr_id: poChild.formatted_id,
+                                project_id: poChild.project_id || 0,
+                                project_name: poChild.project_name || 'Unknown Project',
+                                project_code: poChild.project_code,
+                                client: poChild.client || '',
+                                location: poChild.location || '',
+                                boq_id: poChild.boq_id || 0,
+                                boq_name: poChild.boq_name || '',
+                                item_name: poChild.item_name || '',
+                                sub_item_name: '',
+                                request_type: '',
+                                reason: '',
+                                materials: poChild.materials || [],
+                                materials_count: poChild.materials_count || poChild.materials?.length || 0,
+                                total_cost: poChild.materials_total_cost || 0,
+                                approved_by: 0,
+                                approved_at: null,
+                                created_at: poChild.created_at || '',
+                                status: 'pending',
+                                vendor_id: poChild.vendor_id,
+                                vendor_name: poChild.vendor_name,
+                                vendor_phone: poChild.vendor_phone,
+                                po_child_id: poChild.id,  // Pass POChild ID for email API
+                              };
+                              setSelectedPurchase(purchaseLike);
+                              setIsVendorEmailModalOpen(true);
+                            }}
+                            className="flex-1 bg-blue-900 hover:bg-blue-800 text-white text-xs"
+                            size="sm"
+                          >
+                            <Mail className="w-3.5 h-3.5 mr-1" />
+                            Email
+                          </Button>
+                          <Button
+                            onClick={async () => {
+                              const vendorPhone = poChild.vendor_phone || '';
+                              if (!vendorPhone) {
+                                showError('Vendor phone number not available. Please add phone number in vendor settings.');
+                                return;
+                              }
+                              try {
+                                setSendingWhatsAppId(poChild.parent_cr_id);
+                                await buyerService.sendVendorWhatsApp(poChild.parent_cr_id, vendorPhone);
+                                showSuccess('Purchase order sent via WhatsApp!');
+                                refetchApprovedPOChildren();
+                              } catch (error: any) {
+                                showError(error.message || 'Failed to send WhatsApp');
+                              } finally {
+                                setSendingWhatsAppId(null);
+                              }
+                            }}
+                            disabled={sendingWhatsAppId === poChild.parent_cr_id}
+                            className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs"
+                            size="sm"
+                            title={!poChild.vendor_phone ? 'No phone - click to see error' : 'Send via WhatsApp'}
+                          >
+                            {sendingWhatsAppId === poChild.parent_cr_id ? (
+                              <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <MessageSquare className="w-3.5 h-3.5 mr-1" />
+                            )}
+                            WhatsApp
+                          </Button>
+                        </div>
                       ) : (
                         <>
                           {/* Email Sent Status */}
