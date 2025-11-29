@@ -36,7 +36,9 @@
       "Bash(do basename \"$f\")",
       "Bash(/home/development1/Desktop/MeterSquare/backend/venv/bin/python:*)",
       "Bash(test:*)",
-      "Bash(/home/development1/Desktop/MeterSquare/backend/venv/bin/python3:*)"
+      "Bash(/home/development1/Desktop/MeterSquare/backend/venv/bin/python3:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs:*)"
     ],
     "deny": [],
     "ask": []

@@ -563,40 +563,107 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   );
                 })()}
 
-                {/* Vendor Details - Only show if TD approved vendor */}
-                {changeRequest.vendor_approved_by_td_id && (
-                  <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
+                {/* Vendor Details - Show if vendor has been selected (pending, approved, or rejected) */}
+                {(changeRequest.selected_vendor_name || changeRequest.vendor_selection_status) && (
+                  <div className={`bg-white rounded-lg shadow-sm p-4 mb-6 border-l-4 ${
+                    changeRequest.vendor_selection_status === 'approved' ? 'border-green-500' :
+                    changeRequest.vendor_selection_status === 'rejected' ? 'border-red-500' :
+                    'border-amber-500'
+                  }`}>
                     <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                       <Package className="w-4 h-4" />
                       Vendor Details
+                      {changeRequest.vendor_selection_status === 'pending_td_approval' && (
+                        <span className="ml-2 px-2 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 rounded">
+                          Pending TD Approval
+                        </span>
+                      )}
+                      {changeRequest.vendor_selection_status === 'approved' && (
+                        <span className="ml-2 px-2 py-0.5 text-xs font-bold bg-green-100 text-green-800 rounded">
+                          Approved
+                        </span>
+                      )}
+                      {changeRequest.vendor_selection_status === 'rejected' && (
+                        <span className="ml-2 px-2 py-0.5 text-xs font-bold bg-red-100 text-red-800 rounded">
+                          Rejected
+                        </span>
+                      )}
                     </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="bg-blue-50 rounded-lg p-3">
-                        <p className="text-xs text-blue-600 mb-1">Selected Vendor</p>
+                    <div className={`grid grid-cols-1 gap-4 ${
+                      changeRequest.vendor_selection_status === 'approved' ? 'md:grid-cols-4' : 'md:grid-cols-3'
+                    }`}>
+                      {/* Selected Vendor */}
+                      <div className={`rounded-lg p-3 ${
+                        changeRequest.vendor_selection_status === 'approved' ? 'bg-green-50' :
+                        changeRequest.vendor_selection_status === 'rejected' ? 'bg-red-50' :
+                        'bg-amber-50'
+                      }`}>
+                        <p className={`text-xs mb-1 ${
+                          changeRequest.vendor_selection_status === 'approved' ? 'text-green-600' :
+                          changeRequest.vendor_selection_status === 'rejected' ? 'text-red-600' :
+                          'text-amber-600'
+                        }`}>Selected Vendor</p>
                         <p className="text-sm font-bold text-gray-900">{changeRequest.selected_vendor_name || 'N/A'}</p>
                       </div>
-                      <div className="bg-blue-50 rounded-lg p-3">
-                        <p className="text-xs text-blue-600 mb-1">Approved By TD</p>
-                        <p className="text-sm font-bold text-gray-900">{changeRequest.vendor_approved_by_td_name || 'N/A'}</p>
+                      {/* Selected By (Buyer) */}
+                      <div className={`rounded-lg p-3 ${
+                        changeRequest.vendor_selection_status === 'approved' ? 'bg-green-50' :
+                        changeRequest.vendor_selection_status === 'rejected' ? 'bg-red-50' :
+                        'bg-amber-50'
+                      }`}>
+                        <p className={`text-xs mb-1 ${
+                          changeRequest.vendor_selection_status === 'approved' ? 'text-green-600' :
+                          changeRequest.vendor_selection_status === 'rejected' ? 'text-red-600' :
+                          'text-amber-600'
+                        }`}>Selected By (Buyer)</p>
+                        <p className="text-sm font-bold text-gray-900">{changeRequest.vendor_selected_by_buyer_name || 'N/A'}</p>
                       </div>
-                      <div className="bg-blue-50 rounded-lg p-3">
-                        <p className="text-xs text-blue-600 mb-1">Approval Date</p>
-                        <p className="text-sm font-bold text-gray-900">
-                          {changeRequest.vendor_approval_date
-                            ? new Date(changeRequest.vendor_approval_date).toLocaleDateString('en-US', {
-                                day: '2-digit',
-                                month: 'short',
-                                year: 'numeric'
-                              })
-                            : 'N/A'}
-                        </p>
-                      </div>
+                      {/* Approved By TD - Show for approved status */}
+                      {changeRequest.vendor_selection_status === 'approved' && (
+                        <div className="bg-green-50 rounded-lg p-3">
+                          <p className="text-xs text-green-600 mb-1">Approved By TD</p>
+                          <p className="text-sm font-bold text-gray-900">{changeRequest.vendor_approved_by_td_name || 'N/A'}</p>
+                        </div>
+                      )}
+                      {/* Approval Date - Show for approved status */}
+                      {changeRequest.vendor_selection_status === 'approved' && (
+                        <div className="bg-green-50 rounded-lg p-3">
+                          <p className="text-xs text-green-600 mb-1">Approval Date</p>
+                          <p className="text-sm font-bold text-gray-900">
+                            {changeRequest.vendor_approval_date ? new Date(changeRequest.vendor_approval_date).toLocaleDateString('en-US', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            }) : 'N/A'}
+                          </p>
+                        </div>
+                      )}
+                      {/* Selection Date - Show for pending status */}
+                      {changeRequest.vendor_selection_status === 'pending_td_approval' && (
+                        <div className="bg-amber-50 rounded-lg p-3">
+                          <p className="text-xs text-amber-600 mb-1">Selection Date</p>
+                          <p className="text-sm font-bold text-gray-900">
+                            {changeRequest.vendor_selection_date ? new Date(changeRequest.vendor_selection_date).toLocaleDateString('en-US', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            }) : 'N/A'}
+                          </p>
+                        </div>
+                      )}
+                      {/* Rejection Reason - Show for rejected status */}
+                      {changeRequest.vendor_selection_status === 'rejected' && changeRequest.vendor_rejection_reason && (
+                        <div className="bg-red-50 rounded-lg p-3 md:col-span-3">
+                          <p className="text-xs text-red-600 mb-1">Rejection Reason</p>
+                          <p className="text-sm font-bold text-red-900">{changeRequest.vendor_rejection_reason}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {/* TD Approval Required Info */}
-                {isHighValue && (
+                {/* TD Approval Required Info - Only show if high value AND vendor not already approved */}
+                {isHighValue && changeRequest.vendor_selection_status !== 'approved' && (
                   <div className="bg-white rounded-lg shadow-sm p-4 mb-6 border-l-4 border-blue-500">
                     <div className="flex items-start gap-3">
                       <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />

@@ -450,10 +450,30 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                           </div>
                         )}
 
-                        {purchase.vendor_selected_by_name && (
+                        {(purchase.vendor_selected_by_name || purchase.vendor_selected_by_buyer_name) && (
                           <div>
-                            <p className="text-xs text-gray-500 mb-1">Selected By</p>
-                            <p className="text-gray-900">{purchase.vendor_selected_by_name}</p>
+                            <p className="text-xs text-gray-500 mb-1">Selected By (Buyer)</p>
+                            <p className="text-gray-900">{purchase.vendor_selected_by_buyer_name || purchase.vendor_selected_by_name}</p>
+                          </div>
+                        )}
+
+                        {purchase.vendor_selection_status === 'approved' && purchase.vendor_approved_by_td_name && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Approved By TD</p>
+                            <p className="text-gray-900">{purchase.vendor_approved_by_td_name}</p>
+                          </div>
+                        )}
+
+                        {purchase.vendor_selection_status === 'approved' && purchase.vendor_approval_date && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Approval Date</p>
+                            <p className="text-gray-900">
+                              {new Date(purchase.vendor_approval_date).toLocaleDateString('en-US', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric'
+                              })}
+                            </p>
                           </div>
                         )}
                       </div>

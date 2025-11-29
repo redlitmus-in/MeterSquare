@@ -120,6 +120,10 @@ export interface Purchase {
   vendor_selection_pending_td_approval?: boolean;
   vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
   vendor_selected_by_name?: string | null;
+  vendor_selected_by_buyer_name?: string | null;
+  vendor_approved_by_td_name?: string | null;
+  vendor_approval_date?: string | null;
+  vendor_selection_date?: string | null;
   vendor_email_sent?: boolean;
   po_child_id?: number;  // If this is a POChild record, this is its ID
   use_per_material_vendors?: boolean;
@@ -319,6 +323,29 @@ export interface SendVendorEmailResponse {
   error?: string;
 }
 
+export interface TDRejectedPOChild {
+  po_child_id: number;
+  formatted_id: string;
+  parent_cr_id: number;
+  project_id: number;
+  project_name: string;
+  client: string;
+  location: string;
+  boq_id: number;
+  boq_name: string;
+  item_name: string;
+  materials: any[];
+  materials_count: number;
+  total_cost: number;
+  created_at: string;
+  status: string;
+  rejection_type: string;
+  rejection_reason: string;
+  rejected_by_name: string;
+  vendor_selection_status: string;
+  can_reselect_vendor: boolean;
+}
+
 export interface PurchaseListResponse {
   success: boolean;
   pending_purchases_count?: number;
@@ -334,6 +361,12 @@ export interface PurchaseListResponse {
   pending_approval_purchases?: Purchase[];
   pending_approval_count?: number;
   pending_approval_total_cost?: number;
+  // Rejected purchases
+  rejected_purchases?: Purchase[];
+  rejected_purchases_count?: number;
+  // TD rejected PO children (can re-select vendor)
+  td_rejected_po_children?: TDRejectedPOChild[];
+  td_rejected_count?: number;
 }
 
 export interface CompletePurchaseRequest {

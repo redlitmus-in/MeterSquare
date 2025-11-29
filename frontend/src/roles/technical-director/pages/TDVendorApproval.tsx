@@ -155,7 +155,7 @@ const TDVendorApproval: React.FC = () => {
     return assignments.filter(assignment => {
       if (seBoqSubTab === 'pending') return assignment.vendor_selection_status === 'pending_td_approval';
       if (seBoqSubTab === 'approved') return assignment.vendor_selection_status === 'approved';
-      if (seBoqSubTab === 'rejected') return assignment.vendor_selection_status === 'rejected';
+      if (seBoqSubTab === 'rejected') return assignment.vendor_selection_status === 'rejected' || assignment.vendor_selection_status === 'td_rejected';
       return true;
     });
   }, [assignments, seBoqSubTab]);
@@ -164,7 +164,7 @@ const TDVendorApproval: React.FC = () => {
     return {
       pending: assignments.filter(a => a.vendor_selection_status === 'pending_td_approval').length,
       approved: assignments.filter(a => a.vendor_selection_status === 'approved').length,
-      rejected: assignments.filter(a => a.vendor_selection_status === 'rejected').length
+      rejected: assignments.filter(a => a.vendor_selection_status === 'rejected' || a.vendor_selection_status === 'td_rejected').length
     };
   }, [assignments]);
 
@@ -278,7 +278,7 @@ const TDVendorApproval: React.FC = () => {
                   <Badge className={`${
                     assignment.vendor_selection_status === 'approved'
                       ? 'bg-green-600 text-white'
-                      : assignment.vendor_selection_status === 'rejected'
+                      : (assignment.vendor_selection_status === 'rejected' || assignment.vendor_selection_status === 'td_rejected')
                         ? 'bg-red-600 text-white'
                         : 'bg-yellow-600 text-white'
                   } text-xs whitespace-nowrap`}>
@@ -287,7 +287,7 @@ const TDVendorApproval: React.FC = () => {
                         <CheckCircle className="w-3 h-3 inline mr-1" />
                         Approved
                       </>
-                    ) : assignment.vendor_selection_status === 'rejected' ? (
+                    ) : (assignment.vendor_selection_status === 'rejected' || assignment.vendor_selection_status === 'td_rejected') ? (
                       <>
                         <XCircle className="w-3 h-3 inline mr-1" />
                         Rejected
@@ -431,12 +431,12 @@ const TDVendorApproval: React.FC = () => {
                     <Badge className={`${
                       selectedAssignment.vendor_selection_status === 'approved'
                         ? 'bg-green-600 text-white'
-                        : selectedAssignment.vendor_selection_status === 'rejected'
+                        : (selectedAssignment.vendor_selection_status === 'rejected' || selectedAssignment.vendor_selection_status === 'td_rejected')
                           ? 'bg-red-600 text-white'
                           : 'bg-yellow-600 text-white'
                     }`}>
                       {selectedAssignment.vendor_selection_status === 'approved' ? 'Approved' :
-                       selectedAssignment.vendor_selection_status === 'rejected' ? 'Rejected' : 'Pending'}
+                       (selectedAssignment.vendor_selection_status === 'rejected' || selectedAssignment.vendor_selection_status === 'td_rejected') ? 'Rejected' : 'Pending'}
                     </Badge>
                   </div>
                   <div className="flex items-center gap-4 text-sm text-gray-600">

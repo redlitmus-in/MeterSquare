@@ -971,6 +971,9 @@ def get_buyer_pending_purchases():
                 'gst_number': None,
                 'selected_by_name': None
             }
+            # Initialize vendor_trn and vendor_email before conditional blocks
+            vendor_trn = ""
+            vendor_email = ""
             if cr.selected_vendor_id:
                 from models.vendor import Vendor
                 vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
@@ -985,14 +988,15 @@ def get_buyer_pending_purchases():
                     vendor_details['state'] = vendor.state
                     vendor_details['country'] = vendor.country
                     vendor_details['gst_number'] = vendor.gst_number
+                    # Set vendor_trn and vendor_email from vendor object
+                    vendor_trn = vendor.gst_number or ""
+                    vendor_email = vendor.email or ""
                 # Get who selected the vendor
                 if cr.vendor_selected_by_buyer_id:
                     from models.user import User
                     selector = User.query.get(cr.vendor_selected_by_buyer_id)
                     if selector:
                         vendor_details['selected_by_name'] = selector.full_name
-                    vendor_trn = vendor.gst_number or ""
-                    vendor_email = vendor.email or ""
 
             # Check if materials have been requested from store
             store_requests = InternalMaterialRequest.query.filter_by(cr_id=cr.cr_id).all()
@@ -1084,6 +1088,10 @@ def get_buyer_pending_purchases():
                 "vendor_country": vendor_details['country'],
                 "vendor_gst_number": vendor_details['gst_number'],
                 "vendor_selected_by_name": vendor_details['selected_by_name'],
+                "vendor_selected_by_buyer_name": cr.vendor_selected_by_buyer_name,
+                "vendor_approved_by_td_name": cr.vendor_approved_by_td_name,
+                "vendor_approval_date": cr.vendor_approval_date.isoformat() if cr.vendor_approval_date else None,
+                "vendor_selection_date": cr.vendor_selection_date.isoformat() if cr.vendor_selection_date else None,
                 "vendor_trn": vendor_trn,
                 "vendor_email": vendor_email,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
@@ -1269,6 +1277,9 @@ def get_buyer_completed_purchases():
                 'gst_number': None,
                 'selected_by_name': None
             }
+            # Initialize vendor_trn and vendor_email before conditional blocks
+            vendor_trn = ""
+            vendor_email = ""
             if cr.selected_vendor_id:
                 from models.vendor import Vendor
                 vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
@@ -1283,6 +1294,9 @@ def get_buyer_completed_purchases():
                     vendor_details['state'] = vendor.state
                     vendor_details['country'] = vendor.country
                     vendor_details['gst_number'] = vendor.gst_number
+                    # Set vendor_trn and vendor_email from vendor object
+                    vendor_trn = vendor.gst_number or ""
+                    vendor_email = vendor.email or ""
                 # Get who selected the vendor
                 if cr.vendor_selected_by_buyer_id:
                     from models.user import User
@@ -1327,6 +1341,11 @@ def get_buyer_completed_purchases():
                 "vendor_country": vendor_details['country'],
                 "vendor_gst_number": vendor_details['gst_number'],
                 "vendor_selected_by_name": vendor_details['selected_by_name'],
+                "vendor_selected_by_buyer_name": cr.vendor_selected_by_buyer_name,
+                "vendor_approved_by_td_name": cr.vendor_approved_by_td_name,
+                "vendor_approval_date": cr.vendor_approval_date.isoformat() if cr.vendor_approval_date else None,
+                "vendor_selection_date": cr.vendor_selection_date.isoformat() if cr.vendor_selection_date else None,
+                "vendor_selection_status": cr.vendor_selection_status,
                 "vendor_trn": vendor_trn,
                 "vendor_email": vendor_email,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
@@ -1578,10 +1597,64 @@ def get_buyer_rejected_purchases():
                 "vendor_selected_by_name": vendor_selected_by_name
             })
 
+        # Also get TD rejected POChild items
+        td_rejected_po_children = []
+        try:
+            if is_admin_viewing:
+                po_children = POChild.query.filter(
+                    or_(
+                        POChild.status == 'td_rejected',
+                        POChild.vendor_selection_status == 'td_rejected'
+                    ),
+                    POChild.is_deleted == False
+                ).all()
+            else:
+                po_children = POChild.query.filter(
+                    or_(
+                        POChild.status == 'td_rejected',
+                        POChild.vendor_selection_status == 'td_rejected'
+                    ),
+                    POChild.vendor_selected_by_buyer_id == buyer_id,
+                    POChild.is_deleted == False
+                ).all()
+
+            for poc in po_children:
+                # Get parent CR for project/boq info
+                parent_cr = ChangeRequest.query.filter_by(cr_id=poc.parent_cr_id).first()
+                project = Project.query.get(poc.project_id) if poc.project_id else None
+                boq = BOQ.query.filter_by(boq_id=poc.boq_id).first() if poc.boq_id else None
+
+                td_rejected_po_children.append({
+                    "po_child_id": poc.id,
+                    "formatted_id": poc.get_formatted_id(),
+                    "parent_cr_id": poc.parent_cr_id,
+                    "project_id": poc.project_id,
+                    "project_name": project.project_name if project else "Unknown",
+                    "client": project.client if project else "Unknown",
+                    "location": project.location if project else "Unknown",
+                    "boq_id": poc.boq_id,
+                    "boq_name": boq.boq_name if boq else "Unknown",
+                    "item_name": poc.item_name or "N/A",
+                    "materials": poc.materials_data or [],
+                    "materials_count": len(poc.materials_data or []),
+                    "total_cost": poc.materials_total_cost or 0,
+                    "created_at": poc.created_at.isoformat() if poc.created_at else None,
+                    "status": poc.status,
+                    "rejection_type": "td_vendor_rejection",
+                    "rejection_reason": poc.rejection_reason or "Vendor selection rejected by TD",
+                    "rejected_by_name": poc.vendor_approved_by_td_name,
+                    "vendor_selection_status": poc.vendor_selection_status,
+                    "can_reselect_vendor": True  # Flag to indicate buyer can select new vendor
+                })
+        except Exception as poc_error:
+            log.error(f"Error fetching TD rejected POChild items: {poc_error}")
+
         return jsonify({
             "success": True,
             "rejected_purchases_count": len(rejected_purchases),
-            "rejected_purchases": rejected_purchases
+            "rejected_purchases": rejected_purchases,
+            "td_rejected_po_children": td_rejected_po_children,
+            "td_rejected_count": len(td_rejected_po_children)
         }), 200
 
     except Exception as e:
@@ -3678,12 +3751,20 @@ def td_reject_po_child(po_child_id):
             return jsonify({"error": f"Vendor selection not pending approval. Status: {po_child.vendor_selection_status}"}), 400
 
         # Reject the vendor selection
-        po_child.vendor_selection_status = 'rejected'
-        po_child.status = 'rejected'
+        po_child.vendor_selection_status = 'td_rejected'
+        po_child.status = 'td_rejected'
         po_child.vendor_approved_by_td_id = td_id
         po_child.vendor_approved_by_td_name = td_name
         po_child.vendor_approval_date = datetime.utcnow()
         po_child.rejection_reason = reason
+
+        # Clear vendor selection so buyer can select a new vendor
+        po_child.vendor_id = None
+        po_child.vendor_name = None
+        po_child.vendor_selected_by_buyer_id = None
+        po_child.vendor_selected_by_buyer_name = None
+        po_child.vendor_selection_date = None
+
         po_child.updated_at = datetime.utcnow()
 
         db.session.commit()
