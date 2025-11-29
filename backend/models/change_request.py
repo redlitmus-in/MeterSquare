@@ -350,6 +350,12 @@ class ChangeRequest(db.Model):
             'rejected_by_name': self.rejected_by_name,
             'rejected_at_stage': self.rejected_at_stage,
 
+            # Vendor Email/WhatsApp tracking
+            'vendor_email_sent': self.vendor_email_sent,
+            'vendor_email_sent_date': self.vendor_email_sent_date.isoformat() if self.vendor_email_sent_date else None,
+            'vendor_whatsapp_sent': self.vendor_whatsapp_sent,
+            'vendor_whatsapp_sent_at': self.vendor_whatsapp_sent_at.isoformat() if self.vendor_whatsapp_sent_at else None,
+
             # Timestamps
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

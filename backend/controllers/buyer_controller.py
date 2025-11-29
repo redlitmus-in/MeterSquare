@@ -1097,6 +1097,9 @@ def get_buyer_pending_purchases():
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
                 "vendor_selection_status": cr.vendor_selection_status,  # 'pending_td_approval', 'approved', 'rejected'
                 "vendor_email_sent": cr.vendor_email_sent or False,
+                "vendor_email_sent_date": cr.vendor_email_sent_date.isoformat() if cr.vendor_email_sent_date else None,
+                "vendor_whatsapp_sent": cr.vendor_whatsapp_sent or False,
+                "vendor_whatsapp_sent_at": cr.vendor_whatsapp_sent_at.isoformat() if cr.vendor_whatsapp_sent_at else None,
                 "use_per_material_vendors": cr.use_per_material_vendors or False,
                 "material_vendor_selections": cr.material_vendor_selections or {},
                 "has_store_requests": has_store_requests,
@@ -1925,7 +1928,9 @@ def get_purchase_by_id(cr_id):
             "vendor_id": cr.selected_vendor_id,
             "vendor_name": cr.selected_vendor_name,
             "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
-            "vendor_email_sent": cr.vendor_email_sent or False
+            "vendor_email_sent": cr.vendor_email_sent or False,
+            "vendor_whatsapp_sent": cr.vendor_whatsapp_sent or False,
+            "vendor_whatsapp_sent_at": cr.vendor_whatsapp_sent_at.isoformat() if cr.vendor_whatsapp_sent_at else None
         }
 
         # If vendor is selected, add vendor contact details (with overrides)
@@ -4848,7 +4853,7 @@ def send_po_child_vendor_email(po_child_id):
 
 
 def send_vendor_whatsapp(cr_id):
-    """Send purchase order via WhatsApp to vendor"""
+    """Send purchase order via WhatsApp to vendor with LPO PDF"""
     try:
         from utils.whatsapp_service import WhatsAppService
         from datetime import datetime
@@ -4857,7 +4862,17 @@ def send_vendor_whatsapp(cr_id):
         buyer_id = current_user['user_id']
 
         data = request.get_json()
+        print(f"\n{'='*50}")
+        print(f"WHATSAPP REQUEST DATA: {data}")
+        print(f"{'='*50}\n")
+
         vendor_phone = data.get('vendor_phone')
+        include_lpo_pdf = data.get('include_lpo_pdf', True)  # Default to include PDF
+        lpo_data = data.get('lpo_data')  # LPO customization data from frontend
+
+        print(f"vendor_phone: {vendor_phone}")
+        print(f"include_lpo_pdf: {include_lpo_pdf}")
+        print(f"lpo_data provided: {lpo_data is not None}")
 
         if not vendor_phone:
             return jsonify({"error": "Vendor phone number is required"}), 400
@@ -4889,19 +4904,8 @@ def send_vendor_whatsapp(cr_id):
         if not project:
             return jsonify({"error": "Project not found"}), 404
 
-        # Get materials for this change request (stored as JSON)
-        sub_items_data = cr.sub_items_data or cr.materials_data or []
-        materials_list = []
-        for sub_item in sub_items_data:
-            materials = sub_item.get('materials', [])
-            for m in materials:
-                materials_list.append({
-                    'material_name': m.get('material_name', 'N/A'),
-                    'brand': m.get('brand', ''),
-                    'specification': m.get('specification', ''),
-                    'quantity': m.get('quantity', 0),
-                    'unit': m.get('unit', '')
-                })
+        # Use the same materials extraction as email (proper method)
+        materials_list, cr_total = process_materials_with_negotiated_prices(cr)
 
         # Prepare data for message generation
         vendor_data = {
@@ -4913,7 +4917,8 @@ def send_vendor_whatsapp(cr_id):
         purchase_data = {
             'cr_id': cr_id,
             'date': datetime.utcnow().strftime('%d/%m/%Y'),
-            'materials': materials_list
+            'materials': materials_list,
+            'total_cost': round(cr_total, 2)
         }
 
         buyer_data = {
@@ -4924,18 +4929,203 @@ def send_vendor_whatsapp(cr_id):
 
         project_data = {
             'project_name': project.project_name,
-            'location': project.location or ''
+            'location': project.location or '',
+            'client': project.client or ''
         }
 
-        # Send WhatsApp message with interactive buttons
+        # Generate LPO PDF if requested
+        pdf_url = None
+        print(f"\n{'='*50}")
+        print(f"PDF GENERATION - include_lpo_pdf: {include_lpo_pdf}")
+        print(f"{'='*50}\n")
+
+        if include_lpo_pdf:
+            print(">>> ENTERING PDF GENERATION BLOCK <<<")
+            try:
+                from utils.lpo_pdf_generator import LPOPDFGenerator
+                from models.system_settings import SystemSettings
+                from models.lpo_customization import LPOCustomization
+
+                log.info("Step 1: Starting PDF generation...")
+
+                # If no lpo_data provided, generate using same logic as preview_lpo_pdf
+                if not lpo_data:
+                    # Get saved customizations if any
+                    saved_customization = None
+                    try:
+                        saved_customization = LPOCustomization.query.filter_by(cr_id=cr_id).first()
+                    except Exception:
+                        pass
+
+                    # Get system settings
+                    settings = SystemSettings.query.first()
+
+                    # Calculate items with proper structure
+                    subtotal = 0
+                    items = []
+                    for i, material in enumerate(materials_list, 1):
+                        rate = material.get('negotiated_price') if material.get('negotiated_price') is not None else material.get('unit_price', 0)
+                        qty = material.get('quantity', 0)
+                        amount = float(qty) * float(rate)
+                        subtotal += amount
+                        items.append({
+                            "sl_no": i,
+                            "description": material.get('material_name', '') or material.get('sub_item_name', ''),
+                            "qty": qty,
+                            "unit": material.get('unit', 'Nos'),
+                            "rate": round(rate, 2),
+                            "amount": round(amount, 2)
+                        })
+
+                    vat_percent = 5
+                    vat_amount = subtotal * (vat_percent / 100)
+                    grand_total = subtotal + vat_amount
+
+                    DEFAULT_COMPANY_TRN = "100223723600003"
+                    vendor_phone = vendor.phone or ""
+                    vendor_trn = getattr(vendor, 'trn', '') or getattr(vendor, 'gst_number', '') or ""
+                    default_subject = cr.item_name or cr.justification or ""
+
+                    import json
+
+                    # Get vendor phone with code
+                    vendor_phone_formatted = ""
+                    if hasattr(vendor, 'phone_code') and vendor.phone_code and vendor.phone:
+                        vendor_phone_formatted = f"{vendor.phone_code} {vendor.phone}"
+                    elif vendor.phone:
+                        vendor_phone_formatted = vendor.phone
+
+                    # Parse JSON fields for terms
+                    general_terms_list = []
+                    payment_terms_list_data = []
+                    if saved_customization:
+                        try:
+                            if saved_customization.general_terms:
+                                general_terms_list = json.loads(saved_customization.general_terms) if isinstance(saved_customization.general_terms, str) else saved_customization.general_terms
+                        except:
+                            general_terms_list = []
+                        try:
+                            if saved_customization.payment_terms_list:
+                                payment_terms_list_data = json.loads(saved_customization.payment_terms_list) if isinstance(saved_customization.payment_terms_list, str) else saved_customization.payment_terms_list
+                        except:
+                            payment_terms_list_data = []
+
+                    # Fall back to system settings if no saved customization
+                    if not general_terms_list and settings:
+                        try:
+                            general_terms_list = json.loads(getattr(settings, 'lpo_general_terms', '[]') or '[]')
+                        except:
+                            general_terms_list = []
+                    if not payment_terms_list_data and settings:
+                        try:
+                            payment_terms_list_data = json.loads(getattr(settings, 'lpo_payment_terms_list', '[]') or '[]')
+                        except:
+                            payment_terms_list_data = []
+
+                    lpo_data = {
+                        "vendor": {
+                            "company_name": vendor.company_name or "",
+                            "contact_person": vendor.contact_person_name or "",
+                            "phone": vendor_phone_formatted,
+                            "fax": getattr(vendor, 'fax', '') or "",
+                            "email": vendor.email or "",
+                            "trn": vendor_trn,
+                            "project": project.project_name or "",
+                            "subject": saved_customization.subject if saved_customization and saved_customization.subject else default_subject
+                        },
+                        "company": {
+                            "name": settings.company_name if settings else "Meter Square Interiors LLC",
+                            "contact_person": buyer.full_name or "Procurement Team",
+                            "division": "Admin",
+                            "phone": settings.company_phone if settings else "",
+                            "fax": getattr(settings, 'company_fax', '') if settings else "",
+                            "email": settings.company_email if settings else "",
+                            "trn": getattr(settings, 'company_trn', '') or DEFAULT_COMPANY_TRN if settings else DEFAULT_COMPANY_TRN
+                        },
+                        "lpo_info": {
+                            "lpo_number": f"MS/PO/{cr_id}",
+                            "lpo_date": datetime.utcnow().strftime('%d.%m.%Y'),
+                            "quotation_ref": saved_customization.quotation_ref if saved_customization else "",
+                            "custom_message": saved_customization.custom_message if saved_customization and saved_customization.custom_message else "Thank you very much for quoting us for requirements. As per your quotation and settlement done over the mail, we are issuing the LPO and please ensure the delivery on time"
+                        },
+                        "items": items,
+                        "totals": {
+                            "subtotal": round(subtotal, 2),
+                            "vat_percent": vat_percent,
+                            "vat_amount": round(vat_amount, 2),
+                            "grand_total": round(grand_total, 2)
+                        },
+                        "terms": {
+                            "payment_terms": saved_customization.payment_terms if saved_customization and saved_customization.payment_terms else (getattr(settings, 'default_payment_terms', '100% after delivery') if settings else "100% after delivery"),
+                            "completion_terms": saved_customization.completion_terms if saved_customization and saved_customization.completion_terms else "As agreed",
+                            "general_terms": general_terms_list,
+                            "payment_terms_list": payment_terms_list_data
+                        },
+                        "signatures": {
+                            "md_name": getattr(settings, 'md_name', 'Managing Director') if settings else "Managing Director",
+                            "md_signature": getattr(settings, 'md_signature_image', None) if settings else None,
+                            "td_name": getattr(settings, 'td_name', 'Technical Director') if settings else "Technical Director",
+                            "td_signature": getattr(settings, 'td_signature_image', None) if settings else None,
+                            "stamp_image": getattr(settings, 'company_stamp_image', None) if settings else None,
+                            "is_system_signature": True
+                        },
+                        "header_image": getattr(settings, 'lpo_header_image', None) if settings else None
+                    }
+
+                print("Step 2: lpo_data prepared, generating PDF...")
+                print(f"lpo_data items count: {len(lpo_data.get('items', []))}")
+
+                generator = LPOPDFGenerator()
+                pdf_bytes = generator.generate_lpo_pdf(lpo_data)
+                print(f"Step 3: LPO PDF generated successfully, size: {len(pdf_bytes)} bytes")
+
+                # Upload PDF to Supabase and get public URL
+                # Use timestamp to make filename unique
+                import time
+                timestamp = int(time.time())
+                project_name_clean = project.project_name.replace(' ', '_')[:20] if project else 'Project'
+                pdf_filename = f"LPO-{cr_id}-{timestamp}.pdf"
+                pdf_path = f"whatsapp/lpo/{pdf_filename}"
+                print(f"Step 4: Uploading to Supabase path: {pdf_path}")
+
+                # Upload the file with proper content-disposition for filename
+                upload_result = supabase.storage.from_(SUPABASE_BUCKET).upload(
+                    pdf_path,
+                    pdf_bytes,
+                    {
+                        "content-type": "application/pdf",
+                        "content-disposition": f'attachment; filename="{pdf_filename}"',
+                        "x-upsert": "true"  # Allow overwrite if exists
+                    }
+                )
+                print(f"Step 5: Supabase upload result: {upload_result}")
+
+                # Get public URL
+                pdf_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(pdf_path)
+                print(f"Step 6: PDF URL generated: {pdf_url}")
+
+            except Exception as e:
+                print(f"ERROR in PDF generation/upload: {str(e)}")
+                import traceback
+                print(f"Traceback: {traceback.format_exc()}")
+                # Continue without PDF
+
+        print(f"\n{'='*50}")
+        print(f"FINAL PDF URL: {pdf_url}")
+        print(f"{'='*50}\n")
+
+        # Send WhatsApp message
+        log.info(f"=== SENDING WHATSAPP MESSAGE ===")
         whatsapp_service = WhatsAppService()
         result = whatsapp_service.send_purchase_order(
             phone_number=vendor_phone,
             vendor_data=vendor_data,
             purchase_data=purchase_data,
             buyer_data=buyer_data,
-            project_data=project_data
+            project_data=project_data,
+            pdf_url=pdf_url
         )
+        log.info(f"WhatsApp send_purchase_order result: {result}")
 
         if result.get('success'):
             # Update the change request to mark WhatsApp as sent

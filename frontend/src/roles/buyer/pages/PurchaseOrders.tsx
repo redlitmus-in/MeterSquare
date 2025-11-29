@@ -780,20 +780,37 @@ const PurchaseOrders: React.FC = () => {
                               <Mail className="w-3 h-3 mr-1" />
                               Email
                             </Button>
-                            <Button
-                              onClick={() => handleSendWhatsApp(purchase)}
-                              disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
-                              size="sm"
-                              className="flex-1 h-7 text-xs bg-green-500 hover:bg-green-600 text-white px-2 py-1"
-                              title={!purchase.vendor_phone ? 'Vendor phone not available' : 'Send via WhatsApp'}
-                            >
-                              {sendingWhatsAppId === purchase.cr_id ? (
-                                <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              ) : (
-                                <MessageSquare className="w-3 h-3 mr-1" />
-                              )}
-                              WhatsApp
-                            </Button>
+                            {purchase.vendor_whatsapp_sent ? (
+                              <Button
+                                onClick={() => handleSendWhatsApp(purchase)}
+                                disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
+                                size="sm"
+                                className="flex-1 h-7 text-xs bg-green-100 hover:bg-green-200 text-green-700 border border-green-300 px-2 py-1"
+                                title={`Sent via WhatsApp${purchase.vendor_whatsapp_sent_at ? ` on ${new Date(purchase.vendor_whatsapp_sent_at).toLocaleDateString()}` : ''}`}
+                              >
+                                {sendingWhatsAppId === purchase.cr_id ? (
+                                  <div className="w-3 h-3 mr-1 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <CheckCircle className="w-3 h-3 mr-1" />
+                                )}
+                                Sent
+                              </Button>
+                            ) : (
+                              <Button
+                                onClick={() => handleSendWhatsApp(purchase)}
+                                disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
+                                size="sm"
+                                className="flex-1 h-7 text-xs bg-green-500 hover:bg-green-600 text-white px-2 py-1"
+                                title={!purchase.vendor_phone ? 'Vendor phone not available' : 'Send via WhatsApp'}
+                              >
+                                {sendingWhatsAppId === purchase.cr_id ? (
+                                  <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <MessageSquare className="w-3 h-3 mr-1" />
+                                )}
+                                WhatsApp
+                              </Button>
+                            )}
                           </div>
                         )
                       )}
@@ -1769,20 +1786,38 @@ const PurchaseOrders: React.FC = () => {
                                     <Mail className="w-3 h-3 sm:mr-1" />
                                     <span className="hidden lg:inline">Email</span>
                                   </Button>
-                                  {/* <Button
-                                    onClick={() => handleSendWhatsApp(purchase)}
-                                    disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
-                                    size="sm"
-                                    className="px-2 py-1 h-auto text-xs bg-green-500 hover:bg-green-600 text-white"
-                                    title={!purchase.vendor_phone ? 'No phone' : 'WhatsApp'}
-                                  >
-                                    {sendingWhatsAppId === purchase.cr_id ? (
-                                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                    ) : (
-                                      <MessageSquare className="w-3 h-3 sm:mr-1" />
-                                    )}
-                                    <span className="hidden lg:inline">WA</span>
-                                  </Button> */}
+                                  {/* WhatsApp button with Sent status */}
+                                  {purchase.vendor_whatsapp_sent ? (
+                                    <Button
+                                      onClick={() => handleSendWhatsApp(purchase)}
+                                      disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
+                                      size="sm"
+                                      className="px-2 py-1 h-auto text-xs bg-green-100 hover:bg-green-200 text-green-700 border border-green-300"
+                                      title={`Sent via WhatsApp${purchase.vendor_whatsapp_sent_at ? ` on ${new Date(purchase.vendor_whatsapp_sent_at).toLocaleDateString()}` : ''}`}
+                                    >
+                                      {sendingWhatsAppId === purchase.cr_id ? (
+                                        <div className="w-3 h-3 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                                      ) : (
+                                        <CheckCircle className="w-3 h-3 sm:mr-1" />
+                                      )}
+                                      <span className="hidden lg:inline">Sent</span>
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      onClick={() => handleSendWhatsApp(purchase)}
+                                      disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
+                                      size="sm"
+                                      className="px-2 py-1 h-auto text-xs bg-green-500 hover:bg-green-600 text-white"
+                                      title={!purchase.vendor_phone ? 'No phone' : 'WhatsApp'}
+                                    >
+                                      {sendingWhatsAppId === purchase.cr_id ? (
+                                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      ) : (
+                                        <MessageSquare className="w-3 h-3 sm:mr-1" />
+                                      )}
+                                      <span className="hidden lg:inline">WA</span>
+                                    </Button>
+                                  )}
                                 </>
                               )
                             )}
