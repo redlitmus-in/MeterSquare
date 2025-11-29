@@ -615,6 +615,35 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       toast.warning(`${unselectedMaterials.length} material(s) without vendors will be skipped: ${unselectedMaterials.map(m => m.material_name).join(', ')}`);
     }
 
+    // Check if this is a re-selection for a rejected PO Child
+    if (purchase.po_child_id && viewMode === 'buyer') {
+      try {
+        setIsSubmitting(true);
+        // For PO Child re-selection, we only need to select one vendor for all materials
+        const firstVendor = selectedMaterials[0]?.selected_vendors[0];
+        if (!firstVendor) {
+          toast.error('Please select a vendor');
+          return;
+        }
+
+        const response = await buyerService.reselectVendorForPOChild(
+          purchase.po_child_id,
+          firstVendor.vendor_id
+        );
+
+        toast.success(response.message || 'Vendor re-selected! Awaiting TD approval.');
+        onVendorSelected?.();
+        onClose();
+        return;
+      } catch (error: any) {
+        console.error('Error re-selecting vendor for PO Child:', error);
+        toast.error(error.message || 'Failed to re-select vendor');
+        return;
+      } finally {
+        setIsSubmitting(false);
+      }
+    }
+
     // For buyer mode: Check if full purchase to single vendor (no sub-PO needed)
     // or partial/multiple vendors (create sub-CRs)
     if (viewMode === 'buyer') {

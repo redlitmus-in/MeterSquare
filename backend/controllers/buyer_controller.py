@@ -2010,7 +2010,8 @@ def select_vendor_for_purchase(cr_id):
 
         # Verify it's in the correct status
         # TD can change vendor even when status is pending_td_approval
-        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm']
+        # Also allow 'split_to_sub_crs' for re-selecting vendor on rejected PO Children
+        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm', 'split_to_sub_crs']
         if is_td:
             allowed_statuses.append('pending_td_approval')
 
@@ -2388,7 +2389,8 @@ def select_vendor_for_material(cr_id):
         # Verify it's in the correct status
         # Both buyer and TD can change vendor when status is pending_td_approval
         # Buyer may want to update their selection before TD approves
-        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm', 'pending_td_approval']
+        # Also allow 'split_to_sub_crs' for re-selecting vendor on rejected PO Children
+        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm', 'pending_td_approval', 'split_to_sub_crs']
 
         if cr.status not in allowed_statuses:
             return jsonify({"error": f"Cannot select vendor. Current status: {cr.status}"}), 400
@@ -3824,6 +3826,118 @@ def td_reject_po_child(po_child_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to reject vendor: {str(e)}"}), 500
+
+
+def reselect_vendor_for_po_child(po_child_id):
+    """Buyer re-selects vendor for a TD-rejected POChild"""
+    try:
+        current_user = g.user
+        buyer_id = current_user['user_id']
+        buyer_name = current_user.get('full_name', 'Unknown Buyer')
+        user_role = current_user.get('role', '').lower()
+
+        data = request.get_json()
+        vendor_id = data.get('vendor_id')
+
+        if not vendor_id:
+            return jsonify({"error": "vendor_id is required"}), 400
+
+        # Get the PO child
+        po_child = POChild.query.filter_by(
+            id=po_child_id,
+            is_deleted=False
+        ).first()
+
+        if not po_child:
+            return jsonify({"error": "PO Child not found"}), 404
+
+        # Check if admin or buyer assigned to parent CR
+        is_admin = user_role == 'admin'
+        from utils.admin_viewing_context import get_effective_user_context
+        context = get_effective_user_context()
+        is_admin_viewing = context['is_admin_viewing']
+
+        # Get parent CR to check assignment
+        parent_cr = ChangeRequest.query.get(po_child.parent_cr_id)
+        if not parent_cr:
+            return jsonify({"error": "Parent change request not found"}), 404
+
+        # Verify buyer is assigned to this purchase (or is admin)
+        if not is_admin and not is_admin_viewing:
+            if parent_cr.assigned_to_buyer_user_id != buyer_id and po_child.vendor_selected_by_buyer_id != buyer_id:
+                return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Verify PO Child is in td_rejected status
+        if po_child.vendor_selection_status != 'td_rejected' and po_child.status != 'td_rejected':
+            return jsonify({"error": f"Cannot re-select vendor. PO Child status: {po_child.status}, vendor_selection_status: {po_child.vendor_selection_status}"}), 400
+
+        # Verify vendor exists and is active
+        from models.vendor import Vendor
+        vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+        if not vendor:
+            return jsonify({"error": "Vendor not found"}), 404
+        if vendor.status != 'active':
+            return jsonify({"error": "Vendor is not active"}), 400
+
+        # Update PO Child with new vendor
+        po_child.vendor_id = vendor_id
+        po_child.vendor_name = vendor.company_name
+        po_child.vendor_selected_by_buyer_id = buyer_id
+        po_child.vendor_selected_by_buyer_name = buyer_name
+        po_child.vendor_selection_date = datetime.utcnow()
+        po_child.vendor_selection_status = 'pending_td_approval'
+        po_child.status = 'pending_td_approval'
+        po_child.rejection_reason = None  # Clear previous rejection reason
+        po_child.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        # Send notification to TD about new vendor selection
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+            from models.user import User
+
+            # Find TD users to notify
+            td_users = User.query.filter(
+                User.role.in_(['technical_director', 'TechnicalDirector', 'Technical Director']),
+                User.is_deleted == False
+            ).all()
+
+            for td_user in td_users:
+                notification = NotificationManager.create_notification(
+                    user_id=td_user.user_id,
+                    type='approval',
+                    title='Vendor Re-selected for Approval',
+                    message=f'{buyer_name} re-selected vendor "{vendor.company_name}" for {po_child.get_formatted_id()} after previous rejection',
+                    priority='high',
+                    category='vendor',
+                    action_url='/td/vendor-approvals',
+                    action_label='Review Selection',
+                    metadata={
+                        'po_child_id': str(po_child_id),
+                        'vendor_name': vendor.company_name,
+                        'vendor_id': str(vendor_id)
+                    },
+                    sender_id=buyer_id,
+                    sender_name=buyer_name
+                )
+                send_notification_to_user(td_user.user_id, notification.to_dict())
+        except Exception as notif_error:
+            log.error(f"Failed to send vendor re-selection notification: {notif_error}")
+
+        return jsonify({
+            "success": True,
+            "message": "Vendor re-selected successfully. Awaiting TD approval.",
+            "po_child": po_child.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error re-selecting vendor for PO child: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to re-select vendor: {str(e)}"}), 500
 
 
 def complete_po_child_purchase(po_child_id):

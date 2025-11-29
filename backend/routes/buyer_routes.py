@@ -291,6 +291,17 @@ def td_reject_po_child_route(po_child_id):
     return td_reject_po_child(po_child_id)
 
 
+@buyer_routes.route('/po-child/<int:po_child_id>/reselect-vendor', methods=['POST'])
+@jwt_required
+def reselect_vendor_for_po_child_route(po_child_id):
+    """Buyer re-selects vendor for a TD-rejected POChild"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    from controllers.buyer_controller import reselect_vendor_for_po_child
+    return reselect_vendor_for_po_child(po_child_id)
+
+
 @buyer_routes.route('/po-child/<int:po_child_id>/complete', methods=['POST'])
 @jwt_required
 def complete_po_child_purchase_route(po_child_id):
