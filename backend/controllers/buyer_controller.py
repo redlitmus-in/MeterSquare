@@ -1162,6 +1162,9 @@ def get_buyer_completed_purchases():
                 ChangeRequest.is_deleted == False
             ).all()
 
+        # Import POChild for checking if parent has completed children
+        from models.po_child import POChild
+
         completed_purchases = []
         total_cost = 0
 
@@ -1175,6 +1178,22 @@ def get_buyer_completed_purchases():
             boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
             if not boq:
                 continue
+
+            # BUYER VIEW: Skip parent CRs that have POChildren (all completed)
+            # Parents should be hidden when they have children - only show children cards
+            po_children_for_cr = POChild.query.filter_by(
+                parent_cr_id=cr.cr_id,
+                is_deleted=False
+            ).all()
+
+            if po_children_for_cr:
+                # Parent has children - check if all are completed
+                all_children_completed = all(
+                    pc.status == 'purchase_completed' for pc in po_children_for_cr
+                )
+                if all_children_completed:
+                    # Skip this parent CR - children will be shown separately
+                    continue
 
             # Process materials
             sub_items_data = cr.sub_items_data or cr.materials_data or []
@@ -1314,7 +1333,7 @@ def get_buyer_completed_purchases():
             })
 
         # Also get completed POChildren (vendor-split purchases)
-        from models.po_child import POChild
+        # POChild already imported above
 
         if is_admin_viewing:
             completed_po_children = POChild.query.filter(
