@@ -1336,6 +1336,31 @@ class BuyerService {
     }
   }
 
+  // Get rejected POChild records (TD rejected)
+  async getRejectedPOChildren(): Promise<{
+    success: boolean;
+    rejected_count: number;
+    po_children: POChild[];
+  }> {
+    try {
+      const response = await axios.get(
+        `${API_URL}/buyer/po-children/rejected`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to fetch rejected PO children');
+    } catch (error: any) {
+      console.error('Error fetching rejected PO children:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to fetch rejected PO children');
+    }
+  }
+
   // TD approves POChild vendor selection
   async tdApprovePOChild(poChildId: number): Promise<{
     success: boolean;

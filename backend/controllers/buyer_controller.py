@@ -1609,13 +1609,19 @@ def get_buyer_rejected_purchases():
                     POChild.is_deleted == False
                 ).all()
             else:
-                po_children = POChild.query.filter(
+                # Query by vendor_selected_by_buyer_id OR by parent CR's assigned buyer
+                po_children = POChild.query.outerjoin(
+                    ChangeRequest, POChild.parent_cr_id == ChangeRequest.cr_id
+                ).filter(
                     or_(
                         POChild.status == 'td_rejected',
                         POChild.vendor_selection_status == 'td_rejected'
                     ),
-                    POChild.vendor_selected_by_buyer_id == buyer_id,
-                    POChild.is_deleted == False
+                    POChild.is_deleted == False,
+                    or_(
+                        POChild.vendor_selected_by_buyer_id == buyer_id,
+                        ChangeRequest.assigned_to_buyer_user_id == buyer_id
+                    )
                 ).all()
 
             for poc in po_children:
@@ -3750,6 +3756,9 @@ def td_reject_po_child(po_child_id):
         if po_child.vendor_selection_status != 'pending_td_approval':
             return jsonify({"error": f"Vendor selection not pending approval. Status: {po_child.vendor_selection_status}"}), 400
 
+        # Store buyer info before clearing for notification
+        original_buyer_id = po_child.vendor_selected_by_buyer_id
+
         # Reject the vendor selection
         po_child.vendor_selection_status = 'td_rejected'
         po_child.status = 'td_rejected'
@@ -3759,10 +3768,12 @@ def td_reject_po_child(po_child_id):
         po_child.rejection_reason = reason
 
         # Clear vendor selection so buyer can select a new vendor
+        # BUT keep vendor_selected_by_buyer_id so we can query by buyer later
         po_child.vendor_id = None
         po_child.vendor_name = None
-        po_child.vendor_selected_by_buyer_id = None
-        po_child.vendor_selected_by_buyer_name = None
+        # Don't clear buyer id - needed for querying rejected items
+        # po_child.vendor_selected_by_buyer_id = None
+        # po_child.vendor_selected_by_buyer_name = None
         po_child.vendor_selection_date = None
 
         po_child.updated_at = datetime.utcnow()
@@ -3774,9 +3785,9 @@ def td_reject_po_child(po_child_id):
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
 
-            if po_child.vendor_selected_by_buyer_id:
+            if original_buyer_id:
                 notification = NotificationManager.create_notification(
-                    user_id=po_child.vendor_selected_by_buyer_id,
+                    user_id=original_buyer_id,
                     type='rejection',
                     title='Vendor Selection Rejected',
                     message=f'TD rejected vendor selection for {po_child.get_formatted_id()}. Reason: {reason}',
@@ -3792,7 +3803,7 @@ def td_reject_po_child(po_child_id):
                     sender_id=td_id,
                     sender_name=td_name
                 )
-                send_notification_to_user(po_child.vendor_selected_by_buyer_id, notification.to_dict())
+                send_notification_to_user(original_buyer_id, notification.to_dict())
         except Exception as notif_error:
             log.error(f"Failed to send vendor rejection notification: {notif_error}")
 
@@ -3947,6 +3958,74 @@ def get_pending_po_children():
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to fetch pending PO children: {str(e)}"}), 500
+
+
+def get_rejected_po_children():
+    """Get all POChild records rejected by TD"""
+    try:
+        from sqlalchemy import or_
+
+        current_user = g.user
+        user_role = current_user.get('role', '').lower()
+
+        # Check if TD or admin
+        is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+        is_admin = user_role == 'admin'
+
+        if not is_td and not is_admin:
+            return jsonify({"error": "Access denied. TD or Admin role required."}), 403
+
+        # Get all POChild records rejected by TD
+        rejected_po_children = POChild.query.filter(
+            or_(
+                POChild.vendor_selection_status == 'td_rejected',
+                POChild.vendor_selection_status == 'rejected',
+                POChild.status == 'td_rejected'
+            ),
+            POChild.is_deleted == False
+        ).all()
+
+        result = []
+        for po_child in rejected_po_children:
+            # Get parent CR
+            parent_cr = ChangeRequest.query.get(po_child.parent_cr_id) if po_child.parent_cr_id else None
+
+            # Get project details
+            project = None
+            if po_child.project_id:
+                project = Project.query.get(po_child.project_id)
+            elif parent_cr:
+                project = Project.query.get(parent_cr.project_id)
+
+            # Get BOQ details
+            boq = None
+            if po_child.boq_id:
+                boq = BOQ.query.get(po_child.boq_id)
+            elif parent_cr and parent_cr.boq_id:
+                boq = BOQ.query.get(parent_cr.boq_id)
+
+            result.append({
+                **po_child.to_dict(),
+                'project_name': project.project_name if project else 'Unknown',
+                'project_code': project.project_code if project else None,
+                'client': project.client if project else None,
+                'location': project.location if project else None,
+                'boq_name': boq.boq_name if boq else None,
+                'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
+                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None
+            })
+
+        return jsonify({
+            "success": True,
+            "rejected_count": len(result),
+            "po_children": result
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching rejected PO children: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch rejected PO children: {str(e)}"}), 500
 
 
 def get_buyer_pending_po_children():

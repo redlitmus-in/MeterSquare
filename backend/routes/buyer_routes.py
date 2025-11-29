@@ -260,6 +260,17 @@ def get_approved_po_children_route():
     return get_approved_po_children()
 
 
+@buyer_routes.route('/po-children/rejected', methods=['GET'])
+@jwt_required
+def get_rejected_po_children_route():
+    """Get all POChild records rejected by TD (TD or Admin)"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    from controllers.buyer_controller import get_rejected_po_children
+    return get_rejected_po_children()
+
+
 @buyer_routes.route('/po-child/<int:po_child_id>/td-approve', methods=['POST'])
 @jwt_required
 def td_approve_po_child_route(po_child_id):

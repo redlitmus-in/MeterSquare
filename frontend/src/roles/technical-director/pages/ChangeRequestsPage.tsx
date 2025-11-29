@@ -55,6 +55,7 @@ const ChangeRequestsPage: React.FC = () => {
   const [vendorApprovals, setVendorApprovals] = useState<Purchase[]>([]);
   const [pendingPOChildren, setPendingPOChildren] = useState<POChild[]>([]);
   const [approvedPOChildren, setApprovedPOChildren] = useState<POChild[]>([]);
+  const [rejectedPOChildren, setRejectedPOChildren] = useState<POChild[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -70,6 +71,7 @@ const ChangeRequestsPage: React.FC = () => {
   const [loadingVendorDetails, setLoadingVendorDetails] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
+  const [rejectingPOChildId, setRejectingPOChildId] = useState<number | null>(null);
 
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
@@ -81,6 +83,7 @@ const ChangeRequestsPage: React.FC = () => {
     loadVendorApprovals();
     loadPendingPOChildren();
     loadApprovedPOChildren();
+    loadRejectedPOChildren();
 
     // NO POLLING! Real-time subscriptions in realtimeSubscriptions.ts
     // automatically invalidate queries when change_requests table changes.
@@ -96,6 +99,7 @@ const ChangeRequestsPage: React.FC = () => {
     loadVendorApprovals(); // Also reload vendor approvals
     loadPendingPOChildren(); // Also reload PO children
     loadApprovedPOChildren(); // Also reload approved PO children
+    loadRejectedPOChildren(); // Also reload rejected PO children
   }, [changeRequestUpdateTimestamp]); // Reload whenever timestamp changes
 
   const loadChangeRequests = async (showLoadingSpinner = false) => {
@@ -232,6 +236,20 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
+  // Load rejected PO children (for rejected sub-tab)
+  const loadRejectedPOChildren = async () => {
+    try {
+      const response = await buyerService.getRejectedPOChildren();
+      if (response.success) {
+        console.log('🚫 Rejected PO Children loaded:', response.po_children?.length || 0, 'items');
+        setRejectedPOChildren(response.po_children || []);
+      }
+    } catch (error: any) {
+      console.error('Error loading rejected PO children:', error);
+      setRejectedPOChildren([]);
+    }
+  };
+
   // Handle PO child approval
   const handleApprovePOChild = async (poChildId: number) => {
     try {
@@ -254,6 +272,7 @@ const ChangeRequestsPage: React.FC = () => {
       if (response.success) {
         showSuccess(response.message || 'Vendor selection rejected');
         loadPendingPOChildren();
+        loadRejectedPOChildren();
         loadVendorApprovals();
       }
     } catch (error: any) {
@@ -398,9 +417,17 @@ const ChangeRequestsPage: React.FC = () => {
   };
 
   const handleRejectionSubmit = async (reason: string) => {
-    if (!rejectingCrId) return;
-
     try {
+      // Handle PO Child rejection
+      if (rejectingPOChildId) {
+        await handleRejectPOChild(rejectingPOChildId, reason);
+        setShowRejectionModal(false);
+        setRejectingPOChildId(null);
+        return;
+      }
+
+      if (!rejectingCrId) return;
+
       // Check if this is a vendor selection rejection (from vendor approvals tab)
       const isVendorRejection = vendorApprovals.some(p => p.cr_id === rejectingCrId);
 
@@ -589,8 +616,8 @@ const ChangeRequestsPage: React.FC = () => {
       // Show approved vendor selections
       return matchesSearch && purchase.vendor_selection_status === 'approved';
     } else if (vendorApprovalsSubTab === 'rejected') {
-      // Show rejected vendor selections
-      return matchesSearch && purchase.vendor_selection_status === 'rejected';
+      // Show rejected vendor selections (both 'rejected' and 'td_rejected')
+      return matchesSearch && (purchase.vendor_selection_status === 'rejected' || purchase.vendor_selection_status === 'td_rejected');
     }
     return matchesSearch;
   });
@@ -608,6 +635,12 @@ const ChangeRequestsPage: React.FC = () => {
 
   // Filter approved PO children for approved sub-tab
   const filteredApprovedPOChildren = approvedPOChildren.filter(poChild => {
+    const matchesSearch = (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesSearch;
+  });
+
+  // Filter rejected PO children for rejected sub-tab
+  const filteredRejectedPOChildren = rejectedPOChildren.filter(poChild => {
     const matchesSearch = (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase());
     return matchesSearch;
   });
@@ -724,12 +757,13 @@ const ChangeRequestsPage: React.FC = () => {
       const status = r.status?.trim();
       return status === 'assigned_to_buyer' && !r.vendor_selection_status;
     }).length,
-    vendorApprovals: vendorApprovals.length + pendingPOChildren.length + approvedPOChildren.length, // Total vendor approvals including PO children
+    vendorApprovals: vendorApprovals.length + pendingPOChildren.length + approvedPOChildren.length + rejectedPOChildren.length, // Total vendor approvals including PO children
     vendorApprovalsPending: vendorApprovals.filter(p => p.vendor_selection_status === 'pending_td_approval').length + pendingPOChildren.filter(p => p.vendor_selection_status === 'pending_td_approval').length,
     vendorApprovalsApproved: vendorApprovals.filter(p => p.vendor_selection_status === 'approved').length + approvedPOChildren.length,
-    vendorApprovalsRejected: vendorApprovals.filter(p => p.vendor_selection_status === 'rejected').length,
+    vendorApprovalsRejected: vendorApprovals.filter(p => p.vendor_selection_status === 'rejected' || p.vendor_selection_status === 'td_rejected').length + rejectedPOChildren.length,
     poChildrenPending: pendingPOChildren.filter(p => p.vendor_selection_status === 'pending_td_approval').length,
     poChildrenApproved: approvedPOChildren.length,
+    poChildrenRejected: rejectedPOChildren.length,
     completed: changeRequests.filter(r => r.status?.trim() === 'purchase_completed').length
   };
 
@@ -1132,7 +1166,7 @@ const ChangeRequestsPage: React.FC = () => {
             <TabsContent value="vendor_approvals" className="mt-0 p-0">
               <div className="space-y-2">
                 <h2 className="text-sm font-bold text-gray-900">Vendor Selection Approvals</h2>
-                {filteredVendorApprovals.length === 0 && filteredPOChildren.length === 0 && (vendorApprovalsSubTab !== 'approved' || filteredApprovedPOChildren.length === 0) ? (
+                {filteredVendorApprovals.length === 0 && filteredPOChildren.length === 0 && (vendorApprovalsSubTab !== 'approved' || filteredApprovedPOChildren.length === 0) && (vendorApprovalsSubTab !== 'rejected' || filteredRejectedPOChildren.length === 0) ? (
                   <div className="text-center py-8">
                     <Store className="w-12 h-12 text-gray-300 mx-auto mb-2" />
                     <p className="text-gray-500 text-sm">
@@ -1327,8 +1361,8 @@ const ChangeRequestsPage: React.FC = () => {
                             </button>
                             <button
                               onClick={() => {
-                                const reason = prompt('Enter rejection reason:');
-                                if (reason) handleRejectPOChild(poChild.id, reason);
+                                setRejectingPOChildId(poChild.id);
+                                setShowRejectionModal(true);
                               }}
                               className="bg-red-600 hover:bg-red-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
                             >
@@ -1336,6 +1370,99 @@ const ChangeRequestsPage: React.FC = () => {
                               <span>Reject</span>
                             </button>
                           </div>
+                        </div>
+                      </motion.div>
+                    ))}
+
+                    {/* Rejected PO Children (for Rejected sub-tab) */}
+                    {vendorApprovalsSubTab === 'rejected' && filteredRejectedPOChildren.map((poChild, index) => (
+                      <motion.div
+                        key={`rejected-po-${poChild.id}`}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.02 * index }}
+                        className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-red-300"
+                      >
+                        {/* Header - Compact */}
+                        <div className="p-2 bg-gradient-to-r from-red-50 to-red-100">
+                          <div className="flex items-start justify-between mb-1">
+                            <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{poChild.project_name || poChild.item_name}</h3>
+                            <Badge className="text-[9px] px-1 py-0 bg-red-100 text-red-800">
+                              {poChild.formatted_id}
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-0.5 text-[10px] text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Package className="h-2.5 w-2.5 text-gray-400" />
+                              <span className="truncate">{poChild.client}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-2.5 w-2.5 text-gray-400" />
+                              <span className="truncate">{poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}</span>
+                            </div>
+                            {poChild.item_name && (
+                              <div className="flex items-center gap-1">
+                                <FileText className="h-2.5 w-2.5 text-gray-400" />
+                                <span className="truncate">{poChild.item_name}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Rejection Reason */}
+                        {poChild.rejection_reason && (
+                          <div className="px-2 py-1.5 bg-red-50 border-y border-red-200">
+                            <div className="text-[9px] text-red-600 font-semibold mb-0.5">Rejection Reason:</div>
+                            <div className="text-[10px] text-red-800 line-clamp-2">{poChild.rejection_reason}</div>
+                          </div>
+                        )}
+
+                        {/* Materials List */}
+                        <div className="px-2 pb-2 pt-1">
+                          <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
+                            <Package className="h-2.5 w-2.5" />
+                            Materials ({poChild.materials_count || poChild.materials?.length || 0})
+                          </div>
+                          <div className="bg-gray-50 rounded border border-gray-200 max-h-20 overflow-y-auto">
+                            {poChild.materials && poChild.materials.length > 0 ? (
+                              <div className="divide-y divide-gray-100">
+                                {poChild.materials.slice(0, 3).map((mat: any, idx: number) => (
+                                  <div key={idx} className="px-1.5 py-1 flex items-center justify-between text-[9px]">
+                                    <span className="truncate flex-1 text-gray-700">{mat.material_name}</span>
+                                    <span className="text-gray-500 ml-1">{mat.quantity} {mat.unit}</span>
+                                  </div>
+                                ))}
+                                {poChild.materials.length > 3 && (
+                                  <div className="px-1.5 py-0.5 text-[8px] text-gray-400 text-center">
+                                    +{poChild.materials.length - 3} more
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="px-1.5 py-1 text-[9px] text-gray-400">No materials</div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Total Cost */}
+                        <div className="px-2 pb-2">
+                          <div className="flex items-center justify-between text-[10px] font-bold border-t border-gray-200 pt-1.5">
+                            <span className="text-gray-600">Total Cost:</span>
+                            <span className="text-red-700">AED {(poChild.materials_total_cost || 0).toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="border-t border-gray-200 p-1.5">
+                          <button
+                            onClick={() => handleViewPOChildDetails(poChild)}
+                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
+                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                          >
+                            <Eye className="h-3 w-3" />
+                            <span>View Details</span>
+                          </button>
                         </div>
                       </motion.div>
                     ))}
@@ -1862,10 +1989,11 @@ const ChangeRequestsPage: React.FC = () => {
         onClose={() => {
           setShowRejectionModal(false);
           setRejectingCrId(null);
+          setRejectingPOChildId(null);
           setSelectedChangeRequest(null);
         }}
         onSubmit={handleRejectionSubmit}
-        title="Reject Change Request"
+        title={rejectingPOChildId ? "Reject Vendor Selection" : rejectingCrId && vendorApprovals.some(p => p.cr_id === rejectingCrId) ? "Reject Vendor Selection" : "Reject Change Request"}
       />
     </div>
   );
