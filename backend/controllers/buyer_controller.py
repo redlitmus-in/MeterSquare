@@ -4296,6 +4296,9 @@ def send_vendor_email(cr_id):
         vendor_contact_person = data.get('vendor_contact_person')  # Update contact person
         vendor_phone = data.get('vendor_phone')  # Update phone
 
+        # CC emails (list of {email, name})
+        cc_emails = data.get('cc_emails', [])
+
         # LPO PDF options
         include_lpo_pdf = data.get('include_lpo_pdf', False)  # Whether to attach LPO PDF
         lpo_data = data.get('lpo_data')  # Editable LPO data from frontend
@@ -4514,8 +4517,12 @@ def send_vendor_email(cr_id):
         # ✅ PERFORMANCE FIX: Use async email sending (15s → 0.1s response time)
         from utils.boq_email_service import BOQEmailService
         email_service = BOQEmailService()
+
+        # Extract CC email addresses
+        cc_email_list = [cc.get('email') for cc in cc_emails if cc.get('email')]
+
         email_sent = email_service.send_vendor_purchase_order_async(
-            email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments
+            email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments, cc_email_list
         )
 
         if email_sent:
@@ -4570,6 +4577,9 @@ def send_po_child_vendor_email(po_child_id):
         vendor_company_name = data.get('vendor_company_name')
         vendor_contact_person = data.get('vendor_contact_person')
         vendor_phone = data.get('vendor_phone')
+
+        # CC emails (list of {email, name})
+        cc_emails = data.get('cc_emails', [])
 
         if not vendor_email:
             return jsonify({"error": "Vendor email is required"}), 400
@@ -4718,8 +4728,12 @@ def send_po_child_vendor_email(po_child_id):
 
         # Send email
         email_service = BOQEmailService()
+
+        # Extract CC email addresses
+        cc_email_list = [cc.get('email') for cc in cc_emails if cc.get('email')]
+
         email_sent = email_service.send_vendor_purchase_order_async(
-            email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments
+            email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments, cc_email_list
         )
 
         if email_sent:
@@ -4730,9 +4744,14 @@ def send_po_child_vendor_email(po_child_id):
             db.session.commit()
 
             recipient_count = len(email_list)
+            cc_count = len(cc_email_list) if cc_email_list else 0
+            message = f"Purchase order email sent to {recipient_count} recipient(s)"
+            if cc_count > 0:
+                message += f" + {cc_count} CC recipient(s)"
+            message += " successfully"
             return jsonify({
                 "success": True,
-                "message": f"Purchase order email sent to {recipient_count} recipient(s) successfully"
+                "message": message
             }), 200
         else:
             return jsonify({
@@ -6308,6 +6327,7 @@ def preview_lpo_pdf(cr_id):
     try:
         from models.system_settings import SystemSettings
         from models.vendor import Vendor
+        from models.lpo_customization import LPOCustomization
 
         current_user = g.user
         buyer_id = current_user['user_id']
@@ -6316,6 +6336,22 @@ def preview_lpo_pdf(cr_id):
         cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
         if not cr:
             return jsonify({"error": "Purchase not found"}), 404
+
+        # Get saved customizations if any (handle case where table doesn't exist yet)
+        saved_customization = None
+        try:
+            saved_customization = LPOCustomization.query.filter_by(cr_id=cr_id).first()
+        except Exception as e:
+            db.session.rollback()  # Rollback failed transaction
+            log.warning(f"LPO customization table may not exist, creating it: {str(e)}")
+            try:
+                # Try to create the table
+                LPOCustomization.__table__.create(db.engine, checkfirst=True)
+                db.session.commit()
+                log.info("Created lpo_customizations table")
+            except Exception as create_error:
+                db.session.rollback()
+                log.warning(f"Could not create table: {str(create_error)}")
 
         # Get vendor details
         vendor = None
@@ -6374,6 +6410,9 @@ def preview_lpo_pdf(cr_id):
             vendor_trn = getattr(vendor, 'trn', '') or getattr(vendor, 'gst_number', '') or ""
 
         # Build preview data
+        # Default subject
+        default_subject = cr.item_name or cr.justification or ""
+
         lpo_preview = {
             "vendor": {
                 "company_name": vendor.company_name if vendor else "",
@@ -6383,7 +6422,7 @@ def preview_lpo_pdf(cr_id):
                 "email": vendor.email if vendor else "",
                 "trn": vendor_trn,
                 "project": project.project_name if project else "",
-                "subject": cr.item_name or cr.justification or ""
+                "subject": saved_customization.subject if saved_customization and saved_customization.subject else default_subject
             },
             "company": {
                 "name": settings.company_name if settings else "Meter Square Interiors LLC",
@@ -6397,7 +6436,8 @@ def preview_lpo_pdf(cr_id):
             "lpo_info": {
                 "lpo_number": f"MS/PO/{cr.cr_id}",
                 "lpo_date": datetime.now().strftime('%d.%m.%Y'),
-                "quotation_ref": ""
+                "quotation_ref": saved_customization.quotation_ref if saved_customization else "",
+                "custom_message": saved_customization.custom_message if saved_customization and saved_customization.custom_message else "Thank you very much for quoting us for requirements. As per your quotation and settlement done over the mail, we are issuing the LPO and please ensure the delivery on time"
             },
             "items": items,
             "totals": {
@@ -6407,10 +6447,10 @@ def preview_lpo_pdf(cr_id):
                 "grand_total": round(grand_total, 2)
             },
             "terms": {
-                "payment_terms": getattr(settings, 'default_payment_terms', '100% after delivery') if settings else "100% after delivery",
-                "completion_terms": "As agreed",
-                "general_terms": json.loads(getattr(settings, 'lpo_general_terms', '[]') or '[]') if settings else [],
-                "payment_terms_list": json.loads(getattr(settings, 'lpo_payment_terms_list', '[]') or '[]') if settings else []
+                "payment_terms": saved_customization.payment_terms if saved_customization and saved_customization.payment_terms else (getattr(settings, 'default_payment_terms', '100% after delivery') if settings else "100% after delivery"),
+                "completion_terms": saved_customization.completion_terms if saved_customization and saved_customization.completion_terms else "As agreed",
+                "general_terms": json.loads(saved_customization.general_terms) if saved_customization and saved_customization.general_terms else (json.loads(getattr(settings, 'lpo_general_terms', '[]') or '[]') if settings else []),
+                "payment_terms_list": json.loads(saved_customization.payment_terms_list) if saved_customization and saved_customization.payment_terms_list else (json.loads(getattr(settings, 'lpo_payment_terms_list', '[]') or '[]') if settings else [])
             },
             "signatures": {
                 "md_name": getattr(settings, 'md_name', 'Managing Director') if settings else "Managing Director",
@@ -6434,6 +6474,75 @@ def preview_lpo_pdf(cr_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to preview LPO PDF: {str(e)}"}), 500
+
+
+def save_lpo_customization(cr_id):
+    """Save LPO customizations to database for persistence"""
+    try:
+        from models.lpo_customization import LPOCustomization
+
+        current_user = g.user
+        buyer_id = current_user['user_id']
+
+        # Get the change request to verify it exists
+        cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Get or create customization record
+        try:
+            customization = LPOCustomization.query.filter_by(cr_id=cr_id).first()
+        except Exception as table_error:
+            db.session.rollback()
+            # Table might not exist, try to create it
+            log.warning(f"LPO customization table may not exist, creating it: {str(table_error)}")
+            try:
+                LPOCustomization.__table__.create(db.engine, checkfirst=True)
+                db.session.commit()
+                log.info("Created lpo_customizations table")
+                customization = None  # Table is empty, so no existing record
+            except Exception as create_error:
+                db.session.rollback()
+                log.error(f"Could not create table: {str(create_error)}")
+                return jsonify({"error": "Failed to create LPO customization table"}), 500
+        if not customization:
+            customization = LPOCustomization(cr_id=cr_id, created_by=buyer_id)
+            db.session.add(customization)
+
+        # Update fields from request
+        lpo_info = data.get('lpo_info', {})
+        terms = data.get('terms', {})
+        vendor = data.get('vendor', {})
+
+        customization.quotation_ref = lpo_info.get('quotation_ref', '')
+        customization.custom_message = lpo_info.get('custom_message', '')
+        customization.subject = vendor.get('subject', '')
+        customization.payment_terms = terms.get('payment_terms', '')
+        customization.completion_terms = terms.get('completion_terms', '')
+        customization.general_terms = json.dumps(terms.get('general_terms', []))
+        customization.payment_terms_list = json.dumps(terms.get('payment_terms_list', []))
+        customization.include_signatures = data.get('include_signatures', True)
+
+        db.session.commit()
+
+        log.info(f"LPO customization saved for CR {cr_id} by user {buyer_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "LPO customization saved successfully",
+            "customization": customization.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error saving LPO customization: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to save LPO customization: {str(e)}"}), 500
 
 
 def generate_lpo_pdf(cr_id):
@@ -6480,3 +6589,100 @@ def generate_lpo_pdf(cr_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to generate LPO PDF: {str(e)}"}), 500
+
+
+def save_lpo_default_template():
+    """Save current LPO customizations as default template for future projects"""
+    try:
+        from models.lpo_default_template import LPODefaultTemplate
+
+        current_user = g.user
+        user_id = current_user['user_id']
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Get or create default template for this user
+        try:
+            template = LPODefaultTemplate.query.filter_by(user_id=user_id).first()
+        except Exception as table_error:
+            db.session.rollback()
+            # Table might not exist, try to create it
+            log.warning(f"LPO default template table may not exist, creating it: {str(table_error)}")
+            try:
+                LPODefaultTemplate.__table__.create(db.engine, checkfirst=True)
+                db.session.commit()
+                log.info("Created lpo_default_templates table")
+                template = None
+            except Exception as create_error:
+                db.session.rollback()
+                log.error(f"Could not create table: {str(create_error)}")
+                return jsonify({"error": "Failed to create LPO default template table"}), 500
+
+        if not template:
+            template = LPODefaultTemplate(user_id=user_id)
+            db.session.add(template)
+
+        # Update fields from request
+        lpo_info = data.get('lpo_info', {})
+        terms = data.get('terms', {})
+        vendor = data.get('vendor', {})
+
+        template.quotation_ref = lpo_info.get('quotation_ref', '')
+        template.custom_message = lpo_info.get('custom_message', '')
+        template.subject = vendor.get('subject', '')
+        template.payment_terms = terms.get('payment_terms', '')
+        template.completion_terms = terms.get('completion_terms', '')
+        template.general_terms = json.dumps(terms.get('general_terms', []))
+        template.payment_terms_list = json.dumps(terms.get('payment_terms_list', []))
+        template.include_signatures = data.get('include_signatures', True)
+
+        db.session.commit()
+
+        log.info(f"LPO default template saved for user {user_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "Default template saved successfully. This will be used for new projects.",
+            "template": template.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error saving LPO default template: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to save default template: {str(e)}"}), 500
+
+
+def get_lpo_default_template():
+    """Get the user's default LPO template"""
+    try:
+        from models.lpo_default_template import LPODefaultTemplate
+
+        current_user = g.user
+        user_id = current_user['user_id']
+
+        try:
+            template = LPODefaultTemplate.query.filter_by(user_id=user_id).first()
+        except Exception as table_error:
+            db.session.rollback()
+            # Table might not exist
+            log.warning(f"LPO default template table may not exist: {str(table_error)}")
+            return jsonify({"template": None}), 200
+
+        if template:
+            return jsonify({
+                "success": True,
+                "template": template.to_dict()
+            }), 200
+        else:
+            return jsonify({
+                "success": True,
+                "template": None
+            }), 200
+
+    except Exception as e:
+        log.error(f"Error getting LPO default template: {str(e)}")
+        return jsonify({"error": f"Failed to get default template: {str(e)}"}), 500

@@ -775,7 +775,7 @@ const PurchaseOrders: React.FC = () => {
                               <Mail className="w-3 h-3 mr-1" />
                               Email
                             </Button>
-                            {/* <Button
+                            <Button
                               onClick={() => handleSendWhatsApp(purchase)}
                               disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
                               size="sm"
@@ -788,7 +788,7 @@ const PurchaseOrders: React.FC = () => {
                                 <MessageSquare className="w-3 h-3 mr-1" />
                               )}
                               WhatsApp
-                            </Button> */}
+                            </Button>
                           </div>
                         )
                       )}

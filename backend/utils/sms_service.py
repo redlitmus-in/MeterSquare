@@ -34,13 +34,17 @@ def send_sms_otp(phone_number):
         # Generate 6-digit OTP
         otp = random.randint(100000, 999999)
 
-        # Store OTP in memory with phone number as key
+        # Clean phone number for consistent storage key
+        clean_phone = ''.join(filter(str.isdigit, str(phone_number)))
+
+        # Store OTP in memory with cleaned phone number as key
         # Prefix phone with 'phone:' to distinguish from email
-        storage_key = f"phone:{phone_number}"
+        storage_key = f"phone:{clean_phone}"
         otp_storage[storage_key] = {
             "otp": otp,
             "expires_at": (datetime.utcnow() + timedelta(seconds=300)).timestamp()
         }
+        log.info(f"OTP stored with key: {storage_key}")
 
         # Prepare SMS message
         message = f"Your MeterSquare verification code is: {otp}. Valid for 5 minutes. Do not share this code."

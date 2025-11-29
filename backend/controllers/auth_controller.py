@@ -366,6 +366,15 @@ def site_supervisor_login_sms():
         if login_method == "email" and not email:
             return jsonify({"error": "Email is required"}), 400
 
+        # Clean phone number - remove all non-digits
+        clean_phone = None
+        phone_suffix = None
+        if phone:
+            clean_phone = ''.join(filter(str.isdigit, str(phone)))
+            # Get last 10 digits for matching (ignore country code variations)
+            phone_suffix = clean_phone[-10:] if len(clean_phone) >= 10 else clean_phone
+            log.info(f"Phone login attempt: original={phone}, cleaned={clean_phone}, suffix={phone_suffix}")
+
         # Build query for site supervisor/site engineer roles only
         query = db.session.query(User).join(
             Role, User.role_id == Role.role_id
@@ -377,11 +386,18 @@ def site_supervisor_login_sms():
 
         # Filter by phone or email based on login method
         if login_method == "phone":
-            query = query.filter(User.phone == phone)
+            # Try multiple matching strategies for phone
+            # 1. Exact match
+            # 2. Match by last 10 digits (handles country code variations)
+            user = query.filter(User.phone == phone).first()
+            if not user and clean_phone:
+                user = query.filter(User.phone == clean_phone).first()
+            if not user and phone_suffix:
+                # Match by phone ending with the suffix (last 10 digits)
+                user = query.filter(User.phone.like(f'%{phone_suffix}')).first()
         else:
             query = query.filter(User.email == email)
-
-        user = query.first()
+            user = query.first()
 
         if not user:
             if login_method == "phone":
@@ -395,7 +411,8 @@ def site_supervisor_login_sms():
             if otp:
                 # Store user_id and role for verification step
                 from utils.authentication import otp_storage
-                storage_key = f"phone:{phone}"
+                # Use clean_phone for consistent storage key
+                storage_key = f"phone:{clean_phone}"
                 if storage_key in otp_storage:
                     otp_storage[storage_key]['user_id'] = user.user_id
                     otp_storage[storage_key]['email'] = user.email
@@ -467,12 +484,23 @@ def verify_sms_otp_login():
         from utils.authentication import otp_storage
 
         # Get OTP data based on login method
+        otp_data = None
+        storage_key = None
         if login_method == "phone":
-            storage_key = f"phone:{phone}"
+            # Try multiple storage key formats (handle phone with/without country code)
+            clean_phone = ''.join(filter(str.isdigit, str(phone)))
+            possible_keys = [
+                f"phone:{phone}",
+                f"phone:{clean_phone}",
+            ]
+            for key in possible_keys:
+                if key in otp_storage:
+                    storage_key = key
+                    otp_data = otp_storage.get(key)
+                    break
         else:
             storage_key = email
-
-        otp_data = otp_storage.get(storage_key)
+            otp_data = otp_storage.get(storage_key)
         if not otp_data:
             return jsonify({"error": "OTP not found or expired"}), 400
 

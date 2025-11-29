@@ -211,6 +211,7 @@ export interface SendVendorEmailRequest {
   vendor_phone?: string;
   include_lpo_pdf?: boolean;
   lpo_data?: LPOData;
+  cc_emails?: Array<{ email: string; name: string }>;
 }
 
 // LPO PDF Data Types
@@ -239,6 +240,7 @@ export interface LPOInfo {
   lpo_number: string;
   lpo_date: string;
   quotation_ref: string;
+  custom_message?: string;  // Customizable thank you message for PDF
 }
 
 export interface LPOItem {
@@ -678,6 +680,10 @@ class BuyerService {
       if (data.lpo_data) {
         payload.lpo_data = data.lpo_data;
       }
+      // CC emails
+      if (data.cc_emails && data.cc_emails.length > 0) {
+        payload.cc_emails = data.cc_emails;
+      }
 
       const response = await axios.post<SendVendorEmailResponse>(
         `${API_URL}/buyer/purchase/${crId}/send-vendor-email`,
@@ -784,6 +790,84 @@ class BuyerService {
     }
   }
 
+  // Save LPO customizations to database for persistence
+  async saveLPOCustomization(crId: number, lpoData: LPOData, includeSignatures: boolean = true): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await axios.post(
+        `${API_URL}/buyer/purchase/${crId}/save-lpo-customization`,
+        {
+          lpo_info: lpoData.lpo_info,
+          terms: lpoData.terms,
+          vendor: lpoData.vendor,
+          include_signatures: includeSignatures
+        },
+        { headers: this.getAuthHeaders() }
+      );
+
+      return response.data;
+    } catch (error: any) {
+      console.error('Error saving LPO customization:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to save LPO customization');
+    }
+  }
+
+  // Save current LPO customizations as default template (for use in future projects)
+  async saveLPODefaultTemplate(lpoData: LPOData, includeSignatures: boolean = true): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await axios.post(
+        `${API_URL}/buyer/lpo-default-template`,
+        {
+          lpo_info: lpoData.lpo_info,
+          terms: lpoData.terms,
+          vendor: lpoData.vendor,
+          include_signatures: includeSignatures
+        },
+        { headers: this.getAuthHeaders() }
+      );
+
+      return response.data;
+    } catch (error: any) {
+      console.error('Error saving LPO default template:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to save default template');
+    }
+  }
+
+  // Get user's default LPO template
+  async getLPODefaultTemplate(): Promise<{
+    success: boolean;
+    template: {
+      quotation_ref: string;
+      custom_message: string;
+      subject: string;
+      payment_terms: string;
+      completion_terms: string;
+      general_terms: string[];
+      payment_terms_list: string[];
+      include_signatures: boolean;
+    } | null;
+  }> {
+    try {
+      const response = await axios.get(
+        `${API_URL}/buyer/lpo-default-template`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting LPO default template:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      return { success: false, template: null };
+    }
+  }
+
   // Send email to vendor for POChild (vendor-split purchases)
   async sendPOChildVendorEmail(poChildId: number, data: SendVendorEmailRequest): Promise<SendVendorEmailResponse> {
     try {
@@ -799,6 +883,10 @@ class BuyerService {
       }
       if (data.vendor_phone) {
         payload.vendor_phone = data.vendor_phone;
+      }
+      // CC emails
+      if (data.cc_emails && data.cc_emails.length > 0) {
+        payload.cc_emails = data.cc_emails;
       }
 
       const response = await axios.post<SendVendorEmailResponse>(

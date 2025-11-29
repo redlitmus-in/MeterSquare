@@ -33,7 +33,7 @@ class BOQEmailService:
         self.email_port = EMAIL_PORT
         self.use_tls = EMAIL_USE_TLS
 
-    def send_email(self, recipient_email, subject, html_content, attachments=None):
+    def send_email(self, recipient_email, subject, html_content, attachments=None, cc_emails=None):
         """
         Send email using SMTP
 
@@ -42,6 +42,7 @@ class BOQEmailService:
             subject: Email subject
             html_content: HTML formatted email content
             attachments: List of tuples (filename, file_data, mime_type)
+            cc_emails: List of CC email addresses (optional)
 
         Returns:
             bool: True if email sent successfully, False otherwise
@@ -64,6 +65,14 @@ class BOQEmailService:
             if not recipient_list:
                 raise ValueError("No valid recipient email addresses provided")
 
+            # Handle CC emails
+            cc_list = []
+            if cc_emails:
+                if isinstance(cc_emails, str):
+                    cc_list = [email.strip() for email in cc_emails.split(',') if email.strip()]
+                elif isinstance(cc_emails, list):
+                    cc_list = [email.strip() for email in cc_emails if email.strip()]
+
             # Create message
             message = MIMEMultipart('mixed')
             sender_name = "MeterSquare ERP"
@@ -71,6 +80,10 @@ class BOQEmailService:
             # For multiple recipients, join with comma for the To header
             message["To"] = ", ".join(recipient_list)
             message["Subject"] = subject
+
+            # Add CC header if CC emails exist
+            if cc_list:
+                message["Cc"] = ", ".join(cc_list)
 
             # Attach HTML body
             html_part = MIMEText(html_content, "html", "utf-8")
@@ -84,22 +97,29 @@ class BOQEmailService:
                     encoders.encode_base64(part)
                     part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
                     message.attach(part)
+
+            # Combine all recipients (To + CC) for actual sending
+            all_recipients = recipient_list + cc_list
+
             # Send email
             try:
                 if self.use_tls:
                     with smtplib.SMTP(self.email_host, self.email_port, timeout=30) as server:
                         server.starttls()
                         server.login(self.sender_email, self.sender_password)
-                        # Send to all recipients in one call
-                        server.sendmail(self.sender_email, recipient_list, message.as_string())
+                        # Send to all recipients (To + CC) in one call
+                        server.sendmail(self.sender_email, all_recipients, message.as_string())
                 else:
                     # For SSL (like Gmail on port 465)
                     with smtplib.SMTP_SSL(self.email_host, self.email_port, timeout=30) as server:
                         server.login(self.sender_email, self.sender_password)
-                        # Send to all recipients in one call
-                        server.sendmail(self.sender_email, recipient_list, message.as_string())
+                        # Send to all recipients (To + CC) in one call
+                        server.sendmail(self.sender_email, all_recipients, message.as_string())
 
-                log.info(f"Email sent successfully to {len(recipient_list)} recipient(s): {', '.join(recipient_list)}")
+                cc_info = f" + {len(cc_list)} CC" if cc_list else ""
+                log.info(f"Email sent successfully to {len(recipient_list)} recipient(s){cc_info}: {', '.join(recipient_list)}")
+                if cc_list:
+                    log.info(f"CC recipients: {', '.join(cc_list)}")
                 return True
 
             except smtplib.SMTPAuthenticationError as e:
@@ -118,7 +138,7 @@ class BOQEmailService:
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    def send_email_async(self, recipient_email, subject, html_content, attachments=None):
+    def send_email_async(self, recipient_email, subject, html_content, attachments=None, cc_emails=None):
         """
         Send email asynchronously using background thread queue
         ✅ PERFORMANCE FIX: Non-blocking email sending (15s → 0.1s response time)
@@ -128,6 +148,7 @@ class BOQEmailService:
             subject: Email subject
             html_content: HTML formatted email content
             attachments: List of tuples (filename, file_data, mime_type)
+            cc_emails: List of CC email addresses (optional)
 
         Returns:
             bool: True if email queued successfully (doesn't wait for send)
@@ -142,6 +163,7 @@ class BOQEmailService:
                 'subject': subject,
                 'html_content': html_content,
                 'attachments': attachments,
+                'cc_emails': cc_emails,
                 'sender_email': self.sender_email,
                 'sender_password': self.sender_password,
                 'email_host': self.email_host,
@@ -156,7 +178,8 @@ class BOQEmailService:
                         recipient_email=email_data['recipient_email'],
                         subject=email_data['subject'],
                         html_content=email_data['html_content'],
-                        attachments=email_data['attachments']
+                        attachments=email_data['attachments'],
+                        cc_emails=email_data['cc_emails']
                     )
                 except Exception as e:
                     log.error(f"Background email send failed: {e}")
@@ -2141,7 +2164,7 @@ class BOQEmailService:
             log.error(f"Failed to send purchase order email: {e}")
             return False
 
-    def send_vendor_purchase_order_async(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body=None, attachments=None):
+    def send_vendor_purchase_order_async(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body=None, attachments=None, cc_emails=None):
         """
         Send purchase order email to Vendor asynchronously (non-blocking)
         ✅ PERFORMANCE FIX: Non-blocking email sending (15s → 0.1s response time)
@@ -2154,6 +2177,7 @@ class BOQEmailService:
             project_data: Dictionary containing project information
             custom_email_body: Optional custom HTML body for the email
             attachments: Optional list of tuples (filename, file_data, mime_type)
+            cc_emails: Optional list of CC email addresses
 
         Returns:
             bool: True if email queued successfully (doesn't wait for send)
@@ -2180,12 +2204,14 @@ class BOQEmailService:
                 log.info(f"Queuing email with {len(attachments)} attachment(s)")
 
             # Send email asynchronously (non-blocking)
-            success = self.send_email_async(vendor_email, subject, email_html, attachments)
+            success = self.send_email_async(vendor_email, subject, email_html, attachments, cc_emails)
 
             if success:
                 log.info(f"Purchase order email queued for async sending to vendor(s)")
                 if attachments:
                     log.info(f"Email included {len(attachments)} attachment(s)")
+                if cc_emails:
+                    log.info(f"Email CC'd to {len(cc_emails)} recipient(s)")
             else:
                 log.error(f"Failed to send purchase order email to vendor(s)")
 
