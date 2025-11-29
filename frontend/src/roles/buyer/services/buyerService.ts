@@ -1425,6 +1425,35 @@ class BuyerService {
     }
   }
 
+  // Re-select vendor for a TD-rejected POChild
+  async reselectVendorForPOChild(poChildId: number, vendorId: number): Promise<{
+    success: boolean;
+    message: string;
+    po_child: POChild;
+  }> {
+    try {
+      const response = await axios.post(
+        `${API_URL}/buyer/po-child/${poChildId}/reselect-vendor`,
+        { vendor_id: vendorId },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to re-select vendor');
+    } catch (error: any) {
+      console.error('Error re-selecting vendor for PO child:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('PO child not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to re-select vendor');
+    }
+  }
+
   // Complete POChild purchase
   async completePOChildPurchase(poChildId: number, notes?: string): Promise<{
     success: boolean;
