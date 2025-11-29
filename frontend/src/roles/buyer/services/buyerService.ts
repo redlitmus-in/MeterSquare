@@ -108,11 +108,18 @@ export interface Purchase {
   vendor_id?: number | null;
   vendor_name?: string | null;
   vendor_phone?: string | null;
+  vendor_phone_code?: string | null;
   vendor_contact_person?: string | null;
-  vendor_trn?: string | null;
   vendor_email?: string | null;
+  vendor_category?: string | null;
+  vendor_street_address?: string | null;
+  vendor_city?: string | null;
+  vendor_state?: string | null;
+  vendor_country?: string | null;
+  vendor_gst_number?: string | null;
   vendor_selection_pending_td_approval?: boolean;
   vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
+  vendor_selected_by_name?: string | null;
   vendor_email_sent?: boolean;
   po_child_id?: number;  // If this is a POChild record, this is its ID
   use_per_material_vendors?: boolean;

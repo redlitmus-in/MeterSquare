@@ -957,21 +957,40 @@ def get_buyer_pending_purchases():
                 cr.vendor_selection_status == 'pending_td_approval'
             )
 
-            # Get vendor details from Vendor table if vendor is selected
-            vendor_phone = None
-            vendor_contact_person = None
-            vendor_trn = None
-            vendor_email = None
+            # Get full vendor details from Vendor table if vendor is selected
+            vendor_details = {
+                'phone': None,
+                'phone_code': None,
+                'contact_person': None,
+                'email': None,
+                'category': None,
+                'street_address': None,
+                'city': None,
+                'state': None,
+                'country': None,
+                'gst_number': None,
+                'selected_by_name': None
+            }
             if cr.selected_vendor_id:
                 from models.vendor import Vendor
                 vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
                 if vendor:
-                    # Combine phone_code and phone if both exist
-                    if vendor.phone_code and vendor.phone:
-                        vendor_phone = f"{vendor.phone_code} {vendor.phone}"
-                    elif vendor.phone:
-                        vendor_phone = vendor.phone
-                    vendor_contact_person = vendor.contact_person_name
+                    vendor_details['phone'] = vendor.phone
+                    vendor_details['phone_code'] = vendor.phone_code
+                    vendor_details['contact_person'] = vendor.contact_person_name
+                    vendor_details['email'] = vendor.email
+                    vendor_details['category'] = vendor.category
+                    vendor_details['street_address'] = vendor.street_address
+                    vendor_details['city'] = vendor.city
+                    vendor_details['state'] = vendor.state
+                    vendor_details['country'] = vendor.country
+                    vendor_details['gst_number'] = vendor.gst_number
+                # Get who selected the vendor
+                if cr.vendor_selected_by_buyer_id:
+                    from models.user import User
+                    selector = User.query.get(cr.vendor_selected_by_buyer_id)
+                    if selector:
+                        vendor_details['selected_by_name'] = selector.full_name
                     vendor_trn = vendor.gst_number or ""
                     vendor_email = vendor.email or ""
 
@@ -1054,8 +1073,17 @@ def get_buyer_pending_purchases():
                 "created_at": cr.created_at.isoformat() if cr.created_at else None,
                 "vendor_id": cr.selected_vendor_id,
                 "vendor_name": cr.selected_vendor_name,
-                "vendor_phone": vendor_phone,
-                "vendor_contact_person": vendor_contact_person,
+                "vendor_phone": vendor_details['phone'],
+                "vendor_phone_code": vendor_details['phone_code'],
+                "vendor_contact_person": vendor_details['contact_person'],
+                "vendor_email": vendor_details['email'],
+                "vendor_category": vendor_details['category'],
+                "vendor_street_address": vendor_details['street_address'],
+                "vendor_city": vendor_details['city'],
+                "vendor_state": vendor_details['state'],
+                "vendor_country": vendor_details['country'],
+                "vendor_gst_number": vendor_details['gst_number'],
+                "vendor_selected_by_name": vendor_details['selected_by_name'],
                 "vendor_trn": vendor_trn,
                 "vendor_email": vendor_email,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
@@ -1208,23 +1236,40 @@ def get_buyer_completed_purchases():
                 cr.vendor_selection_status == 'pending_td_approval'
             )
 
-            # Get vendor details from Vendor table if vendor is selected
-            vendor_phone = None
-            vendor_contact_person = None
-            vendor_trn = None
-            vendor_email = None
+            # Get full vendor details from Vendor table if vendor is selected
+            vendor_details = {
+                'phone': None,
+                'phone_code': None,
+                'contact_person': None,
+                'email': None,
+                'category': None,
+                'street_address': None,
+                'city': None,
+                'state': None,
+                'country': None,
+                'gst_number': None,
+                'selected_by_name': None
+            }
             if cr.selected_vendor_id:
                 from models.vendor import Vendor
                 vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
                 if vendor:
-                    # Combine phone_code and phone if both exist
-                    if vendor.phone_code and vendor.phone:
-                        vendor_phone = f"{vendor.phone_code} {vendor.phone}"
-                    elif vendor.phone:
-                        vendor_phone = vendor.phone
-                    vendor_contact_person = vendor.contact_person_name
-                    vendor_trn = vendor.gst_number or ""
-                    vendor_email = vendor.email or ""
+                    vendor_details['phone'] = vendor.phone
+                    vendor_details['phone_code'] = vendor.phone_code
+                    vendor_details['contact_person'] = vendor.contact_person_name
+                    vendor_details['email'] = vendor.email
+                    vendor_details['category'] = vendor.category
+                    vendor_details['street_address'] = vendor.street_address
+                    vendor_details['city'] = vendor.city
+                    vendor_details['state'] = vendor.state
+                    vendor_details['country'] = vendor.country
+                    vendor_details['gst_number'] = vendor.gst_number
+                # Get who selected the vendor
+                if cr.vendor_selected_by_buyer_id:
+                    from models.user import User
+                    selector = User.query.get(cr.vendor_selected_by_buyer_id)
+                    if selector:
+                        vendor_details['selected_by_name'] = selector.full_name
 
             completed_purchases.append({
                 "cr_id": cr.cr_id,
@@ -1252,8 +1297,17 @@ def get_buyer_completed_purchases():
                 "purchase_notes": cr.purchase_notes,
                 "vendor_id": cr.selected_vendor_id,
                 "vendor_name": cr.selected_vendor_name,
-                "vendor_phone": vendor_phone,
-                "vendor_contact_person": vendor_contact_person,
+                "vendor_phone": vendor_details['phone'],
+                "vendor_phone_code": vendor_details['phone_code'],
+                "vendor_contact_person": vendor_details['contact_person'],
+                "vendor_email": vendor_details['email'],
+                "vendor_category": vendor_details['category'],
+                "vendor_street_address": vendor_details['street_address'],
+                "vendor_city": vendor_details['city'],
+                "vendor_state": vendor_details['state'],
+                "vendor_country": vendor_details['country'],
+                "vendor_gst_number": vendor_details['gst_number'],
+                "vendor_selected_by_name": vendor_details['selected_by_name'],
                 "vendor_trn": vendor_trn,
                 "vendor_email": vendor_email,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
@@ -1426,14 +1480,37 @@ def get_buyer_rejected_purchases():
                             "total_price": material_total
                         })
 
-            # Get vendor details if available
+            # Get full vendor details if available
             vendor_phone = None
+            vendor_phone_code = None
             vendor_contact_person = None
+            vendor_email = None
+            vendor_category = None
+            vendor_street_address = None
+            vendor_city = None
+            vendor_state = None
+            vendor_country = None
+            vendor_gst_number = None
+            vendor_selected_by_name = None
             if cr.selected_vendor_id:
                 vendor = Vendor.query.get(cr.selected_vendor_id)
                 if vendor:
                     vendor_phone = vendor.phone
+                    vendor_phone_code = vendor.phone_code
                     vendor_contact_person = vendor.contact_person_name
+                    vendor_email = vendor.email
+                    vendor_category = vendor.category
+                    vendor_street_address = vendor.street_address
+                    vendor_city = vendor.city
+                    vendor_state = vendor.state
+                    vendor_country = vendor.country
+                    vendor_gst_number = vendor.gst_number
+                # Get who selected the vendor
+                if cr.vendor_selected_by_buyer_user_id:
+                    from models.users import User
+                    selector = User.query.filter_by(user_id=cr.vendor_selected_by_buyer_user_id).first()
+                    if selector:
+                        vendor_selected_by_name = selector.full_name
 
             # Determine rejection type and reason
             rejection_type = "change_request"  # default
@@ -1468,7 +1545,18 @@ def get_buyer_rejected_purchases():
                 "rejected_at_stage": cr.rejected_at_stage,
                 "vendor_id": cr.selected_vendor_id,
                 "vendor_name": cr.selected_vendor_name,
-                "vendor_selection_status": cr.vendor_selection_status
+                "vendor_phone": vendor_phone,
+                "vendor_phone_code": vendor_phone_code,
+                "vendor_contact_person": vendor_contact_person,
+                "vendor_email": vendor_email,
+                "vendor_category": vendor_category,
+                "vendor_street_address": vendor_street_address,
+                "vendor_city": vendor_city,
+                "vendor_state": vendor_state,
+                "vendor_country": vendor_country,
+                "vendor_gst_number": vendor_gst_number,
+                "vendor_selection_status": cr.vendor_selection_status,
+                "vendor_selected_by_name": vendor_selected_by_name
             })
 
         return jsonify({

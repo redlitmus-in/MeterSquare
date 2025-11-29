@@ -14,7 +14,11 @@ import {
   Store,
   AlertCircle,
   Edit,
-  Save
+  Save,
+  Mail,
+  Phone,
+  Tag,
+  Clock
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -347,17 +351,113 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
 
                 {/* Justification */}
                 {purchase.reason && (
-                  <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-                    <div className="text-sm font-semibold text-blue-800 mb-2">Justification</div>
-                    <div className="text-sm text-blue-900">{purchase.reason}</div>
+                  <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                    <div className="text-sm font-medium text-gray-700 mb-1">Justification</div>
+                    <div className="text-sm text-gray-900">{purchase.reason}</div>
                   </div>
                 )}
 
                 {/* Completion Notes */}
                 {purchase.status === 'completed' && purchase.purchase_notes && (
-                  <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
-                    <div className="text-sm font-semibold text-green-800 mb-2">Completion Notes</div>
-                    <div className="text-sm text-green-900">{purchase.purchase_notes}</div>
+                  <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                    <div className="text-sm font-medium text-gray-700 mb-1">Completion Notes</div>
+                    <div className="text-sm text-gray-900">{purchase.purchase_notes}</div>
+                  </div>
+                )}
+
+                {/* Vendor Details Section */}
+                {purchase.vendor_id && (
+                  <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6 shadow-sm">
+                    <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <Store className="w-5 h-5 text-gray-600" />
+                        <h4 className="font-semibold text-gray-900 text-base">Selected Vendor Details</h4>
+                      </div>
+                      {purchase.vendor_selection_status === 'pending_td_approval' && (
+                        <span className="px-2.5 py-1 bg-gray-100 text-gray-700 text-xs font-medium rounded flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          Awaiting TD Approval
+                        </span>
+                      )}
+                      {purchase.vendor_selection_status === 'approved' && (
+                        <span className="px-2.5 py-1 bg-gray-100 text-gray-700 text-xs font-medium rounded flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3 text-green-600" />
+                          Approved
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+                      {/* Company Info */}
+                      <div className="space-y-4">
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Company Name</p>
+                          <p className="font-semibold text-gray-900">{purchase.vendor_name}</p>
+                        </div>
+
+                        {purchase.vendor_contact_person && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Contact Person</p>
+                            <p className="text-gray-900">{purchase.vendor_contact_person}</p>
+                          </div>
+                        )}
+
+                        {purchase.vendor_email && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Email</p>
+                            <p className="text-gray-900">{purchase.vendor_email}</p>
+                          </div>
+                        )}
+
+                        {purchase.vendor_phone && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Phone</p>
+                            <p className="text-gray-900">
+                              {purchase.vendor_phone_code ? `${purchase.vendor_phone_code} ` : ''}
+                              {purchase.vendor_phone}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Additional Info */}
+                      <div className="space-y-4">
+                        {purchase.vendor_category && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Category</p>
+                            <p className="text-gray-900">{purchase.vendor_category}</p>
+                          </div>
+                        )}
+
+                        {(purchase.vendor_street_address || purchase.vendor_city) && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Address</p>
+                            <p className="text-gray-900">
+                              {[
+                                purchase.vendor_street_address,
+                                purchase.vendor_city,
+                                purchase.vendor_state,
+                                purchase.vendor_country
+                              ].filter(Boolean).join(', ')}
+                            </p>
+                          </div>
+                        )}
+
+                        {purchase.vendor_gst_number && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">GST/TRN Number</p>
+                            <p className="text-gray-900">{purchase.vendor_gst_number}</p>
+                          </div>
+                        )}
+
+                        {purchase.vendor_selected_by_name && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Selected By</p>
+                            <p className="text-gray-900">{purchase.vendor_selected_by_name}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -484,44 +584,44 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
 
                 {/* Negotiable Price Summary - Show if has new materials */}
                 {localPurchase.materials.some(mat => mat.master_material_id === null || mat.master_material_id === undefined) && localPurchase.overhead_analysis && (
-                  <div className="mt-6 p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border border-purple-200">
-                    <h3 className="text-base font-bold text-purple-900 mb-3 flex items-center gap-2">
-                      <DollarSign className="w-5 h-5" />
+                  <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                      <DollarSign className="w-4 h-4 text-gray-600" />
                       Negotiable Price Summary
                     </h3>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                       <div>
-                        <span className="text-purple-700 text-xs font-medium">Original Allocated:</span>
-                        <p className="font-bold text-purple-900 mt-1">
+                        <span className="text-gray-500 text-xs">Original Allocated</span>
+                        <p className="font-semibold text-gray-900 mt-1">
                           {formatCurrency(localPurchase.overhead_analysis.original_allocated || 0)}
                         </p>
                       </div>
                       <div>
-                        <span className="text-purple-700 text-xs font-medium">Already Consumed:</span>
-                        <p className="font-bold text-orange-600 mt-1">
+                        <span className="text-gray-500 text-xs">Already Consumed</span>
+                        <p className="font-semibold text-gray-900 mt-1">
                           {formatCurrency(localPurchase.overhead_analysis.consumed_before_request || 0)}
                         </p>
                       </div>
                       <div>
-                        <span className="text-purple-700 text-xs font-medium">This Purchase:</span>
-                        <p className="font-bold text-blue-600 mt-1">
+                        <span className="text-gray-500 text-xs">This Purchase</span>
+                        <p className="font-semibold text-gray-900 mt-1">
                           {formatCurrency(localPurchase.total_cost || 0)}
                         </p>
                       </div>
                       <div>
-                        <span className="text-purple-700 text-xs font-medium">Remaining After:</span>
-                        <p className={`font-bold mt-1 ${localPurchase.overhead_analysis.remaining_after_approval < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        <span className="text-gray-500 text-xs">Remaining After</span>
+                        <p className={`font-semibold mt-1 ${localPurchase.overhead_analysis.remaining_after_approval < 0 ? 'text-red-600' : 'text-gray-900'}`}>
                           {formatCurrency(localPurchase.overhead_analysis.remaining_after_approval || 0)}
                         </p>
                       </div>
                     </div>
-                    <div className="mt-3 pt-3 border-t border-purple-300">
+                    <div className="mt-3 pt-3 border-t border-gray-200">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-purple-700 font-medium">Total Negotiable Price Consumption:</span>
-                        <span className={`text-lg font-bold ${
+                        <span className="text-sm text-gray-600">Total Negotiable Price Consumption:</span>
+                        <span className={`text-base font-semibold ${
                           ((localPurchase.overhead_analysis.consumed_before_request + localPurchase.total_cost) / localPurchase.overhead_analysis.original_allocated * 100) > 40
                             ? 'text-red-600'
-                            : 'text-green-600'
+                            : 'text-gray-900'
                         }`}>
                           {localPurchase.overhead_analysis.original_allocated > 0
                             ? (((localPurchase.overhead_analysis.consumed_before_request + localPurchase.total_cost) / localPurchase.overhead_analysis.original_allocated) * 100).toFixed(1)
