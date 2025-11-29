@@ -213,10 +213,97 @@ class WhatsAppService:
             # Fallback to simple text
             return self.send_message(phone_number, body_text)
 
-    def send_purchase_order(self, phone_number: str, vendor_data: dict, purchase_data: dict,
-                           buyer_data: dict, project_data: dict) -> dict:
+    def send_document(self, phone_number: str, document_url: str, filename: str, caption: str = None) -> dict:
         """
-        Send a purchase order via WhatsApp with formatted details and buttons
+        Send a document via WhatsApp
+
+        Args:
+            phone_number: Recipient phone number
+            document_url: Public URL of the document
+            filename: Name of the file
+            caption: Optional caption for the document
+
+        Returns:
+            dict: Response with success status
+        """
+        try:
+            if not self.api_token:
+                raise ValueError("WhatsApp configuration missing: ECHT_API_TOKEN not set")
+
+            clean_phone = self._clean_phone_number(phone_number)
+            message_id = str(uuid.uuid4())
+
+            headers = {
+                'X-API-KEY': self.api_token,
+                'Content-Type': 'application/json'
+            }
+
+            # Ensure filename has .pdf extension
+            if not filename.lower().endswith('.pdf'):
+                filename = filename + '.pdf'
+
+            # Echt.im API format for document - try all possible filename field variations
+            payload = {
+                'id': message_id,
+                'imType': 'whatsapp',
+                'sourceNumber': self.source_number,
+                'destinationNumber': clean_phone,
+                'contentType': 'document',
+                'attachmentUrl': document_url,
+                # Multiple filename field variations for compatibility
+                'attachmentName': filename,
+                'fileName': filename,
+                'filename': filename,
+                'documentName': filename,
+                'document_name': filename,
+                'name': filename,
+                'file_name': filename,
+                # Standard WhatsApp document structure (some APIs use this)
+                'document': {
+                    'link': document_url,
+                    'filename': filename,
+                    'caption': caption or filename
+                },
+                'caption': caption or filename,
+                'text': caption or filename,
+                'channel_id': self.phone_id
+            }
+
+            print(f"\n{'='*50}")
+            print(f"SENDING DOCUMENT via WhatsApp")
+            print(f"{'='*50}")
+            print(f"API URL: {self.api_url}")
+            print(f"Document URL: {document_url}")
+            print(f"Filename: {filename}")
+            print(f"Destination: {clean_phone}")
+            print(f"Full payload: {payload}")
+
+            response = requests.post(
+                self.api_url,
+                json=payload,
+                headers=headers,
+                timeout=30
+            )
+
+            print(f"Document API response status: {response.status_code}")
+            print(f"Document API response body: {response.text}")
+            print(f"Document API response JSON: {response.json() if response.text else 'No JSON'}")
+
+            if response.status_code == 200:
+                response_data = response.json() if response.text else {}
+                print(f"Document send SUCCESS - response: {response_data}")
+                return {'success': True, 'message': 'Document sent successfully', 'response': response_data}
+            else:
+                return {'success': False, 'message': f'Failed to send document: {response.text}'}
+
+        except Exception as e:
+            log.error(f"Error sending document: {str(e)}")
+            return {'success': False, 'message': str(e)}
+
+    def send_purchase_order(self, phone_number: str, vendor_data: dict, purchase_data: dict,
+                           buyer_data: dict, project_data: dict, pdf_url: str = None) -> dict:
+        """
+        Send a purchase order via WhatsApp with formatted details and optional PDF
 
         Args:
             phone_number: Vendor phone number
@@ -224,44 +311,64 @@ class WhatsAppService:
             purchase_data: Purchase order details with materials
             buyer_data: Buyer/procurement contact info
             project_data: Project information
+            pdf_url: Optional URL to LPO PDF document
 
         Returns:
             dict: Response with success status
         """
-        # Build materials list
+        # Build materials list with better formatting
         materials = purchase_data.get('materials', [])
         materials_text = ""
+        total_amount = 0
+
         for idx, material in enumerate(materials, 1):
-            mat_line = f"{idx}. {material.get('material_name', 'N/A')}"
-            if material.get('brand'):
-                mat_line += f" ({material.get('brand')})"
-            mat_line += f" - {material.get('quantity', 0)} {material.get('unit', '')}"
+            mat_name = material.get('material_name', 'N/A')
+            quantity = material.get('quantity', 0)
+            unit = material.get('unit', '')
+            unit_price = material.get('unit_price', 0)
+            total_price = material.get('total_price', 0)
+
+            mat_line = f"▪️ {mat_name}\n"
+            mat_line += f"   Qty: *{quantity} {unit}*"
+            if unit_price:
+                mat_line += f" @ AED {unit_price:,.2f}"
+            if total_price:
+                mat_line += f" = *AED {total_price:,.2f}*"
+                total_amount += float(total_price)
             materials_text += mat_line + "\n"
 
-        # Message body
-        body_text = f"""*PURCHASE ORDER*
-━━━━━━━━━━━━━━━━━━━━
+        # Get total from purchase data or calculate
+        total_cost = purchase_data.get('total_cost', total_amount)
+
+        # Message body - improved design
+        body_text = f"""╔══════════════════════════╗
+       *🏗️ PURCHASE ORDER*
+╚══════════════════════════╝
 
 📋 *PO Number:* PO-{purchase_data.get('cr_id', 'N/A')}
 📅 *Date:* {purchase_data.get('date', 'N/A')}
-
-🏢 *Vendor:* {vendor_data.get('company_name', 'N/A')}
+🏢 *Project:* {project_data.get('project_name', 'N/A')}
 📍 *Location:* {project_data.get('location', 'N/A')}
 
-━━━━━━━━━━━━━━━━━━━━
-📦 *MATERIALS REQUIRED:*
-━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
+*Dear {vendor_data.get('company_name', 'Vendor')}*,
+
+We are pleased to place this purchase order for the following materials:
+
+*📦 MATERIALS ({len(materials)} items):*
+━━━━━━━━━━━━━━━━━━━━━━
 {materials_text}
-*Total Items:* {len(materials)}
+━━━━━━━━━━━━━━━━━━━━━━
+💰 *Total Amount: AED {total_cost:,.2f}*
+━━━━━━━━━━━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━━━━━━━
-👤 *Contact Person:*
-{buyer_data.get('name', 'N/A')}
-📧 {buyer_data.get('email', 'N/A')}
-📞 {buyer_data.get('phone', 'N/A')}
+*📞 CONTACT:*
+👤 {buyer_data.get('name', 'Procurement Team')}
+📧 {buyer_data.get('email', '')}
+📱 {buyer_data.get('phone', '')}
 
-━━━━━━━━━━━━━━━━━━━━
-Please confirm receipt and provide delivery timeline.
+━━━━━━━━━━━━━━━━━━━━━━
+✅ Please confirm receipt and share delivery timeline.
 
 _MeterSquare Interiors LLC_"""
 
@@ -269,11 +376,37 @@ _MeterSquare Interiors LLC_"""
         log.info(f"Phone: {phone_number}")
         log.info(f"Vendor: {vendor_data.get('company_name')}")
         log.info(f"Materials count: {len(materials)}")
+        log.info(f"PDF URL: {pdf_url}")
 
-        # Send as simple text message (more reliable than interactive)
+        # First send the text message
+        print(f"\n=== STEP A: Sending text message ===")
         result = self.send_message(phone_number, body_text)
+        print(f"Text message result: {result}")
 
-        log.info(f"WhatsApp send result: {result}")
+        # Then send PDF document if available
+        print(f"\n=== STEP B: PDF document check ===")
+        print(f"pdf_url received: {pdf_url}")
+        print(f"text result success: {result.get('success')}")
+
+        if pdf_url and result.get('success'):
+            print(f"\n=== STEP C: Sending LPO PDF document ===")
+            print(f"PDF URL: {pdf_url}")
+            pdf_result = self.send_document(
+                phone_number=phone_number,
+                document_url=pdf_url,
+                filename=f"LPO-PO-{purchase_data.get('cr_id', 'N/A')}.pdf",
+                caption=f"📄 Local Purchase Order - PO-{purchase_data.get('cr_id', 'N/A')}"
+            )
+            print(f"PDF send result: {pdf_result}")
+            if not pdf_result.get('success'):
+                print(f"WARNING: Failed to send PDF: {pdf_result.get('message')}")
+                # Still return success for text message
+        else:
+            print(f"WARNING: PDF NOT SENT!")
+            print(f"pdf_url: {pdf_url}")
+            print(f"text success: {result.get('success')}")
+
+        print(f"\n=== FINAL WhatsApp send result: {result} ===\n")
         return result
 
     def generate_purchase_order_message(self, vendor_data: dict, purchase_data: dict,

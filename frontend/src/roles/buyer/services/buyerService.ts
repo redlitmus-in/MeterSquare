@@ -125,6 +125,9 @@ export interface Purchase {
   vendor_approval_date?: string | null;
   vendor_selection_date?: string | null;
   vendor_email_sent?: boolean;
+  vendor_email_sent_date?: string | null;
+  vendor_whatsapp_sent?: boolean;
+  vendor_whatsapp_sent_at?: string | null;
   po_child_id?: number;  // If this is a POChild record, this is its ID
   use_per_material_vendors?: boolean;
   material_vendor_selections?: Record<string, MaterialVendorSelection>;
@@ -956,12 +959,15 @@ class BuyerService {
     }
   }
 
-  // Send WhatsApp message to vendor
-  async sendVendorWhatsApp(crId: number, vendorPhone: string): Promise<{ success: boolean; message: string }> {
+  // Send WhatsApp message to vendor with LPO PDF
+  async sendVendorWhatsApp(crId: number, vendorPhone: string, includeLpoPdf: boolean = true): Promise<{ success: boolean; message: string }> {
     try {
       const response = await axios.post<{ success: boolean; message: string }>(
         `${API_URL}/buyer/purchase/${crId}/send-vendor-whatsapp`,
-        { vendor_phone: vendorPhone },
+        {
+          vendor_phone: vendorPhone,
+          include_lpo_pdf: includeLpoPdf
+        },
         { headers: this.getAuthHeaders() }
       );
 
