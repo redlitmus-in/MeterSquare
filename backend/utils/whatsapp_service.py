@@ -63,23 +63,20 @@ class WhatsAppService:
             message_id = str(uuid.uuid4())
 
             headers = {
-                'x-api-key': self.api_token,
+                'X-API-KEY': self.api_token,
                 'Content-Type': 'application/json'
             }
 
-            # Echt.im API format
+            # Echt.im API format (camelCase keys)
             payload = {
                 'id': message_id,
                 'imType': 'whatsapp',
-                'source_number': self.source_number,
-                'destination_number': clean_phone,
+                'sourceNumber': self.source_number,
+                'destinationNumber': clean_phone,
                 'contentType': 'text',
-                'text': message
+                'text': message,
+                'channel_id': self.phone_id
             }
-
-            # Add phone_id/channel_id if available
-            if self.phone_id:
-                payload['channel_id'] = self.phone_id
 
             log.info(f"=== ECHT.IM WHATSAPP API CALL ===")
             log.info(f"URL: {self.api_url}")

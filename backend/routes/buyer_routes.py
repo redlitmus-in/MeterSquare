@@ -330,6 +330,36 @@ def preview_lpo_pdf_route(cr_id):
     return preview_lpo_pdf(cr_id)
 
 
+@buyer_routes.route('/purchase/<int:cr_id>/save-lpo-customization', methods=['POST'])
+@jwt_required
+def save_lpo_customization_route(cr_id):
+    """Save LPO customizations to database (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return save_lpo_customization(cr_id)
+
+
+@buyer_routes.route('/lpo-default-template', methods=['POST'])
+@jwt_required
+def save_lpo_default_template_route():
+    """Save current LPO customizations as default template (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return save_lpo_default_template()
+
+
+@buyer_routes.route('/lpo-default-template', methods=['GET'])
+@jwt_required
+def get_lpo_default_template_route():
+    """Get user's default LPO template (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_lpo_default_template()
+
+
 @buyer_routes.route('/lpo-settings', methods=['GET'])
 @jwt_required
 def get_lpo_settings_route():

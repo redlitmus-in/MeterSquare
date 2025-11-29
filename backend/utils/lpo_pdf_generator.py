@@ -196,8 +196,9 @@ class LPOPDFGenerator:
         # === THANK YOU MESSAGE ===
         elements.append(Spacer(1, 10))
         quotation_ref = lpo_data.get('lpo_info', {}).get('quotation_ref', '')
-        thank_you_text = f"""Thank you very much for quoting us for requirements. As per your quotation and settlement done over
-the mail, we are issuing the LPO and please ensure the delivery on time"""
+        # Use custom message if provided, otherwise use default
+        default_message = """Thank you very much for quoting us for requirements. As per your quotation and settlement done over the mail, we are issuing the LPO and please ensure the delivery on time"""
+        thank_you_text = lpo_data.get('lpo_info', {}).get('custom_message', '') or default_message
         elements.append(Paragraph(thank_you_text, self.styles['LPONormal']))
 
         # === SCOPE OF WORK ===

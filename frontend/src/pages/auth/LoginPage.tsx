@@ -50,7 +50,7 @@ import { clearAllCachedData } from '@/utils/clearCache';
 import './LoginPage.css';
 
 const loginSchema = z.object({
-  email: z.string().email('Please enter a valid email address'),
+  email: z.string().optional(),
   role: z.string().min(1, 'Please select a role'),
 });
 
@@ -123,6 +123,14 @@ const LoginPage: React.FC = () => {
           });
           return;
         }
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(data.email)) {
+          showError('Invalid email', {
+            description: 'Please enter a valid email address'
+          });
+          return;
+        }
       }
 
       setIsSendingOTP(true);
@@ -130,7 +138,7 @@ const LoginPage: React.FC = () => {
       // Clear any stale cached data before login
       clearAllCachedData();
 
-      setUserEmail(data.email);
+      setUserEmail(data.email || '');
       setUserRole(data.role);
 
       // Use SMS API for site engineer with phone login
@@ -151,7 +159,7 @@ const LoginPage: React.FC = () => {
         }
       } else if (data.role === 'siteEngineer' && loginMethod === 'email') {
         // Site engineer with email login
-        const response = await authApi.sendSiteSupervisorOTP('email', data.email);
+        const response = await authApi.sendSiteSupervisorOTP('email', data.email!);
 
         setStep('otp');
         setResendTimer(30);
@@ -167,7 +175,7 @@ const LoginPage: React.FC = () => {
         }
       } else {
         // Regular login for other roles
-        const response = await authApi.sendOTP(data.email, data.role);
+        const response = await authApi.sendOTP(data.email!, data.role);
 
         setStep('otp');
         setResendTimer(30);
@@ -728,8 +736,8 @@ const LoginPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Phone/Email Toggle for Site Engineer - TEMPORARILY HIDDEN */}
-                  {/* {isSiteEngineer && (
+                  {/* Phone/Email Toggle for Site Engineer */}
+                  {isSiteEngineer && (
                     <div className="space-y-2">
                       <label className="text-sm font-semibold text-gray-700">Login Method</label>
                       <div className="flex gap-2">
@@ -759,35 +767,59 @@ const LoginPage: React.FC = () => {
                         </button>
                       </div>
                     </div>
-                  )} */}
+                  )}
 
-                  {/* Email Field - Phone login TEMPORARILY HIDDEN */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                      <Mail className="w-4 h-4 text-gray-400" />
-                      Email Address
-                    </label>
-                    <motion.div
-                      className="relative"
-                      whileFocus={{ scale: 1.01 }}
-                    >
-                      <input
-                        {...register('email')}
-                        type="email"
-                        className="w-full px-4 py-2.5 bg-gray-50/50 border border-gray-200 rounded-xl focus:bg-white focus:border-transparent focus:ring-2 focus:ring-[#243d8a] focus:ring-offset-2 transition-all duration-200 text-gray-700 placeholder-gray-400"
-                        placeholder="user@metersquare.com"
-                      />
-                    </motion.div>
-                    {errors.email && (
-                      <motion.p
-                        initial={{ opacity: 0, y: -5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="text-xs text-red-500 ml-1"
+                  {/* Email or Phone Field based on login method */}
+                  {isSiteEngineer && loginMethod === 'phone' ? (
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                        <Phone className="w-4 h-4 text-gray-400" />
+                        Phone Number
+                      </label>
+                      <motion.div
+                        className="relative"
+                        whileFocus={{ scale: 1.01 }}
                       >
-                        {errors.email.message}
-                      </motion.p>
-                    )}
-                  </div>
+                        <input
+                          type="tel"
+                          value={userPhone}
+                          onChange={(e) => setUserPhone(e.target.value)}
+                          className="w-full px-4 py-2.5 bg-gray-50/50 border border-gray-200 rounded-xl focus:bg-white focus:border-transparent focus:ring-2 focus:ring-[#243d8a] focus:ring-offset-2 transition-all duration-200 text-gray-700 placeholder-gray-400"
+                          placeholder="Enter phone number with country code (e.g., 971501234567)"
+                        />
+                      </motion.div>
+                      <p className="text-xs text-gray-500 ml-1">
+                        Enter phone number with country code (without + sign)
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                        <Mail className="w-4 h-4 text-gray-400" />
+                        Email Address
+                      </label>
+                      <motion.div
+                        className="relative"
+                        whileFocus={{ scale: 1.01 }}
+                      >
+                        <input
+                          {...register('email')}
+                          type="email"
+                          className="w-full px-4 py-2.5 bg-gray-50/50 border border-gray-200 rounded-xl focus:bg-white focus:border-transparent focus:ring-2 focus:ring-[#243d8a] focus:ring-offset-2 transition-all duration-200 text-gray-700 placeholder-gray-400"
+                          placeholder="user@metersquare.com"
+                        />
+                      </motion.div>
+                      {errors.email && (
+                        <motion.p
+                          initial={{ opacity: 0, y: -5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="text-xs text-red-500 ml-1"
+                        >
+                          {errors.email.message}
+                        </motion.p>
+                      )}
+                    </div>
+                  )}
 
                   {/* Submit Button */}
                   <motion.button
@@ -820,11 +852,15 @@ const LoginPage: React.FC = () => {
                 >
                   <div className="text-center mb-4">
                     <div className="w-12 h-12 bg-[#243d8a]/10 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <KeyRound className="w-6 h-6 text-[#243d8a]" />
+                      {loginMethod === 'phone' ? (
+                        <Smartphone className="w-6 h-6 text-[#243d8a]" />
+                      ) : (
+                        <KeyRound className="w-6 h-6 text-[#243d8a]" />
+                      )}
                     </div>
                     <h3 className="font-semibold text-gray-900">Enter OTP</h3>
                     <p className="text-sm text-gray-500 mt-1">
-                      We've sent a code to {userEmail}
+                      We've sent a code to {loginMethod === 'phone' ? userPhone : userEmail}
                     </p>
                   </div>
 

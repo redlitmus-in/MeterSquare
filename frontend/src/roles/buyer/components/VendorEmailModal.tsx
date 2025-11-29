@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import DOMPurify from 'dompurify'; // ✅ SECURITY: XSS protection for email HTML rendering
 import {
@@ -19,7 +19,8 @@ import {
   Phone,
   Plus,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ArrowLeft
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,6 +52,16 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
 
+  // CC Email state - default company emails
+  const defaultCcEmails = [
+    { email: 'sajisamuel@metersquare.com', name: 'Saji Samuel', checked: true },
+    { email: 'info@metersquare.com', name: 'MeterSquare Info', checked: true },
+  ];
+  const [ccEmails, setCcEmails] = useState(defaultCcEmails);
+  const [customCcEmails, setCustomCcEmails] = useState<Array<{ email: string; name: string }>>([]);
+  const [newCcEmail, setNewCcEmail] = useState('');
+  const [newCcName, setNewCcName] = useState('');
+
   // Editable fields
   const [editedGreeting, setEditedGreeting] = useState('');
   const [editedMessage, setEditedMessage] = useState('');
@@ -80,6 +91,71 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const [newPaymentTerm, setNewPaymentTerm] = useState('');
   const [editingTermIndex, setEditingTermIndex] = useState<number | null>(null);
   const [editingPaymentTermIndex, setEditingPaymentTermIndex] = useState<number | null>(null);
+
+  // Sidebar tab state
+  const [activeTab, setActiveTab] = useState<'email' | 'lpo' | 'terms'>('email');
+
+  // Auto-save state
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Default template state
+  const [isSavingDefault, setIsSavingDefault] = useState(false);
+  const [hasLoadedDefault, setHasLoadedDefault] = useState(false);
+
+  // Save as default template function
+  const handleSaveAsDefault = async () => {
+    if (!lpoData) return;
+
+    setIsSavingDefault(true);
+    try {
+      await buyerService.saveLPODefaultTemplate(lpoData, includeSignatures);
+      showSuccess('Default template saved! This will be used for new projects.');
+    } catch (error: any) {
+      console.error('Error saving default template:', error);
+      showError(error.message || 'Failed to save default template');
+    } finally {
+      setIsSavingDefault(false);
+    }
+  };
+
+  // Auto-save function with debounce
+  const autoSaveLpoCustomization = useCallback(async () => {
+    if (!lpoData || !includeLpoPdf) return;
+
+    setIsSaving(true);
+    try {
+      await buyerService.saveLPOCustomization(purchase.cr_id, lpoData, includeSignatures);
+      setLastSaved(new Date());
+    } catch (error) {
+      console.error('Auto-save failed:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [lpoData, includeLpoPdf, includeSignatures, purchase.cr_id]);
+
+  // Debounced auto-save effect - triggers 2 seconds after user stops editing
+  useEffect(() => {
+    if (!lpoData || !includeLpoPdf) return;
+
+    // Clear previous timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set new timeout for auto-save (2 second debounce)
+    saveTimeoutRef.current = setTimeout(() => {
+      autoSaveLpoCustomization();
+    }, 2000);
+
+    // Cleanup on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [lpoData, autoSaveLpoCustomization, includeLpoPdf]);
 
   // Handle file selection
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -201,7 +277,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
       // Enrich vendor data with purchase props if backend returns empty values
       // This ensures Attn (contact person), phone, TRN, and email show correctly in PDF
-      const enrichedLpoData = {
+      let enrichedLpoData = {
         ...response.lpo_data,
         vendor: {
           ...response.lpo_data.vendor,
@@ -213,6 +289,49 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
           email: response.lpo_data.vendor.email || purchase.vendor_email || '',
         }
       };
+
+      // Check if this is a new project without customization (empty terms arrays)
+      // If so, try to load user's default template
+      const hasCustomTerms = (response.lpo_data.terms?.general_terms?.length > 0) ||
+                             (response.lpo_data.terms?.payment_terms_list?.length > 0) ||
+                             (response.lpo_data.lpo_info?.custom_message);
+
+      if (!hasCustomTerms && !hasLoadedDefault) {
+        try {
+          const defaultTemplate = await buyerService.getLPODefaultTemplate();
+          if (defaultTemplate.template) {
+            // Apply default template to the LPO data
+            enrichedLpoData = {
+              ...enrichedLpoData,
+              lpo_info: {
+                ...enrichedLpoData.lpo_info,
+                quotation_ref: defaultTemplate.template.quotation_ref || enrichedLpoData.lpo_info.quotation_ref,
+                custom_message: defaultTemplate.template.custom_message || enrichedLpoData.lpo_info.custom_message,
+              },
+              vendor: {
+                ...enrichedLpoData.vendor,
+                subject: defaultTemplate.template.subject || enrichedLpoData.vendor.subject,
+              },
+              terms: {
+                ...enrichedLpoData.terms,
+                payment_terms: defaultTemplate.template.payment_terms || enrichedLpoData.terms.payment_terms,
+                completion_terms: defaultTemplate.template.completion_terms || enrichedLpoData.terms.completion_terms,
+                general_terms: defaultTemplate.template.general_terms?.length > 0
+                  ? defaultTemplate.template.general_terms
+                  : enrichedLpoData.terms.general_terms,
+                payment_terms_list: defaultTemplate.template.payment_terms_list?.length > 0
+                  ? defaultTemplate.template.payment_terms_list
+                  : enrichedLpoData.terms.payment_terms_list,
+              }
+            };
+            setIncludeSignatures(defaultTemplate.template.include_signatures);
+            setHasLoadedDefault(true);
+            showInfo('Loaded your default template settings');
+          }
+        } catch (defaultError) {
+          console.log('No default template found, using system defaults');
+        }
+      }
 
       setLpoData(enrichedLpoData);
     } catch (error: any) {
@@ -332,6 +451,12 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
         vendor_phone: editedVendorPhone
       };
 
+      // Include CC emails (default checked only - custom CC temporarily disabled)
+      const allCcEmails = ccEmails.filter(cc => cc.checked).map(cc => ({ email: cc.email, name: cc.name }));
+      if (allCcEmails.length > 0) {
+        emailData.cc_emails = allCcEmails;
+      }
+
       // Include LPO PDF if enabled (with correct signatures based on mode)
       if (includeLpoPdf && lpoData) {
         const finalLpoData = getLpoDataWithSignatures();
@@ -347,9 +472,12 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       setStep('success');
 
       const emailCount = (editedVendorEmail || vendorEmail).split(',').map(e => e.trim()).filter(e => e).length;
-      const message = emailCount > 1
-        ? `Purchase order email sent to ${emailCount} recipients successfully!`
-        : 'Purchase order email sent to vendor successfully!';
+      const ccCount = allCcEmails.length;
+      const message = ccCount > 0
+        ? `Email sent to ${emailCount} vendor(s) + ${ccCount} CC recipient(s)!`
+        : emailCount > 1
+          ? `Purchase order email sent to ${emailCount} recipients successfully!`
+          : 'Purchase order email sent to vendor successfully!';
       showSuccess(message);
 
       setTimeout(() => {
@@ -422,7 +550,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     `).join('') || '';
 
     return `
-      <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #333;">
+      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
         <!-- Header -->
         <div style="background-color: #2563EB; color: white; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 20px;">
           <h2 style="margin: 0; font-size: 24px; font-weight: bold;">PURCHASE ORDER</h2>
@@ -565,50 +693,40 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   return (
     <AnimatePresence>
       {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={handleClose}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-          />
-
-          {/* Modal */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl my-8 overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-5 border-b border-blue-200">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <Mail className="w-6 h-6 text-blue-600" />
-                      <h2 className="text-2xl font-bold text-gray-900">
-                        Send to Vendor
-                      </h2>
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      <span className="font-medium">Purchase Order:</span> PO #{purchase.cr_id} - {purchase.project_name}
-                    </div>
-                  </div>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-y-0 right-0 z-40 bg-gradient-to-br from-gray-50 via-white to-gray-100 md:left-56 left-0 flex flex-col"
+        >
+          {/* Full Page Header - Like Estimator BOQ */}
+          <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
+            <div className="max-w-7xl mx-auto px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
                   <button
                     onClick={handleClose}
-                    className="p-2 hover:bg-blue-200 rounded-lg transition-colors"
+                    className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
                   >
-                    <X className="w-5 h-5 text-gray-600" />
+                    <ArrowLeft className="w-6 h-6 text-gray-600" />
                   </button>
+                  <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
+                    <Mail className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <div>
+                    <h1 className="text-2xl font-bold text-[#243d8a]">Send to Vendor</h1>
+                    <p className="text-sm text-gray-600">
+                      Purchase Order: <span className="font-medium">PO #{purchase.cr_id}</span> - {purchase.project_name}
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              {/* Body */}
-              <div className="p-6 max-h-[70vh] overflow-y-auto">
+              </div>
+            </div>
+          </div>
+
+          {/* Full Page Content */}
+          <div className="flex-1 max-w-7xl mx-auto px-6 py-6 overflow-y-auto w-full">
                 {/* Step 1: Input Email */}
                 {step === 'input' && (
                   <div className="space-y-6">
@@ -654,6 +772,115 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                           {vendorEmail && vendorEmail.includes(',') && (
                             <div className="mt-2 text-xs text-blue-600">
                               {vendorEmail.split(',').map(e => e.trim()).filter(e => e).length} recipient(s)
+                            </div>
+                          )}
+                        </div>
+
+                        {/* CC Email Section */}
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-3">
+                            <Mail className="w-4 h-4 inline mr-1" />
+                            CC (Copy To)
+                          </label>
+
+                          {/* Default CC Emails with checkboxes */}
+                          <div className="space-y-2 mb-3">
+                            {ccEmails.map((cc, index) => (
+                              <div key={cc.email} className="flex items-center gap-3 p-2 bg-white rounded border border-gray-200">
+                                <input
+                                  type="checkbox"
+                                  id={`cc-${index}`}
+                                  checked={cc.checked}
+                                  onChange={(e) => {
+                                    const updated = [...ccEmails];
+                                    updated[index].checked = e.target.checked;
+                                    setCcEmails(updated);
+                                  }}
+                                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                />
+                                <label htmlFor={`cc-${index}`} className="flex-1 text-sm">
+                                  <span className="font-medium text-gray-900">{cc.name}</span>
+                                  <span className="text-gray-500 ml-2">&lt;{cc.email}&gt;</span>
+                                </label>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Custom CC Emails - TEMPORARILY HIDDEN
+                          {customCcEmails.length > 0 && (
+                            <div className="space-y-2 mb-3 border-t border-gray-200 pt-3">
+                              <div className="text-xs text-gray-500 font-medium">Custom CC Recipients:</div>
+                              {customCcEmails.map((cc, index) => (
+                                <div key={index} className="flex items-center gap-2 p-2 bg-blue-50 rounded border border-blue-200">
+                                  <div className="flex-1 text-sm">
+                                    <span className="font-medium text-gray-900">{cc.name || 'No name'}</span>
+                                    <span className="text-gray-500 ml-2">&lt;{cc.email}&gt;</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCustomCcEmails(customCcEmails.filter((_, i) => i !== index));
+                                    }}
+                                    className="p-1 text-red-500 hover:bg-red-50 rounded"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          */}
+
+                          {/* Add Custom CC - TEMPORARILY HIDDEN
+                          <div className="border-t border-gray-200 pt-3">
+                            <div className="text-xs text-gray-500 font-medium mb-2">Add Custom CC:</div>
+                            <div className="flex gap-2">
+                              <Input
+                                value={newCcName}
+                                onChange={(e) => setNewCcName(e.target.value)}
+                                placeholder="Name"
+                                className="text-sm w-1/3"
+                              />
+                              <Input
+                                value={newCcEmail}
+                                onChange={(e) => setNewCcEmail(e.target.value)}
+                                placeholder="email@example.com"
+                                className="text-sm flex-1"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (newCcEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newCcEmail.trim())) {
+                                      setCustomCcEmails([...customCcEmails, { email: newCcEmail.trim(), name: newCcName.trim() }]);
+                                      setNewCcEmail('');
+                                      setNewCcName('');
+                                    }
+                                  }
+                                }}
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  if (newCcEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newCcEmail.trim())) {
+                                    setCustomCcEmails([...customCcEmails, { email: newCcEmail.trim(), name: newCcName.trim() }]);
+                                    setNewCcEmail('');
+                                    setNewCcName('');
+                                  } else {
+                                    showError('Please enter a valid email address');
+                                  }
+                                }}
+                              >
+                                <Plus className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          */}
+
+                          {/* CC Summary */}
+                          {ccEmails.filter(cc => cc.checked).length > 0 && (
+                            <div className="mt-3 text-xs text-green-600">
+                              {ccEmails.filter(cc => cc.checked).length} CC recipient(s) will receive a copy
                             </div>
                           )}
                         </div>
@@ -792,7 +1019,46 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                             )}
                             {includeLpoPdf && lpoData && showLpoEditor && (
                               <div className="mt-4 space-y-4 border-t border-blue-200 pt-4">
-                                <div className="text-sm font-medium text-gray-700">Edit LPO Details</div>
+                                <div className="flex items-center justify-between">
+                                  <div className="text-sm font-medium text-gray-700">Edit LPO Details</div>
+                                  {/* Auto-save status indicator and Save as Default button */}
+                                  <div className="flex items-center gap-3">
+                                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                                      {isSaving ? (
+                                        <>
+                                          <Loader2 className="w-3 h-3 animate-spin" />
+                                          <span>Saving...</span>
+                                        </>
+                                      ) : lastSaved ? (
+                                        <>
+                                          <CheckCircle className="w-3 h-3 text-green-500" />
+                                          <span>Saved</span>
+                                        </>
+                                      ) : null}
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={handleSaveAsDefault}
+                                      disabled={isSavingDefault}
+                                      className="text-xs bg-purple-50 border-purple-200 hover:bg-purple-100 text-purple-700"
+                                      title="Save current settings as default for all new projects"
+                                    >
+                                      {isSavingDefault ? (
+                                        <>
+                                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                          Saving...
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Save className="w-3 h-3 mr-1" />
+                                          Save as Default
+                                        </>
+                                      )}
+                                    </Button>
+                                  </div>
+                                </div>
 
                                 {/* Quotation Ref and Subject */}
                                 <div className="grid grid-cols-2 gap-4">
@@ -848,6 +1114,20 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                       placeholder="e.g., As agreed"
                                     />
                                   </div>
+                                </div>
+
+                                {/* Custom Message for PDF */}
+                                <div>
+                                  <label className="text-xs font-medium text-gray-600">LPO Message (shown in PDF)</label>
+                                  <textarea
+                                    value={lpoData.lpo_info.custom_message || ''}
+                                    onChange={(e) => setLpoData({
+                                      ...lpoData,
+                                      lpo_info: { ...lpoData.lpo_info, custom_message: e.target.value }
+                                    })}
+                                    className="mt-1 w-full p-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
+                                  />
+                                  <p className="text-xs text-gray-400 mt-1">Edit the message that appears in the LPO PDF</p>
                                 </div>
 
                                 {/* General Terms and Conditions Editor */}
@@ -907,6 +1187,20 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                                 className="text-blue-500 hover:text-blue-700"
                                               >
                                                 <Edit3 className="w-3 h-3" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  const updatedTerms = (lpoData.terms.general_terms || []).filter((_, i) => i !== index);
+                                                  setLpoData({
+                                                    ...lpoData,
+                                                    terms: { ...lpoData.terms, general_terms: updatedTerms }
+                                                  });
+                                                }}
+                                                className="text-red-500 hover:text-red-700"
+                                                title="Delete term"
+                                              >
+                                                <Trash2 className="w-3 h-3" />
                                               </button>
                                             </>
                                           )}
@@ -1019,6 +1313,20 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                                 className="text-blue-500 hover:text-blue-700"
                                               >
                                                 <Edit3 className="w-3 h-3" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  const updatedTerms = (lpoData.terms.payment_terms_list || []).filter((_, i) => i !== index);
+                                                  setLpoData({
+                                                    ...lpoData,
+                                                    terms: { ...lpoData.terms, payment_terms_list: updatedTerms }
+                                                  });
+                                                }}
+                                                className="text-red-500 hover:text-red-700"
+                                                title="Delete payment term"
+                                              >
+                                                <Trash2 className="w-3 h-3" />
                                               </button>
                                             </>
                                           )}
@@ -1157,27 +1465,36 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
                 {/* Step 2: Preview Email */}
                 {step === 'preview' && (
-                  <div className="space-y-4">
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
-                      <Eye className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm text-green-900 flex-1">
-                        <p className="font-medium mb-1">Email Preview</p>
-                        <p>Review the email content below before sending to <span className="font-semibold">{vendorEmail}</span></p>
+                  <div className="flex flex-col h-full space-y-3">
+                    <div className="flex items-center justify-between flex-shrink-0">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Eye className="w-4 h-4 text-green-600" />
+                          <span>Review the email content below before sending to <span className="font-semibold text-gray-900">{vendorEmail}</span></span>
+                        </div>
+                        {/* Show CC recipients */}
+                        {ccEmails.filter(cc => cc.checked).length > 0 && (
+                          <div className="flex items-center gap-2 text-sm text-gray-500 mt-1 ml-6">
+                            <span className="text-xs font-medium text-purple-600">CC:</span>
+                            <span className="text-xs">
+                              {ccEmails.filter(cc => cc.checked).map(cc => cc.email).join(', ')}
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <Button
                         onClick={handleToggleEdit}
                         variant="outline"
                         size="sm"
-                        className="flex-shrink-0"
                       >
                         {isEditMode ? (
                           <>
-                            <Save className="w-4 h-4 mr-2" />
+                            <Save className="w-4 h-4 mr-1" />
                             Save
                           </>
                         ) : (
                           <>
-                            <Edit3 className="w-4 h-4 mr-2" />
+                            <Edit3 className="w-4 h-4 mr-1" />
                             Edit
                           </>
                         )}
@@ -1186,7 +1503,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
                     {/* Attached Files Preview */}
                     {attachedFiles.length > 0 && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex-shrink-0">
                         <div className="flex items-center gap-2 mb-3">
                           <Paperclip className="w-4 h-4 text-blue-600" />
                           <span className="text-sm font-semibold text-blue-900">
@@ -1213,9 +1530,9 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                       </div>
                     )}
 
-                    <div className="border border-gray-300 rounded-lg overflow-hidden">
+                    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                       {isEditMode ? (
-                        <div className="bg-white p-6 max-h-[500px] overflow-y-auto">
+                        <div className="bg-white p-4 flex-1 overflow-y-auto border border-gray-200 rounded-lg">
                           {/* Editable Form View - Same format as preview */}
                           <div className="space-y-6 text-sm">
                             {/* Email Header Section */}
@@ -1393,9 +1710,13 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                         </div>
                       ) : (
                         <div
-                          className="bg-white p-6 max-h-[500px] overflow-y-auto"
+                          className="flex-1 overflow-y-auto"
                           dangerouslySetInnerHTML={{
-                            __html: DOMPurify.sanitize(editedEmailContent || emailPreview)
+                            __html: DOMPurify.sanitize(
+                              (editedEmailContent || emailPreview)
+                                .replace(/max-width:\s*800px/gi, 'max-width: 100%')
+                                .replace(/margin:\s*0\s+auto/gi, 'margin: 0')
+                            )
                           }}
                         />
                       )}
@@ -1405,124 +1726,93 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
                 {/* Step 3: Success */}
                 {step === 'success' && (
-                  <div className="flex flex-col items-center justify-center py-12">
+                  <div className="flex flex-col items-center justify-center py-16">
                     <motion.div
                       initial={{ scale: 0 }}
                       animate={{ scale: 1 }}
                       transition={{ type: 'spring', duration: 0.5 }}
-                      className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6"
+                      className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mb-6"
                     >
-                      <CheckCircle className="w-12 h-12 text-green-600" />
+                      <CheckCircle className="w-14 h-14 text-green-600" />
                     </motion.div>
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Email Sent Successfully!</h3>
-                    <p className="text-gray-600 text-center max-w-md">
+                    <h3 className="text-3xl font-bold text-gray-900 mb-3">Email Sent Successfully!</h3>
+                    <p className="text-gray-600 text-center max-w-md text-lg">
                       {vendorEmail.includes(',') ? (
                         <>Purchase order has been sent to <span className="font-semibold">{vendorEmail.split(',').length} recipients</span></>
                       ) : (
                         <>Purchase order has been sent to <span className="font-semibold">{vendorEmail}</span></>
                       )}
                     </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between gap-4">
-                {step === 'input' && (
-                  <>
-                    <div className="text-sm text-gray-600">
-                      Step 1 of 2: Confirm Email
-                    </div>
-                    <div className="flex gap-3">
-                      <Button
-                        onClick={handleClose}
-                        variant="outline"
-                        className="px-6"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={handlePreview}
-                        disabled={!vendorEmail || isLoadingPreview}
-                        className="px-6 bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                        <Eye className="w-4 h-4 mr-2" />
-                        Preview Email
-                      </Button>
-                    </div>
-                  </>
-                )}
-
-                {step === 'preview' && (
-                  <>
-                    <div className="text-sm text-gray-600">
-                      Step 2 of 2: Review & Send
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      <Button
-                        onClick={handleBack}
-                        variant="outline"
-                        className="px-4"
-                        disabled={isSendingEmail || isSendingWhatsApp}
-                      >
-                        Back
-                      </Button>
-{/* WhatsApp button commented out
-                      <Button
-                        onClick={handleSendWhatsApp}
-                        disabled={isSendingWhatsApp || isSendingEmail || !(editedVendorPhone || purchase.vendor_phone)}
-                        className="px-4 bg-green-500 hover:bg-green-600 text-white"
-                        title={!(editedVendorPhone || purchase.vendor_phone) ? 'Vendor phone number required' : 'Send via WhatsApp'}
-                      >
-                        {isSendingWhatsApp ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            Sending...
-                          </>
-                        ) : (
-                          <>
-                            <MessageSquare className="w-4 h-4 mr-2" />
-                            WhatsApp
-                          </>
-                        )}
-                      </Button>
-*/}
-                      <Button
-                        onClick={handleSendEmail}
-                        disabled={isSendingEmail || isSendingWhatsApp}
-                        className="px-4 bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                        {isSendingEmail ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            {attachedFiles.length > 0 ? 'Uploading...' : 'Sending...'}
-                          </>
-                        ) : (
-                          <>
-                            <Mail className="w-4 h-4 mr-2" />
-                            Email
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </>
-                )}
-
-                {step === 'success' && (
-                  <div className="w-full flex justify-center">
                     <Button
                       onClick={handleClose}
-                      className="px-8 bg-green-600 hover:bg-green-700 text-white"
+                      className="mt-8 px-8 py-3 bg-green-600 hover:bg-green-700 text-white"
                     >
                       <CheckCircle className="w-4 h-4 mr-2" />
                       Done
                     </Button>
                   </div>
                 )}
-              </div>
-            </motion.div>
           </div>
-        </>
+
+          {/* Footer with Action Buttons */}
+          {step !== 'success' && (
+            <div className="bg-white border-t border-gray-200 px-6 py-4">
+              <div className="max-w-7xl mx-auto flex items-center justify-between">
+                <div className="text-sm text-gray-600">
+                  {step === 'input' ? 'Step 1 of 2: Configure Email' : 'Step 2 of 2: Review & Send'}
+                </div>
+                <div className="flex items-center gap-3">
+                  {step === 'input' && (
+                    <>
+                      <Button
+                        onClick={handleClose}
+                        variant="outline"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handlePreview}
+                        disabled={!vendorEmail || isLoadingPreview}
+                        className="bg-[#243d8a] hover:bg-[#1e3270] text-white"
+                      >
+                        <Eye className="w-4 h-4 mr-2" />
+                        Preview Email
+                      </Button>
+                    </>
+                  )}
+                  {step === 'preview' && (
+                    <>
+                      <Button
+                        onClick={handleBack}
+                        variant="outline"
+                        disabled={isSendingEmail}
+                      >
+                        Back
+                      </Button>
+                      <Button
+                        onClick={handleSendEmail}
+                        disabled={isSendingEmail}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {isSendingEmail ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Sending...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-4 h-4 mr-2" />
+                            Send Email
+                          </>
+                        )}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </motion.div>
       )}
     </AnimatePresence>
   );
