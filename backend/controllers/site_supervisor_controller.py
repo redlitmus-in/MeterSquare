@@ -410,43 +410,262 @@ def get_all_sitesupervisor_boqs():
         }), 500
 
 def get_sitesupervisor_dashboard():
-    """Get dashboard statistics for Site Engineer"""
+    """Get COMPREHENSIVE dashboard statistics for Site Engineer
+
+    Includes:
+    1. Project statistics (from both pm_assign_ss and Project.site_supervisor_id)
+    2. BOQ/Item statistics (total items, items by status)
+    3. Change Request statistics (pending, approved, rejected, purchase completed)
+    4. Recent projects list
+    5. Projects by priority/deadline
+    """
     try:
+        from models.pm_assign_ss import PMAssignSS
+        from models.change_request import ChangeRequest
+        from models.boq import BOQ, BOQDetails
+        from datetime import timedelta
+
         current_user = g.user
         user_id = current_user['user_id']
         user_role = current_user.get('role', '').lower()
 
         # Get effective user context (handles admin viewing as other roles)
         context = get_effective_user_context()
+        effective_role = context.get('effective_role', user_role)
+        is_admin_viewing = context.get('is_admin_viewing', False)
+        effective_user_id = context.get('effective_user_id')
 
-        # Get all projects assigned to this site engineer (admin sees all projects with site supervisor assigned)
-        if user_role == 'admin' or not should_apply_role_filter(context):
-            projects = Project.query.filter(
-                Project.site_supervisor_id.isnot(None),  # Only projects with site supervisor assigned
+        # Determine target user ID for queries
+        target_user_id = effective_user_id if (is_admin_viewing and effective_user_id) else user_id
+
+        # ========== COLLECT PROJECT IDS ==========
+        all_project_ids = set()
+        all_boq_ids = set()
+        item_assignments = []
+
+        if user_role == 'admin' and not is_admin_viewing:
+            # Pure admin - sees all
+            item_assignments = PMAssignSS.query.filter(PMAssignSS.is_deleted == False).all()
+            all_project_ids.update([a.project_id for a in item_assignments if a.project_id])
+            all_boq_ids.update([a.boq_id for a in item_assignments if a.boq_id])
+
+            projects_from_table = Project.query.filter(
+                Project.site_supervisor_id.isnot(None),
                 Project.is_deleted == False
             ).all()
+            all_project_ids.update([p.project_id for p in projects_from_table])
         else:
-            projects = Project.query.filter(
-                Project.site_supervisor_id == user_id,
+            # Regular SE or admin viewing as SE
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.assigned_to_se_id == target_user_id,
+                PMAssignSS.is_deleted == False
+            ).all()
+            all_project_ids.update([a.project_id for a in item_assignments if a.project_id])
+            all_boq_ids.update([a.boq_id for a in item_assignments if a.boq_id])
+
+            projects_from_table = Project.query.filter(
+                Project.site_supervisor_id == target_user_id,
                 Project.is_deleted == False
             ).all()
+            all_project_ids.update([p.project_id for p in projects_from_table])
 
-        # Count projects by status
+        # ========== EMPTY STATE ==========
+        if not all_project_ids:
+            return jsonify({
+                "success": True,
+                "stats": {
+                    "total_projects": 0,
+                    "assigned_projects": 0,
+                    "ongoing_projects": 0,
+                    "completed_projects": 0,
+                    "completion_rate": 0
+                },
+                "item_stats": {
+                    "total_items_assigned": 0,
+                    "items_pending": 0,
+                    "items_in_progress": 0,
+                    "items_completed": 0,
+                    "unique_boqs": 0
+                },
+                "change_request_stats": {
+                    "total_crs": 0,
+                    "pending_approval": 0,
+                    "approved": 0,
+                    "rejected": 0,
+                    "purchase_completed": 0,
+                    "vendor_approved": 0
+                },
+                "recent_projects": [],
+                "projects_by_priority": {
+                    "high": 0,
+                    "medium": 0,
+                    "low": 0
+                },
+                "deadline_stats": {
+                    "overdue": 0,
+                    "due_this_week": 0,
+                    "due_this_month": 0,
+                    "on_track": 0
+                }
+            }), 200
+
+        # ========== FETCH PROJECTS ==========
+        projects = Project.query.filter(
+            Project.project_id.in_(list(all_project_ids)),
+            Project.is_deleted == False
+        ).order_by(Project.created_at.desc()).all()
+
+        # ========== PROJECT STATISTICS ==========
         total_projects = len(projects)
         assigned_projects = 0
         ongoing_projects = 0
         completed_projects = 0
+        priority_high = 0
+        priority_medium = 0
+        priority_low = 0
+        overdue = 0
+        due_this_week = 0
+        due_this_month = 0
+        on_track = 0
+
+        today = datetime.utcnow().date()
+        week_from_now = today + timedelta(days=7)
+        month_from_now = today + timedelta(days=30)
+
+        recent_projects = []
 
         for project in projects:
             status = (project.status or '').lower()
-            if status in ['assigned', 'pending']:
+            # "active" means project is assigned/active but work may not be in progress
+            if status in ['assigned', 'pending', 'items_assigned', 'active', 'new']:
                 assigned_projects += 1
-            elif status in ['in_progress', 'active']:
+            elif status in ['in_progress', 'ongoing', 'started', 'working']:
                 ongoing_projects += 1
-            elif status == 'completed':
+            elif status in ['completed', 'done', 'finished', 'closed']:
                 completed_projects += 1
             else:
-                assigned_projects += 1  # Default to assigned
+                # Default unknown statuses to assigned
+                assigned_projects += 1
+
+            # Priority stats
+            priority = (getattr(project, 'priority', 'medium') or 'medium').lower()
+            if priority == 'high':
+                priority_high += 1
+            elif priority == 'low':
+                priority_low += 1
+            else:
+                priority_medium += 1
+
+            # Deadline stats
+            if project.start_date and project.duration_days:
+                # Handle both date and datetime objects
+                start = project.start_date if isinstance(project.start_date, datetime) else datetime.combine(project.start_date, datetime.min.time())
+                end_date = (start + timedelta(days=project.duration_days)).date()
+                if status != 'completed':
+                    if end_date < today:
+                        overdue += 1
+                    elif end_date <= week_from_now:
+                        due_this_week += 1
+                    elif end_date <= month_from_now:
+                        due_this_month += 1
+                    else:
+                        on_track += 1
+
+            # Recent projects (top 5)
+            if len(recent_projects) < 5:
+                proj_end_date = None
+                if project.start_date and project.duration_days:
+                    start = project.start_date if isinstance(project.start_date, datetime) else datetime.combine(project.start_date, datetime.min.time())
+                    proj_end_date = (start + timedelta(days=project.duration_days)).date().isoformat()
+
+                recent_projects.append({
+                    "project_id": project.project_id,
+                    "project_name": project.project_name,
+                    "project_code": getattr(project, 'project_code', None),
+                    "client": project.client,
+                    "location": project.location,
+                    "status": project.status or 'assigned',
+                    "priority": getattr(project, 'priority', 'medium'),
+                    "start_date": project.start_date.isoformat() if project.start_date else None,
+                    "end_date": proj_end_date,
+                    "duration_days": project.duration_days,
+                    "created_at": project.created_at.isoformat() if project.created_at else None
+                })
+
+        completion_rate = round((completed_projects / total_projects) * 100, 1) if total_projects > 0 else 0
+
+        # ========== ITEM STATISTICS ==========
+        total_items_assigned = 0
+        items_pending = 0
+        items_in_progress = 0
+        items_completed = 0
+
+        for assignment in item_assignments:
+            if assignment.item_indices:
+                count = len(assignment.item_indices)
+                total_items_assigned += count
+                status = (assignment.assignment_status or 'assigned').lower()
+                if status in ['assigned', 'pending']:
+                    items_pending += count
+                elif status in ['in_progress', 'active']:
+                    items_in_progress += count
+                elif status in ['completed', 'done']:
+                    items_completed += count
+                else:
+                    items_pending += count
+
+        # ========== CHANGE REQUEST STATISTICS ==========
+        cr_query = ChangeRequest.query.filter(
+            ChangeRequest.project_id.in_(list(all_project_ids)),
+            ChangeRequest.is_deleted == False
+        )
+
+        # If not admin, also filter by requested_by_user_id
+        if user_role != 'admin' or is_admin_viewing:
+            cr_query = cr_query.filter(
+                db.or_(
+                    ChangeRequest.requested_by_user_id == target_user_id,
+                    ChangeRequest.project_id.in_(list(all_project_ids))
+                )
+            )
+
+        change_requests = cr_query.all()
+
+        total_crs = len(change_requests)
+        cr_pending = 0
+        cr_approved = 0
+        cr_rejected = 0
+        cr_purchase_completed = 0
+        cr_vendor_approved = 0
+        cr_in_progress = 0
+
+        for cr in change_requests:
+            status = (cr.status or '').lower()
+            # Pending statuses
+            if status in ['pending', 'pending_approval', 'pending_pm_approval', 'pending_td_approval',
+                         'pending_estimator_approval', 'pending_vendor_approval', 'vendor_pending',
+                         'waiting_approval', 'draft']:
+                cr_pending += 1
+            # Approved/In-Progress statuses
+            elif status in ['approved', 'pm_approved', 'td_approved', 'estimator_approved',
+                           'assigned_to_buyer', 'vendor_approved', 'vendor_selected',
+                           'in_progress', 'processing', 'buyer_assigned']:
+                cr_approved += 1
+            # Rejected statuses
+            elif status in ['rejected', 'cancelled', 'vendor_rejected', 'denied']:
+                cr_rejected += 1
+            # Completed statuses
+            elif status in ['purchase_completed', 'completed', 'done', 'closed', 'delivered']:
+                cr_purchase_completed += 1
+            else:
+                # Count any other status as pending for visibility
+                cr_pending += 1
+                log.info(f"Unknown CR status '{status}' for CR {cr.cr_id} - counted as pending")
+
+            if cr.vendor_selection_status == 'approved':
+                cr_vendor_approved += 1
+
+        log.info(f"SE Dashboard comprehensive stats for user {user_id}: projects={total_projects}, items={total_items_assigned}, CRs={total_crs}")
 
         return jsonify({
             "success": True,
@@ -454,7 +673,35 @@ def get_sitesupervisor_dashboard():
                 "total_projects": total_projects,
                 "assigned_projects": assigned_projects,
                 "ongoing_projects": ongoing_projects,
-                "completed_projects": completed_projects
+                "completed_projects": completed_projects,
+                "completion_rate": completion_rate
+            },
+            "item_stats": {
+                "total_items_assigned": total_items_assigned,
+                "items_pending": items_pending,
+                "items_in_progress": items_in_progress,
+                "items_completed": items_completed,
+                "unique_boqs": len(all_boq_ids)
+            },
+            "change_request_stats": {
+                "total_crs": total_crs,
+                "pending_approval": cr_pending,
+                "approved": cr_approved,
+                "rejected": cr_rejected,
+                "purchase_completed": cr_purchase_completed,
+                "vendor_approved": cr_vendor_approved
+            },
+            "recent_projects": recent_projects,
+            "projects_by_priority": {
+                "high": priority_high,
+                "medium": priority_medium,
+                "low": priority_low
+            },
+            "deadline_stats": {
+                "overdue": overdue,
+                "due_this_week": due_this_week,
+                "due_this_month": due_this_month,
+                "on_track": on_track
             }
         }), 200
 
