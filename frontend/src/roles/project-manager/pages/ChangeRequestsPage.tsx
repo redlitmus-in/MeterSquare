@@ -296,7 +296,8 @@ const ChangeRequestsPage: React.FC = () => {
       approved_by_td: 'bg-blue-100 text-blue-800',
       assigned_to_buyer: 'bg-purple-100 text-purple-800',
       purchase_completed: 'bg-green-100 text-green-800',
-      rejected: 'bg-red-100 text-red-800'
+      rejected: 'bg-red-100 text-red-800',
+      split_to_sub_crs: 'bg-indigo-100 text-indigo-800'
     };
     return colors[status as keyof typeof colors] || colors.pending;
   };
@@ -438,7 +439,7 @@ const ChangeRequestsPage: React.FC = () => {
       matchesTab = (
         (activeTab === 'requested' && (req.status === 'send_to_pm' || (req.status === 'under_review' && req.approval_required_from === 'project_manager'))) ||  // Requests needing PM approval (send_to_pm or under_review)
         (activeTab === 'pending' && isPendingTabStatus) ||  // ALL requests for pending sub-tabs
-        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || req.status === 'send_to_est' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval')) ||  // approved_by_pm, send_to_est, send_to_buyer and pending_td_approval status
+        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || req.status === 'send_to_est' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs')) ||  // approved_by_pm, send_to_est, send_to_buyer, pending_td_approval and split_to_sub_crs status
         (activeTab === 'completed' && req.status === 'purchase_completed') ||
         (activeTab === 'rejected' && req.status === 'rejected')
       );
@@ -446,7 +447,7 @@ const ChangeRequestsPage: React.FC = () => {
       // Change Requests tab filtering - show requests that need PM action or PM created
       matchesTab = (
         (activeTab === 'pending' && ['pending', 'under_review'].includes(req.status)) ||
-        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval'].includes(req.status)) ||
+        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs'].includes(req.status)) ||
         (activeTab === 'completed' && req.status === 'purchase_completed') ||
         (activeTab === 'rejected' && req.status === 'rejected')
       );
@@ -456,7 +457,7 @@ const ChangeRequestsPage: React.FC = () => {
 
   const stats = {
     pending: changeRequests.filter(r => ['pending', 'under_review'].includes(r.status)).length,
-    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval'].includes(r.status)).length,
+    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs'].includes(r.status)).length,
     completed: changeRequests.filter(r => r.status === 'purchase_completed').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length,
     // For Extra Material - Requested tab count (send_to_pm or under_review with PM approval)
@@ -469,7 +470,7 @@ const ChangeRequestsPage: React.FC = () => {
         (r.status === 'under_review' && r.approval_required_from === 'buyer') ||  // Sent to Buyer
         r.status === 'assigned_to_buyer'  // Assigned to Buyer
       ).length,  // ALL requests for pending tab sub-tabs (backend already filters by project)
-    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || r.status === 'send_to_est' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval').length,  // approved_by_pm, send_to_est, send_to_buyer and pending_td_approval status
+    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || r.status === 'send_to_est' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs').length,  // approved_by_pm, send_to_est, send_to_buyer, pending_td_approval and split_to_sub_crs status
     completed_extra: changeRequests.filter(r => r.status === 'purchase_completed').length
   };
 

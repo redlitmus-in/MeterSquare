@@ -997,8 +997,6 @@ def get_all_change_requests():
             ).distinct().all()
             se_assigned_project_ids = [p[0] for p in se_assigned_project_ids] if se_assigned_project_ids else []
 
-            log.info(f"Regular SE {user_id} - has item assignments in {len(se_assigned_project_ids)} projects")
-
             # SE sees:
             # 1. Requests where requested_by_role is 'siteengineer'/'sitesupervisor' and status is 'pending'
             # 2. Their own requests (to see pending drafts)
@@ -1025,7 +1023,6 @@ def get_all_change_requests():
             if is_admin_viewing:
                 # Admin viewing as SE - show ALL requests (no filtering)
                 # Admin should see everything when viewing as any role
-                log.info(f"Admin viewing as SE - showing ALL requests (no filtering)")
                 pass  # No additional filtering - admin sees everything
             elif se_assigned_project_ids:
                 # Regular SE - sees pending requests from SEs in their assigned projects + own requests
@@ -1048,10 +1045,8 @@ def get_all_change_requests():
                 )
             else:
                 # No item assignments found - show only own requests
-                log.info(f"SE {user_id} has no item assignments, showing only own requests")
                 query = query.filter(ChangeRequest.requested_by_user_id == user_id)
         elif user_role in ['projectmanager', 'project_manager']:
-            log.info(f"Entering PM block - user_role: {user_role}, is_admin_viewing: {is_admin_viewing}")
             # PM sees:
             # 1. Requests where requested_by_role is 'projectmanager' and status is 'pending' or 'pm_request'
             # 2. Requests with status 'send_to_pm' (sent by SS/SE for PM approval)
@@ -1065,8 +1060,6 @@ def get_all_change_requests():
                 Project.is_deleted == False
             ).all()
             pm_project_ids = [p.project_id for p in pm_projects]
-
-            log.info(f"PM {user_id} - has {len(pm_project_ids)} projects, is_admin_viewing: {is_admin_viewing}")
 
             # Filter for PM: show pending/pm_request requests from project managers
             pm_role_filter = and_(
@@ -1108,8 +1101,6 @@ def get_all_change_requests():
                 ).all()
                 all_pm_project_ids = [p.project_id for p in all_pm_projects]
 
-                log.info(f"Admin viewing as PM - found {len(all_pm_project_ids)} projects with PM assigned")
-
                 # SS/SE pending drafts (not yet sent to PM) - these should be EXCLUDED
                 # Use lower() for case-insensitive comparison (DB has 'siteEngineer', 'SiteEngineer', etc.)
                 is_ss_se_pending_draft = and_(
@@ -1125,9 +1116,6 @@ def get_all_change_requests():
                     func.lower(ChangeRequest.requested_by_role).in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']),
                     ChangeRequest.status != 'pending'
                 )
-
-                log.info(f"Admin viewing as PM - showing PM-relevant requests. is_admin_viewing={is_admin_viewing}, effective_role={effective_role}")
-
                 # Filter: only show requests from projects with PM assigned
                 # Include: admin/PM created (any status) OR SS/SE created but sent for review (not pending)
                 if all_pm_project_ids:
@@ -1157,7 +1145,8 @@ def get_all_change_requests():
                     func.lower(ChangeRequest.requested_by_role).in_(['projectmanager', 'project_manager', 'pm', 'admin']),
                     ChangeRequest.assigned_to_pm_user_id.is_(None)  # Not SE-originated
                 )
-
+                # Requests approved by this PM - show all requests this PM has approved
+                pm_approved_by_this_user = ChangeRequest.pm_approved_by_user_id == user_id
                 query = query.filter(
                     or_(
                         and_(
@@ -1180,6 +1169,7 @@ def get_all_change_requests():
                             ChangeRequest.project_id.in_(pm_project_ids),  # Requests from assigned projects
                             pm_originated_approved  # PM/Admin originated approved requests
                         ),
+                        pm_approved_by_this_user,  # Requests approved by this PM
                         ChangeRequest.requested_by_user_id == user_id  # Own requests
                     )
                 )
