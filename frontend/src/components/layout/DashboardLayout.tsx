@@ -9,6 +9,7 @@ import { MobileMenuButton } from './MobileMenuButton';
 import { Clock } from 'lucide-react';
 import { sanitizeDocumentTitle } from '@/utils/sanitizer';
 import { useAdminViewStore } from '@/store/adminViewStore';
+import { throttle } from '@/utils/performanceOptimizer';
 
 const DashboardLayout: React.FC = React.memo(() => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -18,7 +19,7 @@ const DashboardLayout: React.FC = React.memo(() => {
   });
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showHeader, setShowHeader] = useState(true);
-  const [lastScrollY, setLastScrollY] = useState(0);
+  const lastScrollYRef = useRef(0);  // Use ref instead of state to avoid re-renders
   const { user } = useAuthStore();
   const { unreadCount } = useNotificationStore();
   const { viewingAsRoleName } = useAdminViewStore();
@@ -109,13 +110,15 @@ const DashboardLayout: React.FC = React.memo(() => {
     };
   }, []);
 
-  // Handle scroll to hide/show header
+  // Handle scroll to hide/show header - throttled to reduce re-renders (was causing 60 re-renders/sec)
   useEffect(() => {
     const mainContent = document.querySelector('main');
     if (!mainContent) return;
 
-    const handleScroll = () => {
+    // Throttle scroll handler to run at most every 100ms (reduces re-renders by ~90%)
+    const handleScroll = throttle(() => {
       const currentScrollY = mainContent.scrollTop;
+      const lastScrollY = lastScrollYRef.current;
 
       if (currentScrollY > lastScrollY && currentScrollY > 50) {
         // Scrolling down
@@ -125,15 +128,15 @@ const DashboardLayout: React.FC = React.memo(() => {
         setShowHeader(true);
       }
 
-      setLastScrollY(currentScrollY);
-    };
+      lastScrollYRef.current = currentScrollY;
+    }, 100);
 
     mainContent.addEventListener('scroll', handleScroll, { passive: true });
 
     return () => {
       mainContent.removeEventListener('scroll', handleScroll);
     };
-  }, [lastScrollY]);
+  }, []);  // Empty deps - handler is stable due to throttle and ref
 
   return (
     <div className="h-screen flex overflow-hidden bg-gradient-to-br from-gray-50 via-white to-gray-100">

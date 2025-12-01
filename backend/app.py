@@ -137,6 +137,17 @@ def create_app():
         # Permissions Policy (disable unnecessary browser features)
         response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
 
+        # ✅ PERFORMANCE: Cache-Control headers for browser caching
+        # Don't cache API responses (dynamic data) but allow caching of static assets
+        content_type = response.headers.get('Content-Type', '')
+        if 'application/json' in content_type:
+            # API responses: no caching for dynamic data
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+        elif any(static_type in content_type for static_type in ['image/', 'font/', 'text/css', 'application/javascript']):
+            # Static assets: cache for 1 hour, allow CDN caching
+            response.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=86400'
+
         return response
 
     # ✅ SECURITY: Log security events

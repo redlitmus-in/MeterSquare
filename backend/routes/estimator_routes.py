@@ -1,8 +1,23 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 from datetime import datetime
 from controllers.send_boq_client import *
 from controllers.estimator_controller import *
 from utils.authentication import jwt_required
+
+# Rate limit decorator helper for heavy endpoints
+def rate_limit(limit_string):
+    """Apply rate limiting to expensive endpoints like email sending"""
+    def decorator(f):
+        from functools import wraps
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            limiter = getattr(current_app, 'limiter', None)
+            if limiter:
+                limited_func = limiter.limit(limit_string)(f)
+                return limited_func(*args, **kwargs)
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
 
 estimator_routes = Blueprint('estimator_routes', __name__, url_prefix='/api')
 
@@ -15,9 +30,10 @@ def check_estimator_or_admin_access():
         return jsonify({"error": "Access denied. Estimator or Admin role required."}), 403
     return None
 
-# Client confirmation endpoint
+# Client confirmation endpoint - Rate limited to prevent email abuse
 @estimator_routes.route('/send_boq_to_client', methods=['POST'])
 @jwt_required
+@rate_limit("10 per hour")  # Email with PDF attachment is resource-intensive
 def send_boq_to_client_route():
     """Estimator or Admin sends BOQ to client"""
     access_check = check_estimator_or_admin_access()

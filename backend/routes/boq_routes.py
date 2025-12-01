@@ -1,8 +1,25 @@
 """
 BOQ Routes - API endpoints for Bill of Quantities management
 """
-from flask import Blueprint, g, jsonify
+from flask import Blueprint, g, jsonify, current_app
 from utils.authentication import jwt_required
+
+# Rate limit decorator helper for heavy endpoints
+def rate_limit(limit_string):
+    """Apply rate limiting to expensive endpoints like PDF generation"""
+    def decorator(f):
+        from functools import wraps
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Get limiter from app context
+            limiter = getattr(current_app, 'limiter', None)
+            if limiter:
+                # Apply limit dynamically
+                limited_func = limiter.limit(limit_string)(f)
+                return limited_func(*args, **kwargs)
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
 from controllers.boq_controller import *
 from controllers.boq_upload_controller import *
 from controllers.boq_bulk_controller import bulk_upload_boq
@@ -216,9 +233,10 @@ def get_all_internal_revision_route():
         return access_check
     return get_all_internal_revision()
 
-# PDF Download Routes
+# PDF Download Routes - Rate limited to prevent abuse (CPU-intensive operations)
 @boq_routes.route('/boq/download/internal/<int:boq_id>', methods=['GET'])
 @jwt_required
+@rate_limit("15 per hour")  # PDF generation is CPU-intensive
 def download_internal_pdf_route(boq_id):
     """Download internal BOQ PDF (Estimator, PM, SE, TD, or Admin)"""
     access_check = check_boq_access()
@@ -228,6 +246,7 @@ def download_internal_pdf_route(boq_id):
 
 @boq_routes.route('/boq/download/client/<int:boq_id>', methods=['GET', 'POST'])
 @jwt_required
+@rate_limit("15 per hour")  # PDF generation is CPU-intensive
 def download_client_pdf_route(boq_id):
     """Download client BOQ PDF (Estimator, PM, SE, TD, or Admin)"""
     access_check = check_boq_access()
@@ -237,6 +256,7 @@ def download_client_pdf_route(boq_id):
 
 @boq_routes.route('/boq/preview/client/<int:boq_id>', methods=['POST'])
 @jwt_required
+@rate_limit("20 per hour")  # Preview is slightly less intensive than download
 def preview_client_pdf_route(boq_id):
     """Preview client BOQ PDF with cover page (Estimator, PM, SE, TD, or Admin)"""
     access_check = check_boq_access()
@@ -246,11 +266,13 @@ def preview_client_pdf_route(boq_id):
 
 @boq_routes.route('/boq/download/internal-excel/<int:boq_id>', methods=['GET'])
 @jwt_required
+@rate_limit("30 per hour")  # Excel generation is less intensive than PDF
 def download_internal_excel_route(boq_id):
     return download_internal_excel()
 
 @boq_routes.route('/boq/download/client-excel/<int:boq_id>', methods=['GET'])
 @jwt_required
+@rate_limit("30 per hour")  # Excel generation is less intensive than PDF
 def download_client_excel_route(boq_id):
     return download_client_excel()
 

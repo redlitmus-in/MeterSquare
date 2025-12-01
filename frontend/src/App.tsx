@@ -13,6 +13,7 @@ import { initializeNotificationService } from '@/store/notificationStore';
 import { realtimeNotificationHub } from '@/services/realtimeNotificationHub';
 // NOTE: backgroundNotificationService removed - realtimeNotificationHub handles everything
 import { Security } from '@/utils/security'; // Initialize security system
+// NOTE: LazyMotion not used - would require updating 89 files from 'motion' to 'm' component
 
 // Load notification debugger and desktop notification tester in development
 if (import.meta.env.DEV) {

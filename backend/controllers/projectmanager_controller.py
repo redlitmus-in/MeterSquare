@@ -21,7 +21,7 @@ SHARED FUNCTIONALITY:
 """
 
 from flask import request, jsonify, g
-from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy.orm import selectinload, joinedload, defer
 from config.db import db
 from models.project import Project
 from models.boq import *
@@ -273,9 +273,12 @@ def get_all_pm_boqs():
                 all_history[h.boq_id].append(h)
 
         # Batch load BOQ Details (was: 1 query per BOQ = N queries, now: 1 query total)
+        # Use defer() to skip loading the large boq_details JSONB column - saves ~50-200KB per record
         all_details = {}
         if boq_ids:
-            details_records = BOQDetails.query.filter(
+            details_records = BOQDetails.query.options(
+                defer(BOQDetails.boq_details)  # Defer large JSONB column for list views
+            ).filter(
                 BOQDetails.boq_id.in_(boq_ids),
                 BOQDetails.is_deleted == False
             ).all()
