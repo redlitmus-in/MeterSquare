@@ -908,7 +908,8 @@ def send_for_review(cr_id):
                     creator_name=current_user.get('full_name') or current_user.get('username') or 'User',
                     creator_role=user_role,
                     recipient_user_ids=[next_approver_id],
-                    recipient_role=next_role
+                    recipient_role=next_role,
+                    request_type=change_request.request_type
                 )
         except Exception as notif_error:
             log.error(f"Failed to send CR created notification: {notif_error}")

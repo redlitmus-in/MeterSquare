@@ -56,23 +56,28 @@ export const getNotificationRedirectPath = (
       titleLower.includes('change request') || messageLower.includes('change request') ||
       category === 'change_request' || metadata?.cr_id) {
 
-    console.log('[NotificationRedirect] Matched Materials Purchase/Change Request');
+    console.log('[NotificationRedirect] Matched Materials Purchase/Change Request, request_type:', metadata?.request_type);
 
-    // Materials Purchase Approved - goes to Accepted tab on extra-material
+    // Determine correct route based on request_type from metadata
+    // EXTRA_MATERIALS goes to /extra-material, others go to /change-requests
+    const isExtraMaterial = metadata?.request_type === 'EXTRA_MATERIALS';
+    const basePath = isExtraMaterial ? '/extra-material' : '/change-requests';
+
+    // Materials Purchase Approved
     if (titleLower.includes('approved') || messageLower.includes('approved')) {
       return {
-        path: buildPath('/extra-material'),
+        path: buildPath(basePath),
         queryParams: {
-          tab: 'accepted',
+          tab: isExtraMaterial ? 'accepted' : 'approved',
           ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
         },
       };
     }
 
-    // Materials Purchase Rejected - goes to Rejected tab on extra-material
+    // Materials Purchase Rejected
     if (titleLower.includes('rejected') || messageLower.includes('rejected')) {
       return {
-        path: buildPath('/extra-material'),
+        path: buildPath(basePath),
         queryParams: {
           tab: 'rejected',
           ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
@@ -80,11 +85,11 @@ export const getNotificationRedirectPath = (
       };
     }
 
-    // New Materials Purchase Request - goes to Requested tab on extra-material (for PM to review)
+    // New Materials Purchase Request - for PM/TD to review
     return {
-      path: buildPath('/extra-material'),
+      path: buildPath(basePath),
       queryParams: {
-        tab: 'requested',
+        tab: isExtraMaterial ? 'requested' : 'pending',
         ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
       },
     };
