@@ -54,6 +54,53 @@ const loginSchema = z.object({
   role: z.string().min(1, 'Please select a role'),
 });
 
+// Country codes with phone number length validation
+const countryCodes = [
+  { code: '+971', country: 'UAE', flag: '🇦🇪', minLength: 9, maxLength: 9 },
+  { code: '+91', country: 'India', flag: '🇮🇳', minLength: 10, maxLength: 10 },
+  { code: '+1', country: 'USA', flag: '🇺🇸', minLength: 10, maxLength: 10 },
+  { code: '+44', country: 'UK', flag: '🇬🇧', minLength: 10, maxLength: 10 },
+  { code: '+966', country: 'Saudi', flag: '🇸🇦', minLength: 9, maxLength: 9 },
+  { code: '+968', country: 'Oman', flag: '🇴🇲', minLength: 8, maxLength: 8 },
+  { code: '+973', country: 'Bahrain', flag: '🇧🇭', minLength: 8, maxLength: 8 },
+  { code: '+974', country: 'Qatar', flag: '🇶🇦', minLength: 8, maxLength: 8 },
+  { code: '+965', country: 'Kuwait', flag: '🇰🇼', minLength: 8, maxLength: 8 },
+  { code: '+92', country: 'Pakistan', flag: '🇵🇰', minLength: 10, maxLength: 10 },
+  { code: '+880', country: 'Bangladesh', flag: '🇧🇩', minLength: 10, maxLength: 10 },
+  { code: '+63', country: 'Philippines', flag: '🇵🇭', minLength: 10, maxLength: 10 },
+];
+
+// Mask phone number - hide center 6 digits
+const maskPhoneNumber = (phone: string, countryCode: string): string => {
+  // Clean the phone number - only digits
+  const numberOnly = phone.replace(/\D/g, '');
+  if (numberOnly.length <= 4) return `${countryCode} ${numberOnly}`;
+
+  // For proper masking: show first 2, mask center 6, show last 2
+  // Example: 501234567 -> 50******67
+  const firstPart = numberOnly.slice(0, 2);
+  const lastPart = numberOnly.slice(-2);
+
+  return `${countryCode} ${firstPart}******${lastPart}`;
+};
+
+// Mask email - hide center 6 characters of local part
+const maskEmail = (email: string): string => {
+  if (!email || !email.includes('@')) return email;
+
+  const [localPart, domain] = email.split('@');
+  if (localPart.length <= 4) {
+    return `${localPart[0]}******@${domain}`;
+  }
+
+  // Show first 2 and last 2 characters, mask center with 6 asterisks
+  // Example: rameshsurya107 -> ra******07
+  const firstPart = localPart.slice(0, 2);
+  const lastPart = localPart.slice(-2);
+
+  return `${firstPart}******${lastPart}@${domain}`;
+};
+
 // Available roles - matching README requirements
 const availableRoles = [
   { value: 'admin', label: 'Admin', icon: Shield },
@@ -84,6 +131,9 @@ const LoginPage: React.FC = () => {
   // Site Engineer SMS login states
   const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('email');
   const [userPhone, setUserPhone] = useState('');
+  const [selectedCountryCode, setSelectedCountryCode] = useState(countryCodes[0]); // Default UAE
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const [phoneError, setPhoneError] = useState('');
   const isSiteEngineer = userRole === 'siteEngineer';
   
   // Timer for resend OTP
@@ -116,6 +166,13 @@ const LoginPage: React.FC = () => {
           });
           return;
         }
+        // Validate phone length based on country code
+        if (userPhone.length !== selectedCountryCode.minLength) {
+          showError('Invalid phone number', {
+            description: `${selectedCountryCode.country} phone numbers must be ${selectedCountryCode.minLength} digits`
+          });
+          return;
+        }
       } else {
         if (!data.email || !data.role) {
           showError('Please fill all fields', {
@@ -143,7 +200,9 @@ const LoginPage: React.FC = () => {
 
       // Use SMS API for site engineer with phone login
       if (data.role === 'siteEngineer' && loginMethod === 'phone') {
-        const response = await authApi.sendSiteSupervisorOTP('phone', userPhone);
+        // Combine country code with phone number (remove + for API)
+        const fullPhone = selectedCountryCode.code.replace('+', '') + userPhone;
+        const response = await authApi.sendSiteSupervisorOTP('phone', fullPhone);
 
         setStep('otp');
         setResendTimer(30);
@@ -239,7 +298,8 @@ const LoginPage: React.FC = () => {
       // Use Site Supervisor verify API for site engineers
       if (userRole === 'siteEngineer') {
         if (loginMethod === 'phone') {
-          response = await authApi.verifySiteSupervisorOTP('phone', userPhone, otpToVerify);
+          const fullPhone = selectedCountryCode.code.replace('+', '') + userPhone;
+          response = await authApi.verifySiteSupervisorOTP('phone', fullPhone, otpToVerify);
         } else {
           response = await authApi.verifySiteSupervisorOTP('email', userEmail, otpToVerify);
         }
@@ -293,7 +353,8 @@ const LoginPage: React.FC = () => {
         // Use Site Supervisor API for site engineers
         if (userRole === 'siteEngineer') {
           if (loginMethod === 'phone') {
-            response = await authApi.sendSiteSupervisorOTP('phone', userPhone);
+            const fullPhone = selectedCountryCode.code.replace('+', '') + userPhone;
+            response = await authApi.sendSiteSupervisorOTP('phone', fullPhone);
           } else {
             response = await authApi.sendSiteSupervisorOTP('email', userEmail);
           }
@@ -776,21 +837,84 @@ const LoginPage: React.FC = () => {
                         <Phone className="w-4 h-4 text-gray-400" />
                         Phone Number
                       </label>
-                      <motion.div
-                        className="relative"
-                        whileFocus={{ scale: 1.01 }}
-                      >
-                        <input
-                          type="tel"
-                          value={userPhone}
-                          onChange={(e) => setUserPhone(e.target.value)}
-                          className="w-full px-4 py-2.5 bg-gray-50/50 border border-gray-200 rounded-xl focus:bg-white focus:border-transparent focus:ring-2 focus:ring-[#243d8a] focus:ring-offset-2 transition-all duration-200 text-gray-700 placeholder-gray-400"
-                          placeholder="Enter phone number with country code (e.g., 971501234567)"
-                        />
-                      </motion.div>
-                      <p className="text-xs text-gray-500 ml-1">
-                        Enter phone number with country code (without + sign)
-                      </p>
+                      <div className="flex gap-2">
+                        {/* Country Code Dropdown */}
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setShowCountryDropdown(!showCountryDropdown)}
+                            className="flex items-center gap-1.5 px-3 py-2.5 bg-gray-50/50 border border-gray-200 rounded-xl focus:bg-white focus:border-[#243d8a] focus:ring-2 focus:ring-[#243d8a]/20 transition-all duration-200 text-gray-700 min-w-[100px]"
+                          >
+                            <span className="text-lg">{selectedCountryCode.flag}</span>
+                            <span className="text-sm font-medium">{selectedCountryCode.code}</span>
+                            <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showCountryDropdown ? 'rotate-180' : ''}`} />
+                          </button>
+
+                          <AnimatePresence>
+                            {showCountryDropdown && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                className="absolute z-50 w-48 mt-2 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden"
+                              >
+                                <div className="max-h-48 overflow-y-auto">
+                                  {countryCodes.map((country) => (
+                                    <button
+                                      key={country.code}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedCountryCode(country);
+                                        setShowCountryDropdown(false);
+                                        setPhoneError('');
+                                      }}
+                                      className="w-full px-3 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition-colors"
+                                    >
+                                      <span className="text-lg">{country.flag}</span>
+                                      <span className="text-sm text-gray-700">{country.country}</span>
+                                      <span className="text-sm text-gray-500 ml-auto">{country.code}</span>
+                                      {selectedCountryCode.code === country.code && (
+                                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+
+                        {/* Phone Number Input */}
+                        <motion.div
+                          className="relative flex-1"
+                          whileFocus={{ scale: 1.01 }}
+                        >
+                          <input
+                            type="tel"
+                            value={userPhone}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/\D/g, '');
+                              setUserPhone(value);
+                              // Validate phone length
+                              if (value.length > 0 && (value.length < selectedCountryCode.minLength || value.length > selectedCountryCode.maxLength)) {
+                                setPhoneError(`${selectedCountryCode.country} numbers must be ${selectedCountryCode.minLength} digits`);
+                              } else {
+                                setPhoneError('');
+                              }
+                            }}
+                            maxLength={selectedCountryCode.maxLength}
+                            className={`w-full px-4 py-2.5 bg-gray-50/50 border rounded-xl focus:bg-white focus:border-transparent focus:ring-2 focus:ring-[#243d8a] focus:ring-offset-2 transition-all duration-200 text-gray-700 placeholder-gray-400 ${phoneError ? 'border-red-300' : 'border-gray-200'}`}
+                            placeholder={`Enter ${selectedCountryCode.minLength} digit number`}
+                          />
+                        </motion.div>
+                      </div>
+                      {phoneError ? (
+                        <p className="text-xs text-red-500 ml-1">{phoneError}</p>
+                      ) : (
+                        <p className="text-xs text-gray-500 ml-1">
+                          Enter {selectedCountryCode.minLength} digit phone number for {selectedCountryCode.country}
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -859,8 +983,14 @@ const LoginPage: React.FC = () => {
                       )}
                     </div>
                     <h3 className="font-semibold text-gray-900">Enter OTP</h3>
-                    <p className="text-sm text-gray-500 mt-1">
-                      We've sent a code to {loginMethod === 'phone' ? userPhone : userEmail}
+                    <p className="text-xs text-gray-500 mt-1">
+                      We've sent a code to
+                    </p>
+                    <p className="text-xs font-medium text-[#243d8a] mt-0.5">
+                      {loginMethod === 'phone'
+                        ? maskPhoneNumber(userPhone, selectedCountryCode.code)
+                        : maskEmail(userEmail)
+                      }
                     </p>
                   </div>
 

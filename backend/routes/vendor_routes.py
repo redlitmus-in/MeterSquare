@@ -24,15 +24,10 @@ def check_vendor_access():
     original_role = current_user.get('role', '')
     user_role = original_role.lower().replace('_', '').replace(' ', '')
 
-    # DEBUG: Print actual role values
-    print(f"🔍 DEBUG - Original role: '{original_role}' | Normalized: '{user_role}' | Role ID: {current_user.get('role_id')}")
-
     allowed_roles = ['buyer', 'technicaldirector', 'admin']
     if user_role not in allowed_roles:
-        print(f"❌ Access denied. Role '{user_role}' not in {allowed_roles}")
         return jsonify({"error": "Access denied. Buyer, TD, or Admin role required."}), 403
 
-    print(f"✅ Access granted for role '{user_role}'")
     return None
 
 

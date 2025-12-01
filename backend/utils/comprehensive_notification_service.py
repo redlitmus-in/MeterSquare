@@ -506,7 +506,7 @@ class ComprehensiveNotificationService:
     # ==================== CHANGE REQUEST WORKFLOW NOTIFICATIONS ====================
 
     @staticmethod
-    def notify_cr_created(cr_id, project_name, creator_id, creator_name, creator_role, recipient_user_ids, recipient_role):
+    def notify_cr_created(cr_id, project_name, creator_id, creator_name, creator_role, recipient_user_ids, recipient_role, request_type=None):
         """
         Notify PM/TD when change request is created
         Trigger: SE/PM creates CR
@@ -514,7 +514,7 @@ class ComprehensiveNotificationService:
         Priority: URGENT
         """
         try:
-            log.info(f"[notify_cr_created] CR {cr_id} - Sending to {len(recipient_user_ids)} recipients: {recipient_user_ids}, role: {recipient_role}")
+            log.info(f"[notify_cr_created] CR {cr_id} - Sending to {len(recipient_user_ids)} recipients: {recipient_user_ids}, role: {recipient_role}, request_type: {request_type}")
 
             for user_id in recipient_user_ids:
                 # Check for duplicate notification
@@ -522,7 +522,10 @@ class ComprehensiveNotificationService:
                     log.info(f"[notify_cr_created] Skipping duplicate CR created notification for CR {cr_id} to user {user_id}")
                     continue
 
-                action_url = f'/{recipient_role.lower().replace(" ", "-")}/change-requests?cr_id={cr_id}'
+                # Determine correct route based on request_type
+                # EXTRA_MATERIALS goes to /extra-material, others go to /change-requests
+                route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
+                action_url = f'/{recipient_role.lower().replace(" ", "-")}/{route}?cr_id={cr_id}'
                 log.info(f"[notify_cr_created] Creating notification for user {user_id}, action_url: {action_url}")
 
                 notification = NotificationManager.create_notification(
@@ -535,7 +538,7 @@ class ComprehensiveNotificationService:
                     action_required=True,
                     action_url=action_url,
                     action_label='Review Request',
-                    metadata={'cr_id': cr_id, 'action_url': action_url},
+                    metadata={'cr_id': cr_id, 'action_url': action_url, 'request_type': request_type},
                     sender_id=creator_id,
                     sender_name=creator_name
                 )
@@ -551,7 +554,7 @@ class ComprehensiveNotificationService:
             log.error(f"[notify_cr_created] Traceback: {traceback.format_exc()}")
 
     @staticmethod
-    def notify_cr_approved(cr_id, project_name, approver_id, approver_name, approver_role, next_user_ids, next_role):
+    def notify_cr_approved(cr_id, project_name, approver_id, approver_name, approver_role, next_user_ids, next_role, request_type=None):
         """
         Notify next approver when CR is approved
         Trigger: PM/TD/Estimator approves CR
@@ -559,6 +562,9 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Determine correct route based on request_type
+            route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
+
             for user_id in next_user_ids:
                 # Check for duplicate notification
                 if check_duplicate_notification(user_id, 'Request Approved', 'cr_id', cr_id, minutes=5):
@@ -573,9 +579,9 @@ class ComprehensiveNotificationService:
                     priority='high',
                     category='change_request',
                     action_required=True,
-                    action_url=f'/{next_role.lower().replace(" ", "-")}/change-requests?cr_id={cr_id}',
+                    action_url=f'/{next_role.lower().replace(" ", "-")}/{route}?cr_id={cr_id}',
                     action_label='Review Request',
-                    metadata={'cr_id': cr_id},
+                    metadata={'cr_id': cr_id, 'request_type': request_type},
                     sender_id=approver_id,
                     sender_name=approver_name
                 )
@@ -587,7 +593,7 @@ class ComprehensiveNotificationService:
             log.error(f"Error sending CR approved notification: {e}")
 
     @staticmethod
-    def notify_cr_rejected(cr_id, project_name, rejector_id, rejector_name, rejector_role, creator_user_id, rejection_reason):
+    def notify_cr_rejected(cr_id, project_name, rejector_id, rejector_name, rejector_role, creator_user_id, rejection_reason, request_type=None, creator_role=None):
         """
         Notify creator when CR is rejected
         Trigger: Any approver rejects CR
@@ -600,6 +606,11 @@ class ComprehensiveNotificationService:
                 log.info(f"Skipping duplicate CR rejected notification for CR {cr_id}")
                 return
 
+            # Determine correct route based on request_type
+            route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
+            # Default to site-engineer if creator_role not provided
+            role_path = (creator_role or 'site-engineer').lower().replace(' ', '-').replace('_', '-')
+
             notification = NotificationManager.create_notification(
                 user_id=creator_user_id,
                 type='rejection',
@@ -608,9 +619,9 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='change_request',
                 action_required=True,
-                action_url=f'/site-engineer/change-requests?cr_id={cr_id}',
+                action_url=f'/{role_path}/{route}?cr_id={cr_id}',
                 action_label='View Details',
-                metadata={'cr_id': cr_id, 'reason': rejection_reason},
+                metadata={'cr_id': cr_id, 'reason': rejection_reason, 'request_type': request_type},
                 sender_id=rejector_id,
                 sender_name=rejector_name
             )
@@ -621,7 +632,7 @@ class ComprehensiveNotificationService:
             log.error(f"Error sending CR rejected notification: {e}")
 
     @staticmethod
-    def notify_vendor_selected_for_cr(cr_id, project_name, buyer_id, buyer_name, td_user_id, vendor_name):
+    def notify_vendor_selected_for_cr(cr_id, project_name, buyer_id, buyer_name, td_user_id, vendor_name, request_type=None):
         """
         Notify TD when buyer selects vendor for CR
         Trigger: Buyer selects vendor
@@ -644,7 +655,7 @@ class ComprehensiveNotificationService:
                 action_required=True,
                 action_url=f'/technical-director/vendor-approval?cr_id={cr_id}',
                 action_label='Review Vendor',
-                metadata={'cr_id': cr_id, 'vendor_name': vendor_name},
+                metadata={'cr_id': cr_id, 'vendor_name': vendor_name, 'request_type': request_type},
                 sender_id=buyer_id,
                 sender_name=buyer_name
             )
@@ -655,7 +666,7 @@ class ComprehensiveNotificationService:
             log.error(f"Error sending vendor selection notification: {e}")
 
     @staticmethod
-    def notify_cr_purchase_completed(cr_id, project_name, buyer_id, buyer_name, requester_user_id):
+    def notify_cr_purchase_completed(cr_id, project_name, buyer_id, buyer_name, requester_user_id, request_type=None, requester_role=None):
         """
         Notify requester when CR purchase is completed
         Trigger: Buyer completes purchase
@@ -668,6 +679,11 @@ class ComprehensiveNotificationService:
                 log.info(f"Skipping duplicate CR purchase completed notification for CR {cr_id}")
                 return
 
+            # Determine correct route based on request_type
+            route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
+            # Default to site-engineer if requester_role not provided
+            role_path = (requester_role or 'site-engineer').lower().replace(' ', '-').replace('_', '-')
+
             notification = NotificationManager.create_notification(
                 user_id=requester_user_id,
                 type='success',
@@ -675,9 +691,9 @@ class ComprehensiveNotificationService:
                 message=f'{buyer_name} completed the purchase for your materials request in {project_name}',
                 priority='medium',
                 category='change_request',
-                action_url=f'/site-engineer/change-requests?cr_id={cr_id}',
+                action_url=f'/{role_path}/{route}?cr_id={cr_id}',
                 action_label='View Details',
-                metadata={'cr_id': cr_id},
+                metadata={'cr_id': cr_id, 'request_type': request_type},
                 sender_id=buyer_id,
                 sender_name=buyer_name
             )

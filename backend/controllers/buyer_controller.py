@@ -5087,18 +5087,12 @@ def send_vendor_whatsapp(cr_id):
         buyer_id = current_user['user_id']
 
         data = request.get_json()
-        print(f"\n{'='*50}")
-        print(f"WHATSAPP REQUEST DATA: {data}")
-        print(f"{'='*50}\n")
+        log.debug(f"WhatsApp request received for CR")
 
         vendor_phone = data.get('vendor_phone')
         include_lpo_pdf = data.get('include_lpo_pdf', True)  # Default to include PDF
         lpo_data = data.get('lpo_data')  # LPO customization data from frontend
         po_child_id = data.get('po_child_id')  # Optional: for POChild records
-
-        print(f"vendor_phone: {vendor_phone}")
-        print(f"include_lpo_pdf: {include_lpo_pdf}")
-        print(f"lpo_data provided: {lpo_data is not None}")
         print(f"po_child_id: {po_child_id}")
         print(f"po_child_id TYPE: {type(po_child_id)}")
 
@@ -5231,12 +5225,8 @@ def send_vendor_whatsapp(cr_id):
 
         # Generate LPO PDF if requested
         pdf_url = None
-        print(f"\n{'='*50}")
-        print(f"PDF GENERATION - include_lpo_pdf: {include_lpo_pdf}")
-        print(f"{'='*50}\n")
 
         if include_lpo_pdf:
-            print(">>> ENTERING PDF GENERATION BLOCK <<<")
             try:
                 from utils.lpo_pdf_generator import LPOPDFGenerator
                 from models.system_settings import SystemSettings
@@ -5377,7 +5367,7 @@ def send_vendor_whatsapp(cr_id):
 
                 generator = LPOPDFGenerator()
                 pdf_bytes = generator.generate_lpo_pdf(lpo_data)
-                print(f"Step 3: LPO PDF generated successfully, size: {len(pdf_bytes)} bytes")
+                log.debug(f"LPO PDF generated successfully, size: {len(pdf_bytes)} bytes")
 
                 # Upload PDF to Supabase and get public URL
                 # Use timestamp to make filename unique
@@ -5390,7 +5380,6 @@ def send_vendor_whatsapp(cr_id):
                 pdf_path = f"whatsapp/lpo/{pdf_filename}"
                 print(f">>> PDF FILENAME: {pdf_filename}")
                 print(f">>> po_id_for_filename: {po_id_for_filename}")
-                print(f"Step 4: Uploading to Supabase path: {pdf_path}")
 
                 # Upload the file with proper content-disposition for filename
                 upload_result = supabase.storage.from_(SUPABASE_BUCKET).upload(
@@ -5402,21 +5391,16 @@ def send_vendor_whatsapp(cr_id):
                         "x-upsert": "true"  # Allow overwrite if exists
                     }
                 )
-                print(f"Step 5: Supabase upload result: {upload_result}")
 
                 # Get public URL
                 pdf_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(pdf_path)
-                print(f"Step 6: PDF URL generated: {pdf_url}")
+                log.debug(f"PDF uploaded and URL generated")
 
             except Exception as e:
-                print(f"ERROR in PDF generation/upload: {str(e)}")
+                log.error(f"Error in PDF generation/upload: {str(e)}")
                 import traceback
-                print(f"Traceback: {traceback.format_exc()}")
+                log.error(f"Traceback: {traceback.format_exc()}")
                 # Continue without PDF
-
-        print(f"\n{'='*50}")
-        print(f"FINAL PDF URL: {pdf_url}")
-        print(f"{'='*50}\n")
 
         # Send WhatsApp message
         log.info(f"=== SENDING WHATSAPP MESSAGE ===")

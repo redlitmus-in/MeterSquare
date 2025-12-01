@@ -10,7 +10,10 @@ from datetime import datetime
 from sqlalchemy import and_, or_
 from models.notification import Notification
 from config.db import db
+from config.logging import get_logger
 import os
+
+log = get_logger()
 
 notification_bp = Blueprint('notifications', __name__)
 
@@ -121,7 +124,7 @@ def get_notifications(current_user_id, current_user_role):
     except ValueError as e:
         return jsonify({'error': f'Invalid parameter: {str(e)}'}), 400
     except Exception as e:
-        print(f"Error fetching notifications: {e}")
+        log.error(f"Error fetching notifications: {e}")
         return jsonify({'error': 'Failed to fetch notifications'}), 500
 
 
@@ -150,7 +153,7 @@ def get_notification(current_user_id, current_user_role, notification_id):
         }), 200
 
     except Exception as e:
-        print(f"Error fetching notification: {e}")
+        log.error(f"Error fetching notification: {e}")
         return jsonify({'error': 'Failed to fetch notification'}), 500
 
 
@@ -193,7 +196,7 @@ def mark_as_read(current_user_id, current_user_role):
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error marking notifications as read: {e}")
+        log.error(f"Error marking notifications as read: {e}")
         return jsonify({'error': 'Failed to mark notifications as read'}), 500
 
 
@@ -227,7 +230,7 @@ def mark_all_as_read(current_user_id, current_user_role):
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error marking all notifications as read: {e}")
+        log.error(f"Error marking all notifications as read: {e}")
         return jsonify({'error': 'Failed to mark all notifications as read'}), 500
 
 
@@ -260,7 +263,7 @@ def delete_notification(current_user_id, current_user_role, notification_id):
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error deleting notification: {e}")
+        log.error(f"Error deleting notification: {e}")
         return jsonify({'error': 'Failed to delete notification'}), 500
 
 
@@ -292,7 +295,7 @@ def delete_all_notifications(current_user_id, current_user_role):
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error deleting all notifications: {e}")
+        log.error(f"Error deleting all notifications: {e}")
         return jsonify({'error': 'Failed to delete all notifications'}), 500
 
 
@@ -319,7 +322,7 @@ def subscribe_to_push(current_user_id, current_user_role):
         }), 200
 
     except Exception as e:
-        print(f"Error subscribing to push notifications: {e}")
+        log.error(f"Error subscribing to push notifications: {e}")
         return jsonify({'error': 'Failed to subscribe to push notifications'}), 500
 
 
@@ -340,7 +343,7 @@ def unsubscribe_from_push(current_user_id, current_user_role):
         }), 200
 
     except Exception as e:
-        print(f"Error unsubscribing from push notifications: {e}")
+        log.error(f"Error unsubscribing from push notifications: {e}")
         return jsonify({'error': 'Failed to unsubscribe from push notifications'}), 500
 
 
@@ -366,7 +369,7 @@ def get_notification_count(current_user_id, current_user_role):
         }), 200
 
     except Exception as e:
-        print(f"Error fetching notification count: {e}")
+        log.error(f"Error fetching notification count: {e}")
         return jsonify({'error': 'Failed to fetch notification count'}), 500
 
 
@@ -415,7 +418,7 @@ def get_socketio_status(current_user_id, current_user_role):
         }), 200
 
     except Exception as e:
-        print(f"Error fetching Socket.IO status: {e}")
+        log.error(f"Error fetching Socket.IO status: {e}")
         return jsonify({'error': str(e)}), 500
 
 

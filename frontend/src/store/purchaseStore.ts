@@ -202,11 +202,8 @@ const usePurchaseStore = create<PurchaseStore>()(
             purchaseData = response.data.procurement;
           } else if (endpoint === '/mep_purchases') {
             // For MEP supervisor endpoint - the response has data array directly in response.data.data
-            console.log('[PurchaseStore] MEP endpoint response structure:', Object.keys(response.data));
-
             if (response.data.data && Array.isArray(response.data.data)) {
               purchaseData = response.data.data;
-              console.log('[PurchaseStore] Found MEP purchases:', purchaseData.length, 'items');
             } else if (response.data.purchase_requests) {
               purchaseData = response.data.purchase_requests;
             } else if (response.data.purchases) {
@@ -217,7 +214,6 @@ const usePurchaseStore = create<PurchaseStore>()(
               for (const key of keys) {
                 if (Array.isArray(response.data[key]) && key !== 'pagination' && key !== 'filters') {
                   purchaseData = response.data[key];
-                  console.log('[PurchaseStore] Found MEP data in key:', key);
                   break;
                 }
               }
@@ -416,8 +412,6 @@ const usePurchaseStore = create<PurchaseStore>()(
                     nextRole = 'Project Manager';
                   }
 
-                  console.log(`PR ${purchase.purchase_id} resubmitted - notifying ${nextRole}`);
-
                   // Send reapproval notification
                   await sendPRNotification('reapproved', {
                     documentId: `PR-${purchase.purchase_id}`,
@@ -431,8 +425,6 @@ const usePurchaseStore = create<PurchaseStore>()(
                 // This indicates a resubmission after editing
                 if (currentPurchase.email_sent === true && purchase.email_sent === false &&
                     purchase.status === 'pending' && currentPurchase.status === 'rejected') {
-                  console.log(`PR ${purchase.purchase_id} edited and ready for resubmission`);
-
                   // Determine who should be notified based on workflow
                   let nextRole = 'Project Manager'; // Default to PM for first approval
 
@@ -467,7 +459,6 @@ const usePurchaseStore = create<PurchaseStore>()(
           }
         }
       } catch (error: any) {
-        console.error('Error fetching purchases:', error);
         // Don't show error toast for background polling failures
         if (!get().lastFetchTime) {
           set({ error: error.message || 'Failed to fetch purchases' });

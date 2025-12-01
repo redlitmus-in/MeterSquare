@@ -10,6 +10,7 @@ import PyPDF2
 import json
 import re
 from config.db import db
+from config.logging import get_logger
 from models.boq import BOQ, BOQDetails, MasterItem, MasterMaterial, MasterLabour
 from models.project import Project
 from utils.pdf_extractor import PDFExtractor, extract_boq_from_pdf
@@ -17,6 +18,7 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 
 load_dotenv()
+log = get_logger()
 
 estimator_boq_bp = Blueprint('estimator_boq', __name__)
 
@@ -60,7 +62,7 @@ def extract_text_from_pdf(file_path):
             # Fallback to basic extraction
             return extract_text_from_pdf_fallback(file_path)
     except Exception as e:
-        print(f"Enhanced PDF extraction failed: {e}")
+        log.error(f"Enhanced PDF extraction failed: {e}")
         return extract_text_from_pdf_fallback(file_path)
 
 def extract_text_from_pdf_fallback(file_path):
@@ -118,7 +120,7 @@ def extract_text_from_pdf_fallback(file_path):
                             'data': cleaned_table
                         })
     except Exception as e:
-        print(f"pdfplumber extraction failed: {e}")
+        log.error(f"pdfplumber extraction failed: {e}")
         # Fallback: PyPDF2
         try:
             with open(file_path, 'rb') as file:
@@ -128,7 +130,7 @@ def extract_text_from_pdf_fallback(file_path):
                     if page_text:
                         text += f"\n--- Page {i+1} ---\n{page_text}"
         except Exception as e2:
-            print(f"PyPDF2 extraction failed: {e2}")
+            log.error(f"PyPDF2 extraction failed: {e2}")
 
     return text, tables, boq_data
 
@@ -150,7 +152,7 @@ def extract_text_from_excel(file_path):
             sheet_names = wb.sheetnames
             wb.close()
         except Exception as e:
-            print(f"Error loading workbook: {e}")
+            log.error(f"Error loading workbook: {e}")
             # Fallback: try reading with pandas directly
             sheet_names = [0]  # Read first sheet by index
 
@@ -218,7 +220,7 @@ def extract_text_from_excel(file_path):
                 'data': table_data  # This matches the format expected by process_boq_table
             })
     except Exception as e:
-        print(f"Excel extraction failed: {e}")
+        log.error(f"Excel extraction failed: {e}")
     return text, tables
 
 def extract_boq_data(text, tables, boq_data=None):
@@ -280,7 +282,7 @@ def extract_with_rules(text, tables):
             items = process_boq_table(table_data['data'])
             extracted['boq_items'].extend(items)
         else:
-            print(f"DEBUG: Table #{idx + 1} has no 'data' key, skipping")
+            log.debug(f"Table #{idx + 1} has no 'data' key, skipping")
 
     return extracted
 
@@ -483,11 +485,11 @@ def process_boq_table(table_data):
             if has_financial_data:
                 has_labour = 'labour' in item and item['labour']
                 if has_labour:
-                    print(f"       Labour details: {item['labour']}")
+                    log.debug(f"Labour details: {item['labour']}")
                 items.append(item)
                 item_counter += 1
             else:
-                print(f"DEBUG: Skipping item '{item.get('item_name')}' - no financial data (rate={item.get('rate', 0)}, amount={item.get('amount', 0)}, qty={item.get('qty', 0)})")
+                log.debug(f"Skipping item '{item.get('item_name')}' - no financial data")
 
     return items
 
@@ -634,7 +636,7 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
             if updated:
                 db.session.flush()
             else:
-                print(f"No changes for master material: {master_material.material_name}")
+                log.debug(f"No changes for master material: {master_material.material_name}")
 
         master_material_ids.append(master_material.material_id)
 
@@ -706,7 +708,7 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
             if updated:
                 db.session.flush()
             else:
-                print(f"No changes for master labour: {master_labour.labour_role}")
+                log.debug(f"No changes for master labour: {master_labour.labour_role}")
 
         master_labour_ids.append(master_labour.labour_id)
 
@@ -924,7 +926,7 @@ def process_extracted_items_to_boq(extracted_items, project_id, boq_name, create
 
     except Exception as e:
         # Don't rollback here, let the calling function handle it
-        print(f"Error in process_extracted_items_to_boq: {str(e)}")
+        log.error(f"Error in process_extracted_items_to_boq: {str(e)}")
         raise e
 
 # REMOVED: create_or_get_project() - BOQ now requires existing project_id
@@ -1035,7 +1037,7 @@ def upload_to_supabase(file_content, file_name, boq_id):
             supabase.storage.from_(bucket_name).list()
         except Exception as bucket_error:
             # Bucket might not exist, try to create it
-            print(f"Bucket '{bucket_name}' not found, attempting to create...")
+            log.warning(f"Bucket '{bucket_name}' not found, attempting to create...")
             try:
                 # Try using the anon key as service role key
                 supabase.storage.create_bucket(
@@ -1043,7 +1045,7 @@ def upload_to_supabase(file_content, file_name, boq_id):
                     {'public': True}
                 )
             except Exception as create_error:
-                print(f"Could not create bucket: {create_error}")
+                log.error(f"Could not create bucket: {create_error}")
         # Try to upload file
         try:
             response = supabase.storage.from_(bucket_name).upload(
@@ -1057,12 +1059,12 @@ def upload_to_supabase(file_content, file_name, boq_id):
             return public_url
 
         except Exception as upload_error:
-            print(f"Could not upload to Supabase: {upload_error}")
+            log.error(f"Could not upload to Supabase: {upload_error}")
             # Return None but continue processing
             return None
 
     except Exception as e:
-        print(f"Error with Supabase storage: {e}")
+        log.error(f"Error with Supabase storage: {e}")
         return None
 
 def upload_boq_file():
