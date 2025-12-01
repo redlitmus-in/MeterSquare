@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
@@ -55,9 +55,27 @@ interface Buyer {
 
 const ChangeRequestsPage: React.FC = () => {
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { user } = useAuthStore();
   const isExtraMaterial = location.pathname.includes('extra-material');
-  const [activeTab, setActiveTab] = useState(isExtraMaterial ? 'requested' : 'pending');
+
+  // Get tab and cr_id from URL query parameters (for notification redirects)
+  const urlTab = searchParams.get('tab');
+  const urlCrId = searchParams.get('cr_id');
+
+  const [activeTab, setActiveTab] = useState(() => {
+    // Priority: URL tab param > default based on route
+    if (urlTab) {
+      // Map URL tab values to valid tab values for this page
+      // For Extra Material: requested, pending, accepted, completed, rejected
+      // For Change Requests: pending, approved, completed, rejected
+      const validTabs = ['pending', 'approved', 'completed', 'rejected', 'requested', 'accepted'];
+      if (validTabs.includes(urlTab)) {
+        return urlTab;
+      }
+    }
+    return isExtraMaterial ? 'requested' : 'pending';
+  });
   const [pendingSubTab, setPendingSubTab] = useState<'drafts' | 'sent_to_estimator' | 'sent_to_buyer'>('drafts'); // Sub-tab for Pending
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
@@ -105,6 +123,18 @@ const ChangeRequestsPage: React.FC = () => {
     }
     return allRequests.filter(req => req.request_type !== 'EXTRA_MATERIALS');
   }, [changeRequestsData, isExtraMaterial]);
+
+  // Auto-open change request details when cr_id is in URL (from notification redirect)
+  useEffect(() => {
+    if (urlCrId && changeRequests.length > 0 && !showDetailsModal) {
+      const crIdNum = parseInt(urlCrId, 10);
+      const targetCr = changeRequests.find((cr: ChangeRequestItem) => cr.cr_id === crIdNum);
+      if (targetCr) {
+        setSelectedChangeRequest(targetCr);
+        setShowDetailsModal(true);
+      }
+    }
+  }, [urlCrId, changeRequests, showDetailsModal]);
 
   const initialLoad = isLoading;
 

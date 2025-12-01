@@ -36,7 +36,7 @@ export const getNotificationRedirectPath = (
         tab: workflow.redirectTab,
         ...(metadata?.boq_id && { boq_id: metadata.boq_id }),
         ...(metadata?.documentId && { boq_id: metadata.documentId }),
-        ...(metadata?.cr_id && { cr_id: metadata.cr_id }),
+        ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }),
         ...(metadata?.vendor_id && { vendor_id: metadata.vendor_id }),
         ...(metadata?.po_id && { po_id: metadata.po_id }),
         ...(metadata?.material_id && { material_id: metadata.material_id }),
@@ -49,8 +49,50 @@ export const getNotificationRedirectPath = (
     };
   }
 
-  // Handle BOQ-related notifications
-  if (category === 'approval' || titleLower.includes('boq') || messageLower.includes('boq')) {
+  // PRIORITY: Handle Materials Purchase (Change Request) notifications FIRST
+  // These have category='change_request' or title contains 'materials purchase'
+  // Must check BEFORE BOQ handling since they may have category='approval'
+  if (titleLower.includes('materials purchase') || messageLower.includes('materials purchase') ||
+      titleLower.includes('change request') || messageLower.includes('change request') ||
+      category === 'change_request' || metadata?.cr_id) {
+
+    console.log('[NotificationRedirect] Matched Materials Purchase/Change Request');
+
+    // Materials Purchase Approved - goes to Accepted tab on extra-material
+    if (titleLower.includes('approved') || messageLower.includes('approved')) {
+      return {
+        path: buildPath('/extra-material'),
+        queryParams: {
+          tab: 'accepted',
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+        },
+      };
+    }
+
+    // Materials Purchase Rejected - goes to Rejected tab on extra-material
+    if (titleLower.includes('rejected') || messageLower.includes('rejected')) {
+      return {
+        path: buildPath('/extra-material'),
+        queryParams: {
+          tab: 'rejected',
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+        },
+      };
+    }
+
+    // New Materials Purchase Request - goes to Requested tab on extra-material (for PM to review)
+    return {
+      path: buildPath('/extra-material'),
+      queryParams: {
+        tab: 'requested',
+        ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+      },
+    };
+  }
+
+  // Handle BOQ-related notifications (only if NOT materials purchase)
+  if (titleLower.includes('boq') || messageLower.includes('boq') ||
+      (category === 'approval' && (metadata?.boq_id || metadata?.documentId))) {
 
     // TD Approved BOQ - redirect to approved tab
     if (titleLower.includes('approved') || messageLower.includes('approved by td') ||
@@ -146,36 +188,6 @@ export const getNotificationRedirectPath = (
           boq_id: metadata?.boq_id || metadata?.documentId,
           tab: isTD ? 'pending' : undefined
         }
-      };
-    }
-  }
-
-  // Handle Materials Purchase (Change Request) notifications
-  if (titleLower.includes('change request') || messageLower.includes('change request') ||
-      titleLower.includes('materials purchase') || messageLower.includes('materials purchase') ||
-      category === 'change_request') {
-
-    // Materials Purchase Approved
-    if (titleLower.includes('approved') || messageLower.includes('approved')) {
-      return {
-        path: buildPath('/change-requests'),
-        queryParams: { tab: 'approved', cr_id: metadata?.cr_id },
-      };
-    }
-
-    // Materials Purchase Rejected
-    if (titleLower.includes('rejected')) {
-      return {
-        path: buildPath('/change-requests'),
-        queryParams: { tab: 'rejected', cr_id: metadata?.cr_id },
-      };
-    }
-
-    // New Materials Purchase Created
-    if (titleLower.includes('new') || titleLower.includes('created')) {
-      return {
-        path: buildPath('/change-requests'),
-        queryParams: { tab: 'pending', cr_id: metadata?.cr_id },
       };
     }
   }

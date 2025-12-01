@@ -275,14 +275,61 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     // Get user role for building proper paths
     const userRole = user?.role_id || user?.role || '';
 
-    // PRIORITY 1: Use actionUrl from backend if available (most accurate)
-    const backendActionUrl = notification.actionUrl || notification.metadata?.actionUrl;
-    if (backendActionUrl) {
+    console.log('[NotificationSystem] Handling notification:', {
+      title: notification.title,
+      category: notification.category,
+      metadata: notification.metadata,
+      actionUrl: notification.actionUrl,
+      userRole
+    });
+
+    // PRIORITY 1: Use smart redirect based on notification content (most reliable)
+    // This ensures correct routing based on what the notification is about
+    const redirectConfig = getNotificationRedirectPath(notification, userRole);
+
+    if (redirectConfig) {
+      const redirectUrl = buildNotificationUrl(redirectConfig);
+      console.log('[NotificationSystem] Smart redirect URL:', redirectUrl);
+
       try {
-        // Build role-prefixed path from backend action URL
-        const fullPath = backendActionUrl.startsWith('/') && !backendActionUrl.includes('/technical-director/') && !backendActionUrl.includes('/estimator/') && !backendActionUrl.includes('/project-manager/')
+        if (onNavigate) {
+          onNavigate(redirectUrl);
+        } else {
+          navigate(redirectUrl, {
+            replace: false,
+            state: {
+              from: location.pathname,
+              notification: notification.id,
+              autoFocus: true
+            }
+          });
+        }
+        setShowPanel(false);
+        markAsRead(notification.id);
+        return;
+      } catch (error) {
+        console.error('[NotificationSystem] Navigation error:', error);
+      }
+    }
+
+    // PRIORITY 2: Use backend actionUrl if smart redirect didn't work
+    const backendActionUrl = notification.actionUrl || notification.metadata?.actionUrl || notification.metadata?.action_url;
+    if (backendActionUrl && typeof backendActionUrl === 'string') {
+      try {
+        const knownRolePrefixes = [
+          '/technical-director', '/estimator', '/project-manager',
+          '/site-engineer', '/buyer', '/admin', '/production-manager',
+          '/site-supervisor', '/mep-supervisor', '/mep', '/accounts'
+        ];
+        const hasRolePrefix = knownRolePrefixes.some(prefix =>
+          backendActionUrl.startsWith(prefix + '/') || backendActionUrl.startsWith(prefix + '?')
+        );
+
+        const fullPath = backendActionUrl.startsWith('/') && !hasRolePrefix
           ? buildRolePath(userRole, backendActionUrl)
           : backendActionUrl;
+
+        console.log('[NotificationSystem] Backend action URL fallback:', fullPath);
 
         if (onNavigate) {
           onNavigate(fullPath);
@@ -300,83 +347,43 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
         markAsRead(notification.id);
         return;
       } catch (error) {
-        // Fall through to smart redirect
+        console.error('[NotificationSystem] Backend URL navigation error:', error);
       }
     }
 
-    // PRIORITY 2: Get smart redirect path based on notification content
-    const redirectConfig = getNotificationRedirectPath(notification, userRole);
-
-    if (redirectConfig) {
-      const redirectUrl = buildNotificationUrl(redirectConfig);
-
+    // PRIORITY 3: Fallback to metadata.link
+    if (notification.metadata?.link) {
       try {
-        // Use custom navigation handler if provided
-        if (onNavigate) {
-          onNavigate(redirectUrl);
-        } else {
-          // Navigate to the specific page/tab
-          navigate(redirectUrl, {
-            replace: false,
-            state: {
-              from: location.pathname,
-              notification: notification.id,
-              autoFocus: true // Flag to auto-focus the related item
-            }
-          });
-        }
-
-        // Close the notification panel after navigation
-        setShowPanel(false);
-      } catch (error) {
-        console.error('Navigation error:', error);
-        // Fallback to direct navigation
-        window.location.href = redirectUrl;
-      }
-    } else if (notification.metadata?.link) {
-      // Fallback to metadata.link if no smart redirect found
-      try {
-        // Check if the link contains /boq/ and needs special handling
-        if (notification.metadata.link.includes('/boq/')) {
-          const boqId = notification.metadata.link.split('/boq/').pop()?.split('?')[0];
-
-          // Check if user is Technical Director for proper routing
+        const link = notification.metadata.link;
+        if (link.includes('/boq/')) {
+          const boqId = link.split('/boq/').pop()?.split('?')[0];
           const isTD = userRole && (
             userRole.toString().toLowerCase().includes('technical') ||
             userRole.toString().toLowerCase().includes('director') ||
-            userRole === '2' || // TD role_id
-            userRole === 2
+            userRole === '2' || userRole === 2
           );
-
-          // TD should go to project-approvals for pending BOQs
           const targetPath = isTD ? '/project-approvals' : '/projects';
           const fullPath = buildRolePath(userRole, targetPath);
-
           navigate(`${fullPath}?boq_id=${boqId}&tab=pending`, {
             replace: false,
             state: { from: location.pathname }
           });
-        } else if (notification.metadata.link.startsWith('/')) {
-          navigate(notification.metadata.link, {
-            replace: false,
-            state: { from: location.pathname }
-          });
-        } else if (notification.metadata.link.startsWith('http')) {
-          window.open(notification.metadata.link, '_blank', 'noopener,noreferrer');
+        } else if (link.startsWith('http')) {
+          window.open(link, '_blank', 'noopener,noreferrer');
         } else {
-          navigate(`/${notification.metadata.link}`, {
+          const fullPath = link.startsWith('/') ? link : `/${link}`;
+          navigate(fullPath, {
             replace: false,
             state: { from: location.pathname }
           });
         }
         setShowPanel(false);
       } catch (error) {
-        console.error('Navigation error:', error);
+        console.error('[NotificationSystem] Link navigation error:', error);
         window.location.href = notification.metadata.link;
       }
     }
 
-    // Mark notification as read
     markAsRead(notification.id);
   }, [markAsRead, navigate, location.pathname, onNavigate, user]);
 

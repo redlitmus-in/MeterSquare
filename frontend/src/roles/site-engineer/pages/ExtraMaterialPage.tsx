@@ -761,7 +761,7 @@ const ExtraMaterialPage: React.FC = () => {
                           >
                             <PaperAirplaneIcon className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                             <span className="hidden sm:inline">{sendingRequestId === request.id ? 'Sending...' : 'Send to PM'}</span>
-                            <span className="sm:hidden">{sendingRequestId === request.id ? '...' : 'Send'}</span>
+                            <span className="sm:hidden">{sendingRequestId === request.id ? '...' : 'Send to PM'}</span>
                           </button>
                           <button
                             onClick={() => handleDelete(request.id)}

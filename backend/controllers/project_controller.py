@@ -638,7 +638,7 @@ def get_assigned_projects():
                         # This is an item created by a change request
                         # For these items, consumed overhead should be 0 since the item itself represents the consumption
                         consumed_overhead = 0.0
-                        print(f"Item '{item.get('item_name', '')}' is from a CR, consumed=0")
+                        log.debug(f"Item '{item.get('item_name', '')}' is from a CR, consumed=0")
 
                     else:
                         # ✅ PERFORMANCE: Use pre-loaded change requests (already eager loaded)
@@ -649,13 +649,13 @@ def get_assigned_projects():
                             if cr.status == 'approved' and not cr.is_deleted
                         ] if hasattr(boq, 'change_requests') else []
 
-                        print(f"Item {item_id} ({item.get('item_name', '')}): Found {len(approved_crs)} approved CRs")
+                        log.debug(f"Item {item_id}: Found {len(approved_crs)} approved CRs")
 
                         for cr in approved_crs:
                             # Sum up materials cost from each approved change request
                             cr_cost = cr.materials_total_cost if cr.materials_total_cost else 0.0
                             consumed_overhead += cr_cost
-                            print(f"  CR#{cr.cr_id}: cost={cr_cost}, total={consumed_overhead}")
+                            log.debug(f"CR#{cr.cr_id}: cost={cr_cost}, total={consumed_overhead}")
                     # Calculate available overhead
                     available_overhead = item_overhead - consumed_overhead
 
@@ -672,7 +672,7 @@ def get_assigned_projects():
                     sub_items = item.get('sub_items', [])
                     if sub_items:
                         # Return sub-items as actual sub-items, each with their materials
-                        print(f"DEBUG: Item '{item.get('item_name', '')}' has {len(sub_items)} sub-items")
+                        log.debug(f"Item '{item.get('item_name', '')}' has {len(sub_items)} sub-items")
                         for sub_item_idx, sub_item in enumerate(sub_items):
                             # Generate sub-item ID
                             sub_item_id = f"subitem_{boq.boq_id}_{idx + 1}_{sub_item_idx + 1}"
@@ -701,12 +701,12 @@ def get_assigned_projects():
                                 "sub_item_name": sub_item.get('sub_item_name', ''),
                                 "materials": materials_list
                             }
-                            print(f"DEBUG: Adding sub-item '{sub_item.get('sub_item_name', '')}' with {len(materials_list)} materials")
+                            log.debug(f"Adding sub-item '{sub_item.get('sub_item_name', '')}' with {len(materials_list)} materials")
                             item_info["sub_items"].append(sub_item_info)
                     else:
                         # Fallback: for items without sub_items, treat materials as direct sub-items
                         materials = item.get('materials', [])
-                        print(f"DEBUG: Item '{item.get('item_name', '')}' has {len(materials)} materials (no sub-items)")
+                        log.debug(f"Item '{item.get('item_name', '')}' has {len(materials)} materials (no sub-items)")
                         for mat_idx, material in enumerate(materials):
                             # Use master_material_id if available, otherwise generate one
                             material_id = material.get('master_material_id', '')

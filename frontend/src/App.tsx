@@ -129,7 +129,6 @@ const RoleSpecificProcurementHub: React.FC = () => {
 
   const userRoleLower = userRole.toLowerCase();
 
-  console.log('User role from backend:', userRole, 'Lowercase:', userRoleLower, 'Viewing as:', viewingAsRole);
   // Check if user is Project Manager OR MEP Supervisor (both share same procurement hub)
   if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' || userRoleLower === 'projectmanager' ||
       userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor') {
@@ -540,7 +539,6 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
                  roleId === 5; // Database has admin as role_id: 5
 
   if (!isProjectManager && !isMEP && !isTechnicalDirector && !isAdmin) {
-    console.log('Access denied. User role:', userRole, 'role_id:', roleId);
     return <Navigate to="/403" replace />;
   }
 
@@ -692,7 +690,6 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                  roleId === 5; // Database has admin as role_id: 5
 
   if (!isAdmin) {
-    console.log('Admin access denied. User role:', userRole, 'role_id:', roleId);
     return <Navigate to="/403" replace />;
   }
 

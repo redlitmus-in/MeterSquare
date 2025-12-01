@@ -7,6 +7,9 @@ from config.db import db
 from sqlalchemy import text
 from utils.authentication import jwt_required
 from datetime import datetime
+from config.logging import get_logger
+
+log = get_logger()
 
 terms_bp = Blueprint('terms', __name__, url_prefix='/api')
 
@@ -58,7 +61,7 @@ def get_all_terms():
         }), 200
 
     except Exception as e:
-        print(f"Error fetching terms: {str(e)}")
+        log.error(f"Error fetching terms: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch terms: {str(e)}'}), 500
 
 
@@ -96,7 +99,7 @@ def get_default_terms():
         }), 200
 
     except Exception as e:
-        print(f"Error fetching default terms: {str(e)}")
+        log.error(f"Error fetching default terms: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch default terms: {str(e)}'}), 500
 
 
@@ -132,7 +135,7 @@ def get_term_by_id(term_id):
         }), 200
 
     except Exception as e:
-        print(f"Error fetching term: {str(e)}")
+        log.error(f"Error fetching term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch term: {str(e)}'}), 500
 
 
@@ -197,7 +200,7 @@ def create_term():
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error creating term: {str(e)}")
+        log.error(f"Error creating term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to create term: {str(e)}'}), 500
 
 
@@ -259,7 +262,7 @@ def update_term(term_id):
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error updating term: {str(e)}")
+        log.error(f"Error updating term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to update term: {str(e)}'}), 500
 
 
@@ -309,7 +312,7 @@ def delete_term(term_id):
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error deleting term: {str(e)}")
+        log.error(f"Error deleting term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to delete term: {str(e)}'}), 500
 
 
@@ -368,7 +371,7 @@ def get_boq_terms(boq_id):
         }), 200
 
     except Exception as e:
-        print(f"Error fetching BOQ terms: {str(e)}")
+        log.error(f"Error fetching BOQ terms: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch BOQ terms: {str(e)}'}), 500
 
 
@@ -440,7 +443,7 @@ def save_boq_terms(boq_id):
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error saving BOQ terms: {str(e)}")
+        log.error(f"Error saving BOQ terms: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to save terms selections: {str(e)}'}), 500
 
 
@@ -479,7 +482,7 @@ def get_boq_selected_terms(boq_id):
         }), 200
 
     except Exception as e:
-        print(f"Error fetching selected BOQ terms: {str(e)}")
+        log.error(f"Error fetching selected BOQ terms: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch selected terms: {str(e)}'}), 500
 
 
@@ -515,7 +518,7 @@ def get_all_terms_master():
         }), 200
 
     except Exception as e:
-        print(f"Error fetching terms master: {str(e)}")
+        log.error(f"Error fetching terms master: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch terms: {str(e)}'}), 500
 
 
@@ -572,7 +575,7 @@ def create_term_master():
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error creating term: {str(e)}")
+        log.error(f"Error creating term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to create term: {str(e)}'}), 500
 
 
@@ -626,7 +629,7 @@ def update_term_master(term_id):
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error updating term: {str(e)}")
+        log.error(f"Error updating term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to update term: {str(e)}'}), 500
 
 
@@ -671,5 +674,5 @@ def delete_term_master(term_id):
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error deleting term: {str(e)}")
+        log.error(f"Error deleting term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to delete term: {str(e)}'}), 500

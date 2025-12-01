@@ -84,7 +84,7 @@ export const useNotificationStore = create<NotificationStore>()(
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({ notification_ids: [id] })
-          }).catch(err => console.error('Failed to mark notification as read on backend:', err));
+          }).catch(() => { /* Silent fail */ });
         }
       },
 
@@ -111,7 +111,7 @@ export const useNotificationStore = create<NotificationStore>()(
               'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json'
             }
-          }).catch(err => console.error('Failed to mark all notifications as read on backend:', err));
+          }).catch(() => { /* Silent fail */ });
         }
       },
 
@@ -139,7 +139,7 @@ export const useNotificationStore = create<NotificationStore>()(
               'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json'
             }
-          }).catch(err => console.error('Failed to delete notification on backend:', err));
+          }).catch(() => { /* Silent fail */ });
         }
       },
 
@@ -164,7 +164,7 @@ export const useNotificationStore = create<NotificationStore>()(
               'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json'
             }
-          }).catch(err => console.error('Failed to delete all notifications on backend:', err));
+          }).catch(() => { /* Silent fail */ });
         }
       },
 

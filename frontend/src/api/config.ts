@@ -146,7 +146,9 @@ apiClient.interceptors.request.use(
     return config;
   },
   (error) => {
-    console.error('Request interceptor error:', error);
+    if (import.meta.env.DEV) {
+      console.error('Request interceptor error:', error);
+    }
     return Promise.reject(error);
   }
 );
@@ -164,16 +166,15 @@ apiClient.interceptors.response.use(
     return response;
   },
   async (error) => {
-    // Log error details to console for debugging
-    console.error('API Error:', {
-      message: error.response?.data?.message || error.response?.data?.error || error.message,
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      url: error.config?.url,
-      method: error.config?.method,
-      data: error.response?.data,
-      headers: error.response?.headers
-    });
+    // Log error details to console for debugging (only in development)
+    if (import.meta.env.DEV) {
+      console.error('API Error:', {
+        message: error.response?.data?.message || error.response?.data?.error || error.message,
+        status: error.response?.status,
+        url: error.config?.url,
+        method: error.config?.method,
+      });
+    }
 
     // Handle 401 Unauthorized - clear auth but don't redirect
     if (error.response?.status === 401) {

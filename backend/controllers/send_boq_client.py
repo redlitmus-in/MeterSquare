@@ -124,7 +124,7 @@ def send_boq_to_client():
                                 sub_item['sub_item_image'] = sub_items_map[sub_item_id]
 
         except Exception as e:
-            print(f"[SEND_BOQ] Error fetching images: {str(e)}")
+            log.error(f"Error fetching BOQ images: {str(e)}")
 
         # Calculate CLIENT VERSION - Selling price (includes overhead/profit distributed)
         client_total_value = grand_total  # Client sees same total as internal, just distributed differently

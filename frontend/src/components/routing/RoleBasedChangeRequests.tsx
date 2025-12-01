@@ -14,39 +14,40 @@ const RoleBasedChangeRequests: React.FC = () => {
   const { viewingAsRole } = useAdminViewStore();
   const location = useLocation();
   const userRole = (user as any)?.role || '';
+  const userRoleId = (user as any)?.role_id;
   const userRoleLower = userRole.toLowerCase();
 
   // Check if we're on extra-material route
   const isExtraMaterial = location.pathname.includes('extra-material');
 
   // Check if admin is viewing as another role
-  const isAdmin = userRoleLower === 'admin' || (user as any)?.role_id === 5;
+  const isAdmin = userRoleLower === 'admin' || userRoleId === 5;
   const isAdminViewing = isAdmin && viewingAsRole && viewingAsRole !== 'admin';
 
   // Use viewing role if admin is viewing as another role, otherwise use actual role
   const effectiveRole = isAdminViewing ? viewingAsRole.toLowerCase() : userRoleLower;
 
-  console.log('[RoleBasedChangeRequests] User role:', userRole, 'Viewing as:', viewingAsRole, 'Effective role:', effectiveRole, 'Path:', location.pathname, 'Is Extra Material:', isExtraMaterial);
+  // Also check role_id for more reliable role detection
+  const isPM = userRoleId === 6 || effectiveRole.includes('project') || effectiveRole.includes('manager');
+  const isTD = userRoleId === 7 || effectiveRole.includes('technical') || effectiveRole.includes('director');
+  const isEstimator = userRoleId === 4 || effectiveRole === 'estimator';
+  const isSE = userRoleId === 3 || effectiveRole.includes('site') || effectiveRole.includes('engineer');
+  const isMEP = userRoleId === 11 || effectiveRole.includes('mep');
+
+  console.log('[RoleBasedChangeRequests] User role:', userRole, 'Role ID:', userRoleId, 'Effective role:', effectiveRole, 'isPM:', isPM, 'isTD:', isTD, 'Path:', location.pathname);
 
   // Determine which component to render based on role and route
   let Component;
 
   if (isExtraMaterial) {
-    // Extra Material routing - Use effective role for proper UI selection
-    if (effectiveRole === 'site engineer' || effectiveRole === 'site_engineer' ||
-        effectiveRole === 'siteengineer' || effectiveRole === 'site supervisor' ||
-        effectiveRole === 'site_supervisor' || effectiveRole === 'sitesupervisor') {
+    // Extra Material routing
+    if (isSE) {
       Component = SEExtraMaterialPage;
-    } else if (effectiveRole === 'project manager' || effectiveRole === 'project_manager' ||
-               effectiveRole === 'projectmanager' || effectiveRole === 'mep' ||
-               effectiveRole === 'mep supervisor' || effectiveRole === 'mep_supervisor') {
-      // PM and MEP share the same extra material page
+    } else if (isPM || isMEP) {
       Component = PMChangeRequestsPage;
-    } else if (effectiveRole === 'admin' && !isAdminViewing) {
-      // Direct admin access (not viewing as another role) - default to SE page
+    } else if (isAdmin && !isAdminViewing) {
       Component = SEExtraMaterialPage;
     } else {
-      // Other roles don't have access to extra material
       return (
         <div className="flex items-center justify-center min-h-screen bg-gray-50">
           <div className="text-center p-8 bg-white rounded-lg shadow-md max-w-md">
@@ -56,42 +57,32 @@ const RoleBasedChangeRequests: React.FC = () => {
               </svg>
             </div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">Access Denied</h3>
-            <p className="text-gray-600">
-              Material Purchase is not available for your role.
-            </p>
+            <p className="text-gray-600">Material Purchase is not available for your role.</p>
           </div>
         </div>
       );
     }
   } else {
-    // Change Requests routing - Use effective role for proper UI selection
-    if (effectiveRole === 'technical director' || effectiveRole === 'technical_director' ||
-        effectiveRole === 'technicaldirector') {
+    // Change Requests routing - use role_id based detection for reliability
+    if (isTD) {
       Component = TDChangeRequestsPage;
-    } else if (effectiveRole === 'estimator') {
+    } else if (isEstimator) {
       Component = EstimatorChangeRequestsPage;
-    } else if (effectiveRole === 'project manager' || effectiveRole === 'project_manager' ||
-               effectiveRole === 'projectmanager' || effectiveRole === 'mep' ||
-               effectiveRole === 'mep supervisor' || effectiveRole === 'mep_supervisor') {
-      // PM and MEP share the same change requests page
+    } else if (isPM || isMEP) {
       Component = PMChangeRequestsPage;
-    } else if (effectiveRole === 'admin' && !isAdminViewing) {
-      // Direct admin access (not viewing as another role) - default to TD page
+    } else if (isAdmin && !isAdminViewing) {
       Component = TDChangeRequestsPage;
     } else {
-      // Default to showing access denied message
       return (
         <div className="flex items-center justify-center min-h-screen bg-gray-50">
           <div className="text-center p-8 bg-white rounded-lg shadow-md max-w-md">
             <div className="mb-4">
               <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
+              </svg>
             </div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">Access Denied</h3>
-            <p className="text-gray-600">
-              Change Requests is not available for your role.
-            </p>
+            <p className="text-gray-600">Change Requests is not available for your role.</p>
           </div>
         </div>
       );

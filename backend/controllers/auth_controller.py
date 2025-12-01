@@ -19,7 +19,6 @@ from utils.sms_service import send_sms_otp
 import os
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
-print("ENVIRONMENT:",ENVIRONMENT)
 
 log = get_logger()
 
