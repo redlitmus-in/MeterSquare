@@ -316,47 +316,47 @@ const ExtraMaterialPage: React.FC = () => {
     const statusConfig: { [key: string]: { color: string; icon: React.ReactNode; label: string } } = {
       pending: {
         color: 'bg-gray-100 text-gray-700 border-gray-300',
-        icon: <ClockIcon className="w-4 h-4" />,
+        icon: <ClockIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'Pending'
       },
       under_review: {
         color: 'bg-yellow-100 text-yellow-700 border-yellow-300',
-        icon: <ClockIcon className="w-4 h-4" />,
+        icon: <ClockIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'PM Approval Pending'
       },
       approved_by_pm: {
         color: 'bg-blue-100 text-blue-700 border-blue-300',
-        icon: <ClockIcon className="w-4 h-4" />,
+        icon: <ClockIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'PM Approved - Under Review'
       },
       send_to_est: {
         color: 'bg-blue-100 text-blue-700 border-blue-300',
-        icon: <CheckCircleIcon className="w-4 h-4" />,
+        icon: <CheckCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'Sent to Estimator'
       },
       send_to_buyer: {
         color: 'bg-purple-100 text-purple-700 border-purple-300',
-        icon: <CheckCircleIcon className="w-4 h-4" />,
+        icon: <CheckCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'Sent to Buyer'
       },
       pending_td_approval: {
         color: 'bg-indigo-100 text-indigo-700 border-indigo-300',
-        icon: <ClockIcon className="w-4 h-4" />,
+        icon: <ClockIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'TD Approval Pending'
       },
       approved_by_td: {
         color: 'bg-indigo-100 text-indigo-700 border-indigo-300',
-        icon: <ClockIcon className="w-4 h-4" />,
+        icon: <ClockIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'TD Approved - Final Review'
       },
       approved: {
         color: 'bg-green-100 text-green-700 border-green-300',
-        icon: <CheckCircleIcon className="w-4 h-4" />,
+        icon: <CheckCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'Approved'
       },
       rejected: {
         color: 'bg-red-100 text-red-700 border-red-300',
-        icon: <XCircleIcon className="w-4 h-4" />,
+        icon: <XCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'Rejected'
       },
       split_to_sub_crs: {
@@ -371,9 +371,10 @@ const ExtraMaterialPage: React.FC = () => {
     const config = statusConfig[trimmedStatus] || statusConfig.pending;
 
     return (
-      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${config.color}`}>
+      <span className={`inline-flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium border ${config.color}`}>
         {config.icon}
-        {config.label}
+        <span className="hidden sm:inline">{config.label}</span>
+        <span className="sm:hidden">{config.label.split(' ')[0]}</span>
       </span>
     );
   };
@@ -504,27 +505,27 @@ const ExtraMaterialPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pr-20">
-        {/* Header */}
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
+        {/* Header - Compact on mobile */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+          className="mb-4 sm:mb-8"
         >
-          <div className="bg-gradient-to-r from-red-500/10 to-rose-500/10 rounded-2xl p-6 shadow-sm border border-red-200">
-            <div className="flex justify-between items-center">
+          <div className="bg-gradient-to-r from-red-500/10 to-rose-500/10 rounded-xl sm:rounded-2xl p-3 sm:p-6 shadow-sm border border-red-200">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
               <div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">Material Purchase</h1>
-                <p className="text-gray-600">Request additional sub-items for assigned projects</p>
+                <h1 className="text-xl sm:text-3xl font-bold text-gray-900 mb-1 sm:mb-2">Material Purchase</h1>
+                <p className="text-xs sm:text-base text-gray-600">Request additional sub-items for assigned projects</p>
               </div>
               <button
                 onClick={() => {
                   setSelectedRequest(null); // Clear any previous edit data
                   setShowForm(true);
                 }}
-                className="inline-flex items-center px-4 py-2 bg-[#243d8a] text-white rounded-lg hover:bg-[#1e3270] transition-colors shadow-md"
+                className="inline-flex items-center justify-center px-3 sm:px-4 py-2 bg-[#243d8a] text-white rounded-lg hover:bg-[#1e3270] transition-colors shadow-md text-xs sm:text-sm font-medium whitespace-nowrap"
               >
-                <PlusIcon className="w-5 h-5 mr-2" />
+                <PlusIcon className="w-4 sm:w-5 h-4 sm:h-5 mr-1.5 sm:mr-2" />
                 MATERIAL PURCHASE
               </button>
             </div>
@@ -532,12 +533,71 @@ const ExtraMaterialPage: React.FC = () => {
         </motion.div>
 
         {/* Tabs and View Toggle */}
-        <div className="mb-6 bg-white rounded-xl border border-gray-200">
-          <div className="flex justify-between items-center px-6 pt-4">
-            <nav className="-mb-px flex space-x-8">
+        <div className="mb-4 sm:mb-6 bg-white rounded-xl border border-gray-200 p-2 sm:p-0">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center sm:px-6 sm:pt-4">
+            {/* Mobile: 2-row grid layout, Desktop: horizontal tabs */}
+            <div className="sm:hidden">
+              <div className="grid grid-cols-3 gap-1.5 mb-1.5">
+                <button
+                  onClick={() => setActiveTab('pending')}
+                  className={`py-2 px-2 rounded-lg font-medium text-[11px] transition-all ${
+                    activeTab === 'pending'
+                      ? 'bg-red-100 text-red-700 border border-red-300 shadow-sm'
+                      : 'bg-gray-50 text-gray-600 border border-gray-200'
+                  }`}
+                >
+                  Pending ({pendingMaterials.length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('request')}
+                  className={`py-2 px-2 rounded-lg font-medium text-[11px] transition-all ${
+                    activeTab === 'request'
+                      ? 'bg-red-100 text-red-700 border border-red-300 shadow-sm'
+                      : 'bg-gray-50 text-gray-600 border border-gray-200'
+                  }`}
+                >
+                  Request ({underReviewMaterials.length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('approved')}
+                  className={`py-2 px-2 rounded-lg font-medium text-[11px] transition-all ${
+                    activeTab === 'approved'
+                      ? 'bg-red-100 text-red-700 border border-red-300 shadow-sm'
+                      : 'bg-gray-50 text-gray-600 border border-gray-200'
+                  }`}
+                >
+                  Approved ({approvedMaterials.length})
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  onClick={() => setActiveTab('rejected')}
+                  className={`py-2 px-2 rounded-lg font-medium text-[11px] transition-all ${
+                    activeTab === 'rejected'
+                      ? 'bg-red-100 text-red-700 border border-red-300 shadow-sm'
+                      : 'bg-gray-50 text-gray-600 border border-gray-200'
+                  }`}
+                >
+                  Rejected ({rejectedMaterials.length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('complete')}
+                  className={`py-2 px-2 rounded-lg font-medium text-[11px] transition-all ${
+                    activeTab === 'complete'
+                      ? 'bg-red-100 text-red-700 border border-red-300 shadow-sm'
+                      : 'bg-gray-50 text-gray-600 border border-gray-200'
+                  }`}
+                >
+                  Complete ({completedMaterials.length})
+                </button>
+              </div>
+            </div>
+
+            {/* Desktop: horizontal tabs */}
+            <nav className="hidden sm:flex -mb-px space-x-8">
               <button
                 onClick={() => setActiveTab('pending')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
                   activeTab === 'pending'
                     ? 'border-red-600 text-red-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -550,7 +610,7 @@ const ExtraMaterialPage: React.FC = () => {
               </button>
               <button
                 onClick={() => setActiveTab('request')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
                   activeTab === 'request'
                     ? 'border-red-600 text-red-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -563,7 +623,7 @@ const ExtraMaterialPage: React.FC = () => {
               </button>
               <button
                 onClick={() => setActiveTab('approved')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
                   activeTab === 'approved'
                     ? 'border-red-600 text-red-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -576,7 +636,7 @@ const ExtraMaterialPage: React.FC = () => {
               </button>
               <button
                 onClick={() => setActiveTab('rejected')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
                   activeTab === 'rejected'
                     ? 'border-red-600 text-red-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -589,7 +649,7 @@ const ExtraMaterialPage: React.FC = () => {
               </button>
               <button
                 onClick={() => setActiveTab('complete')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
                   activeTab === 'complete'
                     ? 'border-red-600 text-red-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -602,8 +662,8 @@ const ExtraMaterialPage: React.FC = () => {
               </button>
             </nav>
 
-            {/* View Mode Toggle */}
-            <div className="flex gap-2 mb-4">
+            {/* View Mode Toggle - Hidden on mobile */}
+            <div className="hidden sm:flex gap-2 mb-4">
               <button
                 onClick={() => setViewMode('card')}
                 className={`p-2 rounded-lg transition-colors ${
@@ -641,17 +701,17 @@ const ExtraMaterialPage: React.FC = () => {
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Pending Requests</h2>
             {/* Pending List */}
             {loading ? (
-              <div className="flex justify-center items-center py-12">
+              <div className="flex justify-center items-center py-8 sm:py-12">
                 <ModernLoadingSpinners variant="pulse-wave" />
               </div>
             ) : pendingMaterials.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-                <CubeIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Pending Requests</h3>
-                <p className="text-gray-500">Click "MATERIAL PURCHASE" to create your first request</p>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-12 text-center">
+                <CubeIcon className="w-12 sm:w-16 h-12 sm:h-16 text-gray-400 mx-auto mb-3 sm:mb-4" />
+                <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-1.5 sm:mb-2">No Pending Requests</h3>
+                <p className="text-xs sm:text-base text-gray-500">Click "MATERIAL PURCHASE" to create your first request</p>
               </div>
             ) : viewMode === 'card' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {pendingMaterials.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
@@ -659,54 +719,55 @@ const ExtraMaterialPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
                   >
-                    <div className="p-4">
+                    <div className="p-3 sm:p-4">
                       {/* Header */}
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="font-bold text-gray-900">EM-{request.id}</h3>
+                      <div className="flex items-center justify-between mb-2 sm:mb-3">
+                        <h3 className="font-bold text-gray-900 text-sm sm:text-base">EM-{request.id}</h3>
                         {getStatusBadge(request.status)}
                       </div>
 
                       {/* Project Info */}
-                      <p className="font-semibold text-gray-900 mb-1">{request.project_name}</p>
+                      <p className="font-semibold text-gray-900 text-sm sm:text-base mb-0.5 sm:mb-1 truncate">{request.project_name}</p>
                       {request.project_code && (
-                        <p className="text-xs text-gray-500 mb-3">Code: {request.project_code}</p>
+                        <p className="text-[10px] sm:text-xs text-gray-500 mb-2 sm:mb-3">Code: {request.project_code}</p>
                       )}
 
                       {/* Details */}
-                      <div className="space-y-1.5 text-sm mb-4">
+                      <div className="space-y-1 sm:space-y-1.5 text-xs sm:text-sm mb-3 sm:mb-4">
                         <div>
-                          <p className="text-xs text-gray-500">BOQ Item</p>
-                          <p className="font-medium text-gray-900">{request.boq_item_name}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">BOQ Item</p>
+                          <p className="font-medium text-gray-900 truncate">{request.boq_item_name}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500">Sub-Item</p>
-                          <p className="font-medium text-gray-900">{request.sub_item_name || '-'}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">Sub-Item</p>
+                          <p className="font-medium text-gray-900 truncate">{request.sub_item_name || '-'}</p>
                         </div>
                       </div>
 
                       {/* Actions */}
-                      <div className="space-y-2">
+                      <div className="space-y-1.5 sm:space-y-2">
                         <button
                           onClick={() => handleViewDetails(request.id)}
-                          className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                          className="w-full bg-blue-500 hover:bg-blue-600 text-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded transition-colors flex items-center justify-center gap-1.5 sm:gap-2"
                         >
-                          <EyeIcon className="w-4 h-4" />
+                          <EyeIcon className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                           View Details
                         </button>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
                           <button
                             onClick={() => handleSendToPM(request.id)}
                             disabled={sendingRequestId === request.id}
-                            className="bg-[#243d8a] hover:bg-[#1e3270] text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="bg-[#243d8a] hover:bg-[#1e3270] text-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <PaperAirplaneIcon className="w-4 h-4" />
-                            {sendingRequestId === request.id ? 'Sending...' : 'Send to PM'}
+                            <PaperAirplaneIcon className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
+                            <span className="hidden sm:inline">{sendingRequestId === request.id ? 'Sending...' : 'Send to PM'}</span>
+                            <span className="sm:hidden">{sendingRequestId === request.id ? '...' : 'Send'}</span>
                           </button>
                           <button
                             onClick={() => handleDelete(request.id)}
-                            className="bg-red-600 hover:bg-red-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
+                            className="bg-red-600 hover:bg-red-700 text-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded transition-colors flex items-center justify-center gap-1"
                           >
-                            <TrashIcon className="w-4 h-4" />
+                            <TrashIcon className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                             Delete
                           </button>
                         </div>
@@ -813,17 +874,17 @@ const ExtraMaterialPage: React.FC = () => {
           >
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Sent for PM Approval</h2>
             {loading ? (
-              <div className="flex justify-center items-center py-12">
+              <div className="flex justify-center items-center py-8 sm:py-12">
                 <ModernLoadingSpinners variant="pulse-wave" />
               </div>
             ) : underReviewMaterials.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-                <ClockIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Requests Under Review</h3>
-                <p className="text-gray-500">Requests sent to PM will appear here</p>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-12 text-center">
+                <ClockIcon className="w-12 sm:w-16 h-12 sm:h-16 text-gray-400 mx-auto mb-3 sm:mb-4" />
+                <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-1.5 sm:mb-2">No Requests Under Review</h3>
+                <p className="text-xs sm:text-base text-gray-500">Requests sent to PM will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {underReviewMaterials.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
@@ -831,36 +892,36 @@ const ExtraMaterialPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
                   >
-                    <div className="p-4">
+                    <div className="p-3 sm:p-4">
                       {/* Header */}
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="font-bold text-gray-900">EM-{request.id}</h3>
+                      <div className="flex items-center justify-between mb-2 sm:mb-3">
+                        <h3 className="font-bold text-gray-900 text-sm sm:text-base">EM-{request.id}</h3>
                         {getStatusBadge(request.status)}
                       </div>
 
                       {/* Project Info */}
-                      <p className="font-semibold text-gray-900 mb-1">{request.project_name}</p>
+                      <p className="font-semibold text-gray-900 text-sm sm:text-base mb-0.5 sm:mb-1 truncate">{request.project_name}</p>
                       {request.project_code && (
-                        <p className="text-xs text-gray-500 mb-3">Code: {request.project_code}</p>
+                        <p className="text-[10px] sm:text-xs text-gray-500 mb-2 sm:mb-3">Code: {request.project_code}</p>
                       )}
 
                       {/* Details */}
-                      <div className="space-y-1.5 text-sm mb-4">
+                      <div className="space-y-1 sm:space-y-1.5 text-xs sm:text-sm mb-3 sm:mb-4">
                         <div>
-                          <p className="text-xs text-gray-500">BOQ Item</p>
-                          <p className="font-medium text-gray-900">{request.boq_item_name}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">BOQ Item</p>
+                          <p className="font-medium text-gray-900 truncate">{request.boq_item_name}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500">Sub-Item</p>
-                          <p className="font-medium text-gray-900">{request.sub_item_name || '-'}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">Sub-Item</p>
+                          <p className="font-medium text-gray-900 truncate">{request.sub_item_name || '-'}</p>
                         </div>
                       </div>
 
                       <button
                         onClick={() => handleViewDetails(request.id)}
-                        className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                        className="w-full bg-blue-500 hover:bg-blue-600 text-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded transition-colors flex items-center justify-center gap-1.5 sm:gap-2"
                       >
-                        <EyeIcon className="w-4 h-4" />
+                        <EyeIcon className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                         View Details
                       </button>
                     </div>
@@ -961,17 +1022,17 @@ const ExtraMaterialPage: React.FC = () => {
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Approved Requests</h2>
             {/* Approved List */}
             {loading ? (
-              <div className="flex justify-center items-center py-12">
+              <div className="flex justify-center items-center py-8 sm:py-12">
                 <ModernLoadingSpinners variant="pulse-wave" />
               </div>
             ) : approvedMaterials.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-                <CheckCircleIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Approved Materials</h3>
-                <p className="text-gray-500">Approved extra material requests will appear here</p>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-12 text-center">
+                <CheckCircleIcon className="w-12 sm:w-16 h-12 sm:h-16 text-gray-400 mx-auto mb-3 sm:mb-4" />
+                <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-1.5 sm:mb-2">No Approved Materials</h3>
+                <p className="text-xs sm:text-base text-gray-500">Approved extra material requests will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {approvedMaterials.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
@@ -979,36 +1040,36 @@ const ExtraMaterialPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     className="bg-white rounded-lg border border-green-200 shadow-sm hover:shadow-lg transition-all duration-200"
                   >
-                    <div className="p-4">
+                    <div className="p-3 sm:p-4">
                       {/* Header */}
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="font-bold text-gray-900">EM-{request.id}</h3>
+                      <div className="flex items-center justify-between mb-2 sm:mb-3">
+                        <h3 className="font-bold text-gray-900 text-sm sm:text-base">EM-{request.id}</h3>
                         {getStatusBadge(request.status)}
                       </div>
 
                       {/* Project Info */}
-                      <p className="font-semibold text-gray-900 mb-1">{request.project_name}</p>
+                      <p className="font-semibold text-gray-900 text-sm sm:text-base mb-0.5 sm:mb-1 truncate">{request.project_name}</p>
                       {request.project_code && (
-                        <p className="text-xs text-gray-500 mb-3">Code: {request.project_code}</p>
+                        <p className="text-[10px] sm:text-xs text-gray-500 mb-2 sm:mb-3">Code: {request.project_code}</p>
                       )}
 
                       {/* Details */}
-                      <div className="space-y-1.5 text-sm mb-4">
+                      <div className="space-y-1 sm:space-y-1.5 text-xs sm:text-sm mb-3 sm:mb-4">
                         <div>
-                          <p className="text-xs text-gray-500">BOQ Item</p>
-                          <p className="font-medium text-gray-900">{request.boq_item_name}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">BOQ Item</p>
+                          <p className="font-medium text-gray-900 truncate">{request.boq_item_name}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500">Sub-Item</p>
-                          <p className="font-medium text-gray-900">{request.sub_item_name || '-'}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">Sub-Item</p>
+                          <p className="font-medium text-gray-900 truncate">{request.sub_item_name || '-'}</p>
                         </div>
                       </div>
 
                       <button
                         onClick={() => handleViewDetails(request.id)}
-                        className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                        className="w-full bg-blue-500 hover:bg-blue-600 text-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded transition-colors flex items-center justify-center gap-1.5 sm:gap-2"
                       >
-                        <EyeIcon className="w-4 h-4" />
+                        <EyeIcon className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                         View Details
                       </button>
                     </div>
@@ -1102,17 +1163,17 @@ const ExtraMaterialPage: React.FC = () => {
           >
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Rejected Requests</h2>
             {loading ? (
-              <div className="flex justify-center items-center py-12">
+              <div className="flex justify-center items-center py-8 sm:py-12">
                 <ModernLoadingSpinners variant="pulse-wave" />
               </div>
             ) : rejectedMaterials.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-                <XCircleIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Rejected Requests</h3>
-                <p className="text-gray-500">Rejected extra material requests will appear here</p>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-12 text-center">
+                <XCircleIcon className="w-12 sm:w-16 h-12 sm:h-16 text-gray-400 mx-auto mb-3 sm:mb-4" />
+                <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-1.5 sm:mb-2">No Rejected Requests</h3>
+                <p className="text-xs sm:text-base text-gray-500">Rejected extra material requests will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {rejectedMaterials.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
@@ -1120,57 +1181,57 @@ const ExtraMaterialPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     className="bg-white rounded-lg border border-red-200 shadow-sm hover:shadow-lg transition-all duration-200"
                   >
-                    <div className="p-4">
+                    <div className="p-3 sm:p-4">
                       {/* Header */}
-                      <div className="flex items-start justify-between mb-3">
-                        <h3 className="font-bold text-gray-900">EM-{request.id}</h3>
+                      <div className="flex items-start justify-between mb-2 sm:mb-3">
+                        <h3 className="font-bold text-gray-900 text-sm sm:text-base">EM-{request.id}</h3>
                         {getStatusBadge(request.status)}
                       </div>
 
                       {/* Project Info */}
-                      <div className="mb-3">
-                        <p className="font-semibold text-gray-900">{request.project_name}</p>
+                      <div className="mb-2 sm:mb-3">
+                        <p className="font-semibold text-gray-900 text-sm sm:text-base truncate">{request.project_name}</p>
                         {request.project_code && (
-                          <p className="text-xs text-gray-500">Code: {request.project_code}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">Code: {request.project_code}</p>
                         )}
                       </div>
 
                       {/* Details */}
-                      <div className="space-y-1.5 text-sm mb-3">
+                      <div className="space-y-1 sm:space-y-1.5 text-xs sm:text-sm mb-2 sm:mb-3">
                         <div>
-                          <p className="text-xs text-gray-500">BOQ Item</p>
-                          <p className="font-medium text-gray-900">{request.boq_item_name}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">BOQ Item</p>
+                          <p className="font-medium text-gray-900 truncate">{request.boq_item_name}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500">Sub-Item</p>
-                          <p className="font-medium text-gray-900">{request.sub_item_name || '-'}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">Sub-Item</p>
+                          <p className="font-medium text-gray-900 truncate">{request.sub_item_name || '-'}</p>
                         </div>
                       </div>
 
                       {/* Rejection Details */}
                       {request.rejection_reason && (
-                        <div className="bg-red-50 rounded-lg px-3 py-2 mb-3">
-                          <p className="text-xs font-medium text-red-900">Rejection Reason:</p>
-                          <p className="text-xs text-red-700 mt-1">{request.rejection_reason}</p>
+                        <div className="bg-red-50 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 mb-2 sm:mb-3">
+                          <p className="text-[10px] sm:text-xs font-medium text-red-900">Rejection Reason:</p>
+                          <p className="text-[10px] sm:text-xs text-red-700 mt-0.5 sm:mt-1 line-clamp-2">{request.rejection_reason}</p>
                           {request.rejected_by && (
-                            <p className="text-xs text-red-600 mt-1">By: {request.rejected_by}</p>
+                            <p className="text-[10px] sm:text-xs text-red-600 mt-0.5 sm:mt-1">By: {request.rejected_by}</p>
                           )}
                         </div>
                       )}
 
-                      <div className="space-y-2">
+                      <div className="space-y-1.5 sm:space-y-2">
                         <button
                           onClick={() => handleViewDetails(request.id)}
-                          className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                          className="w-full bg-blue-500 hover:bg-blue-600 text-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded transition-colors flex items-center justify-center gap-1.5 sm:gap-2"
                         >
-                          <EyeIcon className="w-4 h-4" />
+                          <EyeIcon className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                           View Details
                         </button>
                         <button
                           onClick={() => handleDelete(request.id)}
-                          className="w-full bg-red-600 hover:bg-red-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
+                          className="w-full bg-red-600 hover:bg-red-700 text-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded transition-colors flex items-center justify-center gap-1"
                         >
-                          <TrashIcon className="w-4 h-4" />
+                          <TrashIcon className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                           Delete
                         </button>
                       </div>
@@ -1282,17 +1343,17 @@ const ExtraMaterialPage: React.FC = () => {
           >
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Completed Purchases</h2>
             {loading ? (
-              <div className="flex justify-center items-center py-12">
+              <div className="flex justify-center items-center py-8 sm:py-12">
                 <ModernLoadingSpinners variant="pulse-wave" />
               </div>
             ) : completedMaterials.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-                <CheckBadgeIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Completed Purchases</h3>
-                <p className="text-gray-500">Purchases completed by buyer will appear here</p>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-12 text-center">
+                <CheckBadgeIcon className="w-12 sm:w-16 h-12 sm:h-16 text-gray-400 mx-auto mb-3 sm:mb-4" />
+                <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-1.5 sm:mb-2">No Completed Purchases</h3>
+                <p className="text-xs sm:text-base text-gray-500">Purchases completed by buyer will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {completedMaterials.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
@@ -1300,44 +1361,44 @@ const ExtraMaterialPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     className="bg-white rounded-lg border border-green-200 shadow-sm hover:shadow-lg transition-all duration-200"
                   >
-                    <div className="p-4">
+                    <div className="p-3 sm:p-4">
                       {/* Header */}
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="font-bold text-gray-900">EM-{request.id}</h3>
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-green-100 text-green-700 border-green-300">
-                          <CheckBadgeIcon className="w-4 h-4" />
+                      <div className="flex items-center justify-between mb-2 sm:mb-3">
+                        <h3 className="font-bold text-gray-900 text-sm sm:text-base">EM-{request.id}</h3>
+                        <span className="inline-flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium border bg-green-100 text-green-700 border-green-300">
+                          <CheckBadgeIcon className="w-3 sm:w-4 h-3 sm:h-4" />
                           Complete
                         </span>
                       </div>
 
                       {/* Project Info */}
-                      <p className="font-semibold text-gray-900 mb-1">{request.project_name}</p>
+                      <p className="font-semibold text-gray-900 text-sm sm:text-base mb-0.5 sm:mb-1 truncate">{request.project_name}</p>
                       {request.project_code && (
-                        <p className="text-xs text-gray-500 mb-3">Code: {request.project_code}</p>
+                        <p className="text-[10px] sm:text-xs text-gray-500 mb-2 sm:mb-3">Code: {request.project_code}</p>
                       )}
 
                       {/* Details */}
-                      <div className="space-y-1.5 text-sm mb-3">
+                      <div className="space-y-1 sm:space-y-1.5 text-xs sm:text-sm mb-2 sm:mb-3">
                         <div>
-                          <p className="text-xs text-gray-500">BOQ Item</p>
-                          <p className="font-medium text-gray-900">{request.boq_item_name}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">BOQ Item</p>
+                          <p className="font-medium text-gray-900 truncate">{request.boq_item_name}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500">Sub-Item</p>
-                          <p className="font-medium text-gray-900">{request.sub_item_name || '-'}</p>
+                          <p className="text-[10px] sm:text-xs text-gray-500">Sub-Item</p>
+                          <p className="font-medium text-gray-900 truncate">{request.sub_item_name || '-'}</p>
                         </div>
                       </div>
 
                       {/* Purchase Completion Details */}
-                      <div className="bg-green-50 rounded-lg px-3 py-2 mb-3">
-                        <p className="text-xs font-medium text-green-900">Purchase Completed</p>
+                      <div className="bg-green-50 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 mb-2 sm:mb-3">
+                        <p className="text-[10px] sm:text-xs font-medium text-green-900">Purchase Completed</p>
                         {request.purchase_completed_by && (
-                          <p className="text-xs text-green-700 mt-1">
+                          <p className="text-[10px] sm:text-xs text-green-700 mt-0.5 sm:mt-1">
                             By: <span className="font-medium">{request.purchase_completed_by}</span>
                           </p>
                         )}
                         {request.purchase_completion_date && (
-                          <p className="text-xs text-green-600 mt-0.5">
+                          <p className="text-[10px] sm:text-xs text-green-600 mt-0.5">
                             {new Date(request.purchase_completion_date).toLocaleString('en-US', {
                               day: '2-digit',
                               month: 'short',
@@ -1351,9 +1412,9 @@ const ExtraMaterialPage: React.FC = () => {
 
                       <button
                         onClick={() => handleViewDetails(request.id)}
-                        className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                        className="w-full bg-blue-500 hover:bg-blue-600 text-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded transition-colors flex items-center justify-center gap-1.5 sm:gap-2"
                       >
-                        <EyeIcon className="w-4 h-4" />
+                        <EyeIcon className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                         View Details
                       </button>
                     </div>
@@ -1450,18 +1511,18 @@ const ExtraMaterialPage: React.FC = () => {
 
         {/* Form Modal */}
         {showForm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-2 sm:p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+              className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto"
             >
-              <div className="sticky top-0 bg-white border-b px-6 py-4">
-                <h2 className="text-xl font-semibold text-gray-900">
+              <div className="sticky top-0 bg-white border-b px-4 sm:px-6 py-3 sm:py-4">
+                <h2 className="text-base sm:text-xl font-semibold text-gray-900">
                   {selectedRequest?.editMode ? 'Edit Material Purchase Request' : 'Request Material Purchase'}
                 </h2>
               </div>
-              <div className="p-6">
+              <div className="p-3 sm:p-6">
                 <ExtraMaterialForm
                   onSubmit={selectedRequest?.editMode ? undefined : handleSubmitExtraMaterial}
                   onCancel={() => {
@@ -1506,47 +1567,47 @@ const ExtraMaterialPage: React.FC = () => {
 
         {/* Delete Confirmation Modal */}
         {showDeleteModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+              className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
             >
               {/* Header */}
-              <div className="bg-white border-b border-gray-200 px-6 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-red-100 rounded-lg">
-                    <ExclamationTriangleIcon className="w-6 h-6 text-red-600" />
+              <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="p-1.5 sm:p-2 bg-red-100 rounded-lg">
+                    <ExclamationTriangleIcon className="w-5 sm:w-6 h-5 sm:h-6 text-red-600" />
                   </div>
-                  <h3 className="text-xl font-bold text-gray-900">Confirm Delete</h3>
+                  <h3 className="text-lg sm:text-xl font-bold text-gray-900">Confirm Delete</h3>
                 </div>
               </div>
 
               {/* Content */}
-              <div className="p-6">
-                <p className="text-gray-700 text-base mb-2">
+              <div className="p-4 sm:p-6">
+                <p className="text-gray-700 text-sm sm:text-base mb-1.5 sm:mb-2">
                   Are you sure you want to delete this request?
                 </p>
-                <p className="text-sm text-gray-500">
+                <p className="text-xs sm:text-sm text-gray-500">
                   This action cannot be undone. The request will be permanently removed from the system.
                 </p>
               </div>
 
               {/* Footer */}
-              <div className="bg-gray-50 px-6 py-4 flex gap-3 justify-end">
+              <div className="bg-gray-50 px-4 sm:px-6 py-3 sm:py-4 flex gap-2 sm:gap-3 justify-end">
                 <button
                   onClick={cancelDelete}
-                  className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium text-sm"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={confirmDelete}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center gap-2"
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center gap-1.5 sm:gap-2 text-sm"
                 >
-                  <TrashIcon className="w-4 h-4" />
-                  Delete Request
+                  <TrashIcon className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
+                  Delete
                 </button>
               </div>
             </motion.div>

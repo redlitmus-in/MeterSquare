@@ -93,8 +93,8 @@ const NavigationItemComponent = memo<{
           }}
           title={isCollapsed ? item.name : ''}
           className={clsx(
-            'flex-1 group flex items-center transition-colors duration-150 text-xs font-medium rounded-lg',
-            isCollapsed ? 'px-2 py-2 justify-center' : 'px-2.5 py-2',
+            'flex-1 group flex items-center transition-colors duration-150 text-sm md:text-xs font-medium rounded-lg',
+            isCollapsed ? 'px-2 py-2 justify-center' : 'px-3 py-3 md:px-2.5 md:py-2',
             isActive
               ? item.name === 'Procurement'
                 ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 shadow-md border border-red-200'
@@ -107,7 +107,7 @@ const NavigationItemComponent = memo<{
           <div className="flex items-center">
             <div className={clsx(
               'rounded-md transition-colors duration-150',
-              isCollapsed ? 'p-1.5' : 'p-1.5 mr-2',
+              isCollapsed ? 'p-1.5' : 'p-2 mr-2.5 md:p-1.5 md:mr-2',
               isActive
                 ? item.name === 'Procurement'
                   ? 'bg-red-500 shadow-lg'
@@ -117,7 +117,7 @@ const NavigationItemComponent = memo<{
                 : 'bg-gray-100 group-hover:bg-gray-200'
             )}>
               <IconComponent className={clsx(
-                'w-4 h-4 transition-colors duration-150',
+                'w-5 h-5 md:w-4 md:h-4 transition-colors duration-150',
                 isActive ? 'text-white' : item.color || 'text-gray-500'
               )} />
             </div>
@@ -150,8 +150,8 @@ const NavigationItemComponent = memo<{
       onClick={onNavigate}
       title={isCollapsed ? item.name : ''}
       className={clsx(
-        'group flex items-center transition-colors duration-150 text-xs font-medium rounded-lg relative overflow-hidden',
-        isCollapsed ? 'px-2 py-2 justify-center' : 'px-2.5 py-2',
+        'group flex items-center transition-colors duration-150 text-sm md:text-xs font-medium rounded-lg relative overflow-hidden',
+        isCollapsed ? 'px-2 py-2 justify-center' : 'px-3 py-3 md:px-2.5 md:py-2',
         isActive
           ? item.name === 'Procurement'
             ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 shadow-md border border-red-200'
@@ -170,7 +170,7 @@ const NavigationItemComponent = memo<{
       )}
       <div className={clsx(
         'rounded-md transition-colors duration-150',
-        isCollapsed ? 'p-1.5' : 'p-1.5 mr-2',
+        isCollapsed ? 'p-1.5' : 'p-2 mr-2.5 md:p-1.5 md:mr-2',
         isActive
           ? item.name === 'Procurement'
             ? 'bg-red-500 shadow-lg'
@@ -180,7 +180,7 @@ const NavigationItemComponent = memo<{
           : 'bg-gray-100 group-hover:bg-gray-200'
       )}>
         <IconComponent className={clsx(
-          'w-4 h-4 transition-colors duration-150',
+          'w-5 h-5 md:w-4 md:h-4 transition-colors duration-150',
           isActive ? 'text-white' : item.color || 'text-gray-500'
         )} />
       </div>
@@ -785,7 +785,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       {/* Logo Section with Toggle Button */}
       <div className={clsx(
         "border-b border-gray-100 transition-all duration-300",
-        isCollapsed ? "px-2 py-3" : "px-4 py-4"
+        isCollapsed ? "px-2 py-3" : "px-3 py-3 md:px-4 md:py-4"
       )}>
         <div className="flex items-center justify-between">
           {/* MeterSquare Logo */}
@@ -796,7 +796,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             <img
               src="/assets/logo.png"
               alt="MeterSquare"
-              className="h-10 w-auto"
+              className="h-8 md:h-10 w-auto"
               onError={(e) => {
                 // Fallback if logo doesn't load
                 const target = e.target as HTMLImageElement;
@@ -818,10 +818,10 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             </div>
           </div>
           
-          {/* Toggle Button */}
+          {/* Toggle Button - Hidden on mobile */}
           <button
             onClick={toggleSidebar}
-            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+            className="hidden md:block p-1.5 hover:bg-gray-100 rounded-lg transition-colors duration-200"
             title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
@@ -842,9 +842,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       {/* Navigation */}
       <div className={clsx(
         "flex-1 flex flex-col overflow-y-auto transition-[padding] duration-200",
-        isCollapsed ? "py-2 px-1" : "py-3 px-2"
+        isCollapsed ? "py-2 px-1" : "py-4 px-3 md:py-3 md:px-2"
       )}>
-        <nav className="flex-1 space-y-1">
+        <nav className="flex-1 space-y-1.5 md:space-y-1">
           {navigation.map((item) => {
             const isActive = isPathActive(item.href);
             const hasChildren = item.children && item.children.length > 0;
@@ -861,7 +861,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                     <button
                       onClick={() => handleRoleCategoryClick(item.name)}
                       className={clsx(
-                        'w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors',
+                        'w-full flex items-center gap-3 px-3 py-3 md:py-2.5 text-sm font-medium rounded-lg transition-colors',
                         isCollapsed ? 'justify-center' : '',
                         'text-gray-700 hover:bg-gradient-to-r hover:from-gray-50 hover:to-gray-100 hover:text-gray-900'
                       )}
@@ -879,7 +879,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                         setSidebarOpen(false);
                       }}
                       className={clsx(
-                        'w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold rounded-lg transition-colors',
+                        'w-full flex items-center gap-3 px-3 py-3 md:py-2.5 text-sm font-bold rounded-lg transition-colors',
                         isCollapsed ? 'justify-center' : '',
                         'bg-gradient-to-r from-red-50 to-orange-50 text-red-700 hover:from-red-100 hover:to-orange-100 border border-red-200'
                       )}
@@ -913,14 +913,14 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                       {item.children?.map((child) => {
                         const isChildActive = isPathActive(child.href);
                         const ChildIcon = isChildActive ? child.iconSolid : child.icon;
-                        
+
                         return (
                           <Link
                             key={child.name}
                             to={child.href}
                             onClick={() => setSidebarOpen(false)}
                             className={clsx(
-                              'group flex items-center px-3 py-2 text-xs font-medium rounded-lg transition-all duration-200 relative',
+                              'group flex items-center px-3 py-2.5 md:py-2 text-sm md:text-xs font-medium rounded-lg transition-all duration-200 relative',
                               isChildActive
                                 ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-800 border border-red-200 shadow-sm'
                                 : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
@@ -931,7 +931,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                               <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-0.5 h-4 bg-red-500 rounded-r-full"></div>
                             )}
                             <ChildIcon className={clsx(
-                              'w-4 h-4 mr-3 transition-colors duration-200 flex-shrink-0',
+                              'w-5 h-5 md:w-4 md:h-4 mr-3 transition-colors duration-200 flex-shrink-0',
                               isChildActive ? 'text-red-600' : 'text-gray-400 group-hover:text-gray-600'
                             )} />
                             <span className="truncate">{child.name}</span>
@@ -954,38 +954,38 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
 
         {/* User Info Section with Dropdown */}
         {user && (
-          <div className="mt-4 pt-3 border-t border-gray-100">
+          <div className="mt-4 pt-4 md:pt-3 border-t border-gray-100">
             <div className="relative">
               {/* User Info Button - Clickable */}
               <button
                 onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                className="w-full bg-gradient-to-r from-gray-50 to-[#243d8a]/5 rounded-lg p-3 border border-gray-200 hover:border-[#243d8a]/30 transition-all duration-200"
+                className="w-full bg-gradient-to-r from-gray-50 to-[#243d8a]/5 rounded-lg p-3.5 md:p-3 border border-gray-200 hover:border-[#243d8a]/30 transition-all duration-200"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
                     <div className="relative">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#243d8a] to-[#243d8a] flex items-center justify-center shadow-md">
-                        <span className="text-white font-bold text-xs">
+                      <div className="w-10 h-10 md:w-8 md:h-8 rounded-full bg-gradient-to-br from-[#243d8a] to-[#243d8a] flex items-center justify-center shadow-md">
+                        <span className="text-white font-bold text-sm md:text-xs">
                           {user.full_name.split(' ')[0].charAt(0).toUpperCase()}
                         </span>
                       </div>
                       <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
                     </div>
                     <div className="min-w-0 flex-1 text-left">
-                      <p className="text-xs font-semibold text-gray-900 truncate">
+                      <p className="text-sm md:text-xs font-semibold text-gray-900 truncate">
                         {user.full_name.split(' ').slice(0, -1).join(' ') || user.full_name}
                       </p>
-                      <p className="text-[10px] text-gray-600 truncate">
+                      <p className="text-xs md:text-[10px] text-gray-600 truncate">
                         {roleName}
                       </p>
                     </div>
                   </div>
                   {!isCollapsed && (
-                    <ChevronDownIcon 
+                    <ChevronDownIcon
                       className={clsx(
-                        "w-4 h-4 text-gray-400 transition-transform duration-200",
+                        "w-5 h-5 md:w-4 md:h-4 text-gray-400 transition-transform duration-200",
                         userDropdownOpen ? "transform rotate-180" : ""
-                      )} 
+                      )}
                     />
                   )}
                 </div>
@@ -1002,28 +1002,28 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                     className="absolute bottom-full mb-2 left-0 right-0 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-50"
                   >
                     {/* Status Toggle - Available for all roles */}
-                    <div className="px-4 py-3 border-b border-gray-100">
+                    <div className="px-4 py-3.5 md:py-3 border-b border-gray-100">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-                          <span className="text-xs font-medium text-gray-700">Status</span>
+                          <div className={`w-2.5 h-2.5 md:w-2 md:h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                          <span className="text-sm md:text-xs font-medium text-gray-700">Status</span>
                         </div>
                         <button
                           onClick={handleToggleStatus}
                           disabled={updatingStatus}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          className={`relative inline-flex h-7 w-12 md:h-6 md:w-11 items-center rounded-full transition-colors ${
                             isOnline ? 'bg-green-500' : 'bg-gray-300'
                           } ${updatingStatus ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                         >
                           <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-lg transition-transform ${
+                            className={`inline-block h-5 w-5 md:h-4 md:w-4 transform rounded-full bg-white shadow-lg transition-transform ${
                               isOnline ? 'translate-x-6' : 'translate-x-1'
                             }`}
                           />
                         </button>
                       </div>
-                      <div className="mt-1">
-                        <span className={`text-xs font-semibold ${isOnline ? 'text-green-600' : 'text-gray-500'}`}>
+                      <div className="mt-1.5 md:mt-1">
+                        <span className={`text-sm md:text-xs font-semibold ${isOnline ? 'text-green-600' : 'text-gray-500'}`}>
                           {isOnline ? 'Online' : 'Offline'}
                         </span>
                       </div>
@@ -1035,9 +1035,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                         setUserDropdownOpen(false);
                         setSidebarOpen(false);
                       }}
-                      className="flex items-center px-4 py-3 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                      className="flex items-center px-4 py-3.5 md:py-3 text-sm md:text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors duration-200"
                     >
-                      <UserCircleIcon className="w-4 h-4 text-gray-500 mr-3" />
+                      <UserCircleIcon className="w-5 h-5 md:w-4 md:h-4 text-gray-500 mr-3" />
                       <span>Profile Settings</span>
                     </Link>
 
@@ -1046,9 +1046,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                         const { logout } = useAuthStore.getState();
                         logout();
                       }}
-                      className="w-full flex items-center px-4 py-3 text-xs font-medium text-gray-700 hover:bg-red-50 hover:text-red-700 transition-colors duration-200 border-t border-gray-100"
+                      className="w-full flex items-center px-4 py-3.5 md:py-3 text-sm md:text-xs font-medium text-gray-700 hover:bg-red-50 hover:text-red-700 transition-colors duration-200 border-t border-gray-100"
                     >
-                      <ArrowRightOnRectangleIcon className="w-4 h-4 text-gray-500 mr-3" />
+                      <ArrowRightOnRectangleIcon className="w-5 h-5 md:w-4 md:h-4 text-gray-500 mr-3" />
                       <span>Sign Out</span>
                     </button>
                   </motion.div>
@@ -1095,7 +1095,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
               leaveFrom="translate-x-0"
               leaveTo="-translate-x-full"
             >
-              <Dialog.Panel className="relative flex-1 flex flex-col max-w-xs w-full shadow-2xl">
+              <Dialog.Panel className="relative flex-1 flex flex-col max-w-[260px] w-full shadow-2xl">
                 <Transition.Child
                   as={Fragment}
                   enter="ease-in-out duration-300"

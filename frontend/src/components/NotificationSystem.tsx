@@ -31,7 +31,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+// Tabs removed - using custom buttons for better mobile support
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
@@ -475,23 +475,23 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.95 }}
             className={cn(
-              "absolute right-0 top-full mt-2 bg-white rounded-lg shadow-xl border z-[9999] overflow-hidden",
-              "w-[380px] max-h-[480px]"
+              "fixed sm:absolute inset-x-2 sm:inset-x-auto sm:right-0 top-14 sm:top-full sm:mt-2 bg-white rounded-lg shadow-xl border z-[9999] overflow-hidden",
+              "sm:w-[380px] max-h-[85vh] sm:max-h-[480px]"
             )}
           >
-            {/* Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3">
+            {/* Header - Compact on mobile */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-3 sm:px-4 py-2.5 sm:py-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Bell className="w-4 h-4" />
-                  <h3 className="font-semibold text-sm">Notifications</h3>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <Bell className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
+                  <h3 className="font-semibold text-xs sm:text-sm">Notifications</h3>
                   {counts.unread > 0 && (
-                    <Badge className="bg-white/20 text-white text-xs px-1.5 py-0">
+                    <Badge className="bg-white/20 text-white text-[10px] sm:text-xs px-1 sm:px-1.5 py-0">
                       {counts.unread}
                     </Badge>
                   )}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-0.5 sm:gap-1">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -502,7 +502,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                       navigate(notificationsPath);
                       setShowPanel(false);
                     }}
-                    className="text-white hover:bg-white/10 h-7 px-2 text-xs"
+                    className="text-white hover:bg-white/10 h-6 sm:h-7 px-1.5 sm:px-2 text-[10px] sm:text-xs"
                     title="View all notifications"
                   >
                     View All
@@ -512,48 +512,63 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                       size="sm"
                       variant="ghost"
                       onClick={requestPermission}
-                      className="text-white hover:bg-white/10 h-7 px-2 text-xs"
+                      className="text-white hover:bg-white/10 h-6 sm:h-7 px-1.5 sm:px-2 text-[10px] sm:text-xs hidden sm:flex"
                       title="Enable desktop notifications"
                     >
-                      <BellRing className="w-3.5 h-3.5" />
+                      <BellRing className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
                     </Button>
                   )}
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowPanel(false)}
-                    className="text-white hover:bg-white/10 h-7 w-7 p-0"
+                    className="text-white hover:bg-white/10 h-6 sm:h-7 w-6 sm:w-7 p-0"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                   </Button>
                 </div>
               </div>
             </div>
 
-            {/* Tabs - Simplified */}
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
-              <TabsList className="w-full rounded-none border-b bg-gray-50 grid grid-cols-2 h-9">
-                <TabsTrigger value="all" className="data-[state=active]:bg-white data-[state=active]:text-blue-600 text-xs">
+            {/* Tabs - Simplified, Compact on mobile */}
+            <div className="border-b border-gray-200 bg-gray-50">
+              <div className="flex">
+                <button
+                  onClick={() => setActiveTab('all')}
+                  className={`flex-1 px-3 py-2 text-center text-[11px] sm:text-xs font-medium transition-colors ${
+                    activeTab === 'all'
+                      ? 'bg-white text-blue-600 border-b-2 border-blue-600'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                >
                   All {counts.all > 0 && `(${counts.all})`}
-                </TabsTrigger>
-                <TabsTrigger value="unread" className="data-[state=active]:bg-white data-[state=active]:text-blue-600 text-xs">
+                </button>
+                <button
+                  onClick={() => setActiveTab('unread')}
+                  className={`flex-1 px-3 py-2 text-center text-[11px] sm:text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
+                    activeTab === 'unread'
+                      ? 'bg-white text-blue-600 border-b-2 border-blue-600'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                >
                   Unread
                   {counts.unread > 0 && (
-                    <Badge className="bg-red-500 text-white ml-1 h-4 px-1.5 text-xs">
+                    <span className="bg-red-500 text-white px-1.5 py-0.5 rounded-full text-[10px] font-bold min-w-[18px]">
                       {counts.unread}
-                    </Badge>
+                    </span>
                   )}
-                </TabsTrigger>
-              </TabsList>
-              {/* Removed PR and System tabs for simplicity */}
+                </button>
+              </div>
+            </div>
 
-              <TabsContent value={activeTab} className="mt-0">
+            {/* Notifications Content */}
+            <div className="flex-1 overflow-hidden">
                 {/* Notifications List */}
-                <div className="h-[400px] overflow-y-auto">
+                <div className="flex-1 overflow-y-auto max-h-[calc(85vh-100px)] sm:h-[400px]">
                   {filteredNotifications.length === 0 ? (
-                    <div className="p-8 text-center">
-                      <Bell className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-500">No notifications</p>
+                    <div className="p-6 sm:p-8 text-center">
+                      <Bell className="w-10 sm:w-12 h-10 sm:h-12 text-gray-300 mx-auto mb-2 sm:mb-3" />
+                      <p className="text-gray-500 text-sm">No notifications</p>
                     </div>
                   ) : (
                     <div className="divide-y">
@@ -562,26 +577,28 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                           key={notification.id}
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
-                          className={`p-3 hover:bg-gray-50 transition-colors cursor-pointer ${
+                          className={`p-2.5 sm:p-3 hover:bg-gray-50 transition-colors cursor-pointer ${
                             !notification.read ? 'bg-[#243d8a]/5/30' : ''
                           }`}
                           onClick={() => handleNotificationAction(notification)}
                         >
-                          <div className="flex items-start gap-3">
-                            <div className={`p-1.5 rounded-md ${getNotificationColor(notification.type)}`}>
-                              {getNotificationIcon(notification.type)}
+                          <div className="flex items-start gap-2 sm:gap-3">
+                            <div className={`p-1 sm:p-1.5 rounded-md flex-shrink-0 ${getNotificationColor(notification.type)}`}>
+                              <span className="[&>svg]:w-4 [&>svg]:h-4 sm:[&>svg]:w-5 sm:[&>svg]:h-5">
+                                {getNotificationIcon(notification.type)}
+                              </span>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <h4 className="font-medium text-sm text-gray-900 mb-1">
+                              <h4 className="font-medium text-xs sm:text-sm text-gray-900 mb-0.5 sm:mb-1 line-clamp-2">
                                 {notification.title}
                               </h4>
-                              <p className="text-xs text-gray-600 mb-2">
+                              <p className="text-[10px] sm:text-xs text-gray-600 mb-1.5 sm:mb-2 line-clamp-2">
                                 {notification.message}
                               </p>
-                              
-                              {/* Metadata */}
+
+                              {/* Metadata - Hidden on mobile for compactness */}
                               {notification.metadata && (
-                                <div className="flex flex-wrap gap-1.5 mb-2">
+                                <div className="hidden sm:flex flex-wrap gap-1.5 mb-2">
                                   {notification.metadata.project && (
                                     <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
                                       <FileText className="w-3 h-3 mr-1" />
@@ -597,23 +614,23 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                                 </div>
                               )}
 
-                              <div className="flex items-center gap-2 mt-2">
-                                <div className="flex items-center gap-2 flex-1">
+                              <div className="flex items-center gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                                <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
                                   {/* Temporarily hidden - timestamp showing incorrect time */}
                                   {/* <span className="text-xs text-gray-400">
                                     {formatTimestamp(notification.timestamp)}
                                   </span> */}
                                   {notification.metadata?.sender && (
-                                    <span className="text-xs text-gray-500">
-                                      <Users className="w-3 h-3 inline mr-1" />
+                                    <span className="text-[10px] sm:text-xs text-gray-500 truncate">
+                                      <Users className="w-2.5 sm:w-3 h-2.5 sm:h-3 inline mr-0.5 sm:mr-1" />
                                       {notification.metadata.sender}
                                     </span>
                                   )}
                                 </div>
-                                
+
                                 {/* Actions */}
-                                <div className="flex items-center gap-1 flex-shrink-0">
-                                  <Badge className={`text-[10px] px-1.5 py-0.5 ${getPriorityColor(notification.priority)} border`}>
+                                <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
+                                  <Badge className={`text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-0 sm:py-0.5 ${getPriorityColor(notification.priority)} border`}>
                                     {notification.priority}
                                   </Badge>
                                   {!notification.read && (
@@ -624,10 +641,10 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                                         e.stopPropagation();
                                         markAsRead(notification.id);
                                       }}
-                                      className="h-6 w-6 p-0"
+                                      className="h-5 w-5 sm:h-6 sm:w-6 p-0"
                                       title="Mark as read"
                                     >
-                                      <Check className="w-3 h-3" />
+                                      <Check className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
                                     </Button>
                                   )}
                                   <Button
@@ -637,10 +654,10 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                                       e.stopPropagation();
                                       deleteNotification(notification.id);
                                     }}
-                                    className="h-6 w-6 p-0 text-gray-400 hover:text-red-600"
+                                    className="h-5 w-5 sm:h-6 sm:w-6 p-0 text-gray-400 hover:text-red-600"
                                     title="Delete"
                                   >
-                                    <X className="w-3 h-3" />
+                                    <X className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
                                   </Button>
                                 </div>
                               </div>
@@ -651,16 +668,15 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                     </div>
                   )}
                 </div>
-              </TabsContent>
-            </Tabs>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Enhanced Toast Notifications with PR Support */}
+      {/* Enhanced Toast Notifications with PR Support - Mobile friendly */}
       <div className={cn(
         "fixed z-[10000] space-y-2 pointer-events-none",
-        positionClasses[position]
+        "top-4 right-2 sm:right-4 left-2 sm:left-auto"
       )}>
         <AnimatePresence>
           {toastNotifications.map((notification, index) => (
@@ -668,7 +684,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
               key={notification.id}
               initial={{
                 opacity: 0,
-                x: position.includes('right') ? 100 : -100,
+                x: 100,
                 scale: 0.9
               }}
               animate={{
@@ -678,7 +694,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
               }}
               exit={{
                 opacity: 0,
-                x: position.includes('right') ? 100 : -100,
+                x: 100,
                 scale: 0.9
               }}
               transition={{
@@ -690,35 +706,37 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                 zIndex: 10000 - index
               }}
               className={cn(
-                "bg-white rounded-lg shadow-2xl border p-4 w-80 pointer-events-auto",
+                "bg-white rounded-lg shadow-2xl border p-3 sm:p-4 w-full sm:w-80 pointer-events-auto ml-auto",
                 notification.priority === 'urgent' && "border-red-500 border-2 animate-pulse",
                 notification.category === 'approval' && "border-l-4 border-amber-500"
               )}
             >
-              <div className="flex items-start gap-3">
+              <div className="flex items-start gap-2 sm:gap-3">
                 <div className={cn(
-                  "p-2 rounded-lg flex-shrink-0",
+                  "p-1.5 sm:p-2 rounded-lg flex-shrink-0",
                   getNotificationColor(notification.type)
                 )}>
-                  {getNotificationIcon(notification.type)}
+                  <span className="[&>svg]:w-4 [&>svg]:h-4 sm:[&>svg]:w-5 sm:[&>svg]:h-5">
+                    {getNotificationIcon(notification.type)}
+                  </span>
                 </div>
-                <div className="flex-1">
-                  <h4 className="font-medium text-sm text-gray-900">
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-medium text-xs sm:text-sm text-gray-900 line-clamp-2">
                     {notification.title}
                   </h4>
-                  <p className="text-xs text-gray-600 mt-1">
+                  <p className="text-[10px] sm:text-xs text-gray-600 mt-0.5 sm:mt-1 line-clamp-2">
                     {notification.message}
                   </p>
                   {notification.category === 'approval' && notification.metadata && (
-                    <div className="mt-2 flex items-center gap-2">
+                    <div className="mt-1.5 sm:mt-2 flex flex-wrap items-center gap-1 sm:gap-2">
                       {notification.metadata.project && (
-                        <Badge variant="outline" className="text-[10px]">
-                          <FileText className="w-3 h-3 mr-1" />
-                          {notification.metadata.project}
+                        <Badge variant="outline" className="text-[9px] sm:text-[10px] px-1 sm:px-1.5">
+                          <FileText className="w-2.5 sm:w-3 h-2.5 sm:h-3 mr-0.5 sm:mr-1" />
+                          <span className="truncate max-w-[80px] sm:max-w-none">{notification.metadata.project}</span>
                         </Badge>
                       )}
                       {notification.metadata.amount && (
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-[9px] sm:text-[10px] px-1 sm:px-1.5">
                           AED {notification.metadata.amount.toLocaleString()}
                         </Badge>
                       )}
@@ -727,14 +745,14 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                   {notification.actionRequired && (
                     <Button
                       size="sm"
-                      className="h-6 px-2 text-[11px] mt-2 bg-red-500 hover:bg-red-600 text-white"
+                      className="h-5 sm:h-6 px-1.5 sm:px-2 text-[10px] sm:text-[11px] mt-1.5 sm:mt-2 bg-red-500 hover:bg-red-600 text-white"
                       onClick={() => {
                         handleNotificationAction(notification);
                         removeToast(notification.id);
                       }}
                     >
                       View PR
-                      <ChevronRight className="w-3 h-3 ml-0.5" />
+                      <ChevronRight className="w-2.5 sm:w-3 h-2.5 sm:h-3 ml-0.5" />
                     </Button>
                   )}
                 </div>
@@ -742,9 +760,9 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                   variant="ghost"
                   size="sm"
                   onClick={() => removeToast(notification.id)}
-                  className="h-6 w-6 p-0 hover:bg-gray-100"
+                  className="h-5 w-5 sm:h-6 sm:w-6 p-0 hover:bg-gray-100 flex-shrink-0"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
                 </Button>
               </div>
             </motion.div>
