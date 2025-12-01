@@ -141,11 +141,11 @@ const OTPInput: React.FC<OTPInputProps> = ({
             aria-label={`OTP digit ${index + 1} of ${length}`}
             title={`Enter digit ${index + 1} of ${length}`}
             className={cn(
-              "w-12 h-14 text-center text-xl font-semibold",
-              "border-2 rounded-xl transition-all duration-200",
-              "focus:outline-none focus:ring-2 focus:ring-offset-2",
-              digit 
-                ? "border-[#243d8a] bg-[#243d8a]/5 text-[#243d8a]" 
+              "w-10 h-11 md:w-12 md:h-14 text-center text-lg md:text-xl font-semibold",
+              "border-2 rounded-lg md:rounded-xl transition-all duration-200",
+              "focus:outline-none focus:ring-2 focus:ring-offset-1 md:focus:ring-offset-2",
+              digit
+                ? "border-[#243d8a] bg-[#243d8a]/5 text-[#243d8a]"
                 : "border-gray-300 bg-white",
               "focus:border-[#243d8a] focus:ring-[#243d8a]/20",
               "disabled:opacity-50 disabled:cursor-not-allowed",
