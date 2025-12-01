@@ -244,23 +244,26 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                           Request Extension
                         </button>
                       )}
+
+                      {/* Download Button - Moved to left side near Reject button */}
+                      {onDownload && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDownload();
+                          }}
+                          className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors flex items-center gap-2 font-medium"
+                          title="Download BOQ"
+                        >
+                          <Download className="w-5 h-5" />
+                          Download
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Right side: Only Download and Close buttons */}
+                  {/* Right side: Only Close button */}
                   <div className="flex items-center gap-2">
-                    {onDownload && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDownload();
-                        }}
-                        className="p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
-                        title="Download BOQ"
-                      >
-                        <Download className="w-5 h-5" />
-                      </button>
-                    )}
                     {/* Close button - Only show in normal modal mode (not fullScreen) */}
                     {!fullScreen && (
                       <button

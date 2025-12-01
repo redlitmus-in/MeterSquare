@@ -106,17 +106,19 @@ def download_client_pdf():
         cover_page = None
         md_signature_image = None
         authorized_signature_image = None
+        company_seal_image = None
         if request.method == 'POST':
             data = request.get_json() or {}
             cover_page = data.get('cover_page')
             include_signature = data.get('include_signature', False)
 
-            # If include_signature is True, fetch both signatures from admin settings
+            # If include_signature is True, fetch both signatures and seal from admin settings
             if include_signature:
                 from controllers.settings_controller import get_signatures_for_pdf
                 signatures = get_signatures_for_pdf()
                 md_signature_image = signatures.get('md_signature')
                 authorized_signature_image = signatures.get('authorized_signature')
+                company_seal_image = signatures.get('company_seal')
 
         if not boq_id:
             return jsonify({"success": False, "error": "boq_id is required"}), 400
@@ -189,7 +191,8 @@ def download_client_pdf():
         pdf_data = generator.generate_client_pdf(
             project, items, total_material_cost, total_labour_cost, grand_total, boq_json,
             terms_text=None, selected_terms=selected_terms, include_images=include_images,
-            cover_page=cover_page, md_signature_image=md_signature_image, authorized_signature_image=authorized_signature_image
+            cover_page=cover_page, md_signature_image=md_signature_image, authorized_signature_image=authorized_signature_image,
+            company_seal_image=company_seal_image
         )
 
         # Send file
@@ -294,14 +297,16 @@ def preview_client_pdf():
         include_images = data.get('include_images', True)
         include_signature = data.get('include_signature', False)
 
-        # If include_signature is True, fetch both signatures from admin settings
+        # If include_signature is True, fetch both signatures and seal from admin settings
         md_signature_image = None
         authorized_signature_image = None
+        company_seal_image = None
         if include_signature:
             from controllers.settings_controller import get_signatures_for_pdf
             signatures = get_signatures_for_pdf()
             md_signature_image = signatures.get('md_signature')
             authorized_signature_image = signatures.get('authorized_signature')
+            company_seal_image = signatures.get('company_seal')
 
         if not boq_id:
             return jsonify({"success": False, "error": "boq_id is required"}), 400
@@ -370,7 +375,8 @@ def preview_client_pdf():
         pdf_data = generator.generate_client_pdf(
             project, items, total_material_cost, total_labour_cost, grand_total, boq_json,
             terms_text=None, selected_terms=selected_terms, include_images=include_images,
-            cover_page=cover_page, md_signature_image=md_signature_image, authorized_signature_image=authorized_signature_image
+            cover_page=cover_page, md_signature_image=md_signature_image, authorized_signature_image=authorized_signature_image,
+            company_seal_image=company_seal_image
         )
 
         # Send file for preview (inline display, not download)

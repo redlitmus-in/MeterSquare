@@ -6,7 +6,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfgen import canvas
 from io import BytesIO
@@ -55,7 +55,7 @@ class ModernBOQPDFGenerator:
             except:
                 pass
 
-    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, selected_terms=None, include_images=True, cover_page=None, signature_image=None, md_signature_image=None, authorized_signature_image=None):
+    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, selected_terms=None, include_images=True, cover_page=None, signature_image=None, md_signature_image=None, authorized_signature_image=None, company_seal_image=None):
         """Generate clean CLIENT quotation PDF
 
         Args:
@@ -68,6 +68,7 @@ class ModernBOQPDFGenerator:
             signature_image: Base64 encoded signature image (legacy - for backward compatibility)
             md_signature_image: MD signature for cover page (new)
             authorized_signature_image: Authorized signature for quotation section (new)
+            company_seal_image: Company seal/stamp image (base64)
         """
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4,
@@ -78,6 +79,8 @@ class ModernBOQPDFGenerator:
         # Store authorized signature for use in quotation signature section
         # Use new authorized_signature_image if provided, fallback to legacy signature_image
         self.signature_image = authorized_signature_image or signature_image
+        # Store company seal for use in signature section
+        self.company_seal_image = company_seal_image
 
         # Cover Page (if provided) - use MD signature
         if cover_page:
@@ -1512,25 +1515,32 @@ class ModernBOQPDFGenerator:
                            Takes precedence over terms_text if provided.
         """
         elements = []
-        elements.append(Spacer(1, 10))
+        terms_elements = []  # Collect terms separately for potential KeepTogether
+
+        terms_elements.append(Spacer(1, 10))
 
         terms_style = ParagraphStyle('Terms', parent=self.styles['Normal'],
                                      fontSize=7, textColor=colors.HexColor('#666666'))
 
-        elements.append(Paragraph('<b>TERMS & CONDITIONS:</b>', terms_style))
+        terms_elements.append(Paragraph('<b>TERMS & CONDITIONS:</b>', terms_style))
+
+        # Count terms for dynamic layout decision
+        terms_count = 0
 
         # Priority: selected_terms (new system) > terms_text (legacy) > defaults
         if selected_terms and len(selected_terms) > 0:
+            terms_count = len(selected_terms)
             # New system: Use selected terms from database
             for idx, term in enumerate(selected_terms, 1):
                 term_text = term.get('terms_text', '').strip()
                 if term_text:
                     # Add numbered bullet point
                     formatted_text = f'{idx}. {term_text}'
-                    elements.append(Paragraph(formatted_text, terms_style))
+                    terms_elements.append(Paragraph(formatted_text, terms_style))
         elif terms_text and terms_text.strip():
             # Legacy system: Parse custom terms - handle multi-line with bullet points
             lines = terms_text.strip().split('\n')
+            terms_count = len([l for l in lines if l.strip()])
             for line in lines:
                 line = line.strip()
                 if line:
@@ -1539,16 +1549,17 @@ class ModernBOQPDFGenerator:
                         line = f'• {line}'
                     elif line.startswith('-'):
                         line = f'• {line[1:].strip()}'
-                    elements.append(Paragraph(line, terms_style))
+                    terms_elements.append(Paragraph(line, terms_style))
         else:
+            terms_count = 3
             # Default hardcoded terms (fallback)
-            elements.append(Paragraph('• This quotation is valid for 30 days from the date of issue.', terms_style))
-            elements.append(Paragraph('• Payment terms: 50% advance, 40% on delivery, 10% after installation.', terms_style))
-            elements.append(Paragraph('• All prices are in AED and exclude VAT unless stated otherwise.', terms_style))
+            terms_elements.append(Paragraph('• This quotation is valid for 30 days from the date of issue.', terms_style))
+            terms_elements.append(Paragraph('• Payment terms: 50% advance, 40% on delivery, 10% after installation.', terms_style))
+            terms_elements.append(Paragraph('• All prices are in AED and exclude VAT unless stated otherwise.', terms_style))
 
-        elements.append(Spacer(1, 8))
+        terms_elements.append(Spacer(1, 8))
 
-        # Signatures - Include uploaded signature image if available
+        # Signatures - Include uploaded signature image and seal if available
         # Build MeterSquare signature side
         ms_header = Paragraph('<b>For MeterSquare Interiors LLC</b>',
             ParagraphStyle('SigHeader', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER))
@@ -1566,20 +1577,47 @@ class ModernBOQPDFGenerator:
             except Exception as e:
                 print(f"[PDF] Error rendering signature in BOQ: {e}")
 
-        ms_line = Paragraph('_____________________<br/>Authorized Signature',
+        # Build seal image or empty space
+        seal_img_element = Spacer(1, 25)  # Default empty space if no seal
+        if hasattr(self, 'company_seal_image') and self.company_seal_image:
+            try:
+                # Parse base64 data URL
+                seal_data = self.company_seal_image
+                if seal_data.startswith('data:image/'):
+                    header, encoded = seal_data.split(',', 1)
+                    seal_bytes = base64.b64decode(encoded)
+                    seal_buffer = BytesIO(seal_bytes)
+                    seal_img_element = Image(seal_buffer, width=0.8*inch, height=0.8*inch, kind='proportional')
+            except Exception as e:
+                print(f"[PDF] Error rendering seal in BOQ: {e}")
+
+        # MeterSquare signature with label "Technical Director"
+        ms_line = Paragraph('_____________________<br/><b>Technical Director</b><br/><font size="6">Authorized Signature</font>',
             ParagraphStyle('SigLine', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER))
 
         # Client signature side
         client_header = Paragraph('<b>Client Acceptance</b>',
             ParagraphStyle('ClientHeader', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER))
         client_space = Spacer(1, 25)
-        client_line = Paragraph('_____________________<br/>Client Signature',
+        client_line = Paragraph('_____________________<br/><b>Client Signature</b>',
             ParagraphStyle('ClientLine', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER))
 
-        # Create a single table with proper alignment
+        # Create signature + seal combo for MeterSquare side
+        # Signature and seal side by side
+        sig_seal_data = [[sig_img_element, seal_img_element]]
+        sig_seal_table = Table(sig_seal_data, colWidths=[1.5*inch, 1.0*inch])
+        sig_seal_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (0,0), 'CENTER'),
+            ('ALIGN', (1,0), (1,0), 'CENTER'),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ]))
+
+        # Create a single table with proper alignment for both sides
         sig_data = [
             [ms_header, client_header],
-            [sig_img_element, client_space],
+            [sig_seal_table, client_space],
             [ms_line, client_line]
         ]
 
@@ -1590,15 +1628,29 @@ class ModernBOQPDFGenerator:
             ('TOPPADDING', (0,0), (-1,-1), 2),
             ('BOTTOMPADDING', (0,0), (-1,-1), 2),
         ]))
-        elements.append(sig_table)
+        terms_elements.append(sig_table)
 
-        elements.append(Spacer(1, 5))
+        terms_elements.append(Spacer(1, 8))
+
+        # Thin line before footer
+        from reportlab.platypus import HRFlowable
+        terms_elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#cccccc'), spaceBefore=3, spaceAfter=3))
 
         # Footer
-        elements.append(Paragraph(
+        terms_elements.append(Paragraph(
             'MeterSquare Interiors LLC | P.O. Box 12345, Dubai, UAE | Tel: +971 4 123 4567 | info@metersquare.com',
             ParagraphStyle('Footer', parent=self.styles['Normal'], fontSize=6,
                          textColor=colors.HexColor('#999999'), alignment=TA_CENTER)
         ))
+
+        # Dynamic layout based on terms count:
+        # If more than 8 terms, keep terms + signatures + footer together on same page
+        # This ensures they move to next page together when content is large
+        if terms_count > 8:
+            # Large terms section - keep everything together
+            elements.append(KeepTogether(terms_elements))
+        else:
+            # Small terms section - flow naturally
+            elements.extend(terms_elements)
 
         return elements

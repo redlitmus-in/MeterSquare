@@ -1694,6 +1694,7 @@ def get_boq(boq_id):
             "terms_conditions": terms_conditions,
             "project_details": {
                 "project_name": project.project_name if project else None,
+                "client": project.client if project else None,
                 "location": project.location if project else None,
                 "floor": project.floor_name if project else None,
                 "hours": project.working_hours if project else None,

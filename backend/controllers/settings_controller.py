@@ -421,21 +421,22 @@ def get_signature_for_pdf():
 def get_signatures_for_pdf():
     """
     Get both MD and authorized signature images for PDF generation (internal use)
-    Returns dict with md_signature and authorized_signature if enabled, None values otherwise
+    Returns dict with md_signature, authorized_signature, and company_seal if enabled, None values otherwise
     """
     try:
         settings = SystemSettings.query.first()
         if not settings:
-            return {'md_signature': None, 'authorized_signature': None}
+            return {'md_signature': None, 'authorized_signature': None, 'company_seal': None}
 
         if not getattr(settings, 'signature_enabled', False):
-            return {'md_signature': None, 'authorized_signature': None}
+            return {'md_signature': None, 'authorized_signature': None, 'company_seal': None}
 
         return {
             'md_signature': getattr(settings, 'md_signature_image', None),
-            'authorized_signature': getattr(settings, 'signature_image', None)
+            'authorized_signature': getattr(settings, 'signature_image', None),
+            'company_seal': getattr(settings, 'company_stamp_image', None)
         }
 
     except Exception as e:
         log.error(f"Error getting signatures for PDF: {str(e)}")
-        return {'md_signature': None, 'authorized_signature': None}
+        return {'md_signature': None, 'authorized_signature': None, 'company_seal': None}

@@ -33,15 +33,17 @@ def send_boq_to_client():
         cover_page = data.get('cover_page')  # Cover page data for PDF
         include_signature = data.get('include_signature', False)  # Boolean to include admin signature
 
-        # If include_signature is True, fetch both signatures from admin settings
+        # If include_signature is True, fetch both signatures and seal from admin settings
         md_signature_image = None
         authorized_signature_image = None
+        company_seal_image = None
         if include_signature:
             from controllers.settings_controller import get_signatures_for_pdf
             signatures = get_signatures_for_pdf()
             md_signature_image = signatures.get('md_signature')
             authorized_signature_image = signatures.get('authorized_signature')
-            log.info(f"[SEND_BOQ] include_signature={include_signature}, md_signature exists={md_signature_image is not None}, authorized_signature exists={authorized_signature_image is not None}")
+            company_seal_image = signatures.get('company_seal')
+            log.info(f"[SEND_BOQ] include_signature={include_signature}, md_signature exists={md_signature_image is not None}, authorized_signature exists={authorized_signature_image is not None}, company_seal exists={company_seal_image is not None}")
 
         if not boq_id or not client_emails_raw:
             return jsonify({"success": False, "error": "boq_id and client_email are required"}), 400
@@ -180,7 +182,7 @@ def send_boq_to_client():
             try:
                 pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
                 # Generate PDF WITH images, selected terms, cover page, and optional signatures
-                pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms=selected_terms, include_images=True, cover_page=cover_page, md_signature_image=md_signature_image, authorized_signature_image=authorized_signature_image)
+                pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms=selected_terms, include_images=True, cover_page=cover_page, md_signature_image=md_signature_image, authorized_signature_image=authorized_signature_image, company_seal_image=company_seal_image)
                 pdf_file = (pdf_filename, pdf_data)
             except Exception as pdf_err:
                 log.error(f"Error generating PDF: {str(pdf_err)}")
@@ -780,7 +782,7 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     return excel_buffer.read()
 
 
-def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, selected_terms=None, include_images=True, cover_page=None, md_signature_image=None, authorized_signature_image=None):
+def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, selected_terms=None, include_images=True, cover_page=None, md_signature_image=None, authorized_signature_image=None, company_seal_image=None):
     """
     Generate Client PDF - MODERN PROFESSIONAL CORPORATE FORMAT
     Uses unified ModernBOQPDFGenerator
@@ -791,9 +793,10 @@ def generate_client_pdf(project, items, total_material_cost, total_labour_cost, 
         cover_page: Optional dict with cover page data for quotation letter
         md_signature_image: MD signature for cover page (base64)
         authorized_signature_image: Authorized signature for quotation section (base64)
+        company_seal_image: Company seal/stamp image (base64)
     """
     if boq_json is None:
         boq_json = {}
 
     generator = ModernBOQPDFGenerator()
-    return generator.generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text=None, selected_terms=selected_terms, include_images=include_images, cover_page=cover_page, md_signature_image=md_signature_image, authorized_signature_image=authorized_signature_image)
+    return generator.generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text=None, selected_terms=selected_terms, include_images=include_images, cover_page=cover_page, md_signature_image=md_signature_image, authorized_signature_image=authorized_signature_image, company_seal_image=company_seal_image)
