@@ -544,13 +544,32 @@ def get_buyer_dashboard():
                 ChangeRequest.is_deleted == False
             ).order_by(desc(ChangeRequest.updated_at)).all()
 
+        # ✅ PERFORMANCE OPTIMIZATION: Batch load all BOQs and Projects upfront
+        # Instead of N+1 queries (2 queries per CR), we do 2 batch queries total
+        cr_boq_ids = list(set([cr.boq_id for cr in change_requests if cr.boq_id]))
+
+        # Batch load all BOQs (was: 1 query per CR = N queries, now: 1 query total)
+        all_boqs = {}
+        if cr_boq_ids:
+            boqs = BOQ.query.filter(BOQ.boq_id.in_(cr_boq_ids), BOQ.is_deleted == False).all()
+            for b in boqs:
+                all_boqs[b.boq_id] = b
+
+        # Batch load all Projects (was: 1 query per CR = N queries, now: 1 query total)
+        project_ids_for_boqs = list(set([b.project_id for b in all_boqs.values() if b.project_id]))
+        all_projects = {}
+        if project_ids_for_boqs:
+            projects = Project.query.filter(Project.project_id.in_(project_ids_for_boqs), Project.is_deleted == False).all()
+            for p in projects:
+                all_projects[p.project_id] = p
+
         for cr in change_requests:
-            # Get BOQ and project info
-            boq = BOQ.query.filter_by(boq_id=cr.boq_id, is_deleted=False).first()
+            # Get BOQ and project info from pre-loaded data (NO QUERY)
+            boq = all_boqs.get(cr.boq_id)  # ✅ Uses pre-loaded dict instead of query
             if not boq:
                 continue
 
-            project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+            project = all_projects.get(boq.project_id)  # ✅ Uses pre-loaded dict instead of query
             if not project:
                 continue
 
@@ -5057,10 +5076,12 @@ def send_po_child_vendor_email(po_child_id):
 
 
 def send_vendor_whatsapp(cr_id):
-    """Send purchase order via WhatsApp to vendor with LPO PDF"""
+    """Send purchase order via WhatsApp to vendor with LPO PDF - supports both parent CR and POChild"""
     try:
         from utils.whatsapp_service import WhatsAppService
         from datetime import datetime
+        from models.po_child import POChild
+        from models.vendor import Vendor
 
         current_user = g.user
         buyer_id = current_user['user_id']
@@ -5073,28 +5094,75 @@ def send_vendor_whatsapp(cr_id):
         vendor_phone = data.get('vendor_phone')
         include_lpo_pdf = data.get('include_lpo_pdf', True)  # Default to include PDF
         lpo_data = data.get('lpo_data')  # LPO customization data from frontend
+        po_child_id = data.get('po_child_id')  # Optional: for POChild records
 
         print(f"vendor_phone: {vendor_phone}")
         print(f"include_lpo_pdf: {include_lpo_pdf}")
         print(f"lpo_data provided: {lpo_data is not None}")
+        print(f"po_child_id: {po_child_id}")
+        print(f"po_child_id TYPE: {type(po_child_id)}")
 
         if not vendor_phone:
             return jsonify({"error": "Vendor phone number is required"}), 400
 
-        # Get the change request
+        # Get the change request (parent)
         cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
         if not cr:
             return jsonify({"error": "Purchase order not found"}), 404
 
-        if not cr.selected_vendor_id:
-            return jsonify({"error": "No vendor selected for this purchase"}), 400
+        # Check if this is a POChild request or parent CR request
+        po_child = None
+        vendor_id = None
 
-        if cr.vendor_selection_status != 'approved':
-            return jsonify({"error": "Vendor selection must be approved by TD before sending WhatsApp"}), 400
+        if po_child_id:
+            # POChild specified directly
+            print(f">>> Looking for POChild with id={po_child_id}")
+            po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
+            print(f">>> POChild found: {po_child is not None}")
+            if po_child:
+                print(f">>> POChild.id: {po_child.id}")
+                print(f">>> POChild.vendor_id: {po_child.vendor_id}")
+                print(f">>> POChild.materials_data: {po_child.materials_data}")
+                print(f">>> POChild.materials_data type: {type(po_child.materials_data)}")
+            if po_child and po_child.vendor_id:
+                vendor_id = po_child.vendor_id
+                if po_child.vendor_selection_status != 'approved':
+                    return jsonify({"error": "Vendor selection must be approved by TD before sending WhatsApp"}), 400
+
+        if not vendor_id:
+            # Try to find POChild by parent_cr_id with approved vendor
+            po_children = POChild.query.filter_by(
+                parent_cr_id=cr_id,
+                is_deleted=False,
+                vendor_selection_status='approved'
+            ).all()
+
+            if po_children:
+                # Find the POChild that matches the vendor phone
+                for pc in po_children:
+                    if pc.vendor_id:
+                        v = Vendor.query.filter_by(vendor_id=pc.vendor_id, is_deleted=False).first()
+                        if v and v.phone == vendor_phone:
+                            po_child = pc
+                            vendor_id = pc.vendor_id
+                            break
+
+                # If no match by phone, use first approved POChild
+                if not vendor_id and po_children:
+                    po_child = po_children[0]
+                    vendor_id = po_child.vendor_id
+
+        if not vendor_id:
+            # Fall back to parent CR's vendor
+            if cr.selected_vendor_id:
+                vendor_id = cr.selected_vendor_id
+                if cr.vendor_selection_status != 'approved':
+                    return jsonify({"error": "Vendor selection must be approved by TD before sending WhatsApp"}), 400
+            else:
+                return jsonify({"error": "No vendor selected for this purchase"}), 400
 
         # Get vendor details
-        from models.vendor import Vendor
-        vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
+        vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
         if not vendor:
             return jsonify({"error": "Vendor not found"}), 404
 
@@ -5108,8 +5176,29 @@ def send_vendor_whatsapp(cr_id):
         if not project:
             return jsonify({"error": "Project not found"}), 404
 
-        # Use the same materials extraction as email (proper method)
-        materials_list, cr_total = process_materials_with_negotiated_prices(cr)
+        # Get materials - use POChild materials if available, otherwise parent CR
+        if po_child and po_child.materials_data:
+            # Use POChild's materials
+            materials_list = []
+            po_total = 0
+            for material in po_child.materials_data:
+                mat_total = float(material.get('total_price', 0) or 0)
+                materials_list.append({
+                    'material_name': material.get('material_name', ''),
+                    'sub_item_name': material.get('sub_item_name', ''),
+                    'quantity': material.get('quantity', 0),
+                    'unit': material.get('unit', ''),
+                    'unit_price': float(material.get('unit_price', 0) or 0),
+                    'total_price': mat_total,
+                    'negotiated_price': float(material.get('negotiated_price', 0) or material.get('unit_price', 0) or 0)
+                })
+                po_total += mat_total
+            cr_total = po_child.materials_total_cost or po_total
+            print(f"Using POChild materials: {len(materials_list)} items, total: {cr_total}")
+        else:
+            # Use parent CR's materials
+            materials_list, cr_total = process_materials_with_negotiated_prices(cr)
+            print(f"Using parent CR materials: {len(materials_list)} items, total: {cr_total}")
 
         # Prepare data for message generation
         vendor_data = {
@@ -5118,8 +5207,11 @@ def send_vendor_whatsapp(cr_id):
             'phone': vendor_phone
         }
 
+        # Use POChild's formatted ID if available
+        display_cr_id = po_child.get_formatted_id() if po_child else f"PO-{cr_id}"
+
         purchase_data = {
-            'cr_id': cr_id,
+            'cr_id': display_cr_id.replace('PO-', '') if display_cr_id.startswith('PO-') else cr_id,
             'date': datetime.utcnow().strftime('%d/%m/%Y'),
             'materials': materials_list,
             'total_cost': round(cr_total, 2)
@@ -5247,7 +5339,7 @@ def send_vendor_whatsapp(cr_id):
                             "trn": getattr(settings, 'company_trn', '') or DEFAULT_COMPANY_TRN if settings else DEFAULT_COMPANY_TRN
                         },
                         "lpo_info": {
-                            "lpo_number": f"MS/PO/{cr_id}",
+                            "lpo_number": f"MS/PO/{po_child.get_formatted_id().replace('PO-', '')}" if po_child else f"MS/PO/{cr_id}",
                             "lpo_date": datetime.utcnow().strftime('%d.%m.%Y'),
                             "quotation_ref": saved_customization.quotation_ref if saved_customization else "",
                             "custom_message": saved_customization.custom_message if saved_customization and saved_customization.custom_message else "Thank you very much for quoting us for requirements. As per your quotation and settlement done over the mail, we are issuing the LPO and please ensure the delivery on time"
@@ -5278,6 +5370,10 @@ def send_vendor_whatsapp(cr_id):
 
                 print("Step 2: lpo_data prepared, generating PDF...")
                 print(f"lpo_data items count: {len(lpo_data.get('items', []))}")
+                print(f">>> LPO NUMBER in lpo_data: {lpo_data.get('lpo_info', {}).get('lpo_number', 'NOT SET')}")
+                print(f">>> po_child exists: {po_child is not None}")
+                if po_child:
+                    print(f">>> po_child.get_formatted_id(): {po_child.get_formatted_id()}")
 
                 generator = LPOPDFGenerator()
                 pdf_bytes = generator.generate_lpo_pdf(lpo_data)
@@ -5288,8 +5384,12 @@ def send_vendor_whatsapp(cr_id):
                 import time
                 timestamp = int(time.time())
                 project_name_clean = project.project_name.replace(' ', '_')[:20] if project else 'Project'
-                pdf_filename = f"LPO-{cr_id}-{timestamp}.pdf"
+                # Use POChild ID if available for correct PO number
+                po_id_for_filename = po_child.get_formatted_id().replace('PO-', '') if po_child else str(cr_id)
+                pdf_filename = f"LPO-{po_id_for_filename}-{timestamp}.pdf"
                 pdf_path = f"whatsapp/lpo/{pdf_filename}"
+                print(f">>> PDF FILENAME: {pdf_filename}")
+                print(f">>> po_id_for_filename: {po_id_for_filename}")
                 print(f"Step 4: Uploading to Supabase path: {pdf_path}")
 
                 # Upload the file with proper content-disposition for filename
@@ -5332,10 +5432,17 @@ def send_vendor_whatsapp(cr_id):
         log.info(f"WhatsApp send_purchase_order result: {result}")
 
         if result.get('success'):
-            # Update the change request to mark WhatsApp as sent
-            cr.vendor_whatsapp_sent = True
-            cr.vendor_whatsapp_sent_at = datetime.utcnow()
-            cr.updated_at = datetime.utcnow()
+            # Update WhatsApp sent status
+            if po_child:
+                # Update POChild WhatsApp sent status
+                po_child.vendor_whatsapp_sent = True
+                po_child.vendor_whatsapp_sent_at = datetime.utcnow()
+                po_child.updated_at = datetime.utcnow()
+            else:
+                # Update parent CR WhatsApp sent status
+                cr.vendor_whatsapp_sent = True
+                cr.vendor_whatsapp_sent_at = datetime.utcnow()
+                cr.updated_at = datetime.utcnow()
             db.session.commit()
 
             return jsonify({
@@ -6803,14 +6910,24 @@ def preview_lpo_pdf(cr_id):
         from models.system_settings import SystemSettings
         from models.vendor import Vendor
         from models.lpo_customization import LPOCustomization
+        from models.po_child import POChild
 
         current_user = g.user
         buyer_id = current_user['user_id']
+
+        # Check for po_child_id in query params
+        po_child_id = request.args.get('po_child_id', type=int)
+        po_child = None
 
         # Get the change request
         cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
         if not cr:
             return jsonify({"error": "Purchase not found"}), 404
+
+        # Get POChild if specified
+        if po_child_id:
+            po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
+            print(f">>> preview_lpo_pdf: po_child_id={po_child_id}, po_child found={po_child is not None}")
 
         # Get saved customizations if any (handle case where table doesn't exist yet)
         saved_customization = None
@@ -6828,9 +6945,11 @@ def preview_lpo_pdf(cr_id):
                 db.session.rollback()
                 log.warning(f"Could not create table: {str(create_error)}")
 
-        # Get vendor details
+        # Get vendor details - use POChild vendor if available
         vendor = None
-        if cr.selected_vendor_id:
+        if po_child and po_child.vendor_id:
+            vendor = Vendor.query.filter_by(vendor_id=po_child.vendor_id, is_deleted=False).first()
+        elif cr.selected_vendor_id:
             vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
 
         # Get project details
@@ -6842,8 +6961,29 @@ def preview_lpo_pdf(cr_id):
         # Get system settings
         settings = SystemSettings.query.first()
 
-        # Process materials with negotiated prices
-        materials_list, cr_total = process_materials_with_negotiated_prices(cr)
+        # Process materials - use POChild materials if available
+        if po_child and po_child.materials_data:
+            # Use POChild's materials
+            materials_list = []
+            cr_total = 0
+            for material in po_child.materials_data:
+                mat_total = float(material.get('total_price', 0) or 0)
+                materials_list.append({
+                    'material_name': material.get('material_name', ''),
+                    'sub_item_name': material.get('sub_item_name', ''),
+                    'quantity': material.get('quantity', 0),
+                    'unit': material.get('unit', ''),
+                    'unit_price': float(material.get('unit_price', 0) or 0),
+                    'total_price': mat_total,
+                    'negotiated_price': float(material.get('negotiated_price', 0) or material.get('unit_price', 0) or 0)
+                })
+                cr_total += mat_total
+            cr_total = po_child.materials_total_cost or cr_total
+            print(f">>> preview_lpo_pdf: Using POChild materials: {len(materials_list)} items, total: {cr_total}")
+        else:
+            # Use parent CR's materials
+            materials_list, cr_total = process_materials_with_negotiated_prices(cr)
+            print(f">>> preview_lpo_pdf: Using parent CR materials: {len(materials_list)} items, total: {cr_total}")
 
         # Calculate totals
         subtotal = 0
@@ -6909,7 +7049,7 @@ def preview_lpo_pdf(cr_id):
                 "trn": getattr(settings, 'company_trn', '') or DEFAULT_COMPANY_TRN if settings else DEFAULT_COMPANY_TRN
             },
             "lpo_info": {
-                "lpo_number": f"MS/PO/{cr.cr_id}",
+                "lpo_number": f"MS/PO/{po_child.get_formatted_id().replace('PO-', '')}" if po_child else f"MS/PO/{cr.cr_id}",
                 "lpo_date": datetime.now().strftime('%d.%m.%Y'),
                 "quotation_ref": saved_customization.quotation_ref if saved_customization else "",
                 "custom_message": saved_customization.custom_message if saved_customization and saved_customization.custom_message else "Thank you very much for quoting us for requirements. As per your quotation and settlement done over the mail, we are issuing the LPO and please ensure the delivery on time"

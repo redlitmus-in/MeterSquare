@@ -254,7 +254,8 @@ const PurchaseOrders: React.FC = () => {
 
     try {
       setSendingWhatsAppId(purchase.cr_id);
-      await buyerService.sendVendorWhatsApp(purchase.cr_id, purchase.vendor_phone);
+      // Pass po_child_id if this is a POChild record to get correct materials
+      await buyerService.sendVendorWhatsApp(purchase.cr_id, purchase.vendor_phone, true, purchase.po_child_id);
       showSuccess('Purchase order sent via WhatsApp!');
       refetchPending();
     } catch (error: any) {
@@ -795,13 +796,13 @@ const PurchaseOrders: React.FC = () => {
                                 )}
                                 Sent
                               </Button>
-                            ) : (
+                            ) : purchase.vendor_phone ? (
                               <Button
                                 onClick={() => handleSendWhatsApp(purchase)}
-                                disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
+                                disabled={sendingWhatsAppId === purchase.cr_id}
                                 size="sm"
                                 className="flex-1 h-7 text-xs bg-green-500 hover:bg-green-600 text-white px-2 py-1"
-                                title={!purchase.vendor_phone ? 'Vendor phone not available' : 'Send via WhatsApp'}
+                                title="Send via WhatsApp"
                               >
                                 {sendingWhatsAppId === purchase.cr_id ? (
                                   <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -810,6 +811,14 @@ const PurchaseOrders: React.FC = () => {
                                 )}
                                 WhatsApp
                               </Button>
+                            ) : (
+                              <div
+                                className="flex-1 h-7 flex items-center justify-center bg-gray-100 border border-gray-300 rounded text-gray-400 text-xs px-2 py-1 cursor-not-allowed"
+                                title="No phone number available for this vendor"
+                              >
+                                <MessageSquare className="w-3 h-3 mr-1 opacity-50" />
+                                No Phone
+                              </div>
                             )}
                           </div>
                         )
@@ -1075,36 +1084,51 @@ const PurchaseOrders: React.FC = () => {
                             <Mail className="w-3.5 h-3.5 mr-1" />
                             Email
                           </Button>
-                          <Button
-                            onClick={async () => {
-                              const vendorPhone = poChild.vendor_phone || '';
-                              if (!vendorPhone) {
-                                showError('Vendor phone number not available. Please add phone number in vendor settings.');
-                                return;
-                              }
-                              try {
-                                setSendingWhatsAppId(poChild.parent_cr_id);
-                                await buyerService.sendVendorWhatsApp(poChild.parent_cr_id, vendorPhone);
-                                showSuccess('Purchase order sent via WhatsApp!');
-                                refetchApprovedPOChildren();
-                              } catch (error: any) {
-                                showError(error.message || 'Failed to send WhatsApp');
-                              } finally {
-                                setSendingWhatsAppId(null);
-                              }
-                            }}
-                            disabled={sendingWhatsAppId === poChild.parent_cr_id}
-                            className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs"
-                            size="sm"
-                            title={!poChild.vendor_phone ? 'No phone - click to see error' : 'Send via WhatsApp'}
-                          >
-                            {sendingWhatsAppId === poChild.parent_cr_id ? (
-                              <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          {poChild.vendor_phone ? (
+                            poChild.vendor_whatsapp_sent ? (
+                              <div
+                                className="flex-1 flex items-center justify-center bg-green-50 border border-green-300 rounded text-green-600 text-xs px-2 py-1.5"
+                                title={`WhatsApp sent${poChild.vendor_whatsapp_sent_at ? ` on ${new Date(poChild.vendor_whatsapp_sent_at).toLocaleDateString()}` : ''}`}
+                              >
+                                <CheckCircle className="w-3.5 h-3.5 mr-1" />
+                                Sent
+                              </div>
                             ) : (
-                              <MessageSquare className="w-3.5 h-3.5 mr-1" />
-                            )}
-                            WhatsApp
-                          </Button>
+                              <Button
+                                onClick={async () => {
+                                  try {
+                                    setSendingWhatsAppId(poChild.id);
+                                    await buyerService.sendVendorWhatsApp(poChild.parent_cr_id, poChild.vendor_phone!, true, poChild.id);
+                                    showSuccess('Purchase order sent via WhatsApp!');
+                                    refetchApprovedPOChildren();
+                                  } catch (error: any) {
+                                    showError(error.message || 'Failed to send WhatsApp');
+                                  } finally {
+                                    setSendingWhatsAppId(null);
+                                  }
+                                }}
+                                disabled={sendingWhatsAppId === poChild.id}
+                                className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs"
+                                size="sm"
+                                title="Send via WhatsApp"
+                              >
+                                {sendingWhatsAppId === poChild.id ? (
+                                  <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <MessageSquare className="w-3.5 h-3.5 mr-1" />
+                                )}
+                                WhatsApp
+                              </Button>
+                            )
+                          ) : (
+                            <div
+                              className="flex-1 flex items-center justify-center bg-gray-100 border border-gray-300 rounded text-gray-400 text-xs px-2 py-1.5 cursor-not-allowed"
+                              title="No phone number available for this vendor"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 mr-1 opacity-50" />
+                              No Phone
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <>
@@ -1835,13 +1859,13 @@ const PurchaseOrders: React.FC = () => {
                                       )}
                                       <span className="hidden lg:inline">Sent</span>
                                     </Button>
-                                  ) : (
+                                  ) : purchase.vendor_phone ? (
                                     <Button
                                       onClick={() => handleSendWhatsApp(purchase)}
-                                      disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
+                                      disabled={sendingWhatsAppId === purchase.cr_id}
                                       size="sm"
                                       className="px-2 py-1 h-auto text-xs bg-green-500 hover:bg-green-600 text-white"
-                                      title={!purchase.vendor_phone ? 'No phone' : 'WhatsApp'}
+                                      title="Send via WhatsApp"
                                     >
                                       {sendingWhatsAppId === purchase.cr_id ? (
                                         <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -1850,6 +1874,14 @@ const PurchaseOrders: React.FC = () => {
                                       )}
                                       <span className="hidden lg:inline">WA</span>
                                     </Button>
+                                  ) : (
+                                    <div
+                                      className="px-2 py-1 h-auto flex items-center bg-gray-100 border border-gray-300 rounded text-gray-400 text-xs cursor-not-allowed"
+                                      title="No phone number available"
+                                    >
+                                      <MessageSquare className="w-3 h-3 sm:mr-1 opacity-50" />
+                                      <span className="hidden lg:inline">No Phone</span>
+                                    </div>
                                   )}
                                 </>
                               )

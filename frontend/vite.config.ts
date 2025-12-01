@@ -141,9 +141,50 @@ export default defineConfig(({ mode }) => {
             }
           },
 
-          // ✅ CRITICAL PERFORMANCE FIX: Auto code splitting enabled
-          // Vite will automatically split code based on dynamic imports
-          // manualChunks: undefined  // Let Vite handle it automatically
+          // ✅ PERFORMANCE: Manual chunk splitting for optimal loading
+          // Separates heavy vendor libraries into their own chunks
+          // This reduces initial bundle size and allows parallel loading
+          manualChunks: (id) => {
+            // React core libraries - needed immediately
+            if (id.includes('node_modules/react/') ||
+                id.includes('node_modules/react-dom/') ||
+                id.includes('node_modules/react-router-dom/')) {
+              return 'react-core';
+            }
+            // UI framework - large, split it out
+            if (id.includes('node_modules/@radix-ui/') ||
+                id.includes('node_modules/lucide-react/') ||
+                id.includes('node_modules/@heroicons/')) {
+              return 'ui-components';
+            }
+            // Data processing libs - only needed for specific features
+            if (id.includes('node_modules/xlsx/') ||
+                id.includes('node_modules/jspdf/') ||
+                id.includes('node_modules/pdfmake/')) {
+              return 'data-export';
+            }
+            // Charts - only needed for dashboards
+            if (id.includes('node_modules/highcharts/') ||
+                id.includes('node_modules/recharts/') ||
+                id.includes('node_modules/chart.js/')) {
+              return 'charts';
+            }
+            // Form handling
+            if (id.includes('node_modules/react-hook-form/') ||
+                id.includes('node_modules/zod/') ||
+                id.includes('node_modules/@hookform/')) {
+              return 'forms';
+            }
+            // Supabase & realtime
+            if (id.includes('node_modules/@supabase/') ||
+                id.includes('node_modules/socket.io-client/')) {
+              return 'realtime';
+            }
+            // All other vendor modules
+            if (id.includes('node_modules/')) {
+              return 'vendor';
+            }
+          }
         },
 
         // Tree-shaking and side-effects optimization

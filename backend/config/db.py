@@ -1,11 +1,38 @@
 import os
+import time
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 # Load environment variables from .env file
 load_dotenv()
 
 db = SQLAlchemy()
+
+# ✅ PERFORMANCE: Query timing for development
+# Logs slow queries (>100ms) to help identify bottlenecks
+_query_start_time = {}
+
+@event.listens_for(Engine, "before_cursor_execute")
+def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    """Record query start time"""
+    if os.getenv("ENVIRONMENT", "development") == "development":
+        conn.info.setdefault('query_start_time', []).append(time.time())
+
+@event.listens_for(Engine, "after_cursor_execute")
+def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    """Log slow queries (>100ms) in development"""
+    if os.getenv("ENVIRONMENT", "development") == "development":
+        start_times = conn.info.get('query_start_time', [])
+        if start_times:
+            total_time = time.time() - start_times.pop()
+            # Log queries that take more than 100ms
+            if total_time > 0.1:
+                import logging
+                logging.getLogger('slow_queries').warning(
+                    f"SLOW QUERY ({total_time*1000:.1f}ms): {statement[:200]}..."
+                )
 
 def initialize_db(app):
     """

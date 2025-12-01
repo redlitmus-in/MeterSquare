@@ -273,7 +273,8 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const loadLpoData = async () => {
     try {
       setIsLoadingLpo(true);
-      const response = await buyerService.previewLPOPdf(purchase.cr_id);
+      // Pass po_child_id to get correct materials for POChild records
+      const response = await buyerService.previewLPOPdf(purchase.cr_id, purchase.po_child_id);
 
       // Enrich vendor data with purchase props if backend returns empty values
       // This ensures Attn (contact person), phone, TRN, and email show correctly in PDF
@@ -504,7 +505,8 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
       setIsSendingWhatsApp(true);
 
-      await buyerService.sendVendorWhatsApp(purchase.cr_id, phoneToSend);
+      // Pass po_child_id if this is a POChild record to get correct materials
+      await buyerService.sendVendorWhatsApp(purchase.cr_id, phoneToSend, true, purchase.po_child_id);
 
       showSuccess('Purchase order sent via WhatsApp successfully!');
 

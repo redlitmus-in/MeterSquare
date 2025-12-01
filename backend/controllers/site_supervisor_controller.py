@@ -167,6 +167,54 @@ def get_all_sitesupervisor_boqs():
             Project.is_deleted == False
         ).all()
 
+        # ✅ PERFORMANCE OPTIMIZATION: Batch load all related data before the loop
+        # Collect all BOQ IDs from all projects for batch queries
+        all_boq_ids = []
+        all_project_ids = [p.project_id for p in projects]
+        for project in projects:
+            boqs = [boq for boq in project.boqs if not boq.is_deleted and boq.email_sent] if hasattr(project, 'boqs') and project.boqs else []
+            all_boq_ids.extend([boq.boq_id for boq in boqs])
+
+        # Batch load BOQ History (was: N queries per project, now: 1 query total)
+        all_boq_history = {}
+        if all_boq_ids:
+            history_records = BOQHistory.query.filter(
+                BOQHistory.boq_id.in_(all_boq_ids)
+            ).order_by(BOQHistory.action_date.desc()).all()
+            for h in history_records:
+                if h.boq_id not in all_boq_history:
+                    all_boq_history[h.boq_id] = h  # Keep only the most recent
+
+        # Batch load BOQ Material Assignments (was: 1 query per project, now: 1 query total)
+        from models.boq_material_assignment import BOQMaterialAssignment
+        all_material_assignments = {}
+        if all_boq_ids:
+            assignments = BOQMaterialAssignment.query.filter(
+                BOQMaterialAssignment.boq_id.in_(all_boq_ids),
+                BOQMaterialAssignment.is_deleted == False
+            ).all()
+            for a in assignments:
+                if a.boq_id not in all_material_assignments:
+                    all_material_assignments[a.boq_id] = a
+
+        # Batch load all PM Assign SS records (was: multiple queries per project, now: 1 query total)
+        all_pm_assign_ss = {}
+        all_pm_assign_ss_by_project = {}
+        if all_boq_ids:
+            pm_assigns = PMAssignSS.query.filter(
+                PMAssignSS.boq_id.in_(all_boq_ids),
+                PMAssignSS.is_deleted == False
+            ).all()
+            for pa in pm_assigns:
+                # Group by boq_id
+                if pa.boq_id not in all_pm_assign_ss:
+                    all_pm_assign_ss[pa.boq_id] = []
+                all_pm_assign_ss[pa.boq_id].append(pa)
+                # Group by project_id
+                if pa.project_id not in all_pm_assign_ss_by_project:
+                    all_pm_assign_ss_by_project[pa.project_id] = []
+                all_pm_assign_ss_by_project[pa.project_id].append(pa)
+
         projects_list = []
         for project in projects:
             # Use pre-loaded relationship instead of querying
@@ -175,15 +223,13 @@ def get_all_sitesupervisor_boqs():
             # Collect BOQ IDs for this project
             boq_ids = [boq.boq_id for boq in boqs]
 
-            # Determine project status from BOQ history
+            # Determine project status from BOQ history using pre-loaded data (NO QUERY)
             project_status = project.status or 'assigned'
 
             # Check if any BOQs exist and have history
             if boqs:
                 for boq in boqs:
-                    history = BOQHistory.query.filter_by(
-                        boq_id=boq.boq_id
-                    ).order_by(BOQHistory.action_date.desc()).first()
+                    history = all_boq_history.get(boq.boq_id)  # ✅ Uses pre-loaded dict instead of query
 
                     if history and history.receiver_role == 'site_engineer':
                         # Site engineer is the receiver - show as assigned/pending
@@ -196,19 +242,16 @@ def get_all_sitesupervisor_boqs():
                 from datetime import timedelta
                 end_date = (project.start_date + timedelta(days=project.duration_days)).isoformat()
 
-            # Check if BOQ has been assigned to a buyer
+            # Check if BOQ has been assigned to a buyer using pre-loaded data (NO QUERY)
             boq_assigned_to_buyer = False
             assigned_buyer_name = None
             if boq_ids:
-                from models.boq_material_assignment import BOQMaterialAssignment
-                assignment = BOQMaterialAssignment.query.filter(
-                    BOQMaterialAssignment.boq_id.in_(boq_ids),
-                    BOQMaterialAssignment.is_deleted == False
-                ).first()
-
-                if assignment:
-                    boq_assigned_to_buyer = True
-                    assigned_buyer_name = assignment.assigned_to_buyer_name
+                for bid in boq_ids:
+                    assignment = all_material_assignments.get(bid)  # ✅ Uses pre-loaded dict
+                    if assignment:
+                        boq_assigned_to_buyer = True
+                        assigned_buyer_name = assignment.assigned_to_buyer_name
+                        break
 
             # Calculate item assignment counts and collect assigned items details
             items_assigned_to_me = 0
@@ -218,18 +261,10 @@ def get_all_sitesupervisor_boqs():
             boqs_with_items = []
 
             if boq_ids:
-                # DEBUG: Check what's in pm_assign_ss for these BOQs
-                log.info(f"=== DEBUG: SE user_id = {user_id}, type = {type(user_id)} ===")
-                log.info(f"=== DEBUG: BOQ IDs to check = {boq_ids} ===")
-
-                # Check ALL assignments for these BOQs (regardless of SE)
-                all_assignments = PMAssignSS.query.filter(
-                    PMAssignSS.boq_id.in_(boq_ids),
-                    PMAssignSS.is_deleted == False
-                ).all()
-                log.info(f"=== DEBUG: Found {len(all_assignments)} total assignments in pm_assign_ss for these BOQs ===")
-                for a in all_assignments:
-                    log.info(f"  - Assignment ID: {a.pm_assign_id}, BOQ: {a.boq_id}, assigned_to_se_id: {a.assigned_to_se_id} (type: {type(a.assigned_to_se_id)}), item_indices: {a.item_indices}")
+                # Get ALL assignments for these BOQs from pre-loaded data (NO QUERY)
+                boq_assignments_list = []
+                for bid in boq_ids:
+                    boq_assignments_list.extend(all_pm_assign_ss.get(bid, []))
 
                 for boq_id in boq_ids:
                     boq = next((b for b in boqs if b.boq_id == boq_id), None)
@@ -239,14 +274,9 @@ def get_all_sitesupervisor_boqs():
                         items = boq_details.boq_details.get('items', [])
                         total_items += len(items)
 
-                        # Get assignments from pm_assign_ss table for this BOQ and SE
-                        assignments = PMAssignSS.query.filter_by(
-                            boq_id=boq_id,
-                            assigned_to_se_id=user_id,
-                            is_deleted=False
-                        ).all()
-
-                        log.info(f"=== DEBUG: For BOQ {boq_id}, found {len(assignments)} assignments for SE {user_id} ===")
+                        # Get assignments from pre-loaded data (NO QUERY)
+                        assignments = [pa for pa in all_pm_assign_ss.get(boq_id, [])
+                                      if pa.assigned_to_se_id == user_id]  # ✅ Filter from pre-loaded data
 
                         # Collect items assigned to this SE for this BOQ
                         boq_assigned_items = []
@@ -334,9 +364,9 @@ def get_all_sitesupervisor_boqs():
                 "boqs": []
             }
 
-            # Add all BOQs to the area's boqs array
+            # Add all BOQs to the area's boqs array using pre-loaded data (NO QUERY)
             for boq_id in boq_ids:
-                boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+                boq = next((b for b in boqs if b.boq_id == boq_id), None)  # ✅ Uses pre-loaded list
                 if boq:
                     area_info["boqs"].append({
                         "boq_id": boq.boq_id,
@@ -344,25 +374,19 @@ def get_all_sitesupervisor_boqs():
                         "items": []  # Items will be populated by ExtraMaterialForm if needed
                     })
 
-            # Check if all SE's work has been PM-confirmed
-            from models.pm_assign_ss import PMAssignSS
-            se_assignments = PMAssignSS.query.filter_by(
-                project_id=project.project_id,
-                assigned_to_se_id=user_id,
-                is_deleted=False,
-                se_completion_requested=True  # Only check assignments where SE requested completion
-            ).all()
+            # Check if all SE's work has been PM-confirmed using pre-loaded data (NO QUERY)
+            # Filter from pre-loaded data instead of querying
+            project_assignments = all_pm_assign_ss_by_project.get(project.project_id, [])
+            se_assignments = [a for a in project_assignments
+                            if a.assigned_to_se_id == user_id and a.se_completion_requested]  # ✅ Uses pre-loaded dict
 
             # SE's work is confirmed if ALL their requested assignments are PM-confirmed
             all_my_work_confirmed = all(a.pm_confirmed_completion for a in se_assignments) if se_assignments else False
 
-            # Check if THIS SE has requested completion (SE-specific, not project-level)
-            # If ANY of this SE's assignments has se_completion_requested=True, then this SE requested completion
-            my_completion_requested = any(a.se_completion_requested for a in PMAssignSS.query.filter_by(
-                project_id=project.project_id,
-                assigned_to_se_id=user_id,
-                is_deleted=False
-            ).all())
+            # Check if THIS SE has requested completion using pre-loaded data (NO QUERY)
+            # Filter from pre-loaded data instead of querying
+            my_se_assignments = [a for a in project_assignments if a.assigned_to_se_id == user_id]  # ✅ Uses pre-loaded dict
+            my_completion_requested = any(a.se_completion_requested for a in my_se_assignments)
 
             projects_list.append({
                 "project_id": project.project_id,

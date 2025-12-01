@@ -55,6 +55,8 @@ export interface POChild {
   vendor_approval_date?: string | null;
   vendor_email_sent?: boolean;
   vendor_email_sent_date?: string | null;
+  vendor_whatsapp_sent?: boolean;
+  vendor_whatsapp_sent_at?: string | null;
   status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'rejected';
   rejection_reason?: string | null;
   purchase_completed_by_user_id?: number | null;
@@ -779,10 +781,15 @@ class BuyerService {
   }
 
   // Preview LPO PDF data (get editable data before generation)
-  async previewLPOPdf(crId: number): Promise<LPOPreviewResponse> {
+  async previewLPOPdf(crId: number, poChildId?: number): Promise<LPOPreviewResponse> {
     try {
+      // Build URL with optional po_child_id query param
+      let url = `${API_URL}/buyer/purchase/${crId}/preview-lpo-pdf`;
+      if (poChildId) {
+        url += `?po_child_id=${poChildId}`;
+      }
       const response = await axios.post<LPOPreviewResponse>(
-        `${API_URL}/buyer/purchase/${crId}/preview-lpo-pdf`,
+        url,
         {},
         { headers: this.getAuthHeaders() }
       );
@@ -962,13 +969,14 @@ class BuyerService {
   }
 
   // Send WhatsApp message to vendor with LPO PDF
-  async sendVendorWhatsApp(crId: number, vendorPhone: string, includeLpoPdf: boolean = true): Promise<{ success: boolean; message: string }> {
+  async sendVendorWhatsApp(crId: number, vendorPhone: string, includeLpoPdf: boolean = true, poChildId?: number): Promise<{ success: boolean; message: string }> {
     try {
       const response = await axios.post<{ success: boolean; message: string }>(
         `${API_URL}/buyer/purchase/${crId}/send-vendor-whatsapp`,
         {
           vendor_phone: vendorPhone,
-          include_lpo_pdf: includeLpoPdf
+          include_lpo_pdf: includeLpoPdf,
+          po_child_id: poChildId
         },
         { headers: this.getAuthHeaders() }
       );

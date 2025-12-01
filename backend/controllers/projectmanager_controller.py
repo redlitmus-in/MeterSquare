@@ -28,6 +28,7 @@ from models.boq import *
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils.boq_email_service import BOQEmailService
+from utils.response_cache import cached_response, invalidate_cache  # ✅ PERFORMANCE: Response caching
 from utils.comprehensive_notification_service import notification_service
 from models.user import User
 from models.role import Role
@@ -255,14 +256,57 @@ def get_all_pm_boqs():
             ).order_by(BOQ.created_at.desc())
         # Paginate
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        # ✅ PERFORMANCE OPTIMIZATION: Batch load all related data in single queries
+        # Instead of N+1 queries (1 query per BOQ), we now do 3 batch queries total
+        boq_ids = [boq.boq_id for boq in paginated.items]
+
+        # Batch load BOQ History (was: 2 queries per BOQ = 2N queries, now: 1 query total)
+        all_history = {}
+        if boq_ids:
+            history_records = BOQHistory.query.filter(
+                BOQHistory.boq_id.in_(boq_ids)
+            ).order_by(BOQHistory.action_date.desc()).all()
+            for h in history_records:
+                if h.boq_id not in all_history:
+                    all_history[h.boq_id] = []
+                all_history[h.boq_id].append(h)
+
+        # Batch load BOQ Details (was: 1 query per BOQ = N queries, now: 1 query total)
+        all_details = {}
+        if boq_ids:
+            details_records = BOQDetails.query.filter(
+                BOQDetails.boq_id.in_(boq_ids),
+                BOQDetails.is_deleted == False
+            ).all()
+            for d in details_records:
+                all_details[d.boq_id] = d
+
+        # Collect all user IDs needed (PMs and SEs) for batch loading
+        pm_user_ids = set()
+        se_user_ids = set()
+        for boq in paginated.items:
+            if boq.project:
+                if boq.project.user_id:
+                    pm_ids_list = boq.project.user_id if isinstance(boq.project.user_id, list) else [boq.project.user_id]
+                    pm_user_ids.update(pm_ids_list)
+                if boq.project.site_supervisor_id:
+                    se_user_ids.add(boq.project.site_supervisor_id)
+
+        # Batch load all Users (was: 2 queries per BOQ = 2N queries, now: 1 query total)
+        all_users = {}
+        all_user_ids = list(pm_user_ids | se_user_ids)
+        if all_user_ids:
+            users = User.query.filter(User.user_id.in_(all_user_ids)).all()
+            for u in users:
+                all_users[u.user_id] = u
+
         # Build response with BOQ details and history
         boqs_list = []
         for boq in paginated.items:
-            # Get BOQ history (will be empty array if no history)
-            history = BOQHistory.query.filter(
-                BOQHistory.boq_id == boq.boq_id,
-                (BOQHistory.sender_role != 'estimator') | (BOQHistory.receiver_role != 'estimator')
-            ).order_by(BOQHistory.action_date.desc()).all()
+            # Get BOQ history from pre-loaded data (NO QUERY - uses pre-loaded dict)
+            history = [h for h in all_history.get(boq.boq_id, [])
+                      if not (h.sender_role == 'estimator' and h.receiver_role == 'estimator')]
 
             # Determine the correct status to display for Project Manager
             display_status = boq.status
@@ -283,14 +327,14 @@ def get_all_pm_boqs():
                         display_status = h.boq_status
                         break
 
-            # Get PM status from the project's assigned user
+            # Get PM status from pre-loaded users (NO QUERY - uses pre-loaded dict)
             pm_status = None
             pm_name = current_user.get('full_name')
             if boq.project and boq.project.user_id:
                 # project.user_id is now a JSONB array, get first PM (primary PM)
                 pm_ids = boq.project.user_id if isinstance(boq.project.user_id, list) else [boq.project.user_id]
                 if pm_ids and len(pm_ids) > 0:
-                    pm_user = User.query.filter_by(user_id=pm_ids[0]).first()
+                    pm_user = all_users.get(pm_ids[0])  # ✅ Uses pre-loaded dict instead of query
                     if pm_user:
                         # Get user_status from database, fallback to is_active if user_status is null
                         pm_status = pm_user.user_status if pm_user.user_status else ("Active" if pm_user.is_active else "Inactive")
@@ -299,10 +343,10 @@ def get_all_pm_boqs():
             # Build complete project details
             project_details = None
             if boq.project:
-                # Get Site Engineer name if assigned
+                # Get Site Engineer name from pre-loaded users (NO QUERY - uses pre-loaded dict)
                 se_name = None
                 if boq.project.site_supervisor_id:
-                    se_user = User.query.filter_by(user_id=boq.project.site_supervisor_id).first()
+                    se_user = all_users.get(boq.project.site_supervisor_id)  # ✅ Uses pre-loaded dict instead of query
                     if se_user:
                         se_name = se_user.full_name
 
@@ -341,12 +385,12 @@ def get_all_pm_boqs():
                     "confirmed_completions": boq.project.confirmed_completions if hasattr(boq.project, 'confirmed_completions') else 0
                 }
 
-            # Check for pending and approved day extension requests that PM sent to TD
+            # Check for pending and approved day extension requests using pre-loaded history (NO QUERY)
             has_pending_day_extension = False
             pending_day_extension_count = 0
             has_approved_extension = False
             if boq.project and boq.project.user_id:  # Only check if PM is assigned
-                pending_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).all()
+                pending_history = all_history.get(boq.boq_id, [])  # ✅ Uses pre-loaded dict instead of query
                 for hist in pending_history:
                     if hist.action and isinstance(hist.action, list):
                         for action in hist.action:
@@ -361,12 +405,12 @@ def get_all_pm_boqs():
                             elif action_type == 'day_extension_approved' and action_status == 'approved':
                                 has_approved_extension = True
 
-            # Get item assignment counts
+            # Get item assignment counts from pre-loaded data (NO QUERY - uses pre-loaded dict)
             total_items = 0
             items_assigned_by_me = 0
             items_pending_assignment = 0
 
-            boq_details_record = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+            boq_details_record = all_details.get(boq.boq_id)  # ✅ Uses pre-loaded dict instead of query
             if boq_details_record and boq_details_record.boq_details:
                 items = boq_details_record.boq_details.get('items', [])
 
@@ -474,17 +518,36 @@ def get_all_pm():
         current_time = datetime.utcnow()
         online_threshold = timedelta(minutes=5)
 
+        # ✅ PERFORMANCE OPTIMIZATION: Batch load all projects with PMs assigned
+        # Instead of N queries (1 per PM), we do 1 query for all projects
+        pm_user_ids = [pm.user_id for pm in get_pms]
+
+        # Get all projects that have any PM assigned (single query instead of N queries)
+        all_projects = Project.query.filter(
+            Project.user_id.isnot(None),
+            Project.is_deleted == False
+        ).all()
+
+        # Build a mapping: pm_user_id -> list of projects
+        pm_projects_map = {}
+        for project in all_projects:
+            if project.user_id:
+                # user_id is JSONB array, so iterate through all PM IDs
+                pm_ids_in_project = project.user_id if isinstance(project.user_id, list) else [project.user_id]
+                for pm_id in pm_ids_in_project:
+                    if pm_id in pm_user_ids:  # Only map for PMs we're interested in
+                        if pm_id not in pm_projects_map:
+                            pm_projects_map[pm_id] = []
+                        pm_projects_map[pm_id].append(project)
+
         for pm in get_pms:
             # Check online status based on user_status field
             # Only "online" is considered online, everything else (offline/NULL) is offline
             is_online = pm.user_status == 'online'
             log.info(f"PM {pm.full_name}: user_status={pm.user_status}, is_online={is_online}")
 
-            # Fetch all projects assigned to this PM (user_id is now JSONB array)
-            # Use JSONB contains operator directly
-            projects = Project.query.filter(
-                Project.user_id.contains([pm.user_id])
-            ).all()
+            # ✅ Get projects from pre-loaded map (NO QUERY - uses pre-loaded dict)
+            projects = pm_projects_map.get(pm.user_id, [])
 
             if projects and len(projects) > 0:
                 # Add each project under assigned list

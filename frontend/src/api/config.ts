@@ -78,10 +78,21 @@ export const supabase = createClient(envConfig.supabase.url, envConfig.supabase.
   }
 });
 
-// Axios instance with enhanced error handling
+// ✅ PERFORMANCE: Standard API client with reasonable timeout
+// Most operations should complete within 60 seconds
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 300000, // Increased timeout to 5 minutes for large BOQ operations
+  timeout: 60000, // 60 seconds for standard operations (reduced from 5 minutes)
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// ✅ PERFORMANCE: Separate client for long-running operations (BOQ uploads, bulk operations)
+// Only use this for operations that genuinely need extended time
+export const longRunningApiClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 300000, // 5 minutes for bulk uploads
   headers: {
     'Content-Type': 'application/json',
   },
@@ -225,7 +236,36 @@ apiClient.interceptors.response.use(
       }
     }
     */
-    
+
+    return Promise.reject(error);
+  }
+);
+
+// ✅ PERFORMANCE: Apply same interceptors to long-running client
+// This ensures auth tokens and cache behavior work for bulk operations
+longRunningApiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('access_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    // Skip cache for long-running operations (they're usually writes)
+    config.headers['X-Skip-Cache'] = 'true';
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+longRunningApiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    console.error('Long-running API Error:', error.message);
+    if (error.response?.status === 401) {
+      localStorage.removeItem('access_token');
+      if (!window.location.pathname.includes('/login')) {
+        window.location.replace('/login');
+      }
+    }
     return Promise.reject(error);
   }
 );

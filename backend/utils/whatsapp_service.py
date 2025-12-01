@@ -242,7 +242,10 @@ class WhatsAppService:
             if not filename.lower().endswith('.pdf'):
                 filename = filename + '.pdf'
 
-            # Echt.im API format for document - try all possible filename field variations
+            # Echt.im API format for document
+            # Remove .pdf extension for title display (WhatsApp shows filename as title)
+            title_name = filename.replace('.pdf', '').replace('.PDF', '')
+
             payload = {
                 'id': message_id,
                 'imType': 'whatsapp',
@@ -250,22 +253,12 @@ class WhatsAppService:
                 'destinationNumber': clean_phone,
                 'contentType': 'document',
                 'attachmentUrl': document_url,
-                # Multiple filename field variations for compatibility
                 'attachmentName': filename,
                 'fileName': filename,
-                'filename': filename,
-                'documentName': filename,
-                'document_name': filename,
-                'name': filename,
-                'file_name': filename,
-                # Standard WhatsApp document structure (some APIs use this)
-                'document': {
-                    'link': document_url,
-                    'filename': filename,
-                    'caption': caption or filename
-                },
+                'documentFilename': filename,
+                'title': title_name,
+                'name': title_name,
                 'caption': caption or filename,
-                'text': caption or filename,
                 'channel_id': self.phone_id
             }
 
@@ -276,7 +269,6 @@ class WhatsAppService:
             print(f"Document URL: {document_url}")
             print(f"Filename: {filename}")
             print(f"Destination: {clean_phone}")
-            print(f"Full payload: {payload}")
 
             response = requests.post(
                 self.api_url,
@@ -316,66 +308,26 @@ class WhatsAppService:
         Returns:
             dict: Response with success status
         """
-        # Build materials list with better formatting
-        materials = purchase_data.get('materials', [])
-        materials_text = ""
-        total_amount = 0
-
-        for idx, material in enumerate(materials, 1):
-            mat_name = material.get('material_name', 'N/A')
-            quantity = material.get('quantity', 0)
-            unit = material.get('unit', '')
-            unit_price = material.get('unit_price', 0)
-            total_price = material.get('total_price', 0)
-
-            mat_line = f"▪️ {mat_name}\n"
-            mat_line += f"   Qty: *{quantity} {unit}*"
-            if unit_price:
-                mat_line += f" @ AED {unit_price:,.2f}"
-            if total_price:
-                mat_line += f" = *AED {total_price:,.2f}*"
-                total_amount += float(total_price)
-            materials_text += mat_line + "\n"
-
-        # Get total from purchase data or calculate
-        total_cost = purchase_data.get('total_cost', total_amount)
-
-        # Message body - improved design
-        body_text = f"""╔══════════════════════════╗
-       *🏗️ PURCHASE ORDER*
-╚══════════════════════════╝
+        # Message body - simple and clean
+        body_text = f"""*🛒 PURCHASE ORDER*
+━━━━━━━━━━━━━━━━━━━━━━
 
 📋 *PO Number:* PO-{purchase_data.get('cr_id', 'N/A')}
-📅 *Date:* {purchase_data.get('date', 'N/A')}
-🏢 *Project:* {project_data.get('project_name', 'N/A')}
-📍 *Location:* {project_data.get('location', 'N/A')}
 
-━━━━━━━━━━━━━━━━━━━━━━
-*Dear {vendor_data.get('company_name', 'Vendor')}*,
+Dear *{vendor_data.get('company_name', 'Vendor')}*,
 
-We are pleased to place this purchase order for the following materials:
+Please find the attached Local Purchase Order (LPO) document for your reference.
 
-*📦 MATERIALS ({len(materials)} items):*
-━━━━━━━━━━━━━━━━━━━━━━
-{materials_text}
-━━━━━━━━━━━━━━━━━━━━━━
-💰 *Total Amount: AED {total_cost:,.2f}*
-━━━━━━━━━━━━━━━━━━━━━━
+Kindly review the details and confirm the order. Please share the expected delivery timeline at your earliest convenience.
 
-*📞 CONTACT:*
-👤 {buyer_data.get('name', 'Procurement Team')}
-📧 {buyer_data.get('email', '')}
-📱 {buyer_data.get('phone', '')}
+Thank you.
 
-━━━━━━━━━━━━━━━━━━━━━━
-✅ Please confirm receipt and share delivery timeline.
-
-_MeterSquare Interiors LLC_"""
+_MeterSquare Interiors LLC_
+📞 {buyer_data.get('phone', '')}"""
 
         log.info(f"=== SENDING PURCHASE ORDER via WhatsApp ===")
         log.info(f"Phone: {phone_number}")
         log.info(f"Vendor: {vendor_data.get('company_name')}")
-        log.info(f"Materials count: {len(materials)}")
         log.info(f"PDF URL: {pdf_url}")
 
         # First send the text message
@@ -391,11 +343,16 @@ _MeterSquare Interiors LLC_"""
         if pdf_url and result.get('success'):
             print(f"\n=== STEP C: Sending LPO PDF document ===")
             print(f"PDF URL: {pdf_url}")
+            whatsapp_filename = f"LPO-PO-{purchase_data.get('cr_id', 'N/A')}.pdf"
+            whatsapp_caption = f"📄 Local Purchase Order - PO-{purchase_data.get('cr_id', 'N/A')}"
+            print(f">>> WhatsApp FILENAME being sent: {whatsapp_filename}")
+            print(f">>> WhatsApp CAPTION being sent: {whatsapp_caption}")
+            print(f">>> purchase_data cr_id: {purchase_data.get('cr_id')}")
             pdf_result = self.send_document(
                 phone_number=phone_number,
                 document_url=pdf_url,
-                filename=f"LPO-PO-{purchase_data.get('cr_id', 'N/A')}.pdf",
-                caption=f"📄 Local Purchase Order - PO-{purchase_data.get('cr_id', 'N/A')}"
+                filename=whatsapp_filename,
+                caption=whatsapp_caption
             )
             print(f"PDF send result: {pdf_result}")
             if not pdf_result.get('success'):
@@ -408,38 +365,3 @@ _MeterSquare Interiors LLC_"""
 
         print(f"\n=== FINAL WhatsApp send result: {result} ===\n")
         return result
-
-    def generate_purchase_order_message(self, vendor_data: dict, purchase_data: dict,
-                                        buyer_data: dict, project_data: dict) -> str:
-        """
-        Generate a formatted purchase order message (for backward compatibility)
-        """
-        materials = purchase_data.get('materials', [])
-        materials_text = ""
-        for idx, material in enumerate(materials, 1):
-            materials_text += f"\n{idx}. {material.get('material_name', 'N/A')}"
-            if material.get('brand'):
-                materials_text += f" - {material.get('brand')}"
-            materials_text += f" - Qty: {material.get('quantity', 0)} {material.get('unit', '')}"
-
-        return f"""*PURCHASE ORDER - MeterSquare Interiors*
-
-*PO Number:* PO-{purchase_data.get('cr_id', 'N/A')}
-*Date:* {purchase_data.get('date', 'N/A')}
-
-*Vendor:* {vendor_data.get('company_name', 'N/A')}
-*Location:* {project_data.get('location', 'N/A')}
-
-*Materials Required:*{materials_text}
-
-*Total Items:* {len(materials)}
-
-*Contact Person:*
-{buyer_data.get('name', 'N/A')}
-Email: {buyer_data.get('email', 'N/A')}
-Phone: {buyer_data.get('phone', 'N/A')}
-
-Please confirm receipt and provide delivery timeline.
-
-Thank you,
-MeterSquare Interiors LLC"""

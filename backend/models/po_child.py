@@ -50,6 +50,8 @@ class POChild(db.Model):
     # Communication tracking
     vendor_email_sent = db.Column(db.Boolean, default=False)
     vendor_email_sent_date = db.Column(db.DateTime, nullable=True)
+    vendor_whatsapp_sent = db.Column(db.Boolean, default=False)
+    vendor_whatsapp_sent_at = db.Column(db.DateTime, nullable=True)
 
     # Purchase completion
     purchase_completed_by_user_id = db.Column(db.Integer, nullable=True)
@@ -109,6 +111,8 @@ class POChild(db.Model):
             'vendor_approval_date': self.vendor_approval_date.isoformat() if self.vendor_approval_date else None,
             'vendor_email_sent': self.vendor_email_sent,
             'vendor_email_sent_date': self.vendor_email_sent_date.isoformat() if self.vendor_email_sent_date else None,
+            'vendor_whatsapp_sent': self.vendor_whatsapp_sent,
+            'vendor_whatsapp_sent_at': self.vendor_whatsapp_sent_at.isoformat() if self.vendor_whatsapp_sent_at else None,
             'purchase_completed_by_user_id': self.purchase_completed_by_user_id,
             'purchase_completed_by_name': self.purchase_completed_by_name,
             'purchase_completion_date': self.purchase_completion_date.isoformat() if self.purchase_completion_date else None,

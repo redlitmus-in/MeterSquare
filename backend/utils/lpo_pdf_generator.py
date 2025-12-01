@@ -6,7 +6,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch, mm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfgen import canvas
 from io import BytesIO
@@ -100,7 +100,22 @@ class LPOPDFGenerator:
             return None
 
     def _add_watermark(self, canvas_obj, doc):
-        """Add subtle watermark"""
+        """Add subtle watermark and set PDF metadata"""
+        # Set PDF metadata (title, author, etc.) - this is what WhatsApp reads
+        if hasattr(self, '_pdf_title') and self._pdf_title:
+            # Method 1: Direct canvas methods
+            canvas_obj.setTitle(self._pdf_title)
+            canvas_obj.setAuthor("MeterSquare Interiors LLC")
+            canvas_obj.setSubject("Local Purchase Order")
+            canvas_obj.setCreator("MeterSquare LPO System")
+
+            # Method 2: Set via internal document info (more reliable)
+            if hasattr(canvas_obj, '_doc') and hasattr(canvas_obj._doc, 'info'):
+                canvas_obj._doc.info.title = self._pdf_title
+                canvas_obj._doc.info.author = "MeterSquare Interiors LLC"
+                canvas_obj._doc.info.subject = "Local Purchase Order"
+                canvas_obj._doc.info.creator = "MeterSquare LPO System"
+
         logo_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'logo.png')
         if os.path.exists(logo_path):
             try:
@@ -171,13 +186,24 @@ class LPOPDFGenerator:
             bytes: PDF file content
         """
         buffer = BytesIO()
+
+        # Get LPO number for PDF title
+        lpo_number = lpo_data.get('lpo_info', {}).get('lpo_number', 'LPO')
+        pdf_title = f"Local Purchase Order - {lpo_number}"
+        # Store title for use in canvas callback (sets actual PDF metadata)
+        self._pdf_title = pdf_title
+
         doc = SimpleDocTemplate(
             buffer,
             pagesize=A4,
             topMargin=20,
             bottomMargin=30,
             leftMargin=25,
-            rightMargin=25
+            rightMargin=25,
+            title=pdf_title,
+            author="MeterSquare Interiors LLC",
+            subject="Local Purchase Order",
+            creator="MeterSquare LPO System"
         )
         elements = []
 
@@ -220,14 +246,31 @@ class LPOPDFGenerator:
             self.styles['LPONormal']
         ))
 
-        # === TERMS ===
-        elements.extend(self._generate_terms_section(lpo_data))
+        # === TERMS + SIGNATURES + FOOTER ===
+        # Check both materials AND terms count to decide page layout
+        terms = lpo_data.get('terms', {})
+        general_terms = terms.get('general_terms', [])
+        items = lpo_data.get('items', [])
+        terms_count = len(general_terms)
+        items_count = len(items)
 
-        # === SIGNATURES ===
-        elements.extend(self._generate_signature_section(lpo_data))
+        # If content is small (few items AND few terms), let it flow naturally
+        # Otherwise, keep Terms + Signatures + Footer together for security
+        is_small_document = items_count <= 5 and terms_count <= 4
 
-        # === FOOTER ===
-        elements.extend(self._generate_footer(lpo_data))
+        if is_small_document:
+            # Small document - let everything flow naturally (fits on page 1)
+            elements.extend(self._generate_terms_section(lpo_data))
+            elements.extend(self._generate_signature_section(lpo_data))
+            elements.extend(self._generate_footer(lpo_data))
+        else:
+            # Large document - keep Terms + Signatures + Footer together
+            # This ensures signatures are never alone on a page
+            secure_block = []
+            secure_block.extend(self._generate_terms_section(lpo_data))
+            secure_block.extend(self._generate_signature_section(lpo_data))
+            secure_block.extend(self._generate_footer(lpo_data))
+            elements.append(KeepTogether(secure_block))
 
         # Build PDF
         doc.build(elements, onFirstPage=self._add_watermark, onLaterPages=self._add_watermark)
@@ -478,7 +521,7 @@ TRN# {company.get('trn', 'N/A')}'''
         elements = []
         signatures = lpo_data.get('signatures', {})
 
-        elements.append(Spacer(1, 25))
+        elements.append(Spacer(1, 10))  # Compact spacing
 
         # Create signature cells
         md_name = signatures.get('md_name', 'Managing Director')
@@ -502,10 +545,10 @@ TRN# {company.get('trn', 'N/A')}'''
             self.styles['LPOSmall']
         ))
 
-        # Stamp cell (center)
+        # Stamp cell (center) - reduced size for better fit
         stamp_cell = []
         if stamp_image:
-            stamp_img = self._get_image_from_base64(stamp_image, width=1.2*inch, height=1.2*inch)
+            stamp_img = self._get_image_from_base64(stamp_image, width=1*inch, height=1*inch)
             if stamp_img:
                 stamp_cell.append(stamp_img)
 
