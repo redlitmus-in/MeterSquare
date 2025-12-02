@@ -464,7 +464,17 @@ const ExtraMaterialPage: React.FC = () => {
         });
       }
 
-      refetch();
+      // Remove cache completely and refetch fresh data
+      removeQueries(['change-requests']);
+      removeQueries(['extra-materials']);
+      removeQueries(['se-change-requests']);
+      // Small delay to ensure backend has processed the status change
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const freshData = await refetch();
+      console.log('🔄 Fresh data after send:', freshData?.data);
+      // Switch to Request tab to show the moved item
+      console.log('🔄 Switching to Request tab after successful send');
+      setActiveTab('request');
     } catch (error: any) {
       console.error('Error sending request:', error);
       showError(error.response?.data?.error || 'Failed to send request');
@@ -489,7 +499,13 @@ const ExtraMaterialPage: React.FC = () => {
       showSuccess('Request deleted successfully');
       setShowDeleteModal(false);
       setDeleteRequestId(null);
-      refetch();
+      // Remove cache completely and refetch fresh data
+      removeQueries(['change-requests']);
+      removeQueries(['extra-materials']);
+      removeQueries(['se-change-requests']);
+      // Small delay to ensure backend has processed the deletion
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await refetch();
     } catch (error: any) {
       console.error('Error deleting request:', error);
       showError(error.response?.data?.error || 'Failed to delete request');

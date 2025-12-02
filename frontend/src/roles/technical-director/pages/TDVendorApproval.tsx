@@ -20,6 +20,7 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import axios from 'axios';
+import { removeQueries } from '@/lib/queryClient';
 
 interface BOQAssignment {
   assignment_id: number;
@@ -115,7 +116,16 @@ const TDVendorApproval: React.FC = () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       showSuccess('Vendor approved successfully');
+      // Remove cache completely and refetch fresh data
+      removeQueries(['td-vendor-approvals']);
+      removeQueries(['vendor-approvals']);
+      removeQueries(['purchases']);
+      removeQueries(['dashboard']);
+      // Small delay to ensure backend has processed the status change
+      await new Promise(resolve => setTimeout(resolve, 500));
       fetchSEBoqAssignments();
+      // Switch to approved tab to show the moved item
+      setSeBoqSubTab('approved');
     } catch (error: any) {
       showError(error.response?.data?.error || 'Failed to approve vendor');
       console.error(error);
@@ -142,7 +152,16 @@ const TDVendorApproval: React.FC = () => {
       setShowRejectModal(false);
       setRejectionReason('');
       setAssignmentToReject(null);
+      // Remove cache completely and refetch fresh data
+      removeQueries(['td-vendor-approvals']);
+      removeQueries(['vendor-approvals']);
+      removeQueries(['purchases']);
+      removeQueries(['dashboard']);
+      // Small delay to ensure backend has processed the status change
+      await new Promise(resolve => setTimeout(resolve, 500));
       fetchSEBoqAssignments();
+      // Switch to rejected tab to show the moved item
+      setSeBoqSubTab('rejected');
     } catch (error: any) {
       showError(error.response?.data?.error || 'Failed to reject vendor');
       console.error(error);

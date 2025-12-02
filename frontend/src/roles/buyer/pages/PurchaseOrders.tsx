@@ -36,6 +36,8 @@ import { buyerService, Purchase, PurchaseListResponse, StoreAvailabilityResponse
 import PurchaseDetailsModal from '../components/PurchaseDetailsModal';
 import MaterialVendorSelectionModal from '../components/MaterialVendorSelectionModal';
 import VendorEmailModal from '../components/VendorEmailModal';
+import { removeQueries } from '@/lib/queryClient';
+
 const PurchaseOrders: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'ongoing' | 'pending_approval' | 'completed' | 'rejected'>('ongoing');
   const [ongoingSubTab, setOngoingSubTab] = useState<'pending_purchase' | 'vendor_approved'>('pending_purchase');
@@ -226,8 +228,20 @@ const PurchaseOrders: React.FC = () => {
       const response = await buyerService.resendChangeRequest(crId);
       if (response.success) {
         showSuccess('Change request resent successfully!');
-        refetchPending();
-        refetchRejected();
+        // Remove cache completely and refetch fresh data
+        removeQueries(['purchases']);
+        removeQueries(['pending-purchases']);
+        removeQueries(['buyer-pending-purchases']);
+        removeQueries(['buyer-rejected-purchases']);
+        removeQueries(['change-requests']);
+        removeQueries(['dashboard']);
+        // Small delay to ensure backend has processed the change
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await refetchPending();
+        await refetchRejected();
+        // Switch to pending tab to see the resent item
+        setActiveTab('ongoing');
+        setOngoingSubTab('pending_purchase');
       } else {
         showError(response.message || 'Failed to resend');
       }
@@ -257,7 +271,16 @@ const PurchaseOrders: React.FC = () => {
       // Pass po_child_id if this is a POChild record to get correct materials
       await buyerService.sendVendorWhatsApp(purchase.cr_id, purchase.vendor_phone, true, purchase.po_child_id);
       showSuccess('Purchase order sent via WhatsApp!');
-      refetchPending();
+      // Remove cache completely and refetch fresh data
+      removeQueries(['purchases']);
+      removeQueries(['pending-purchases']);
+      removeQueries(['buyer-pending-purchases']);
+      removeQueries(['buyer-approved-po-children']);
+      removeQueries(['dashboard']);
+      // Small delay to ensure backend has processed the change
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await refetchPending();
+      await refetchApprovedPOChildren();
     } catch (error: any) {
       showError(error.message || 'Failed to send WhatsApp');
     } finally {
@@ -272,9 +295,21 @@ const PurchaseOrders: React.FC = () => {
 
       showSuccess('Purchase marked as complete successfully!');
 
-      // Refetch both lists
-      refetchPending();
-      refetchCompleted();
+      // Remove cache completely and refetch fresh data
+      removeQueries(['purchases']);
+      removeQueries(['pending-purchases']);
+      removeQueries(['buyer-pending-purchases']);
+      removeQueries(['buyer-completed-purchases']);
+      removeQueries(['buyer-approved-po-children']);
+      removeQueries(['change-requests']);
+      removeQueries(['dashboard']);
+      // Small delay to ensure backend has processed the change
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await refetchPending();
+      await refetchCompleted();
+      await refetchApprovedPOChildren();
+      // Switch to completed tab to show the item
+      setActiveTab('completed');
     } catch (error: any) {
       showError(error.message || 'Failed to complete purchase');
     } finally {
@@ -310,8 +345,20 @@ const PurchaseOrders: React.FC = () => {
       setStoreAvailability(null);
       setSelectedPurchase(null);
 
-      // Refetch pending list (purchase stays in pending until manually completed)
-      refetchPending();
+      // Remove cache completely and refetch fresh data
+      removeQueries(['purchases']);
+      removeQueries(['pending-purchases']);
+      removeQueries(['buyer-pending-purchases']);
+      removeQueries(['buyer-completed-purchases']);
+      removeQueries(['inventory']);
+      removeQueries(['requests']);
+      removeQueries(['dashboard']);
+      // Small delay to ensure backend has processed the change
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await refetchPending();
+      await refetchCompleted();
+      // Switch to completed tab to show the item
+      setActiveTab('completed');
     } catch (error: any) {
       showError(error.message || 'Failed to request from store');
     } finally {
@@ -1926,9 +1973,21 @@ const PurchaseOrders: React.FC = () => {
             setIsDetailsModalOpen(false);
             setSelectedPurchase(null);
           }}
-          onVendorSelected={() => {
-            refetchPending();
-            refetchCompleted();
+          onVendorSelected={async () => {
+            // Remove cache completely and refetch fresh data
+            removeQueries(['purchases']);
+            removeQueries(['pending-purchases']);
+            removeQueries(['buyer-pending-purchases']);
+            removeQueries(['buyer-pending-po-children']);
+            removeQueries(['buyer-approved-po-children']);
+            removeQueries(['change-requests']);
+            // Small delay to ensure backend has processed the change
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await refetchPending();
+            await refetchCompleted();
+            await refetchPendingPOChildren();
+            // Switch to pending approval tab to see the submitted vendor selection
+            setActiveTab('pending_approval');
           }}
         />
       )}
@@ -1942,9 +2001,21 @@ const PurchaseOrders: React.FC = () => {
             setIsVendorSelectionModalOpen(false);
             setSelectedPurchase(null);
           }}
-          onVendorSelected={() => {
-            refetchPending();
-            refetchCompleted();
+          onVendorSelected={async () => {
+            // Remove cache completely and refetch fresh data
+            removeQueries(['purchases']);
+            removeQueries(['pending-purchases']);
+            removeQueries(['buyer-pending-purchases']);
+            removeQueries(['buyer-pending-po-children']);
+            removeQueries(['buyer-approved-po-children']);
+            removeQueries(['change-requests']);
+            // Small delay to ensure backend has processed the change
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await refetchPending();
+            await refetchCompleted();
+            await refetchPendingPOChildren();
+            // Switch to pending approval tab to see the submitted vendor selection
+            setActiveTab('pending_approval');
           }}
         />
       )}
@@ -1958,9 +2029,15 @@ const PurchaseOrders: React.FC = () => {
             setIsVendorEmailModalOpen(false);
             setSelectedPurchase(null);
           }}
-          onEmailSent={() => {
-            refetchPending();
-            refetchCompleted();
+          onEmailSent={async () => {
+            // Remove cache completely and refetch fresh data
+            removeQueries(['purchases']);
+            removeQueries(['pending-purchases']);
+            removeQueries(['buyer-pending-purchases']);
+            // Small delay to ensure backend has processed the change
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await refetchPending();
+            await refetchCompleted();
           }}
         />
       )}

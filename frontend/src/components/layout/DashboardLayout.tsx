@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import ModernSidebar from './ModernSidebar';
 import NotificationSystem from '@/components/NotificationSystem';
@@ -20,6 +20,7 @@ const DashboardLayout: React.FC = React.memo(() => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showHeader, setShowHeader] = useState(true);
   const lastScrollYRef = useRef(0);  // Use ref instead of state to avoid re-renders
+  const [isLayoutReady, setIsLayoutReady] = useState(false);
   const { user } = useAuthStore();
   const { unreadCount } = useNotificationStore();
   const { viewingAsRoleName } = useAdminViewStore();
@@ -138,6 +139,14 @@ const DashboardLayout: React.FC = React.memo(() => {
     };
   }, []);  // Empty deps - handler is stable due to throttle and ref
 
+  // Delay rendering NotificationSystem to prevent flash in wrong position
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLayoutReady(true);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <div className="h-screen flex overflow-hidden bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {/* Mobile Menu Button */}
@@ -159,9 +168,11 @@ const DashboardLayout: React.FC = React.memo(() => {
       </div>
 
       {/* Floating Notifications - Now available globally for toast notifications */}
-      <div className={`fixed top-16 right-4 z-[100] transition-all duration-300`}>
-        <NotificationSystem />
-      </div>
+      {isLayoutReady && (
+        <div className={`fixed top-16 right-4 z-[100] transition-all duration-300`}>
+          <NotificationSystem />
+        </div>
+      )}
 
       {/* Admin View Context Indicator - Show only for admin when viewing as another role */}
       {(user?.role === 'admin' || user?.role_id === 5) && viewingAsRoleName && (
