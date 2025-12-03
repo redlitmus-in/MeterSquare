@@ -755,26 +755,26 @@ def update_internal_revision_boq(boq_id):
                         db.session.add(boq_prelim)
                 log.info(f"✅ Updated preliminary selections in boq_preliminaries for BOQ {boq_id} during internal revision")
 
-        # Save terms & conditions selections to boq_terms_selections junction table
+        # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
         terms_conditions = data.get("terms_conditions", [])
         if terms_conditions and isinstance(terms_conditions, list):
-            for term in terms_conditions:
-                term_id = term.get('term_id')
-                is_checked = term.get('checked', False)
+            # Extract only checked term IDs
+            selected_term_ids = [
+                term.get('term_id') for term in terms_conditions
+                if term.get('term_id') and term.get('checked', False)
+            ]
 
-                if term_id:  # Only save if it has a term_id (from master table)
-                    # Insert or update term selection
-                    db.session.execute(text("""
-                        INSERT INTO boq_terms_selections (boq_id, term_id, is_checked, created_at, updated_at)
-                        VALUES (:boq_id, :term_id, :is_checked, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        ON CONFLICT (boq_id, term_id)
-                        DO UPDATE SET is_checked = :is_checked, updated_at = CURRENT_TIMESTAMP
-                    """), {
-                        'boq_id': boq_id,
-                        'term_id': term_id,
-                        'is_checked': is_checked
-                    })
-            log.info(f"✅ Updated terms selections in boq_terms_selections for BOQ {boq_id} during internal revision")
+            # Insert or update single row with term_ids array
+            db.session.execute(text("""
+                INSERT INTO boq_terms_selections (boq_id, term_ids, created_at, updated_at)
+                VALUES (:boq_id, :term_ids, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (boq_id)
+                DO UPDATE SET term_ids = :term_ids, updated_at = CURRENT_TIMESTAMP
+            """), {
+                'boq_id': boq_id,
+                'term_ids': selected_term_ids
+            })
+            log.info(f"✅ Updated {len(selected_term_ids)} terms selections in boq_terms_selections for BOQ {boq_id} during internal revision")
 
         # Create internal revision record using SQLAlchemy ORM
         internal_revision = BOQInternalRevision(
