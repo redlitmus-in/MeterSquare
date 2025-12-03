@@ -32,7 +32,7 @@ const RoleRouteWrapper: React.FC = () => {
 
   // Check if user is admin
   const userRole = (user as any)?.role || '';
-  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  const isAdmin = userRole?.toLowerCase() === 'admin';
 
   // Get the expected role slug for the authenticated user
   let expectedRoleSlug = getRoleSlug(user.role_id);

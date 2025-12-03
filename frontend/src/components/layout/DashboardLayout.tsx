@@ -68,7 +68,7 @@ const DashboardLayout: React.FC = React.memo(() => {
     let roleName = user?.role_id ? getRoleDisplayName(String(user.role_id)) : 'User';
 
     // If admin is viewing as another role, override with viewing context
-    if ((user?.role === 'admin' || user?.role_id === 5) && viewingAsRoleName) {
+    if (user?.role?.toLowerCase() === 'admin' && viewingAsRoleName) {
       roleName = `Admin (${viewingAsRoleName})`;
     }
 
@@ -175,7 +175,7 @@ const DashboardLayout: React.FC = React.memo(() => {
       )}
 
       {/* Admin View Context Indicator - Show only for admin when viewing as another role */}
-      {(user?.role === 'admin' || user?.role_id === 5) && viewingAsRoleName && (
+      {user?.role?.toLowerCase() === 'admin' && viewingAsRoleName && (
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-40 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-full px-4 py-2 shadow-lg border border-white/20">
           <div className="flex items-center gap-2 text-sm font-medium">
             <span className="flex items-center gap-1.5">

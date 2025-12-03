@@ -44,7 +44,7 @@ const RoleDashboard: React.FC = () => {
   let userRole = (user as any)?.role || getRoleName(user.role_id);
 
   // If admin is viewing as another role, use that role instead
-  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  const isAdmin = userRole?.toLowerCase() === 'admin';
   if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
     userRole = viewingAsRole;
   }

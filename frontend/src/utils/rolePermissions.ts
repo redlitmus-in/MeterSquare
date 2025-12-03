@@ -16,13 +16,11 @@ export const isAdmin = (user: User | null): boolean => {
   if (!user) return false;
 
   const userRole = user.role?.toLowerCase();
-  const roleId = user.role_id;
+  const roleId = typeof user.role_id === 'string' ? user.role_id.toLowerCase() : '';
 
   return (
     userRole === 'admin' ||
-    roleId === 'admin' ||
-    roleId === 5 || // Admin role_id in database
-    roleId === 1    // Some systems use 1 for admin
+    roleId === 'admin'
   );
 };
 
@@ -34,14 +32,14 @@ export const isProjectManager = (user: User | null): boolean => {
   if (isAdmin(user)) return true;
 
   const userRole = user.role?.toLowerCase();
-  const roleId = user.role_id;
+  const roleId = typeof user.role_id === 'string' ? user.role_id.toLowerCase() : '';
 
   return (
     userRole === 'projectmanager' ||
     userRole === 'project manager' ||
     userRole === 'project_manager' ||
-    roleId === 'projectManager' ||
-    roleId === 5
+    roleId === 'projectmanager' ||
+    roleId === 'project_manager'
   );
 };
 
@@ -53,14 +51,14 @@ export const isTechnicalDirector = (user: User | null): boolean => {
   if (isAdmin(user)) return true;
 
   const userRole = user.role?.toLowerCase();
-  const roleId = user.role_id;
+  const roleId = typeof user.role_id === 'string' ? user.role_id.toLowerCase() : '';
 
   return (
     userRole === 'technicaldirector' ||
     userRole === 'technical director' ||
     userRole === 'technical_director' ||
-    roleId === 'technicalDirector' ||
-    roleId === 7
+    roleId === 'technicaldirector' ||
+    roleId === 'technical_director'
   );
 };
 
@@ -72,13 +70,13 @@ export const isEstimator = (user: User | null): boolean => {
   if (isAdmin(user)) return true;
 
   const userRole = user.role?.toLowerCase();
-  const roleId = user.role_id;
+  const roleId = typeof user.role_id === 'string' ? user.role_id.toLowerCase() : '';
 
   return (
     userRole === 'estimator' ||
     userRole === 'estimation' ||
     roleId === 'estimator' ||
-    roleId === 4
+    roleId === 'estimation'
   );
 };
 
@@ -90,7 +88,7 @@ export const isSiteEngineer = (user: User | null): boolean => {
   if (isAdmin(user)) return true;
 
   const userRole = user.role?.toLowerCase();
-  const roleId = user.role_id;
+  const roleId = typeof user.role_id === 'string' ? user.role_id.toLowerCase() : '';
 
   return (
     userRole === 'siteengineer' ||
@@ -99,8 +97,8 @@ export const isSiteEngineer = (user: User | null): boolean => {
     userRole === 'sitesupervisor' ||
     userRole === 'site supervisor' ||
     userRole === 'site_supervisor' ||
-    roleId === 'siteEngineer' ||
-    roleId === 2
+    roleId === 'siteengineer' ||
+    roleId === 'site_engineer'
   );
 };
 
@@ -112,12 +110,11 @@ export const isBuyer = (user: User | null): boolean => {
   if (isAdmin(user)) return true;
 
   const userRole = user.role?.toLowerCase();
-  const roleId = user.role_id;
+  const roleId = typeof user.role_id === 'string' ? user.role_id.toLowerCase() : '';
 
   return (
     userRole === 'buyer' ||
-    roleId === 'buyer' ||
-    roleId === 8
+    roleId === 'buyer'
   );
 };
 

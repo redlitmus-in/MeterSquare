@@ -205,8 +205,8 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
   const navigate = useNavigate();
   const { user, getRoleDashboard } = useAuthStore();
   const { viewingAsRole, setRoleView, resetToAdminView } = useAdminViewStore();
-  const roleName = getRoleDisplayName(user?.role_id || '');
-  const roleColor = getRoleThemeColor(user?.role_id || '');
+  const roleName = getRoleDisplayName(user?.role || user?.role_id || '');
+  const roleColor = getRoleThemeColor(user?.role || user?.role_id || '');
   const dashboardPath = getRoleDashboard();
   const [expandedSections, setExpandedSections] = useState<string[]>(['vendor management']);
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -330,13 +330,15 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
   // Memoized navigation items to prevent re-calculation on every render
   const navigation = useMemo(() => {
     const roleId = user?.role_id;
-    const isAdmin = user?.role === 'admin' || user?.role_id === 5; // Database has admin as role_id 5
+    const userRole = user?.role?.toLowerCase() || '';
+    const isAdmin = userRole === 'admin';
 
     // Determine which role to use for building paths
-    // If admin is viewing as another role, use that role; otherwise use actual role
+    // If admin is viewing as another role, use that role; otherwise use actual role from backend
+    // Use user.role (string) instead of user.role_id to avoid database inconsistencies
     const effectiveRoleForPaths = isAdmin && viewingAsRole && viewingAsRole !== 'admin'
       ? viewingAsRole
-      : (roleId || '');
+      : (user?.role || roleId || '');
 
     // Build role-prefixed paths
     const buildPath = (path: string) => buildRolePath(effectiveRoleForPaths, path);
@@ -578,9 +580,11 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
 
     let navigation = [...baseItems];
 
-    // Check for Technical Director with multiple format variations
-    // Also check the display name and role name
-    const isTechnicalDirector = user?.role_id === UserRole.TECHNICAL_DIRECTOR ||
+    // Check for Technical Director - primarily use role name from backend
+    const isTechnicalDirector = userRole === 'technicaldirector' ||
+        userRole === 'technical director' ||
+        userRole === 'technical_director' ||
+        user?.role_id === UserRole.TECHNICAL_DIRECTOR ||
         roleId === 'technicalDirector' ||
         roleIdLower === 'technical director' ||
         roleIdLower === 'technical_director' ||
@@ -588,16 +592,21 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         currentRole === UserRole.TECHNICAL_DIRECTOR ||
         getRoleDisplayName(roleId || '') === 'Technical Director';
 
-    // Check for Estimator with multiple format variations
-    const isEstimator = user?.role_id === UserRole.ESTIMATION ||
+    // Check for Estimator - primarily use role name from backend
+    const isEstimator = userRole === 'estimator' ||
+        userRole === 'estimation' ||
+        user?.role_id === UserRole.ESTIMATION ||
         roleId === 'estimation' ||
         roleIdLower === 'estimation' ||
         roleIdLower === 'estimator' ||
         currentRole === UserRole.ESTIMATION ||
         getRoleDisplayName(roleId || '') === 'Estimator';
 
-    // Check for Site Engineer with multiple format variations
-    const isSiteEngineer = user?.role_id === UserRole.SITE_ENGINEER ||
+    // Check for Site Engineer - primarily use role name from backend
+    const isSiteEngineer = userRole === 'siteengineer' ||
+        userRole === 'site engineer' ||
+        userRole === 'site_engineer' ||
+        user?.role_id === UserRole.SITE_ENGINEER ||
         roleId === 'siteEngineer' ||
         roleIdLower === 'site engineer' ||
         roleIdLower === 'site_engineer' ||
@@ -605,21 +614,24 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         currentRole === UserRole.SITE_ENGINEER ||
         getRoleDisplayName(roleId || '') === 'Site Engineer';
 
-    // Check for Buyer with multiple format variations
-    const isBuyer = roleId === 'buyer' ||
+    // Check for Buyer - primarily use role name from backend
+    const isBuyer = userRole === 'buyer' ||
+        roleId === 'buyer' ||
         roleIdLower === 'buyer' ||
         currentRole === 'buyer' ||
         getRoleDisplayName(roleId || '') === 'Buyer';
 
-    // Check for Production Manager with multiple format variations
-    const isProductionManager = roleId === 'productionManager' ||
+    // Check for Production Manager - primarily use role name from backend
+    const isProductionManager = userRole === 'productionmanager' ||
+        userRole === 'production manager' ||
+        userRole === 'production_manager' ||
+        roleId === 'productionManager' ||
         roleIdLower === 'productionmanager' ||
         roleIdLower === 'production manager' ||
         roleIdLower === 'production_manager' ||
         currentRole === 'productionManager' ||
         currentRole === UserRole.PRODUCTION_MANAGER ||
-        getRoleDisplayName(roleId || '') === 'Production Manager' ||
-        roleId === 9; // Database role_id for production manager
+        getRoleDisplayName(roleId || '') === 'Production Manager';
 
     // Check for Admin with multiple format variations (using isAdmin from line 324)
     if (isAdmin) {
@@ -722,6 +734,12 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       // Estimator gets Projects page, not Procurement
       navigation.push(...estimatorItems);
     } else if (
+      userRole === 'projectmanager' ||
+      userRole === 'project manager' ||
+      userRole === 'project_manager' ||
+      userRole === 'mep' ||
+      userRole === 'mep manager' ||
+      userRole === 'mep_manager' ||
       user?.role_id === UserRole.PROJECT_MANAGER ||
       currentRole === UserRole.PROJECT_MANAGER ||
       user?.role_id === UserRole.MEP ||
@@ -1030,7 +1048,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                     </div>
 
                     <Link
-                      to={buildRolePath(user?.role_id || '', 'profile')}
+                      to={buildRolePath(user?.role || user?.role_id || '', 'profile')}
                       onClick={() => {
                         setUserDropdownOpen(false);
                         setSidebarOpen(false);

@@ -45,9 +45,10 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
   const [allChangeRequests, setAllChangeRequests] = useState<any[]>([]);
 
   // Check if user is Site Engineer - hide price fields for SE
-  const isSiteEngineer = user?.role?.toLowerCase() === 'siteengineer' ||
-                         user?.role?.toLowerCase() === 'site engineer' ||
-                         user?.role_id === 3;
+  const userRoleLower = user?.role?.toLowerCase() || '';
+  const isSiteEngineer = userRoleLower === 'siteengineer' ||
+                         userRoleLower === 'site engineer' ||
+                         userRoleLower === 'site_engineer';
 
   // Check if user is Project Manager or Estimator - allow quantity editing
   const isProjectManagerOrEstimator =

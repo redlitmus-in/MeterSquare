@@ -118,7 +118,7 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
   };
 
   // Don't show for non-admin users
-  if (user?.role !== 'admin' && user?.role_id !== 1) {
+  if (user?.role?.toLowerCase() !== 'admin') {
     return null;
   }
 

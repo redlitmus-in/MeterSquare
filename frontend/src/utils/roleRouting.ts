@@ -17,6 +17,8 @@ import { UserRole } from '@/types';
  * 9: productionManager
  * 11: mep (MEP Supervisor - management level)
  */
+// Production database role setup
+
 export const ROLE_ID_TO_NAME: Record<number, string> = {
   3: 'siteEngineer',
   4: 'estimator',
@@ -31,6 +33,19 @@ export const ROLE_ID_TO_NAME: Record<number, string> = {
   2: 'siteEngineer', // Fallback
   10: 'estimator' // Fallback
 };
+
+// lOCAL DATABASE ROLE SETUP
+
+// export const ROLE_ID_TO_NAME: Record<number, string> = {
+//   1: 'estimator',
+//   2: 'admin',
+//   3: 'projectManager',
+//   4: 'technicalDirector',
+//   5: 'siteEngineer',
+//   6: 'buyer',  // ← FIXED: buyer is role_id 6, not 8
+//   7: 'productionManager',
+//   8: 'mep', // MEP Supervisor (management level, shares PM functionality)
+// };
 
 /**
  * Convert camelCase role to URL-friendly slug

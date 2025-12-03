@@ -22,6 +22,24 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT")
 
 log = get_logger()
 
+# Frontend to Database role mapping
+# Maps frontend role names to database role names
+FRONTEND_TO_DB_ROLE_MAP = {
+    'procurement': 'buyer',  # Frontend sends 'procurement', DB has 'buyer'
+    'buyer': 'buyer',        # Also accept 'buyer' directly
+}
+
+def map_frontend_role_to_db(frontend_role):
+    """
+    Map frontend role name to database role name
+    Returns the database role name or the original if no mapping exists
+    """
+    if not frontend_role:
+        return frontend_role
+
+    frontend_role_lower = frontend_role.lower().strip()
+    return FRONTEND_TO_DB_ROLE_MAP.get(frontend_role_lower, frontend_role_lower)
+
 def jwt_required(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -101,8 +119,15 @@ def user_register():
         if User.query.filter_by(email=email, is_deleted=False).first():
             return jsonify({"error": "User with this email already exists"}), 409
 
+        # Map frontend role to database role (e.g., 'procurement' -> 'buyer')
+        db_role_name = map_frontend_role_to_db(role_name)
+        log.info(f"Registration: frontend_role={role_name}, db_role={db_role_name}")
+
         # Get or create role
-        role = Role.query.filter(db.func.lower(Role.role) == role_name, Role.is_deleted == False).first()
+        role = Role.query.filter(
+            db.func.lower(db.func.trim(Role.role)) == db_role_name.lower(),
+            Role.is_deleted == False
+        ).first()
         if not role:
             return jsonify({"error": f"Role '{role_name}' not found. Please contact admin."}), 404
 
@@ -148,11 +173,16 @@ def user_login():
     """
     try:
         data = request.get_json()
-        email = data.get("email") 
+        email = data.get("email")
         role_name = data.get("role")  # Optional role parameter
-        
+
         if not email:
             return jsonify({"error": "Email is required"}), 400
+
+        # Map frontend role to database role (e.g., 'procurement' -> 'buyer')
+        db_role_name = map_frontend_role_to_db(role_name) if role_name else None
+
+        log.info(f"Login attempt: email={email}, frontend_role={role_name}, db_role={db_role_name}")
 
         # Build query to check user exists
         query = db.session.query(User).join(
@@ -162,13 +192,13 @@ def user_login():
             User.is_deleted == False,
             User.is_active == True
         )
-        
-        # If role specified, validate user has that role
-        if role_name:
+
+        # If role specified, validate user has that role (using mapped DB role)
+        if db_role_name:
             query = query.filter(
-                db.func.lower(Role.role) == role_name.lower()
+                db.func.lower(db.func.trim(Role.role)) == db_role_name.lower()
             )
-            
+
         user = query.first()
 
         if not user:
@@ -176,6 +206,8 @@ def user_login():
                 return jsonify({"error": f"User not found with role '{role_name}' or account inactive"}), 404
             else:
                 return jsonify({"error": "User not found or inactive"}), 404
+
+        log.info(f"User found: user_id={user.user_id}, email={user.email}")
         
         # Send OTP to user's email ASYNCHRONOUSLY (instant return)
         otp = send_otp_async(email)
@@ -185,8 +217,9 @@ def user_login():
             from utils.authentication import otp_storage
             if email in otp_storage:
                 otp_storage[email]['user_id'] = user.user_id
-                if role_name:
-                    otp_storage[email]['role'] = role_name
+                if db_role_name:
+                    # Store the DB role name for verification
+                    otp_storage[email]['role'] = db_role_name
             
             response_data = {
                 "message": "OTP sent successfully to your email",

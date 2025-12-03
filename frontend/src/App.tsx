@@ -123,7 +123,7 @@ const RoleSpecificProcurementHub: React.FC = () => {
   let userRole = (user as any)?.role || '';
 
   // If admin is viewing as another role, use that role instead
-  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  const isAdmin = userRole?.toLowerCase() === 'admin';
   if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
     userRole = viewingAsRole;
   }
@@ -170,7 +170,7 @@ const RoleSpecificProjects: React.FC = () => {
   let userRole = (user as any)?.role || '';
 
   // If admin is viewing as another role, use that role instead
-  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  const isAdmin = userRole?.toLowerCase() === 'admin';
   if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
     userRole = viewingAsRole;
   }
@@ -200,7 +200,7 @@ const RoleSpecificVendorHub: React.FC = () => {
   let userRole = (user as any)?.role || '';
 
   // If admin is viewing as another role, use that role instead
-  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  const isAdmin = userRole?.toLowerCase() === 'admin';
   if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
     userRole = viewingAsRole;
   }
@@ -279,7 +279,7 @@ const RoleSpecificVendorDetails: React.FC = () => {
   let userRole = (user as any)?.role || '';
 
   // If admin is viewing as another role, use that role instead
-  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  const isAdmin = userRole?.toLowerCase() === 'admin';
   if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
     userRole = viewingAsRole;
   }
@@ -332,7 +332,7 @@ const RoleSpecificMaterials: React.FC = () => {
   const { viewingAsRole } = useAdminViewStore();
 
   let userRole = (user as any)?.role || '';
-  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  const isAdmin = userRole?.toLowerCase() === 'admin';
   if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
     userRole = viewingAsRole;
   }
@@ -378,7 +378,7 @@ const RoleSpecificPurchaseOrders: React.FC = () => {
   const { viewingAsRole } = useAdminViewStore();
 
   let userRole = (user as any)?.role || '';
-  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  const isAdmin = userRole?.toLowerCase() === 'admin';
   if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
     userRole = viewingAsRole;
   }
@@ -424,7 +424,7 @@ const RoleSpecificStore: React.FC = () => {
   const { viewingAsRole } = useAdminViewStore();
 
   let userRole = (user as any)?.role || '';
-  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  const isAdmin = userRole?.toLowerCase() === 'admin';
   if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
     userRole = viewingAsRole;
   }
@@ -433,7 +433,7 @@ const RoleSpecificStore: React.FC = () => {
   const roleId = user?.role_id;
   const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
 
-  const isBuyer = roleId === 'buyer' || roleIdLower === 'buyer' || userRoleLower === 'buyer' || roleId === 8;
+  const isBuyer = roleId === 'buyer' || roleIdLower === 'buyer' || userRoleLower === 'buyer';
 
   if (isBuyer || isAdmin) {
     return <BuyerStore />;
@@ -537,7 +537,7 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
                  userRoleLower === 'admin' ||
                  roleId === 'admin' ||
                  roleIdLower === 'admin' ||
-                 roleId === 5; // Database has admin as role_id: 5
+                 roleId?.toString().toLowerCase() === 'admin';
 
   if (!isProjectManager && !isMEP && !isTechnicalDirector && !isAdmin) {
     return <Navigate to="/403" replace />;
@@ -565,8 +565,7 @@ const TechnicalDirectorRoute: React.FC<{ children: React.ReactNode }> = ({ child
   const isAdmin = userRole === 'Admin' ||
                  userRoleLower === 'admin' ||
                  roleId === 'admin' ||
-                 roleIdLower === 'admin' ||
-                 roleId === 5;
+                 roleIdLower === 'admin';
 
   if (!isTechnicalDirector && !isAdmin) {
     return <Navigate to="/403" replace />;
@@ -591,8 +590,7 @@ const EstimatorRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   const isAdmin = userRole === 'Admin' ||
                  userRoleLower === 'admin' ||
                  roleId === 'admin' ||
-                 roleIdLower === 'admin' ||
-                 roleId === 5;
+                 roleIdLower === 'admin';
 
   if (!isEstimator && !isAdmin) {
     return <Navigate to="/403" replace />;
@@ -621,8 +619,7 @@ const SiteEngineerRoute: React.FC<{ children: React.ReactNode }> = ({ children }
   const isAdmin = userRole === 'Admin' ||
                  userRoleLower === 'admin' ||
                  roleId === 'admin' ||
-                 roleIdLower === 'admin' ||
-                 roleId === 5;
+                 roleIdLower === 'admin';
 
   if (!isSiteEngineer && !isAdmin) {
     return <Navigate to="/403" replace />;
@@ -655,14 +652,12 @@ const ProductionManagerRoute: React.FC<{ children: React.ReactNode }> = ({ child
                              userRoleLower === 'production manager' ||
                              userRoleLower === 'production_manager' ||
                              roleId === 'productionManager' ||
-                             roleIdLower === 'production_manager' ||
-                             roleId === 9; // Database role_id for production manager
+                             roleIdLower === 'production_manager';
 
   const isAdmin = userRole === 'Admin' ||
                  userRoleLower === 'admin' ||
                  roleId === 'admin' ||
-                 roleIdLower === 'admin' ||
-                 roleId === 5;
+                 roleIdLower === 'admin';
 
   if (!isProductionManager && !isAdmin) {
     return <Navigate to="/403" replace />;
@@ -683,12 +678,12 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const roleId = user?.role_id;
   const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
 
-  // Check if user is Admin (including role_id === 5 from database)
+  // Check if user is Admin
   const isAdmin = userRole === 'Admin' ||
                  userRoleLower === 'admin' ||
                  roleId === 'admin' ||
                  roleIdLower === 'admin' ||
-                 roleId === 5; // Database has admin as role_id: 5
+                 roleId?.toString().toLowerCase() === 'admin';
 
   if (!isAdmin) {
     return <Navigate to="/403" replace />;
