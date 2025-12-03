@@ -344,19 +344,19 @@ def get_boq_terms(boq_id):
                 'is_checked': False  # Default to unchecked
             }
 
-        # Fetch existing selections for this BOQ
+        # Fetch selected term_ids for this BOQ (single row with array)
         selections_query = """
-            SELECT term_id, is_checked
+            SELECT term_ids
             FROM boq_terms_selections
             WHERE boq_id = :boq_id
         """
-        selections_cursor = db.session.execute(text(selections_query), {'boq_id': boq_id})
+        result = db.session.execute(text(selections_query), {'boq_id': boq_id}).fetchone()
+        selected_term_ids = result[0] if result and result[0] else []
 
         # Update checked status for selected terms
-        for row in selections_cursor:
-            term_id = row[0]
+        for term_id in selected_term_ids:
             if term_id in master_terms:
-                master_terms[term_id]['is_checked'] = row[1]
+                master_terms[term_id]['is_checked'] = True
 
         # Convert to list
         terms_list = list(master_terms.values())
@@ -380,24 +380,34 @@ def get_boq_terms(boq_id):
 def save_boq_terms(boq_id):
     """
     Save term selections for a BOQ
-    Request body: {selections: [{term_id, is_checked}]}
-    Similar to POST /api/boq/:boq_id/preliminaries
+    Request body: {selections: [{term_id, is_checked}]} or {term_ids: [1, 2, 3]}
+    Stores as single row with term_ids array
     """
     try:
         # Check role authorization
-        current_user = g.current_user
+        current_user = g.user
         allowed_roles = ['Admin', 'Estimator', 'Technical Director']
-        if current_user['role'] not in allowed_roles:
+        user_role = current_user.get('role', '').strip()
+        if not any(user_role.lower() == allowed.lower() for allowed in allowed_roles):
             return jsonify({
                 'success': False,
                 'message': f'Access denied. {", ".join(allowed_roles)} role required.'
             }), 403
 
         data = request.get_json()
-        selections = data.get('selections', [])
 
-        if not selections:
-            return jsonify({'success': False, 'message': 'No selections provided'}), 400
+        # Support both formats:
+        # 1. {term_ids: [1, 2, 3]} - new format with just selected IDs
+        # 2. {selections: [{term_id, is_checked}]} - old format for backwards compatibility
+        if 'term_ids' in data:
+            selected_term_ids = data.get('term_ids', [])
+        else:
+            selections = data.get('selections', [])
+            # Extract only checked term IDs
+            selected_term_ids = [
+                s.get('term_id') for s in selections
+                if s.get('term_id') and s.get('is_checked', False)
+            ]
 
         # Verify BOQ exists
         boq_check = db.session.execute(
@@ -408,37 +418,38 @@ def save_boq_terms(boq_id):
         if not boq_check:
             return jsonify({'success': False, 'message': 'BOQ not found'}), 404
 
-        # Delete existing selections for this BOQ
-        db.session.execute(
-            text("DELETE FROM boq_terms_selections WHERE boq_id = :boq_id"),
+        # Check if selection exists for this BOQ
+        existing = db.session.execute(
+            text("SELECT id FROM boq_terms_selections WHERE boq_id = :boq_id"),
             {'boq_id': boq_id}
-        )
+        ).fetchone()
 
-        # Insert new selections (store ALL terms with their checked status)
-        insert_query = """
-            INSERT INTO boq_terms_selections (boq_id, term_id, is_checked, created_at, updated_at)
-            VALUES (:boq_id, :term_id, :is_checked, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """
-
-        saved_count = 0
-        for selection in selections:
-            term_id = selection.get('term_id')
-            is_checked = selection.get('is_checked', False)
-
-            if term_id:
-                db.session.execute(text(insert_query), {
-                    'boq_id': boq_id,
-                    'term_id': term_id,
-                    'is_checked': is_checked
-                })
-                saved_count += 1
+        if existing:
+            # Update existing row
+            db.session.execute(
+                text("""
+                    UPDATE boq_terms_selections
+                    SET term_ids = :term_ids, updated_at = CURRENT_TIMESTAMP
+                    WHERE boq_id = :boq_id
+                """),
+                {'boq_id': boq_id, 'term_ids': selected_term_ids}
+            )
+        else:
+            # Insert new row
+            db.session.execute(
+                text("""
+                    INSERT INTO boq_terms_selections (boq_id, term_ids, created_at, updated_at)
+                    VALUES (:boq_id, :term_ids, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """),
+                {'boq_id': boq_id, 'term_ids': selected_term_ids}
+            )
 
         db.session.commit()
 
         return jsonify({
             'success': True,
             'message': 'Terms selections saved successfully',
-            'saved_count': saved_count
+            'saved_count': len(selected_term_ids)
         }), 200
 
     except Exception as e:
@@ -451,28 +462,37 @@ def save_boq_terms(boq_id):
 @jwt_required
 def get_boq_selected_terms(boq_id):
     """
-    Get only SELECTED (is_checked=true) terms for a BOQ
+    Get only SELECTED terms for a BOQ
     Used for PDF generation and display
     Similar to GET /api/boq/:boq_id/preliminaries/selected
     """
     try:
-        query = """
-            SELECT t.term_id, t.terms_text, t.display_order
-            FROM boq_terms t
-            INNER JOIN boq_terms_selections s ON t.term_id = s.term_id
-            WHERE s.boq_id = :boq_id AND s.is_checked = TRUE
-            ORDER BY t.display_order, t.term_id
+        # First get the term_ids array for this BOQ
+        term_ids_query = """
+            SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
         """
+        result = db.session.execute(text(term_ids_query), {'boq_id': boq_id}).fetchone()
+        term_ids = result[0] if result and result[0] else []
 
-        cursor = db.session.execute(text(query), {'boq_id': boq_id})
         selected_terms = []
+        if term_ids:
+            # Fetch terms for selected IDs
+            query = """
+                SELECT term_id, terms_text, display_order
+                FROM boq_terms
+                WHERE term_id = ANY(:term_ids)
+                AND is_active = TRUE
+                AND is_deleted = FALSE
+                ORDER BY display_order, term_id
+            """
+            cursor = db.session.execute(text(query), {'term_ids': term_ids})
 
-        for row in cursor:
-            selected_terms.append({
-                'term_id': row[0],
-                'terms_text': row[1],
-                'display_order': row[2]
-            })
+            for row in cursor:
+                selected_terms.append({
+                    'term_id': row[0],
+                    'terms_text': row[1],
+                    'display_order': row[2]
+                })
 
         return jsonify({
             'success': True,
