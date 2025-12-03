@@ -25,8 +25,8 @@ const VendorDetails: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
-  // Get role-specific vendor list path
-  const roleSlug = getRoleSlug(user?.role_id || '');
+  // Get role-specific vendor list path (use role name, not role_id)
+  const roleSlug = getRoleSlug(user?.role || user?.role_name || '');
   const vendorsPath = `/${roleSlug}/vendors`;
 
   // Get tax number label based on country

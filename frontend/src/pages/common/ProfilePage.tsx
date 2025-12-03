@@ -240,7 +240,7 @@ const ProfilePage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Badge className="bg-white/20 text-white border-white/30 backdrop-blur-sm px-3 py-1">
                   <RoleIcon className="w-4 h-4 mr-1.5" />
-                  {getRoleDisplayName(user?.role_id || '')}
+                  {getRoleDisplayName(user?.role || user?.role_name || '')}
                 </Badge>
                 {user?.is_active && (
                   <Badge className="bg-green-500/30 text-white border-green-400/50 backdrop-blur-sm px-3 py-1">
@@ -519,7 +519,7 @@ const ProfilePage: React.FC = () => {
                       </div>
                       <div>
                         <p className="text-xs text-gray-600 font-medium">Role</p>
-                        <p className="text-sm font-semibold text-gray-900">{getRoleDisplayName(user?.role_id || '')}</p>
+                        <p className="text-sm font-semibold text-gray-900">{getRoleDisplayName(user?.role || user?.role_name || '')}</p>
                       </div>
                     </div>
                   </div>

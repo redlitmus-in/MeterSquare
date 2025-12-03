@@ -65,7 +65,7 @@ const DashboardLayout: React.FC = React.memo(() => {
   // Update browser title with user role and notification count
   useEffect(() => {
     // For admin viewing as another role, show viewing context
-    let roleName = user?.role_id ? getRoleDisplayName(String(user.role_id)) : 'User';
+    let roleName = user?.role || user?.role_name ? getRoleDisplayName(user?.role || user?.role_name || '') : 'User';
 
     // If admin is viewing as another role, override with viewing context
     if (user?.role?.toLowerCase() === 'admin' && viewingAsRoleName) {

@@ -3,49 +3,11 @@ import { UserRole } from '@/types';
 /**
  * Role-based routing configuration
  * Maps user roles to their specific dashboard paths
+ *
+ * NOTE: This file uses ROLE NAMES (strings) from the backend, not role IDs.
+ * The backend returns the role name directly in the login response (e.g., 'admin', 'estimator').
+ * No need to map role IDs to names - the backend handles that.
  */
-
-/**
- * Map numeric role IDs to role names (based on ACTUAL database)
- * Database structure (from roles table):
- * 3: siteEngineer
- * 4: estimator
- * 5: admin  ← CORRECTED
- * 6: projectManager
- * 7: technicalDirector
- * 8: buyer
- * 9: productionManager
- * 11: mep (MEP Supervisor - management level)
- */
-// Production database role setup
-
-export const ROLE_ID_TO_NAME: Record<number, string> = {
-  3: 'siteEngineer',
-  4: 'estimator',
-  5: 'admin', // ← FIXED: Database has admin as role_id 5
-  6: 'projectManager',
-  7: 'technicalDirector',
-  8: 'buyer',
-  9: 'productionManager',
-  11: 'mep', // MEP Supervisor (management level, shares PM functionality)
-  // Legacy/fallback mappings
-  1: 'admin', // Fallback
-  2: 'siteEngineer', // Fallback
-  10: 'estimator' // Fallback
-};
-
-// lOCAL DATABASE ROLE SETUP
-
-// export const ROLE_ID_TO_NAME: Record<number, string> = {
-//   1: 'estimator',
-//   2: 'admin',
-//   3: 'projectManager',
-//   4: 'technicalDirector',
-//   5: 'siteEngineer',
-//   6: 'buyer',  // ← FIXED: buyer is role_id 6, not 8
-//   7: 'productionManager',
-//   8: 'mep', // MEP Supervisor (management level, shares PM functionality)
-// };
 
 /**
  * Convert camelCase role to URL-friendly slug
@@ -93,35 +55,36 @@ export const ROLE_DASHBOARD_PATHS: Record<string, string> = {
 };
 
 /**
- * Get role name from numeric ID or string
- * @param roleId - Numeric role ID or string role name
+ * Get role name from string role
+ * The backend returns role names directly (e.g., 'admin', 'estimator')
+ * @param role - String role name from backend
  * @returns Role name string
  */
-export const getRoleName = (roleId: string | number | UserRole): string => {
-  // If it's a number, map it to role name
-  if (typeof roleId === 'number') {
-    return ROLE_ID_TO_NAME[roleId] || UserRole.SITE_SUPERVISOR;
+export const getRoleName = (role: string | UserRole): string => {
+  if (typeof role === 'string' && role.length > 0) {
+    // Check if it's a valid UserRole enum value
+    if (Object.values(UserRole).includes(role as UserRole)) {
+      return role;
+    }
+    // Check if it's in ROLE_URL_SLUGS keys (covers 'admin', 'siteEngineer', 'buyer', etc.)
+    if (role in ROLE_URL_SLUGS) {
+      return role;
+    }
+    // Return as-is (backend sends role name directly)
+    return role;
   }
-  // If it's already a valid role string, return it
-  if (Object.values(UserRole).includes(roleId as UserRole)) {
-    return roleId as string;
-  }
-  // Try to parse as number if it's a string number
-  const numId = parseInt(roleId as string);
-  if (!isNaN(numId)) {
-    return ROLE_ID_TO_NAME[numId] || UserRole.SITE_SUPERVISOR;
-  }
-  return roleId as string;
+  // Fallback to site supervisor
+  return UserRole.SITE_SUPERVISOR;
 };
 
 /**
  * Get role slug for URL
- * @param role - User role (camelCase format, or numeric ID)
+ * @param role - User role (camelCase format)
  * @returns URL-friendly role slug
  */
-export const getRoleSlug = (role: string | number | UserRole): string => {
+export const getRoleSlug = (role: string | UserRole): string => {
   const roleName = getRoleName(role);
-  return ROLE_URL_SLUGS[roleName as UserRole] || 'user';
+  return ROLE_URL_SLUGS[roleName] || ROLE_URL_SLUGS[roleName as UserRole] || 'user';
 };
 
 /**
@@ -135,20 +98,20 @@ export const getRoleFromSlug = (slug: string): UserRole | null => {
 
 /**
  * Get dashboard path for a specific role
- * @param role - User role (camelCase format or numeric ID)
+ * @param role - User role (camelCase format)
  * @returns Dashboard path for the role
  */
-export const getRoleDashboardPath = (role: string | number | UserRole): string => {
+export const getRoleDashboardPath = (role: string | UserRole): string => {
   const slug = getRoleSlug(role);
   return `/${slug}/dashboard`;
 };
 
 /**
  * Get role display name
- * @param role - User role (camelCase format or numeric ID)
+ * @param role - User role (camelCase format)
  * @returns Human-readable role name
  */
-export const getRoleDisplayName = (role: string | number | UserRole): string => {
+export const getRoleDisplayName = (role: string | UserRole): string => {
   const roleName = getRoleName(role);
   const roleNames: Record<string, string> = {
     'admin': 'Admin',
@@ -175,8 +138,7 @@ export const getRoleDisplayName = (role: string | number | UserRole): string => 
  * @param role - User role
  * @returns Tailwind color class for the role
  */
-export const getRoleThemeColor = (role: string | number | UserRole): string => {
-  // Convert numeric role ID to role name first
+export const getRoleThemeColor = (role: string | UserRole): string => {
   const roleName = getRoleName(role);
 
   const roleColors: Record<string, string> = {
@@ -205,7 +167,7 @@ export const getRoleThemeColor = (role: string | number | UserRole): string => {
  * @param path - Base path without role prefix
  * @returns Full path with role prefix
  */
-export const buildRolePath = (role: string | number | UserRole, path: string): string => {
+export const buildRolePath = (role: string | UserRole, path: string): string => {
   const slug = getRoleSlug(role);
   // Ensure path starts with /
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;

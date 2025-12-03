@@ -24,8 +24,8 @@ const VendorManagement: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
-  // Get role-specific vendor detail path
-  const roleSlug = getRoleSlug(user?.role_id || '');
+  // Get role-specific vendor detail path (use role name, not role_id)
+  const roleSlug = getRoleSlug(user?.role || user?.role_name || '');
   const vendorsBasePath = `/${roleSlug}/vendors`;
 
   const [vendors, setVendors] = useState<Vendor[]>([]);

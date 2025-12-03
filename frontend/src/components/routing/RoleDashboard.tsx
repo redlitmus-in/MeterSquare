@@ -40,8 +40,8 @@ const RoleDashboard: React.FC = () => {
     );
   }
 
-  // Get the role name from user (handles both role_id and role string)
-  let userRole = (user as any)?.role || getRoleName(user.role_id);
+  // Get the role name from user (use role name string from backend)
+  let userRole = (user as any)?.role || (user as any)?.role_name || '';
 
   // If admin is viewing as another role, use that role instead
   const isAdmin = userRole?.toLowerCase() === 'admin';

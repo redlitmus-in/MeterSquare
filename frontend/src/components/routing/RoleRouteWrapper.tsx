@@ -34,8 +34,8 @@ const RoleRouteWrapper: React.FC = () => {
   const userRole = (user as any)?.role || '';
   const isAdmin = userRole?.toLowerCase() === 'admin';
 
-  // Get the expected role slug for the authenticated user
-  let expectedRoleSlug = getRoleSlug(user.role_id);
+  // Get the expected role slug for the authenticated user (use role name, not role_id)
+  let expectedRoleSlug = getRoleSlug((user as any).role || (user as any).role_name || '');
 
   // If admin is viewing as another role, allow that role's URL
   if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {

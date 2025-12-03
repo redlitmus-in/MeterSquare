@@ -215,10 +215,14 @@ export const useAuthStore = create<AuthState>()(
 
       getRoleDashboard: () => {
         const state = get();
-        if (!state.user || !state.user.role_id) {
+        // Use role name (string) instead of role_id (number)
+        // Backend returns both: role (name string) and role_id (numeric)
+        if (!state.user || (!state.user.role && !state.user.role_id)) {
           return '/dashboard';
         }
-        return getRoleDashboardPath(state.user.role_id);
+        // Prefer role name over role_id
+        const userRole = state.user.role || state.user.role_name || String(state.user.role_id);
+        return getRoleDashboardPath(userRole);
       },
 
     }),
