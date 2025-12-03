@@ -7,7 +7,7 @@ from flask import Blueprint, jsonify, request
 from functools import wraps
 import jwt
 from datetime import datetime
-from sqlalchemy import and_, or_
+from sqlalchemy import and_
 from models.notification import Notification
 from config.db import db
 from config.logging import get_logger
@@ -73,13 +73,10 @@ def get_notifications(current_user_id, current_user_role):
         limit = min(int(request.args.get('limit', 100)), 500)  # Max 500
         offset = int(request.args.get('offset', 0))
 
-        # Build query
+        # Build query - only show notifications for this specific user
         query = Notification.query.filter(
             and_(
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
         )
@@ -100,13 +97,10 @@ def get_notifications(current_user_id, current_user_role):
         # Apply pagination
         notifications = query.limit(limit).offset(offset).all()
 
-        # Get unread count
+        # Get unread count - only for this specific user
         unread_count = Notification.query.filter(
             and_(
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.read == False,
                 Notification.deleted_at.is_(None)
             )
@@ -136,10 +130,7 @@ def get_notification(current_user_id, current_user_role, notification_id):
         notification = Notification.query.filter(
             and_(
                 Notification.id == notification_id,
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
         ).first()
@@ -171,14 +162,11 @@ def mark_as_read(current_user_id, current_user_role):
         if not notification_ids:
             return jsonify({'error': 'notification_ids is required'}), 400
 
-        # Update notifications
+        # Update notifications - only for this specific user
         notifications = Notification.query.filter(
             and_(
                 Notification.id.in_(notification_ids),
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
         ).all()
@@ -205,13 +193,10 @@ def mark_as_read(current_user_id, current_user_role):
 def mark_all_as_read(current_user_id, current_user_role):
     """Mark all notifications as read for the current user"""
     try:
-        # Update all unread notifications
+        # Update all unread notifications - only for this specific user
         notifications = Notification.query.filter(
             and_(
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.read == False,
                 Notification.deleted_at.is_(None)
             )
@@ -242,10 +227,7 @@ def delete_notification(current_user_id, current_user_role, notification_id):
         notification = Notification.query.filter(
             and_(
                 Notification.id == notification_id,
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
         ).first()
@@ -274,10 +256,7 @@ def delete_all_notifications(current_user_id, current_user_role):
     try:
         notifications = Notification.query.filter(
             and_(
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
         ).all()
@@ -354,10 +333,7 @@ def get_notification_count(current_user_id, current_user_role):
     try:
         unread_count = Notification.query.filter(
             and_(
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.read == False,
                 Notification.deleted_at.is_(None)
             )

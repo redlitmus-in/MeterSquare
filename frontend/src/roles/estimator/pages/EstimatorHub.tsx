@@ -432,12 +432,12 @@ const EstimatorHub: React.FC = () => {
 
     const approvedCount = boqs.filter(b => {
       const s = b.status?.toLowerCase();
-      return s === 'pm_approved' || s === 'pending_td_approval' || s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed';
+      return s === 'pm_approved' || s === 'pending_td_approval' || s === 'approved' || s === 'revision_approved' || s === 'sent_for_confirmation' || s === 'client_confirmed';
     }).length;
 
     const revisionsCount = boqs.filter(b => {
       const s = b.status?.toLowerCase();
-      return s === 'under_revision' || s === 'pending_revision' || s === 'revision_approved';
+      return s === 'under_revision' || s === 'pending_revision';
     }).length;
 
     const rejectedCount = boqs.filter(b => {
