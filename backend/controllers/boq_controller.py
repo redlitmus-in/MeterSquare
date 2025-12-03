@@ -1153,30 +1153,30 @@ def create_boq():
 
             log.info(f"Saved {len(preliminary_selections_to_save)} preliminary selections to boq_preliminaries for BOQ {boq.boq_id}")
 
-        # Save terms & conditions selections to boq_terms_selections junction table
+        # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
         terms_conditions = data.get("terms_conditions", [])
         log.info(f"Received terms_conditions payload: {len(terms_conditions) if terms_conditions else 0} terms")
 
         if terms_conditions and isinstance(terms_conditions, list):
             from sqlalchemy import text
-            for term in terms_conditions:
-                term_id = term.get('term_id')
-                is_checked = term.get('checked', False)
+            # Extract only checked term IDs
+            selected_term_ids = [
+                term.get('term_id') for term in terms_conditions
+                if term.get('term_id') and term.get('checked', False)
+            ]
 
-                if term_id:  # Only save if it has a term_id (from master table)
-                    # Insert or update term selection
-                    db.session.execute(text("""
-                        INSERT INTO boq_terms_selections (boq_id, term_id, is_checked, created_at, updated_at)
-                        VALUES (:boq_id, :term_id, :is_checked, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        ON CONFLICT (boq_id, term_id)
-                        DO UPDATE SET is_checked = :is_checked, updated_at = CURRENT_TIMESTAMP
-                    """), {
-                        'boq_id': boq.boq_id,
-                        'term_id': term_id,
-                        'is_checked': is_checked
-                    })
+            # Insert or update single row with term_ids array
+            db.session.execute(text("""
+                INSERT INTO boq_terms_selections (boq_id, term_ids, created_at, updated_at)
+                VALUES (:boq_id, :term_ids, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (boq_id)
+                DO UPDATE SET term_ids = :term_ids, updated_at = CURRENT_TIMESTAMP
+            """), {
+                'boq_id': boq.boq_id,
+                'term_ids': selected_term_ids
+            })
 
-            log.info(f"✅ Saved terms selections to boq_terms_selections for BOQ {boq.boq_id}")
+            log.info(f"✅ Saved {len(selected_term_ids)} terms selections to boq_terms_selections for BOQ {boq.boq_id}")
         else:
             log.warning(f"No terms_conditions in payload for BOQ {boq.boq_id}")
 
@@ -1644,31 +1644,31 @@ def get_boq(boq_id):
         # Get terms & conditions from boq_terms_selections junction table using JOIN
         try:
             from sqlalchemy import text
-            # Query to join boq_terms_selections with boq_terms to get term details
-            query = text("""
-                SELECT
-                    bt.term_id,
-                    bt.terms_text,
-                    bt.display_order,
-                    bts.is_checked,
-                    bts.id as selection_id
-                FROM boq_terms_selections bts
-                INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
-                WHERE bts.boq_id = :boq_id
-                AND bt.is_active = TRUE AND bt.is_deleted = FALSE
-                ORDER BY bt.display_order, bt.term_id
+            # First get selected term_ids for this BOQ (single row with term_ids array)
+            term_ids_query = text("""
+                SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
             """)
+            term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq_id}).fetchone()
+            selected_term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
 
-            terms_result = db.session.execute(query, {'boq_id': boq_id})
+            # Get all active terms from master
+            all_terms_query = text("""
+                SELECT term_id, terms_text, display_order
+                FROM boq_terms
+                WHERE is_active = TRUE AND is_deleted = FALSE
+                ORDER BY display_order, term_id
+            """)
+            all_terms_result = db.session.execute(all_terms_query)
             terms_items = []
 
-            for row in terms_result:
+            for row in all_terms_result:
+                term_id = row[0]
                 terms_items.append({
-                    'id': f'term-{row[0]}',
-                    'term_id': row[0],
+                    'id': f'term-{term_id}',
+                    'term_id': term_id,
                     'terms_text': row[1],
                     'display_order': row[2],
-                    'checked': row[3],
+                    'checked': term_id in selected_term_ids,
                     'isCustom': False
                 })
 

@@ -164,24 +164,31 @@ def download_client_pdf():
         if not project:
             return jsonify({"success": False, "error": "Project not found"}), 404
 
-        # Fetch selected Terms & Conditions from database
+        # Fetch selected Terms & Conditions from database (single row with term_ids array)
         from sqlalchemy import text
         from config.db import db
         selected_terms = []
         try:
-            query = text("""
-                SELECT bt.terms_text
-                FROM boq_terms_selections bts
-                INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
-                WHERE bts.boq_id = :boq_id
-                AND bts.is_checked = TRUE
-                AND bt.is_active = TRUE
-                AND bt.is_deleted = FALSE
-                ORDER BY bt.display_order, bt.term_id
+            # First get the term_ids array for this BOQ
+            term_ids_query = text("""
+                SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
             """)
-            terms_result = db.session.execute(query, {'boq_id': boq_id})
-            for row in terms_result:
-                selected_terms.append({'terms_text': row[0]})
+            term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq_id}).fetchone()
+            term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
+
+            if term_ids:
+                # Fetch terms text for selected term IDs
+                query = text("""
+                    SELECT terms_text
+                    FROM boq_terms
+                    WHERE term_id = ANY(:term_ids)
+                    AND is_active = TRUE
+                    AND is_deleted = FALSE
+                    ORDER BY display_order, term_id
+                """)
+                terms_result = db.session.execute(query, {'term_ids': term_ids})
+                for row in terms_result:
+                    selected_terms.append({'terms_text': row[0]})
             log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
@@ -349,24 +356,31 @@ def preview_client_pdf():
         if not project:
             return jsonify({"success": False, "error": "Project not found"}), 404
 
-        # Fetch selected Terms & Conditions from database
+        # Fetch selected Terms & Conditions from database (single row with term_ids array)
         from sqlalchemy import text
         from config.db import db
         selected_terms = []
         try:
-            query = text("""
-                SELECT bt.terms_text
-                FROM boq_terms_selections bts
-                INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
-                WHERE bts.boq_id = :boq_id
-                AND bts.is_checked = TRUE
-                AND bt.is_active = TRUE
-                AND bt.is_deleted = FALSE
-                ORDER BY bt.display_order, bt.term_id
+            # First get the term_ids array for this BOQ
+            term_ids_query = text("""
+                SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
             """)
-            terms_result = db.session.execute(query, {'boq_id': boq_id})
-            for row in terms_result:
-                selected_terms.append({'terms_text': row[0]})
+            term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq_id}).fetchone()
+            term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
+
+            if term_ids:
+                # Fetch terms text for selected term IDs
+                query = text("""
+                    SELECT terms_text
+                    FROM boq_terms
+                    WHERE term_id = ANY(:term_ids)
+                    AND is_active = TRUE
+                    AND is_deleted = FALSE
+                    ORDER BY display_order, term_id
+                """)
+                terms_result = db.session.execute(query, {'term_ids': term_ids})
+                for row in terms_result:
+                    selected_terms.append({'terms_text': row[0]})
         except Exception as e:
             log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
 
@@ -446,23 +460,30 @@ def download_client_excel():
         if not project:
             return jsonify({"success": False, "error": "Project not found"}), 404
 
-        # Fetch selected Terms & Conditions from database
+        # Fetch selected Terms & Conditions from database (single row with term_ids array)
         from sqlalchemy import text
         selected_terms = []
         try:
-            query = text("""
-                SELECT bt.terms_text
-                FROM boq_terms_selections bts
-                INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
-                WHERE bts.boq_id = :boq_id
-                AND bts.is_checked = TRUE
-                AND bt.is_active = TRUE
-                AND bt.is_deleted = FALSE
-                ORDER BY bt.display_order, bt.term_id
+            # First get the term_ids array for this BOQ
+            term_ids_query = text("""
+                SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
             """)
-            terms_result = db.session.execute(query, {'boq_id': boq_id})
-            for row in terms_result:
-                selected_terms.append({'terms_text': row[0]})
+            term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq_id}).fetchone()
+            term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
+
+            if term_ids:
+                # Fetch terms text for selected term IDs
+                query = text("""
+                    SELECT terms_text
+                    FROM boq_terms
+                    WHERE term_id = ANY(:term_ids)
+                    AND is_active = TRUE
+                    AND is_deleted = FALSE
+                    ORDER BY display_order, term_id
+                """)
+                terms_result = db.session.execute(query, {'term_ids': term_ids})
+                for row in terms_result:
+                    selected_terms.append({'terms_text': row[0]})
             log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
