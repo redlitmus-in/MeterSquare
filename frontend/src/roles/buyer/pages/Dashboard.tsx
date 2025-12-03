@@ -18,6 +18,7 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { showError } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { API_BASE_URL } from '@/api/config';
 
 interface DashboardStats {
   total_materials: number;
@@ -114,14 +115,13 @@ const BuyerDashboard: React.FC = () => {
   const loadDashboardStats = async () => {
     try {
       setLoading(true);
-      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
       const token = localStorage.getItem('access_token');
 
       if (!token) {
         throw new Error('No authentication token found');
       }
 
-      const response = await fetch(`${API_URL}/buyer/dashboard`, {
+      const response = await fetch(`${API_BASE_URL}/buyer/dashboard`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

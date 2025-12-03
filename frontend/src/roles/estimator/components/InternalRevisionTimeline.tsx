@@ -6,6 +6,7 @@ import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelp
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
+import { API_BASE_URL } from '@/api/config';
 
 interface InternalRevision {
   id: number;
@@ -60,7 +61,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   onReject,
   refreshTrigger
 }) => {
-  const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
+  const API_URL = API_BASE_URL;
 
   const [boqs, setBOQs] = useState<BOQWithInternalRevisions[]>([]);
   const [selectedBoq, setSelectedBoq] = useState<BOQWithInternalRevisions | null>(null);

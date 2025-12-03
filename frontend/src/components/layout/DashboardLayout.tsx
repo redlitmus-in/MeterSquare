@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import ModernSidebar from './ModernSidebar';
 import NotificationSystem from '@/components/NotificationSystem';

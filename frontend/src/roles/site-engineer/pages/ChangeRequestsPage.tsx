@@ -10,12 +10,13 @@ import {
   EyeIcon
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
-import axios from 'axios';
+import { apiClient } from '@/api/config';
 import { useAuthStore } from '@/store/authStore';
 import ExtraSubItemsForm from '@/components/change-requests/ExtraSubItemsForm';
 import { useChangeRequestsAutoSync } from '@/hooks/useAutoSync';
 import { changeRequestService } from '@/services/changeRequestService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { API_BASE_URL } from '@/api/config';
 
 interface POChildInfo {
   id: number;
@@ -56,7 +57,8 @@ const ChangeRequestsPage: React.FC = () => {
   const [selectedRequest, setSelectedRequest] = useState<ChangeRequest | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false); // Prevents double-submission
 
-  const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+  // Use centralized API URL from config
+  const API_URL = API_BASE_URL;
   const token = localStorage.getItem('access_token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -81,12 +83,12 @@ const ChangeRequestsPage: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      const response = await axios.post(`${API_URL}/boq/change-request`, data, { headers });
+      const response = await apiClient.post(`/boq/change-request`, data, { headers });
 
       if (response.data.cr_id) {
         // Send for review immediately after creation
-        await axios.post(
-          `${API_URL}/change-request/${response.data.cr_id}/send-for-review`,
+        await apiClient.post(
+          `/change-request/${response.data.cr_id}/send-for-review`,
           {},
           { headers }
         );

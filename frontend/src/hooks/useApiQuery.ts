@@ -1,7 +1,8 @@
 import { useQuery, useMutation, UseQueryOptions, UseMutationOptions } from '@tanstack/react-query';
 import { apiWrapper } from '@/api/config';
-import { CACHE_TIMES, queryClient, invalidateQueries } from '@/lib/queryClient';
-import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { queryClient, invalidateQueries } from '@/lib/queryClient';
+import { CACHE_TIMES, type CacheStrategy } from '@/lib/constants';
+import { showSuccess, showError } from '@/utils/toastHelper';
 
 // Types for API responses
 export type ApiError = {
@@ -18,7 +19,7 @@ export type ApiError = {
 
 // Enhanced options for queries
 export interface ApiQueryOptions<TData = any> extends Omit<UseQueryOptions<TData, ApiError>, 'queryKey' | 'queryFn'> {
-  cacheStrategy?: keyof typeof CACHE_TIMES;
+  cacheStrategy?: CacheStrategy;
   showErrorToast?: boolean;
   retryOnMount?: boolean;
   backgroundRefetch?: boolean;
@@ -64,17 +65,11 @@ export function useApiQuery<TData = any>(
       }
     },
     staleTime: cacheConfig.staleTime,
-    cacheTime: cacheConfig.cacheTime,
-    refetchOnMount: backgroundRefetch,
-    onError: (error) => {
-      if (showErrorToast) {
-        const message = error?.response?.data?.detail ||
-                       error?.response?.data?.message ||
-                       error?.message ||
-                       'Failed to fetch data';
-        showError(message);
-      }
-    },
+    gcTime: cacheConfig.cacheTime, // gcTime replaced cacheTime in React Query v5
+    // Always refetch on mount to ensure fresh data
+    refetchOnMount: 'always',
+    // Refetch when window gains focus
+    refetchOnWindowFocus: true,
     ...queryOptions,
   });
 }
@@ -116,8 +111,9 @@ export function useApiMutation<TData = any, TVariables = any>(
 
       // Call user's onMutate if provided
       if (onMutate) {
-        return onMutate(variables);
+        return (onMutate as (variables: TVariables) => unknown)(variables);
       }
+      return undefined;
     },
     onSuccess: async (data, variables, context) => {
       // Show success toast
@@ -134,7 +130,7 @@ export function useApiMutation<TData = any, TVariables = any>(
 
       // Call user's onSuccess if provided
       if (onSuccess) {
-        onSuccess(data, variables, context);
+        (onSuccess as (data: TData, variables: TVariables, context: unknown) => void)(data, variables, context);
       }
     },
     onError: (error, variables, context) => {
@@ -154,7 +150,7 @@ export function useApiMutation<TData = any, TVariables = any>(
 
       // Call user's onError if provided
       if (onError) {
-        onError(error, variables, context);
+        (onError as (error: ApiError, variables: TVariables, context: unknown) => void)(error, variables, context);
       }
     },
     ...mutationOptions,
@@ -168,7 +164,7 @@ export function useApiMutation<TData = any, TVariables = any>(
 export async function prefetchData<TData = any>(
   queryKey: any[],
   endpoint: string,
-  cacheStrategy: keyof typeof CACHE_TIMES = 'DYNAMIC'
+  cacheStrategy: CacheStrategy = 'DYNAMIC'
 ) {
   const cacheConfig = CACHE_TIMES[cacheStrategy];
 
@@ -176,7 +172,7 @@ export async function prefetchData<TData = any>(
     queryKey,
     queryFn: () => apiWrapper.get<TData>(endpoint),
     staleTime: cacheConfig.staleTime,
-    cacheTime: cacheConfig.cacheTime,
+    gcTime: cacheConfig.cacheTime, // gcTime replaced cacheTime in React Query v5
   });
 }
 

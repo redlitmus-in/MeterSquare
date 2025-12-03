@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
 import { useApiQuery, useApiMutation } from './useApiQuery';
 import { useOptimisticUpdates } from './useOptimisticUpdates';
 import { API_ENDPOINTS, apiWrapper } from '@/api/config';
-import { queryKeys } from '@/lib/queryClient';
-import { subscribeToPurchases } from '@/lib/realtimeSubscriptions';
+import { queryKeys } from '@/lib/constants';
+import { queryClient } from '@/lib/queryClient';
+import { CACHE_TIMES } from '@/lib/constants';
 
 // Types for purchase requests
 export interface PurchaseRequest {
@@ -38,23 +38,20 @@ export interface UpdatePurchaseData extends Partial<CreatePurchaseData> {
 
 /**
  * Hook for managing purchase requests with real-time updates and caching
+ * Real-time subscriptions are set up globally in App.tsx via setupRealtimeSubscriptions
+ * NO POLLING - Real-time handles all updates
  */
 export function usePurchaseRequests(filters?: any) {
-  const queryKey = queryKeys.purchases.list(filters);
-
-  // Setup real-time subscriptions
-  useEffect(() => {
-    const unsubscribe = subscribeToPurchases();
-    return unsubscribe;
-  }, []);
+  const queryKey = [...queryKeys.purchases.list(filters)];
 
   // Fetch purchase requests with caching
+  // Real-time subscriptions are handled globally in App.tsx
   const query = useApiQuery<PurchaseRequest[]>(
     queryKey,
     API_ENDPOINTS.PURCHASE.ALL,
     {
       cacheStrategy: 'DYNAMIC',
-      refetchInterval: 30000, // Auto-refresh every 30 seconds
+      refetchInterval: false, // ✅ NO POLLING! Real-time subscriptions handle updates
       showErrorToast: true,
     }
   );
@@ -72,7 +69,7 @@ export function usePurchaseRequests(filters?: any) {
  * Hook for fetching a single purchase request
  */
 export function usePurchaseRequest(id: string | number) {
-  const queryKey = queryKeys.purchases.detail(id);
+  const queryKey = [...queryKeys.purchases.detail(id)];
 
   const query = useApiQuery<PurchaseRequest>(
     queryKey,
@@ -287,7 +284,7 @@ export function useApprovePurchase() {
  * Hook for fetching purchase history
  */
 export function usePurchaseHistory(id: string | number) {
-  const queryKey = queryKeys.purchases.history(id);
+  const queryKey = [...queryKeys.purchases.history(id)];
 
   const query = useApiQuery<any[]>(
     queryKey,
@@ -314,12 +311,12 @@ export function usePrefetchPurchase() {
     // Prefetch both detail and history
     await Promise.all([
       queryClient.prefetchQuery({
-        queryKey: queryKeys.purchases.detail(id),
+        queryKey: [...queryKeys.purchases.detail(id)],
         queryFn: () => apiWrapper.get(API_ENDPOINTS.PURCHASE.GET(id)),
         staleTime: CACHE_TIMES.DYNAMIC.staleTime,
       }),
       queryClient.prefetchQuery({
-        queryKey: queryKeys.purchases.history(id),
+        queryKey: [...queryKeys.purchases.history(id)],
         queryFn: () => apiWrapper.get(API_ENDPOINTS.PURCHASE.HISTORY(id)),
         staleTime: CACHE_TIMES.STATIC.staleTime,
       }),

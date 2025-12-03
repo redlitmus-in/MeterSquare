@@ -37,6 +37,7 @@ import PurchaseDetailsModal from '../components/PurchaseDetailsModal';
 import MaterialVendorSelectionModal from '../components/MaterialVendorSelectionModal';
 import VendorEmailModal from '../components/VendorEmailModal';
 import { removeQueries } from '@/lib/queryClient';
+import { STALE_TIMES, REALTIME_TABLES } from '@/lib/constants';
 
 const PurchaseOrders: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'ongoing' | 'pending_approval' | 'completed' | 'rejected'>('ongoing');
@@ -60,8 +61,8 @@ const PurchaseOrders: React.FC = () => {
   const { data: pendingData, isLoading: isPendingLoading, refetch: refetchPending } = useAutoSync<PurchaseListResponse>({
     queryKey: ['buyer-pending-purchases'],
     fetchFn: () => buyerService.getPendingPurchases(),
-    realtimeTables: ['purchases', 'purchase_materials', 'change_requests'], // ✅ Real-time subscriptions
-    staleTime: 30000, // ✅ 30 seconds (was 2 seconds)
+    realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL], // ✅ Real-time subscriptions from constants
+    staleTime: STALE_TIMES.STANDARD, // ✅ 30 seconds from constants
     // ❌ REMOVED: refetchInterval - No more polling!
   });
 
@@ -70,8 +71,8 @@ const PurchaseOrders: React.FC = () => {
   const { data: completedData, isLoading: isCompletedLoading, refetch: refetchCompleted } = useAutoSync<PurchaseListResponse>({
     queryKey: ['buyer-completed-purchases'],
     fetchFn: () => buyerService.getCompletedPurchases(),
-    realtimeTables: ['purchases', 'purchase_materials'], // ✅ Real-time subscriptions
-    staleTime: 60000, // ✅ 60 seconds (completed data is less time-sensitive)
+    realtimeTables: [...REALTIME_TABLES.PURCHASES], // ✅ Real-time subscriptions from constants
+    staleTime: STALE_TIMES.DASHBOARD, // ✅ 60 seconds from constants (completed data is less time-sensitive)
     // ❌ REMOVED: refetchInterval - No more polling!
   });
 
@@ -79,8 +80,8 @@ const PurchaseOrders: React.FC = () => {
   const { data: rejectedData, isLoading: isRejectedLoading, refetch: refetchRejected } = useAutoSync<PurchaseListResponse>({
     queryKey: ['buyer-rejected-purchases'],
     fetchFn: () => buyerService.getRejectedPurchases(),
-    realtimeTables: ['purchases', 'change_requests'], // ✅ Real-time subscriptions
-    staleTime: 60000, // ✅ 60 seconds
+    realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL], // ✅ Real-time subscriptions from constants
+    staleTime: STALE_TIMES.DASHBOARD, // ✅ 60 seconds from constants
   });
 
   // ✅ Fetch approved PO children (for Vendor Approved tab)
@@ -91,8 +92,8 @@ const PurchaseOrders: React.FC = () => {
   }>({
     queryKey: ['buyer-approved-po-children'],
     fetchFn: () => buyerService.getApprovedPOChildren(),
-    realtimeTables: ['po_child', 'change_requests'], // Real-time subscriptions
-    staleTime: 30000, // 30 seconds
+    realtimeTables: ['po_child', ...REALTIME_TABLES.CHANGE_REQUESTS], // Real-time subscriptions
+    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
   });
 
   // Fetch POChildren pending TD approval (for Pending Approval tab)
@@ -103,8 +104,8 @@ const PurchaseOrders: React.FC = () => {
   }>({
     queryKey: ['buyer-pending-po-children'],
     fetchFn: () => buyerService.getBuyerPendingPOChildren(),
-    realtimeTables: ['po_child', 'change_requests'],
-    staleTime: 30000,
+    realtimeTables: ['po_child', ...REALTIME_TABLES.CHANGE_REQUESTS],
+    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
   });
 
   // Helper function for processing purchases (po_children are embedded in parent CR response)

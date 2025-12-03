@@ -15,6 +15,11 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { subscribeToRealtime } from '@/lib/realtimeSubscriptions';
 import { invalidateQueries } from '@/lib/queryClient';
+import {
+  STALE_TIMES,
+  CACHE_GC_TIMES,
+  REALTIME_TABLES,
+} from '@/lib/constants';
 
 interface UseAutoSyncOptions<TData = any> {
   /**
@@ -73,7 +78,7 @@ export function useAutoSync<TData = any>({
   fetchFn,
   realtimeTables = [],
   enabled = true,
-  staleTime = 30000, // 30 seconds default
+  staleTime = STALE_TIMES.STANDARD, // 30 seconds default from constants
   onUpdate,
   onRealtimeEvent,
   showNotifications = false,
@@ -89,7 +94,7 @@ export function useAutoSync<TData = any>({
     queryFn: fetchFn,
     enabled,
     staleTime, // How long data is considered fresh
-    gcTime: 1000 * 60 * 15, // 15 minutes cache (increased from 10)
+    gcTime: CACHE_GC_TIMES.EXTENDED, // 15 minutes cache from constants
 
     // ✅ Smart refetch strategies (NO polling!)
     refetchOnWindowFocus: true,  // Refetch when user returns to tab
@@ -193,8 +198,8 @@ export function useChangeRequestsAutoSync(fetchFn: () => Promise<any>) {
   return useAutoSync({
     queryKey: ['change-requests'],
     fetchFn,
-    realtimeTables: ['change_requests'],
-    staleTime: 15000, // ✅ 15 seconds (was 2 seconds with aggressive polling)
+    realtimeTables: [...REALTIME_TABLES.CHANGE_REQUESTS],
+    staleTime: STALE_TIMES.CRITICAL, // 15 seconds from constants
     enabled: true,
   });
 }
@@ -205,10 +210,10 @@ export function useChangeRequestsAutoSync(fetchFn: () => Promise<any>) {
  */
 export function useBOQAutoSync(boqId: number, fetchFn: () => Promise<any>) {
   return useAutoSync({
-    queryKey: ['boq', boqId],
+    queryKey: ['boq', String(boqId)],
     fetchFn,
-    realtimeTables: ['boq', 'boq_items', 'boq_sub_items'],
-    staleTime: 20000, // ✅ 20 seconds (was 2 seconds with aggressive polling)
+    realtimeTables: [...REALTIME_TABLES.BOQ],
+    staleTime: STALE_TIMES.HIGH_PRIORITY, // 20 seconds from constants
     enabled: !!boqId,
   });
 }
@@ -221,8 +226,8 @@ export function useProjectsAutoSync(fetchFn: () => Promise<any>, enabled: boolea
   return useAutoSync({
     queryKey: ['projects'],
     fetchFn,
-    realtimeTables: ['projects', 'boq', 'boq_items'],
-    staleTime: 30000, // ✅ 30 seconds (was 2 seconds with aggressive polling)
+    realtimeTables: [...REALTIME_TABLES.PROJECTS_FULL],
+    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
     enabled: enabled,
   });
 }
@@ -235,8 +240,8 @@ export function useExtraMaterialsAutoSync(fetchFn: () => Promise<any>) {
   return useAutoSync({
     queryKey: ['extra-materials'],
     fetchFn,
-    realtimeTables: ['change_requests'],
-    staleTime: 20000, // ✅ 20 seconds (was 2 seconds with aggressive polling)
+    realtimeTables: [...REALTIME_TABLES.CHANGE_REQUESTS],
+    staleTime: STALE_TIMES.HIGH_PRIORITY, // 20 seconds from constants
     enabled: true,
   });
 }
@@ -249,8 +254,8 @@ export function usePurchaseRequestsAutoSync(fetchFn: () => Promise<any>) {
   return useAutoSync({
     queryKey: ['purchase-requests'],
     fetchFn,
-    realtimeTables: ['purchases', 'purchase_materials'],
-    staleTime: 30000, // ✅ 30 seconds - already optimized!
+    realtimeTables: [...REALTIME_TABLES.PURCHASES],
+    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
     enabled: true
   });
 }
@@ -263,8 +268,8 @@ export function useDashboardMetricsAutoSync(role: string, fetchFn: () => Promise
   return useAutoSync({
     queryKey: ['dashboard-metrics', role],
     fetchFn,
-    realtimeTables: ['projects', 'purchases', 'tasks', 'change_requests'],
-    staleTime: 60000, // ✅ 60 seconds (was 2 seconds - massive improvement!)
+    realtimeTables: [...REALTIME_TABLES.DASHBOARD],
+    staleTime: STALE_TIMES.DASHBOARD, // 60 seconds from constants
     enabled: true,
   });
 }
@@ -274,10 +279,10 @@ export function useDashboardMetricsAutoSync(role: string, fetchFn: () => Promise
  */
 export function useBOQDetailsAutoSync(boqId: number, fetchFn: () => Promise<any>) {
   return useAutoSync({
-    queryKey: ['boq-details', boqId],
+    queryKey: ['boq-details', String(boqId)],
     fetchFn,
-    realtimeTables: ['boq', 'boq_items', 'boq_sub_items'],
-    staleTime: 30000, // ✅ 30 seconds - already optimized!
+    realtimeTables: [...REALTIME_TABLES.BOQ],
+    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
     enabled: !!boqId
   });
 }
@@ -290,8 +295,8 @@ export function useNotificationsAutoSync(userId: string, fetchFn: () => Promise<
   return useAutoSync({
     queryKey: ['notifications', userId],
     fetchFn,
-    realtimeTables: ['notifications'],
-    staleTime: 10000, // ✅ 10 seconds for notifications (very fresh)
+    realtimeTables: [...REALTIME_TABLES.NOTIFICATIONS],
+    staleTime: STALE_TIMES.REALTIME, // 10 seconds from constants (very fresh)
     enabled: !!userId
   });
 }
@@ -303,8 +308,8 @@ export function useTasksAutoSync(userId: string, fetchFn: () => Promise<any>) {
   return useAutoSync({
     queryKey: ['tasks', userId],
     fetchFn,
-    realtimeTables: ['tasks'],
-    staleTime: 30000, // ✅ 30 seconds - already optimized!
+    realtimeTables: [...REALTIME_TABLES.TASKS],
+    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
     enabled: !!userId
   });
 }
@@ -314,10 +319,10 @@ export function useTasksAutoSync(userId: string, fetchFn: () => Promise<any>) {
  */
 export function useMaterialPurchasesAutoSync(projectId: number, fetchFn: () => Promise<any>) {
   return useAutoSync({
-    queryKey: ['material-purchases', projectId],
+    queryKey: ['material-purchases', String(projectId)],
     fetchFn,
-    realtimeTables: ['purchases', 'purchase_materials'],
-    staleTime: 30000, // ✅ 30 seconds - already optimized!
+    realtimeTables: [...REALTIME_TABLES.PURCHASES],
+    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
     enabled: !!projectId
   });
 }
@@ -327,10 +332,10 @@ export function useMaterialPurchasesAutoSync(projectId: number, fetchFn: () => P
  */
 export function useLabourHoursAutoSync(projectId: number, fetchFn: () => Promise<any>) {
   return useAutoSync({
-    queryKey: ['labour-hours', projectId],
+    queryKey: ['labour-hours', String(projectId)],
     fetchFn,
-    realtimeTables: ['labour_hours'],
-    staleTime: 30000, // ✅ 30 seconds - already optimized!
+    realtimeTables: [...REALTIME_TABLES.LABOUR],
+    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
     enabled: !!projectId
   });
 }
@@ -340,10 +345,10 @@ export function useLabourHoursAutoSync(projectId: number, fetchFn: () => Promise
  */
 export function useProjectOverviewAutoSync(projectId: number, fetchFn: () => Promise<any>) {
   return useAutoSync({
-    queryKey: ['project-overview', projectId],
+    queryKey: ['project-overview', String(projectId)],
     fetchFn,
-    realtimeTables: ['projects', 'boq', 'purchases', 'change_requests'],
-    staleTime: 30000, // ✅ 30 seconds - already optimized!
+    realtimeTables: [...REALTIME_TABLES.PROJECT_OVERVIEW],
+    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
     enabled: !!projectId
   });
 }

@@ -33,6 +33,7 @@ import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 import DayExtensionRequestModal from '../components/DayExtensionRequestModal';
 import AssignItemToSEModal from '@/components/modals/AssignItemToSEModal';
+import { API_BASE_URL } from '@/api/config';
 
 interface BOQDetails {
   boq_detail_id?: number;
@@ -357,7 +358,7 @@ const MyProjects: React.FC = () => {
 
   const loadAvailableBuyers = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+      const API_URL = API_BASE_URL;
       // Updated to use PM route - PM manages buyers
       const response = await fetch(`${API_URL}/all_buyers`, {
         headers: {

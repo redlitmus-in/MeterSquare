@@ -1,6 +1,6 @@
-import axios from 'axios';
+import { apiClient } from '@/api/config';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+// Using apiClient for proper auth and cache handling
 
 export interface ChangeRequestItem {
   cr_id: number;
@@ -169,38 +169,7 @@ export interface CreateChangeRequestData {
 }
 
 class ChangeRequestService {
-  private getAuthHeaders() {
-    const token = localStorage.getItem('access_token');
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    };
-
-    // Add viewing context for admin role (same as apiClient interceptor)
-    const adminViewStore = localStorage.getItem('admin-view-storage');
-    if (adminViewStore) {
-      try {
-        const viewState = JSON.parse(adminViewStore);
-        const viewingAsRole = viewState?.state?.viewingAsRole;
-        const viewingAsRoleId = viewState?.state?.viewingAsRoleId;
-        const viewingAsUserId = viewState?.state?.viewingAsUserId;
-
-        if (viewingAsRole && viewingAsRole !== 'admin') {
-          headers['X-Viewing-As-Role'] = viewingAsRole;
-          if (viewingAsRoleId) {
-            headers['X-Viewing-As-Role-Id'] = String(viewingAsRoleId);
-          }
-          if (viewingAsUserId) {
-            headers['X-Viewing-As-User-Id'] = String(viewingAsUserId);
-          }
-        }
-      } catch (e) {
-        // Ignore parsing errors
-      }
-    }
-
-    return { headers };
-  }
+  // Note: apiClient already handles auth headers and admin viewing context
 
 
   /**
@@ -209,11 +178,7 @@ class ChangeRequestService {
    */
   async createChangeRequest(data: CreateChangeRequestData): Promise<{ success: boolean; data?: any; message?: string }> {
     try {
-      const response = await axios.post(
-        `${API_BASE_URL}/boq/change-request`,
-        data,
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.post('/boq/change-request', data);
 
       return {
         success: true,
@@ -235,10 +200,7 @@ class ChangeRequestService {
    */
   async getChangeRequests(): Promise<{ success: boolean; data: ChangeRequestItem[]; message?: string; count?: number }> {
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/change-requests`,
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.get('/change-requests');
 
       if (response.data.success) {
         return {
@@ -269,10 +231,7 @@ class ChangeRequestService {
    */
   async getChangeRequestDetail(crId: number): Promise<{ success: boolean; data?: ChangeRequestItem; message?: string }> {
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/change-request/${crId}`,
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.get(`/change-request/${crId}`);
 
       if (response.data.success) {
         return {
@@ -301,10 +260,7 @@ class ChangeRequestService {
    */
   async getAllBuyers(): Promise<{ success: boolean; buyers: Array<{user_id: number, full_name: string, email: string, username: string}>; message?: string }> {
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/buyers`,
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.get('/buyers');
 
       return {
         success: response.data.success,
@@ -336,11 +292,7 @@ class ChangeRequestService {
         payload.materials_data = updatedMaterials;
       }
 
-      const response = await axios.post(
-        `${API_BASE_URL}/change-request/${crId}/approve`,
-        payload,
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.post(`/change-request/${crId}/approve`, payload);
 
       return {
         success: response.data.success,
@@ -361,11 +313,7 @@ class ChangeRequestService {
    */
   async reject(crId: number, rejection_reason: string): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.post(
-        `${API_BASE_URL}/change-request/${crId}/reject`,
-        { rejection_reason },
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.post(`/change-request/${crId}/reject`, { rejection_reason });
 
       return {
         success: response.data.success,
@@ -386,10 +334,7 @@ class ChangeRequestService {
    */
   async getBOQChangeRequests(boqId: number): Promise<{ success: boolean; data: ChangeRequestItem[]; count?: number; message?: string }> {
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/boq/${boqId}/change-requests`,
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.get(`/boq/${boqId}/change-requests`);
 
       if (response.data.success) {
         return {
@@ -420,10 +365,7 @@ class ChangeRequestService {
    */
   async getChangeRequestById(crId: number): Promise<{ success: boolean; data?: ChangeRequestItem; message?: string }> {
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/change-request/${crId}`,
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.get(`/change-request/${crId}`);
 
       if (response.data.success) {
         return {
@@ -461,11 +403,7 @@ class ChangeRequestService {
         payload.buyer_id = buyerId;
       }
 
-      const response = await axios.post(
-        `${API_BASE_URL}/change-request/${crId}/send-for-review`,
-        payload,
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.post(`/change-request/${crId}/send-for-review`, payload);
 
       return {
         success: response.data.success,
@@ -500,11 +438,7 @@ class ChangeRequestService {
     }>;
   }): Promise<{ success: boolean; message?: string; data?: any }> {
     try {
-      const response = await axios.put(
-        `${API_BASE_URL}/change-request/${crId}`,
-        data,
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.put(`/change-request/${crId}`, data);
 
       return {
         success: true,
@@ -526,10 +460,7 @@ class ChangeRequestService {
    */
   async getBuyers(): Promise<{ success: boolean; message?: string; data?: Array<{ user_id: number; full_name: string; username: string }> }> {
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/buyers`,
-        this.getAuthHeaders()
-      );
+      const response = await apiClient.get('/buyers');
 
       return {
         success: true,

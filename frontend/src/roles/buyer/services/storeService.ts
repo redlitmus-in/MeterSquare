@@ -1,6 +1,9 @@
-import axios, { AxiosError } from 'axios';
+import { apiClient } from '@/api/config';
+import { AxiosError } from 'axios';
+import { API_BASE_URL } from '@/api/config';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+// Use centralized API URL from config - no hardcoded fallbacks
+const API_URL = API_BASE_URL;
 
 // Store item interface
 export interface StoreItem {
@@ -36,7 +39,7 @@ class StoreService {
    */
   async getStoreItems(): Promise<StoreItem[]> {
     try {
-      const response = await axios.get(`${API_URL}/buyer/store/items`, {
+      const response = await apiClient.get(`/buyer/store/items`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
@@ -57,7 +60,7 @@ class StoreService {
    */
   async getStoreItemDetails(itemId: number): Promise<StoreItem> {
     try {
-      const response = await axios.get(`${API_URL}/buyer/store/items/${itemId}`, {
+      const response = await apiClient.get(`/buyer/store/items/${itemId}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
@@ -78,7 +81,7 @@ class StoreService {
    */
   async getStoreCategories(): Promise<StoreCategory[]> {
     try {
-      const response = await axios.get(`${API_URL}/buyer/store/categories`, {
+      const response = await apiClient.get(`/buyer/store/categories`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }

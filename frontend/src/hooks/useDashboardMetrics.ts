@@ -1,8 +1,7 @@
 import { useEffect } from 'react';
-import { useApiQuery } from './useApiQuery';
-import { API_ENDPOINTS, apiWrapper } from '@/api/config';
-import { queryKeys } from '@/lib/queryClient';
-import { subscribeToRoleBasedUpdates } from '@/lib/realtimeSubscriptions';
+import { useApiQuery, prefetchData } from './useApiQuery';
+import { API_ENDPOINTS } from '@/api/config';
+import { queryKeys } from '@/lib/constants';
 import { useAuthStore } from '@/store/authStore';
 
 // Dashboard metrics types
@@ -32,16 +31,11 @@ export interface ChartData {
 
 /**
  * Hook for fetching dashboard metrics with real-time updates
+ * Real-time subscriptions are set up globally in App.tsx via setupRealtimeSubscriptions
  */
 export function useDashboardMetrics() {
   const { user } = useAuthStore();
   const userRole = (user as any)?.role || '';
-
-  // Setup real-time subscriptions based on role
-  useEffect(() => {
-    const unsubscribe = subscribeToRoleBasedUpdates(userRole);
-    return unsubscribe;
-  }, [userRole]);
 
   // Determine API endpoint based on role
   const getEndpoint = () => {
@@ -147,14 +141,12 @@ export function useRoleDashboard() {
   useEffect(() => {
     if (userRole) {
       // Prefetch common data that user might need
-      const prefetchData = async () => {
-        const { prefetchQuery } = await import('@/hooks/useApiQuery');
-
+      const doPrefetch = async () => {
         // Prefetch based on role
         switch (userRole.toLowerCase()) {
           case 'procurement':
-            await prefetchQuery(
-              queryKeys.purchases.list(),
+            await prefetchData(
+              [...queryKeys.purchases.list()],
               API_ENDPOINTS.PROCUREMENT.ALL_PURCHASES,
               'DYNAMIC'
             );
@@ -162,16 +154,16 @@ export function useRoleDashboard() {
 
           case 'project manager':
           case 'projectmanager':
-            await prefetchQuery(
-              queryKeys.purchases.list({ status: 'pending' }),
+            await prefetchData(
+              [...queryKeys.purchases.list({ status: 'pending' })],
               API_ENDPOINTS.PROJECT_MANAGER.GET_PURCHASES,
               'DYNAMIC'
             );
             break;
 
           case 'accounts':
-            await prefetchQuery(
-              queryKeys.dashboard.metrics('accounts'),
+            await prefetchData(
+              [...queryKeys.dashboard.metrics('accounts')],
               API_ENDPOINTS.ACCOUNTS.FINANCIAL_SUMMARY,
               'DASHBOARD'
             );
@@ -179,7 +171,7 @@ export function useRoleDashboard() {
         }
       };
 
-      prefetchData();
+      doPrefetch();
     }
   }, [userRole]);
 

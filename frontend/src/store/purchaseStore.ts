@@ -6,9 +6,10 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { apiClient, API_ENDPOINTS } from '@/api/config';
-import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
-import { subscribeToRealtime } from '@/lib/realtimeSubscriptions';
+import { showSuccess, showError, showInfo } from '@/utils/toastHelper';
 import { sendPRNotification, requestNotificationPermission } from '@/middleware/notificationMiddleware';
+import { STALE_TIMES, DEBOUNCE_TIMES } from '@/lib/constants';
+import { invalidateQueries } from '@/lib/queryClient';
 
 interface Purchase {
   purchase_id: number;
@@ -110,10 +111,10 @@ interface PurchaseStore {
   getPurchasesForRole: (role: string) => Purchase[];
 }
 
-// ✅ PERFORMANCE: Optimized polling interval (30 seconds)
+// ✅ PERFORMANCE: Optimized polling interval from constants
 // Real-time updates handled by WebSocket (socket.io) for instant updates
 // Polling is now a fallback to ensure data consistency
-const DEFAULT_POLLING_INTERVAL = 30000; // 30s (was 2s - 93% less network traffic!)
+const DEFAULT_POLLING_INTERVAL = STALE_TIMES.STANDARD; // 30s from constants
 
 // Debounce timer for fetch requests
 let fetchDebounceTimer: NodeJS.Timeout | null = null;
@@ -520,49 +521,18 @@ const usePurchaseStore = create<PurchaseStore>()(
     },
 
     // Setup real-time subscription with instant updates
+    // NOTE: Real-time subscriptions are now handled GLOBALLY in App.tsx via setupRealtimeSubscriptions
+    // This function is kept for backwards compatibility but doesn't create duplicate subscriptions
     setupRealtimeSubscription: () => {
-      const state = get();
-      if (state.subscriptionCleanup) {
-        state.subscriptionCleanup();
-      }
+      // Global real-time subscriptions handle this now via realtimeSubscriptions.ts
+      // They automatically invalidate React Query cache which triggers refetch
+      // This prevents duplicate subscriptions and ensures single source of truth
 
-      // Subscribe to purchase_workflow_status changes for INSTANT updates
-      const cleanup = subscribeToRealtime({
-        table: 'purchase_workflow_status',
-        event: '*',
-        onInsert: (payload) => {
-          // INSTANT refetch - no delay for real-time experience
-          const userRole = localStorage.getItem('userRole');
-          get().fetchPurchases(userRole || undefined);
-
-          // Show notification for new data
-          showSuccess('New purchase data available!', {
-            duration: 2000,
-            position: 'top-right',
-          });
-        },
-        onUpdate: (payload) => {
-          // INSTANT refetch - no delay for real-time experience
-          const userRole = localStorage.getItem('userRole');
-          get().fetchPurchases(userRole || undefined);
-
-          // Show notification for updated data
-          showInfo('Purchase data updated!', {
-            duration: 2000,
-            position: 'top-right',
-          });
-        },
-        onDelete: (payload) => {
-          // INSTANT refetch for deletions too
-          const userRole = localStorage.getItem('userRole');
-          get().fetchPurchases(userRole || undefined);
-        },
-        invalidateKeys: [
-          ['purchases'],
-          ['dashboard', 'metrics'],
-          ['approvals', 'pending'],
-        ],
-      });
+      // Register a cleanup function that invalidates purchase queries when called
+      const cleanup = () => {
+        invalidateQueries(['purchases']);
+        invalidateQueries(['purchase-requests']);
+      };
 
       set({ subscriptionCleanup: cleanup });
     },
@@ -709,9 +679,9 @@ export const startPolling = (role?: string) => {
         const now = Date.now();
         const timeSinceLastUpdate = lastUpdate ? now - lastUpdate.getTime() : Infinity;
 
-        // If we received an update in the last 3 seconds (from real-time), skip this poll
+        // If we received an update recently (from real-time), skip this poll
         // This avoids redundant fetches when real-time is working correctly
-        if (timeSinceLastUpdate > 3000) {
+        if (timeSinceLastUpdate > DEBOUNCE_TIMES.RECENT_UPDATE_SKIP) {
           currentStore.fetchPurchases(mappedRole);
         }
       }
@@ -737,14 +707,14 @@ document.addEventListener('visibilitychange', () => {
       clearTimeout(visibilityChangeTimeout);
     }
 
-    // ✅ PERFORMANCE: Debounce with 300ms delay - prevents spam when quickly switching tabs
+    // ✅ PERFORMANCE: Debounce with delay from constants - prevents spam when quickly switching tabs
     visibilityChangeTimeout = setTimeout(() => {
       const store = usePurchaseStore.getState();
       const userRole = localStorage.getItem('userRole');
 
-      // Skip if we just fetched recently (within last 2 seconds)
+      // Skip if we just fetched recently (within threshold from constants)
       const lastFetch = store.lastFetchTime;
-      if (lastFetch && Date.now() - lastFetch.getTime() < 2000) {
+      if (lastFetch && Date.now() - lastFetch.getTime() < DEBOUNCE_TIMES.FOCUS_SKIP) {
         return; // Skip - data is fresh
       }
 
@@ -775,7 +745,7 @@ document.addEventListener('visibilitychange', () => {
       if (mappedRole) {
         store.fetchPurchases(mappedRole);
       }
-    }, 300);
+    }, DEBOUNCE_TIMES.VISIBILITY);
   } else {
     // Tab is hidden - clear any pending refresh
     if (visibilityChangeTimeout) {

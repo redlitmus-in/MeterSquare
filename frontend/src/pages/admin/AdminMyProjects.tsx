@@ -10,7 +10,8 @@ import {
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import axios from 'axios';
+import { apiClient } from '@/api/config';
+import { API_BASE_URL } from '@/api/config';
 
 // Import the actual PM Projects component
 import PMMyProjects from '@/roles/project-manager/pages/MyProjects';
@@ -37,10 +38,9 @@ const AdminMyProjects: React.FC = () => {
   const loadProjectManagers = async () => {
     try {
       setLoading(true);
-      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
       const token = localStorage.getItem('access_token');
 
-      const response = await axios.get(`${API_URL}/admin/project-managers`, {
+      const response = await apiClient.get(`/admin/project-managers`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
 

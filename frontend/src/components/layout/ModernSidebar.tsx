@@ -50,9 +50,10 @@ import { clsx } from 'clsx';
 import { siteEngineerService } from '@/roles/site-engineer/services/siteEngineerService';
 import { projectManagerService } from '@/roles/project-manager/services/projectManagerService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
-import axios from 'axios';
+import { apiClient } from '@/api/config';
 import { useAdminViewStore } from '@/store/adminViewStore';
 import { adminApi } from '@/api/admin';
+import { API_BASE_URL } from '@/api/config';
 
 interface NavigationItem {
   name: string;
@@ -292,9 +293,8 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         await projectManagerService.updateUserStatus(user.user_id, newStatus);
       } else {
         // For all other roles, use direct API call
-        const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
         const token = localStorage.getItem('access_token');
-        await axios.post(`${API_URL}/user_status`, {
+        await apiClient.post(`/user_status`, {
           user_id: user.user_id,
           status: newStatus
         }, {

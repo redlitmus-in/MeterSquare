@@ -4,8 +4,10 @@
  */
 
 import axios from 'axios';
+import { API_BASE_URL } from '@/api/config';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+// Use centralized API URL from config - no hardcoded fallbacks
+const API_URL = API_BASE_URL;
 
 /**
  * Download Internal BOQ Excel (with full breakdown)

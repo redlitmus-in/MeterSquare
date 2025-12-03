@@ -47,14 +47,9 @@ export const ROLE_URL_SLUGS: Record<string, string> = {
   [UserRole.PRODUCTION_MANAGER]: 'production-manager',
   [UserRole.DESIGN]: 'design',
   [UserRole.ESTIMATION]: 'estimator', // Map estimation to estimator URL
+  [UserRole.ESTIMATOR]: 'estimator',
   [UserRole.ACCOUNTS]: 'accounts',
   [UserRole.TECHNICAL_DIRECTOR]: 'technical-director',
-  'technicalDirector': 'technical-director',
-  'projectManager': 'project-manager',
-  'productionManager': 'production-manager',
-  'mep': 'mep',  // Management level MEP
-  'estimator': 'estimator',
-  'estimation': 'estimator' // Map estimation to estimator URL
 };
 
 /**
@@ -77,14 +72,9 @@ export const ROLE_DASHBOARD_PATHS: Record<string, string> = {
   [UserRole.PRODUCTION_MANAGER]: '/production-manager/dashboard',
   [UserRole.DESIGN]: '/design/dashboard',
   [UserRole.ESTIMATION]: '/estimator/dashboard', // Map estimation to estimator dashboard
+  [UserRole.ESTIMATOR]: '/estimator/dashboard',
   [UserRole.ACCOUNTS]: '/accounts/dashboard',
   [UserRole.TECHNICAL_DIRECTOR]: '/technical-director/dashboard',
-  'technicalDirector': '/technical-director/dashboard',
-  'projectManager': '/project-manager/dashboard',
-  'productionManager': '/production-manager/dashboard',
-  'mep': '/mep/dashboard',  // Management level MEP
-  'estimator': '/estimator/dashboard',
-  'estimation': '/estimator/dashboard' // Map estimation to estimator dashboard
 };
 
 /**
@@ -157,14 +147,9 @@ export const getRoleDisplayName = (role: string | number | UserRole): string => 
     [UserRole.PRODUCTION_MANAGER]: 'Production Manager',
     [UserRole.DESIGN]: 'Design',
     [UserRole.ESTIMATION]: 'Estimator', // Map to Estimator display name
+    [UserRole.ESTIMATOR]: 'Estimator',
     [UserRole.ACCOUNTS]: 'Accounts',
     [UserRole.TECHNICAL_DIRECTOR]: 'Technical Director',
-    'technicalDirector': 'Technical Director',
-    'projectManager': 'Project Manager',
-    'productionManager': 'Production Manager',
-    'mep': 'MEP Supervisor',  // Display as "MEP Supervisor" in UI
-    'estimator': 'Estimator',
-    'estimation': 'Estimator' // Map to Estimator display name
   };
 
   return roleNames[roleName as UserRole] || roleNames[roleName] || 'User';
@@ -175,7 +160,10 @@ export const getRoleDisplayName = (role: string | number | UserRole): string => 
  * @param role - User role
  * @returns Tailwind color class for the role
  */
-export const getRoleThemeColor = (role: string | UserRole): string => {
+export const getRoleThemeColor = (role: string | number | UserRole): string => {
+  // Convert numeric role ID to role name first
+  const roleName = getRoleName(role);
+
   const roleColors: Record<string, string> = {
     'admin': 'purple',
     'siteEngineer': 'orange',
@@ -188,17 +176,12 @@ export const getRoleThemeColor = (role: string | UserRole): string => {
     [UserRole.PRODUCTION_MANAGER]: 'amber',
     [UserRole.DESIGN]: 'purple',
     [UserRole.ESTIMATION]: 'indigo', // Map to indigo (same as estimator)
+    [UserRole.ESTIMATOR]: 'indigo',
     [UserRole.ACCOUNTS]: 'emerald',
     [UserRole.TECHNICAL_DIRECTOR]: 'blue',
-    'technicalDirector': 'blue',
-    'projectManager': 'green',
-    'productionManager': 'amber',
-    'mep': 'cyan',  // Cyan for MEP
-    'estimator': 'indigo',
-    'estimation': 'indigo' // Map to indigo (same as estimator)
   };
 
-  return roleColors[role as UserRole] || roleColors[role] || 'gray';
+  return roleColors[roleName as UserRole] || roleColors[roleName] || 'gray';
 };
 
 /**
@@ -207,7 +190,7 @@ export const getRoleThemeColor = (role: string | UserRole): string => {
  * @param path - Base path without role prefix
  * @returns Full path with role prefix
  */
-export const buildRolePath = (role: string | UserRole, path: string): string => {
+export const buildRolePath = (role: string | number | UserRole, path: string): string => {
   const slug = getRoleSlug(role);
   // Ensure path starts with /
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
@@ -261,15 +244,11 @@ export const hasRouteAccess = (userRole: string | UserRole, routePath: string): 
     [UserRole.PROCUREMENT]: ['/procurement', '/vendor'],
     [UserRole.PROJECT_MANAGER]: ['/procurement', '/workflows', '/projects', '/team'],
     [UserRole.PRODUCTION_MANAGER]: ['/production', '/materials', '/projects', '/workflows', '/m2-store'],
-    'projectManager': ['/procurement', '/workflows', '/projects', '/team'],
-    'productionManager': ['/production', '/materials', '/projects', '/workflows', '/m2-store'],
-    'mep': ['/procurement', '/workflows', '/projects', '/team', '/boq'],  // Same access as PM
     [UserRole.DESIGN]: ['/projects', '/workflows'],
     [UserRole.ESTIMATION]: ['/boq', '/estimation', '/projects', '/cost-analysis'], // Map to estimator access
+    [UserRole.ESTIMATOR]: ['/boq', '/estimation', '/projects', '/cost-analysis'],
     [UserRole.ACCOUNTS]: ['/procurement/approvals'],
-    'technicalDirector': ['/'], // Technical Director has access to all routes
-    'estimator': ['/boq', '/estimation', '/projects', '/cost-analysis'],
-    'estimation': ['/boq', '/estimation', '/projects', '/cost-analysis'] // Map to estimator access
+    [UserRole.TECHNICAL_DIRECTOR]: ['/'], // Technical Director has access to all routes
   };
   
   const allowedRoutes = roleAccess[userRole as UserRole] || [];

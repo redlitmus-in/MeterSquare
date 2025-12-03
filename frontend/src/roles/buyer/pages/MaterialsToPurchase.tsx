@@ -25,6 +25,8 @@ import {
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { useAutoSync } from '@/hooks/useAutoSync';
+import { API_BASE_URL } from '@/api/config';
+import { STALE_TIMES } from '@/lib/constants';
 
 interface Material {
   project_id: number;
@@ -65,14 +67,13 @@ const MaterialsToPurchase: React.FC = () => {
   const { data: materialsData, isLoading } = useAutoSync<MaterialsResponse>({
     queryKey: ['buyer-boq-materials'],
     fetchFn: async () => {
-      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
       const token = localStorage.getItem('access_token');
 
       if (!token) {
         throw new Error('No authentication token found');
       }
 
-      const response = await fetch(`${API_URL}/buyer/boq-materials`, {
+      const response = await fetch(`${API_BASE_URL}/buyer/boq-materials`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -85,7 +86,7 @@ const MaterialsToPurchase: React.FC = () => {
       return response.json();
     },
     realtimeTables: ['boq', 'boq_items', 'boq_materials', 'boq_sub_items'], // ✅ Real-time subscriptions
-    staleTime: 60000, // ✅ 60 seconds (was 30 seconds)
+    staleTime: STALE_TIMES.DASHBOARD, // ✅ 60 seconds from constants
     // ❌ REMOVED: refetchInterval - No more polling!
   });
 

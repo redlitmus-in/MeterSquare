@@ -1,6 +1,9 @@
-import axios, { AxiosError } from 'axios';
+import { apiClient } from '@/api/config';
+import { AxiosError } from 'axios';
+import { API_BASE_URL } from '@/api/config';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+// Use centralized API URL from config - no hardcoded fallbacks
+const API_URL = API_BASE_URL;
 
 // Interfaces
 export interface InventoryMaterial {
@@ -79,8 +82,8 @@ class InventoryService {
    */
   async createInventoryItem(material: Omit<InventoryMaterial, 'inventory_material_id'>): Promise<InventoryMaterial> {
     try {
-      const response = await axios.post(
-        `${API_URL}/add_item_inventory`,
+      const response = await apiClient.post(
+        `/add_item_inventory`,
         material,
         { headers: this.getAuthHeader() }
       );
@@ -100,8 +103,8 @@ class InventoryService {
    */
   async getAllInventoryItems(): Promise<InventoryMaterial[]> {
     try {
-      const response = await axios.get(
-        `${API_URL}/all_item_inventory`,
+      const response = await apiClient.get(
+        `/all_item_inventory`,
         { headers: this.getAuthHeader() }
       );
       // Backend returns { materials: [...], total: number }
@@ -120,8 +123,8 @@ class InventoryService {
    */
   async getInventoryItemById(id: number): Promise<InventoryMaterial> {
     try {
-      const response = await axios.get(
-        `${API_URL}/inventory/${id}`,
+      const response = await apiClient.get(
+        `/inventory/${id}`,
         { headers: this.getAuthHeader() }
       );
       // Backend returns { material: {...} }
@@ -140,8 +143,8 @@ class InventoryService {
    */
   async updateInventoryItem(id: number, material: Partial<InventoryMaterial>): Promise<InventoryMaterial> {
     try {
-      const response = await axios.put(
-        `${API_URL}/inventory/${id}`,
+      const response = await apiClient.put(
+        `/inventory/${id}`,
         material,
         { headers: this.getAuthHeader() }
       );
@@ -161,8 +164,8 @@ class InventoryService {
    */
   async deleteInventoryItem(id: number): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.delete(
-        `${API_URL}/inventory/${id}`,
+      const response = await apiClient.delete(
+        `/inventory/${id}`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -180,8 +183,8 @@ class InventoryService {
    */
   async getItemTransactionHistory(id: number): Promise<InventoryTransaction[]> {
     try {
-      const response = await axios.get(
-        `${API_URL}/inventory/${id}/history`,
+      const response = await apiClient.get(
+        `/inventory/${id}/history`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -201,8 +204,8 @@ class InventoryService {
    */
   async createTransaction(transaction: Omit<InventoryTransaction, 'inventory_transaction_id'>): Promise<InventoryTransaction> {
     try {
-      const response = await axios.post(
-        `${API_URL}/transactions`,
+      const response = await apiClient.post(
+        `/transactions`,
         transaction,
         { headers: this.getAuthHeader() }
       );
@@ -221,8 +224,8 @@ class InventoryService {
    */
   async getAllTransactions(): Promise<InventoryTransaction[]> {
     try {
-      const response = await axios.get(
-        `${API_URL}/transactions`,
+      const response = await apiClient.get(
+        `/transactions`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -240,8 +243,8 @@ class InventoryService {
    */
   async getTransactionById(id: number): Promise<InventoryTransaction> {
     try {
-      const response = await axios.get(
-        `${API_URL}/transactions/${id}`,
+      const response = await apiClient.get(
+        `/transactions/${id}`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -261,8 +264,8 @@ class InventoryService {
    */
   async createInternalRequest(request: Omit<InternalMaterialRequest, 'request_id'>): Promise<InternalMaterialRequest> {
     try {
-      const response = await axios.post(
-        `${API_URL}/internal_material_request`,
+      const response = await apiClient.post(
+        `/internal_material_request`,
         request,
         { headers: this.getAuthHeader() }
       );
@@ -281,8 +284,8 @@ class InventoryService {
    */
   async getAllInternalRequests(): Promise<InternalMaterialRequest[]> {
     try {
-      const response = await axios.get(
-        `${API_URL}/internal_material_requests`,
+      const response = await apiClient.get(
+        `/internal_material_requests`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -300,8 +303,8 @@ class InventoryService {
    */
   async getSentInternalRequests(): Promise<InternalMaterialRequest[]> {
     try {
-      const response = await axios.get(
-        `${API_URL}/sent_internal_requests`,
+      const response = await apiClient.get(
+        `/sent_internal_requests`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -319,8 +322,8 @@ class InventoryService {
    */
   async getInternalRequestById(id: number): Promise<InternalMaterialRequest> {
     try {
-      const response = await axios.get(
-        `${API_URL}/internal_material/${id}`,
+      const response = await apiClient.get(
+        `/internal_material/${id}`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -338,8 +341,8 @@ class InventoryService {
    */
   async updateInternalRequest(id: number, request: Partial<InternalMaterialRequest>): Promise<InternalMaterialRequest> {
     try {
-      const response = await axios.put(
-        `${API_URL}/internal_material/${id}`,
+      const response = await apiClient.put(
+        `/internal_material/${id}`,
         request,
         { headers: this.getAuthHeader() }
       );
@@ -358,8 +361,8 @@ class InventoryService {
    */
   async deleteInternalRequest(id: number): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.delete(
-        `${API_URL}/internal_material/${id}`,
+      const response = await apiClient.delete(
+        `/internal_material/${id}`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -377,8 +380,8 @@ class InventoryService {
    */
   async sendInternalRequest(id: number): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.get(
-        `${API_URL}/internal_material/${id}/send`,
+      const response = await apiClient.get(
+        `/internal_material/${id}/send`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -396,8 +399,8 @@ class InventoryService {
    */
   async approveInternalRequest(id: number, data?: any): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/internal_material/${id}/approve`,
+      const response = await apiClient.post(
+        `/internal_material/${id}/approve`,
         data || {},
         { headers: this.getAuthHeader() }
       );
@@ -416,8 +419,8 @@ class InventoryService {
    */
   async rejectInternalRequest(id: number, reason: string): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/internal_material/${id}/reject`,
+      const response = await apiClient.post(
+        `/internal_material/${id}/reject`,
         { rejection_reason: reason },
         { headers: this.getAuthHeader() }
       );
@@ -436,8 +439,8 @@ class InventoryService {
    */
   async dispatchMaterial(id: number, data?: any): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/internal_material/${id}/dispatch`,
+      const response = await apiClient.post(
+        `/internal_material/${id}/dispatch`,
         data || {},
         { headers: this.getAuthHeader() }
       );
@@ -456,8 +459,8 @@ class InventoryService {
    */
   async checkAvailability(id: number): Promise<any> {
     try {
-      const response = await axios.get(
-        `${API_URL}/internal_material/${id}/check_availability`,
+      const response = await apiClient.get(
+        `/internal_material/${id}/check_availability`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -475,8 +478,8 @@ class InventoryService {
    */
   async issueMaterial(id: number, data?: any): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/internal_material/${id}/issue_material`,
+      const response = await apiClient.post(
+        `/internal_material/${id}/issue_material`,
         data || {},
         { headers: this.getAuthHeader() }
       );
@@ -497,8 +500,8 @@ class InventoryService {
    */
   async getInventorySummary(): Promise<any> {
     try {
-      const response = await axios.get(
-        `${API_URL}/summary`,
+      const response = await apiClient.get(
+        `/summary`,
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -516,8 +519,8 @@ class InventoryService {
    */
   async getDashboardData(): Promise<any> {
     try {
-      const response = await axios.get(
-        `${API_URL}/inventory/dashboard`,
+      const response = await apiClient.get(
+        `/inventory/dashboard`,
         { headers: this.getAuthHeader() }
       );
       return response.data.dashboard;

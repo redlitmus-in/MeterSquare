@@ -8,8 +8,7 @@ import {
   CalculatorIcon
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
-import axios from 'axios';
-import { apiClient } from '@/api/config';
+import { apiClient, API_BASE_URL } from '@/api/config';
 import { useAuthStore } from '@/store/authStore';
 import { useAdminViewStore } from '@/store/adminViewStore';
 import { changeRequestService } from '@/services/changeRequestService';
@@ -291,7 +290,6 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const [showExistingRequests, setShowExistingRequests] = useState(false);
   const [loadingRequests, setLoadingRequests] = useState(false);
 
-  const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
   const token = localStorage.getItem('access_token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -434,16 +432,16 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       let filteredProjects = projectsList;
       if (isSiteEngineer && projectsList.length > 0) {
         // Debug: Log project structure to verify completion status fields
-        console.log('🔍 All projects received:', projectsList.map(p => ({
+        console.log('🔍 All projects received:', projectsList.map((p: Project) => ({
           name: p.project_name,
           id: p.project_id,
           my_work_confirmed: p.my_work_confirmed,
-          completion_requested: p.completion_requested,
+          completion_requested: (p as any).completion_requested,
           my_completion_requested: p.my_completion_requested
         })));
 
         // Filter out completed/confirmed projects (only show active work)
-        filteredProjects = projectsList.filter(project => {
+        filteredProjects = projectsList.filter((project: Project) => {
           // Only hide projects where THIS SE's work is confirmed or THIS SE requested completion
           // Also hide projects with "completed" or "Completed" status
           const isCompleted =

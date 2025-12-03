@@ -1,6 +1,7 @@
 import axios, { AxiosRequestConfig } from 'axios';
 import { createClient } from '@supabase/supabase-js';
 import { getEnvironmentConfig } from '../utils/environment';
+import { API_TIMEOUTS, REALTIME_SETTINGS, STALE_TIMES } from '@/lib/constants';
 
 // Get validated environment configuration
 const envConfig = getEnvironmentConfig();
@@ -19,7 +20,7 @@ interface CacheEntry {
   etag?: string;
 }
 const responseCache = new Map<string, CacheEntry>();
-const CACHE_TTL = 30000; // 30 seconds cache for GET requests
+const CACHE_TTL = STALE_TIMES.STANDARD; // 30 seconds cache for GET requests from constants
 
 export const getCacheKey = (url: string, params?: any): string => {
   return `${url}-${JSON.stringify(params || {})}`;
@@ -54,10 +55,22 @@ export const clearCache = (pattern?: string): void => {
   }
 };
 
+// Clear cache on page load/refresh to ensure fresh data
+// This prevents stale data after hard refresh
+if (typeof window !== 'undefined') {
+  // Clear on page load
+  responseCache.clear();
+
+  // Also clear on beforeunload to ensure clean state on navigation
+  window.addEventListener('beforeunload', () => {
+    responseCache.clear();
+  });
+}
+
 // API Configuration
 export const API_BASE_URL = envConfig.api.baseUrl;
 
-// Supabase Configuration with optimized Realtime settings
+// Supabase Configuration with optimized Realtime settings from constants
 export const supabase = createClient(envConfig.supabase.url, envConfig.supabase.anonKey, {
   auth: {
     autoRefreshToken: true,
@@ -66,10 +79,10 @@ export const supabase = createClient(envConfig.supabase.url, envConfig.supabase.
   },
   realtime: {
     params: {
-      eventsPerSecond: 10
+      eventsPerSecond: REALTIME_SETTINGS.EVENTS_PER_SECOND
     },
-    timeout: 30000, // Increase timeout to 30 seconds
-    heartbeatIntervalMs: 15000, // Send heartbeat every 15 seconds
+    timeout: REALTIME_SETTINGS.TIMEOUT,
+    heartbeatIntervalMs: REALTIME_SETTINGS.HEARTBEAT_INTERVAL,
   },
   global: {
     headers: {
@@ -78,11 +91,11 @@ export const supabase = createClient(envConfig.supabase.url, envConfig.supabase.
   }
 });
 
-// ✅ PERFORMANCE: Standard API client with reasonable timeout
+// ✅ PERFORMANCE: Standard API client with reasonable timeout from constants
 // Most operations should complete within 60 seconds
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000, // 60 seconds for standard operations (reduced from 5 minutes)
+  timeout: API_TIMEOUTS.STANDARD, // 60 seconds from constants
   headers: {
     'Content-Type': 'application/json',
   },
@@ -92,7 +105,7 @@ export const apiClient = axios.create({
 // Only use this for operations that genuinely need extended time
 export const longRunningApiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 300000, // 5 minutes for bulk uploads
+  timeout: API_TIMEOUTS.LONG_RUNNING, // 5 minutes from constants
   headers: {
     'Content-Type': 'application/json',
   },
@@ -137,22 +150,13 @@ apiClient.interceptors.request.use(
       delete config.headers['Content-Type'];
     }
 
-    // ✅ PERFORMANCE: Check cache for GET requests (stale-while-revalidate)
-    if (config.method?.toLowerCase() === 'get' && !config.headers['X-Skip-Cache']) {
-      const cacheKey = getCacheKey(config.url || '', config.params);
-      const cachedData = getFromCache(cacheKey);
-      if (cachedData) {
-        // Return cached data immediately, but still make request in background
-        config.headers['X-Cache-Hit'] = 'true';
-        config.adapter = () => Promise.resolve({
-          data: cachedData,
-          status: 200,
-          statusText: 'OK (from cache)',
-          headers: {},
-          config,
-        });
-      }
-    }
+    // ❌ DISABLED: In-memory axios cache causes stale data issues
+    // React Query already handles caching properly with invalidation on mutations
+    // The custom adapter was preventing fresh data from being fetched
+    // Keeping the cache infrastructure for potential future use, but not using it
+
+    // Always fetch fresh data - let React Query handle caching
+    config.headers['X-Skip-Cache'] = 'true';
 
     return config;
   },
@@ -167,8 +171,15 @@ apiClient.interceptors.request.use(
 // Response interceptor with error handling and caching
 apiClient.interceptors.response.use(
   (response) => {
+    const method = response.config.method?.toLowerCase();
+
+    // ✅ Clear ALL cache after any mutation to ensure fresh data
+    // This prevents stale data showing after status changes
+    if (method === 'post' || method === 'put' || method === 'patch' || method === 'delete') {
+      responseCache.clear();
+    }
     // ✅ PERFORMANCE: Cache successful GET responses
-    if (response.config.method?.toLowerCase() === 'get' &&
+    else if (method === 'get' &&
         !response.config.headers?.['X-Cache-Hit'] &&
         !response.config.headers?.['X-Skip-Cache']) {
       const cacheKey = getCacheKey(response.config.url || '', response.config.params);

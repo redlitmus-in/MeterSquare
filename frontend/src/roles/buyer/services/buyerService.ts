@@ -1,6 +1,6 @@
-import axios from 'axios';
+import { apiClient } from '@/api/config';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+// apiClient already handles auth headers, base URL, and cache control
 
 export interface MaterialVendorSelection {
   vendor_id: number;
@@ -402,9 +402,8 @@ class BuyerService {
   // Get pending purchases (assigned to buyer)
   async getPendingPurchases(): Promise<PurchaseListResponse> {
     try {
-      const response = await axios.get<PurchaseListResponse>(
-        `${API_URL}/buyer/new-purchases`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<PurchaseListResponse>(
+        `/buyer/new-purchases`
       );
 
       if (response.data.success) {
@@ -423,9 +422,8 @@ class BuyerService {
   // Get completed purchases
   async getCompletedPurchases(): Promise<PurchaseListResponse> {
     try {
-      const response = await axios.get<PurchaseListResponse>(
-        `${API_URL}/buyer/completed-purchases`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<PurchaseListResponse>(
+        `/buyer/completed-purchases`
       );
 
       if (response.data.success) {
@@ -443,9 +441,8 @@ class BuyerService {
 
   async getRejectedPurchases(): Promise<PurchaseListResponse> {
     try {
-      const response = await axios.get<PurchaseListResponse>(
-        `${API_URL}/buyer/rejected-purchases`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<PurchaseListResponse>(
+        `/buyer/rejected-purchases`
       );
 
       if (response.data.success) {
@@ -464,10 +461,9 @@ class BuyerService {
   // Resend rejected change request
   async resendChangeRequest(crId: number): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.put<{ success: boolean; message: string; error?: string }>(
-        `${API_URL}/change-request/${crId}/resend`,
-        {},
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.put<{ success: boolean; message: string; error?: string }>(
+        `/change-request/${crId}/resend`,
+        {}
       );
 
       if (response.data.success) {
@@ -495,10 +491,9 @@ class BuyerService {
       // 2. Merges materials to BOQ with 'planned_quantity: 0' marker
       // 3. Preserves original BOQ totals
       // 4. Creates MaterialPurchaseTracking entries
-      const response = await axios.post<CompletePurchaseResponse>(
-        `${API_URL}/change-request/${data.cr_id}/complete-purchase`,
-        { purchase_notes: data.notes || '' },
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post<CompletePurchaseResponse>(
+        `/change-request/${data.cr_id}/complete-purchase`,
+        { purchase_notes: data.notes || '' }
       );
 
       if (response.data.success) {
@@ -520,9 +515,8 @@ class BuyerService {
   // Get purchase by ID (for details view)
   async getPurchaseById(crId: number): Promise<Purchase> {
     try {
-      const response = await axios.get<{ success: boolean; purchase: Purchase; error?: string }>(
-        `${API_URL}/buyer/purchase/${crId}`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<{ success: boolean; purchase: Purchase; error?: string }>(
+        `/buyer/purchase/${crId}`
       );
 
       if (response.data.success && response.data.purchase) {
@@ -545,10 +539,9 @@ class BuyerService {
   // Note: Backend endpoint needs to be implemented at /api/buyer/purchase/{cr_id}/select-vendor
   async selectVendor(data: SelectVendorRequest): Promise<SelectVendorResponse> {
     try {
-      const response = await axios.post<SelectVendorResponse>(
-        `${API_URL}/buyer/purchase/${data.cr_id}/select-vendor`,
-        { vendor_id: data.vendor_id },
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post<SelectVendorResponse>(
+        `/buyer/purchase/${data.cr_id}/select-vendor`,
+        { vendor_id: data.vendor_id }
       );
 
       if (response.data.success) {
@@ -573,10 +566,9 @@ class BuyerService {
     materialSelections: Array<{ material_name: string; vendor_id: number }>
   ): Promise<SelectVendorResponse> {
     try {
-      const response = await axios.post<SelectVendorResponse>(
-        `${API_URL}/buyer/purchase/${cr_id}/select-vendor-for-material`,
-        { material_selections: materialSelections },
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post<SelectVendorResponse>(
+        `/buyer/purchase/${cr_id}/select-vendor-for-material`,
+        { material_selections: materialSelections }
       );
 
       if (response.data.success) {
@@ -595,10 +587,9 @@ class BuyerService {
   // Update purchase notes
   async updatePurchaseNotes(data: UpdatePurchaseNotesRequest): Promise<UpdatePurchaseNotesResponse> {
     try {
-      const response = await axios.put<UpdatePurchaseNotesResponse>(
-        `${API_URL}/buyer/purchase/${data.cr_id}/notes`,
-        { notes: data.notes },
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.put<UpdatePurchaseNotesResponse>(
+        `/buyer/purchase/${data.cr_id}/notes`,
+        { notes: data.notes }
       );
 
       if (response.data.success) {
@@ -621,13 +612,12 @@ class BuyerService {
   // Note: Backend endpoint needs to be implemented at /api/buyer/purchase/{cr_id}/update
   async updatePurchaseOrder(data: UpdatePurchaseOrderRequest): Promise<UpdatePurchaseOrderResponse> {
     try {
-      const response = await axios.put<UpdatePurchaseOrderResponse>(
-        `${API_URL}/buyer/purchase/${data.cr_id}/update`,
+      const response = await apiClient.put<UpdatePurchaseOrderResponse>(
+        `/buyer/purchase/${data.cr_id}/update`,
         {
           materials: data.materials,
           total_cost: data.total_cost
-        },
-        { headers: this.getAuthHeaders() }
+        }
       );
 
       if (response.data.success) {
@@ -652,9 +642,8 @@ class BuyerService {
   // Preview vendor email
   async previewVendorEmail(crId: number): Promise<PreviewVendorEmailResponse> {
     try {
-      const response = await axios.get<PreviewVendorEmailResponse>(
-        `${API_URL}/buyer/purchase/${crId}/preview-vendor-email`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<PreviewVendorEmailResponse>(
+        `/buyer/purchase/${crId}/preview-vendor-email`
       );
 
       if (response.data.success) {
@@ -676,9 +665,8 @@ class BuyerService {
   // Preview vendor email for POChild (vendor-split purchases)
   async previewPOChildVendorEmail(poChildId: number): Promise<PreviewVendorEmailResponse> {
     try {
-      const response = await axios.get<PreviewVendorEmailResponse>(
-        `${API_URL}/buyer/po-child/${poChildId}/preview-vendor-email`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<PreviewVendorEmailResponse>(
+        `/buyer/po-child/${poChildId}/preview-vendor-email`
       );
 
       if (response.data.success) {
@@ -725,10 +713,9 @@ class BuyerService {
         payload.cc_emails = data.cc_emails;
       }
 
-      const response = await axios.post<SendVendorEmailResponse>(
-        `${API_URL}/buyer/purchase/${crId}/send-vendor-email`,
-        payload,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post<SendVendorEmailResponse>(
+        `/buyer/purchase/${crId}/send-vendor-email`,
+        payload
       );
 
       if (response.data.success) {
@@ -762,9 +749,8 @@ class BuyerService {
   // Get LPO settings (signatures, company info) for PDF generation
   async getLPOSettings(): Promise<LPOSettingsResponse> {
     try {
-      const response = await axios.get<LPOSettingsResponse>(
-        `${API_URL}/buyer/lpo-settings`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<LPOSettingsResponse>(
+        `/buyer/lpo-settings`
       );
 
       if (response.data.success) {
@@ -784,14 +770,13 @@ class BuyerService {
   async previewLPOPdf(crId: number, poChildId?: number): Promise<LPOPreviewResponse> {
     try {
       // Build URL with optional po_child_id query param
-      let url = `${API_URL}/buyer/purchase/${crId}/preview-lpo-pdf`;
+      let url = `/buyer/purchase/${crId}/preview-lpo-pdf`;
       if (poChildId) {
         url += `?po_child_id=${poChildId}`;
       }
-      const response = await axios.post<LPOPreviewResponse>(
+      const response = await apiClient.post<LPOPreviewResponse>(
         url,
-        {},
-        { headers: this.getAuthHeaders() }
+        {}
       );
 
       if (response.data.success) {
@@ -813,8 +798,8 @@ class BuyerService {
   // Generate LPO PDF (returns blob for download)
   async generateLPOPdf(crId: number, lpoData: LPOData): Promise<Blob> {
     try {
-      const response = await axios.post(
-        `${API_URL}/buyer/purchase/${crId}/generate-lpo-pdf`,
+      const response = await apiClient.post(
+        `/buyer/purchase/${crId}/generate-lpo-pdf`,
         { lpo_data: lpoData },
         {
           headers: this.getAuthHeaders(),
@@ -838,15 +823,14 @@ class BuyerService {
   // Save LPO customizations to database for persistence
   async saveLPOCustomization(crId: number, lpoData: LPOData, includeSignatures: boolean = true): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/buyer/purchase/${crId}/save-lpo-customization`,
+      const response = await apiClient.post(
+        `/buyer/purchase/${crId}/save-lpo-customization`,
         {
           lpo_info: lpoData.lpo_info,
           terms: lpoData.terms,
           vendor: lpoData.vendor,
           include_signatures: includeSignatures
-        },
-        { headers: this.getAuthHeaders() }
+        }
       );
 
       return response.data;
@@ -862,15 +846,14 @@ class BuyerService {
   // Save current LPO customizations as default template (for use in future projects)
   async saveLPODefaultTemplate(lpoData: LPOData, includeSignatures: boolean = true): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/buyer/lpo-default-template`,
+      const response = await apiClient.post(
+        `/buyer/lpo-default-template`,
         {
           lpo_info: lpoData.lpo_info,
           terms: lpoData.terms,
           vendor: lpoData.vendor,
           include_signatures: includeSignatures
-        },
-        { headers: this.getAuthHeaders() }
+        }
       );
 
       return response.data;
@@ -898,9 +881,8 @@ class BuyerService {
     } | null;
   }> {
     try {
-      const response = await axios.get(
-        `${API_URL}/buyer/lpo-default-template`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get(
+        `/buyer/lpo-default-template`
       );
 
       return response.data;
@@ -934,10 +916,9 @@ class BuyerService {
         payload.cc_emails = data.cc_emails;
       }
 
-      const response = await axios.post<SendVendorEmailResponse>(
-        `${API_URL}/buyer/po-child/${poChildId}/send-vendor-email`,
-        payload,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post<SendVendorEmailResponse>(
+        `/buyer/po-child/${poChildId}/send-vendor-email`,
+        payload
       );
 
       if (response.data.success) {
@@ -971,14 +952,13 @@ class BuyerService {
   // Send WhatsApp message to vendor with LPO PDF
   async sendVendorWhatsApp(crId: number, vendorPhone: string, includeLpoPdf: boolean = true, poChildId?: number): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.post<{ success: boolean; message: string }>(
-        `${API_URL}/buyer/purchase/${crId}/send-vendor-whatsapp`,
+      const response = await apiClient.post<{ success: boolean; message: string }>(
+        `/buyer/purchase/${crId}/send-vendor-whatsapp`,
         {
           vendor_phone: vendorPhone,
           include_lpo_pdf: includeLpoPdf,
           po_child_id: poChildId
-        },
-        { headers: this.getAuthHeaders() }
+        }
       );
 
       if (response.data.success) {
@@ -1006,10 +986,9 @@ class BuyerService {
   // Send email to vendor for SE BOQ assignment
   async sendSeBoqVendorEmail(assignmentId: number, vendorEmail: string): Promise<SendVendorEmailResponse> {
     try {
-      const response = await axios.post<SendVendorEmailResponse>(
-        `${API_URL}/buyer/se-boq/${assignmentId}/send-vendor-email`,
-        { vendor_email: vendorEmail },
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post<SendVendorEmailResponse>(
+        `/buyer/se-boq/${assignmentId}/send-vendor-email`,
+        { vendor_email: vendorEmail }
       );
 
       if (response.data.success) {
@@ -1043,8 +1022,8 @@ class BuyerService {
 
       const token = localStorage.getItem('access_token');
 
-      const response = await axios.post(
-        `${API_URL}/buyer/upload/${crId}`,
+      const response = await apiClient.post(
+        `/buyer/upload/${crId}`,
         formData,
         {
           headers: {
@@ -1077,9 +1056,8 @@ class BuyerService {
   // Check store availability for a purchase
   async checkStoreAvailability(crId: number): Promise<StoreAvailabilityResponse> {
     try {
-      const response = await axios.get<StoreAvailabilityResponse>(
-        `${API_URL}/buyer/purchase/${crId}/check-store-availability`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<StoreAvailabilityResponse>(
+        `/buyer/purchase/${crId}/check-store-availability`
       );
 
       if (response.data.success) {
@@ -1101,10 +1079,9 @@ class BuyerService {
   // Complete purchase from M2 Store
   async completeFromStore(crId: number, notes?: string): Promise<CompleteFromStoreResponse> {
     try {
-      const response = await axios.post<CompleteFromStoreResponse>(
-        `${API_URL}/buyer/purchase/${crId}/complete-from-store`,
-        { notes: notes || '' },
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post<CompleteFromStoreResponse>(
+        `/buyer/purchase/${crId}/complete-from-store`,
+        { notes: notes || '' }
       );
 
       if (response.data.success) {
@@ -1165,9 +1142,8 @@ class BuyerService {
     created_at: string;
   }> {
     try {
-      const response = await axios.get(
-        `${API_URL}/buyer/purchase/${crId}/vendor-selection`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get(
+        `/buyer/purchase/${crId}/vendor-selection`
       );
 
       if (response.data.success) {
@@ -1195,15 +1171,14 @@ class BuyerService {
     crId?: number
   ): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/buyer/vendor/${vendorId}/update-price`,
+      const response = await apiClient.post(
+        `/buyer/vendor/${vendorId}/update-price`,
         {
           material_name: materialName,
           new_price: newPrice,
           save_for_future: saveForFuture,
           cr_id: crId  // Include cr_id to save negotiated price to the purchase
-        },
-        { headers: this.getAuthHeaders() }
+        }
       );
 
       if (response.data.success) {
@@ -1252,13 +1227,12 @@ class BuyerService {
     }>;
   }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/buyer/purchase/${crId}/create-po-children`,
+      const response = await apiClient.post(
+        `/buyer/purchase/${crId}/create-po-children`,
         {
           vendor_groups: vendorGroups,
           submission_group_id: submissionGroupId
-        },
-        { headers: this.getAuthHeaders() }
+        }
       );
 
       if (response.data.success) {
@@ -1284,9 +1258,8 @@ class BuyerService {
     po_children: POChild[];
   }> {
     try {
-      const response = await axios.get(
-        `${API_URL}/buyer/po-children/pending`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get(
+        `/buyer/po-children/pending`
       );
 
       if (response.data.success) {
@@ -1309,9 +1282,8 @@ class BuyerService {
     po_children: POChild[];
   }> {
     try {
-      const response = await axios.get(
-        `${API_URL}/buyer/po-children/buyer-pending`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get(
+        `/buyer/po-children/buyer-pending`
       );
 
       if (response.data.success) {
@@ -1334,9 +1306,8 @@ class BuyerService {
     po_children: POChild[];
   }> {
     try {
-      const response = await axios.get(
-        `${API_URL}/buyer/po-children/approved`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get(
+        `/buyer/po-children/approved`
       );
 
       if (response.data.success) {
@@ -1359,9 +1330,8 @@ class BuyerService {
     po_children: POChild[];
   }> {
     try {
-      const response = await axios.get(
-        `${API_URL}/buyer/po-children/rejected`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get(
+        `/buyer/po-children/rejected`
       );
 
       if (response.data.success) {
@@ -1384,10 +1354,9 @@ class BuyerService {
     po_child: POChild;
   }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/buyer/po-child/${poChildId}/td-approve`,
-        {},
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post(
+        `/buyer/po-child/${poChildId}/td-approve`,
+        {}
       );
 
       if (response.data.success) {
@@ -1413,10 +1382,9 @@ class BuyerService {
     po_child: POChild;
   }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/buyer/po-child/${poChildId}/td-reject`,
-        { reason },
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post(
+        `/buyer/po-child/${poChildId}/td-reject`,
+        { reason }
       );
 
       if (response.data.success) {
@@ -1442,10 +1410,9 @@ class BuyerService {
     po_child: POChild;
   }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/buyer/po-child/${poChildId}/reselect-vendor`,
-        { vendor_id: vendorId },
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post(
+        `/buyer/po-child/${poChildId}/reselect-vendor`,
+        { vendor_id: vendorId }
       );
 
       if (response.data.success) {
@@ -1472,10 +1439,9 @@ class BuyerService {
     all_po_children_completed: boolean;
   }> {
     try {
-      const response = await axios.post(
-        `${API_URL}/buyer/po-child/${poChildId}/complete`,
-        { notes: notes || '' },
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post(
+        `/buyer/po-child/${poChildId}/complete`,
+        { notes: notes || '' }
       );
 
       if (response.data.success) {

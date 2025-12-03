@@ -35,6 +35,7 @@ import { changeRequestService, ChangeRequestItem } from '@/services/changeReques
 import { buyerService, Purchase, POChild } from '@/roles/buyer/services/buyerService';
 import { buyerVendorService, Vendor, VendorProduct } from '@/roles/buyer/services/buyerVendorService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { API_BASE_URL } from '@/api/config';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
@@ -433,7 +434,7 @@ const ChangeRequestsPage: React.FC = () => {
 
       if (isVendorRejection) {
         // Reject vendor selection
-        const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+        const apiUrl = API_BASE_URL;
         const token = localStorage.getItem('access_token');
 
         const response = await fetch(`${apiUrl}/buyer/purchase/${rejectingCrId}/td-reject-vendor`, {
@@ -648,7 +649,7 @@ const ChangeRequestsPage: React.FC = () => {
   const handleApproveVendor = async (crId: number) => {
     setApprovingVendorId(crId);
     try {
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+      const apiUrl = API_BASE_URL;
       const token = localStorage.getItem('access_token');
 
       const response = await fetch(`${apiUrl}/buyer/purchase/${crId}/td-approve-vendor`, {

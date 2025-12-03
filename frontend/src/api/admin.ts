@@ -3,20 +3,9 @@
  * Handles all admin-related API calls
  */
 
-import axios from 'axios';
+import { apiClient } from '@/api/config';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-
-// Create axios instance with auth token
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('access_token'); // Fixed: use 'access_token' not 'token'
-  return {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    }
-  };
-};
+// Note: apiClient already handles auth headers, base URL, and cache control
 
 // ============================================
 // USER MANAGEMENT
@@ -75,8 +64,8 @@ export const adminApi = {
     is_active?: boolean;
     department?: string;
   }): Promise<UsersResponse> {
-    const response = await axios.get(`${API_URL}/admin/users`, {
-      ...getAuthHeaders(),
+    const response = await apiClient.get(`/admin/users`, {
+      
       params
     });
     return response.data;
@@ -84,29 +73,25 @@ export const adminApi = {
 
   // Create new user
   async createUser(userData: CreateUserData): Promise<{ message: string; user: User }> {
-    const response = await axios.post(`${API_URL}/admin/users`, userData, getAuthHeaders());
+    const response = await apiClient.post(`/admin/users`, userData);
     return response.data;
   },
 
   // Update user
   async updateUser(userId: number, userData: UpdateUserData): Promise<{ message: string; user: User }> {
-    const response = await axios.put(`${API_URL}/admin/users/${userId}`, userData, getAuthHeaders());
+    const response = await apiClient.put(`/admin/users/${userId}`, userData);
     return response.data;
   },
 
   // Delete user (soft delete)
   async deleteUser(userId: number): Promise<{ message: string; user_id: number }> {
-    const response = await axios.delete(`${API_URL}/admin/users/${userId}`, getAuthHeaders());
+    const response = await apiClient.delete(`/admin/users/${userId}`);
     return response.data;
   },
 
   // Toggle user active status
   async toggleUserStatus(userId: number, isActive: boolean): Promise<{ message: string; user_id: number; is_active: boolean }> {
-    const response = await axios.post(
-      `${API_URL}/admin/users/${userId}/status`,
-      { is_active: isActive },
-      getAuthHeaders()
-    );
+    const response = await apiClient.post(`/admin/users/${userId}/status`, { is_active: isActive });
     return response.data;
   },
 
@@ -115,7 +100,7 @@ export const adminApi = {
   // ============================================
 
   async getRoles(): Promise<{ roles: Role[] }> {
-    const response = await axios.get(`${API_URL}/admin/roles`, getAuthHeaders());
+    const response = await apiClient.get(`/admin/roles`);
     return response.data;
   },
 
@@ -129,19 +114,15 @@ export const adminApi = {
     search?: string;
     status?: string;
   }): Promise<ProjectsResponse> {
-    const response = await axios.get(`${API_URL}/admin/projects`, {
-      ...getAuthHeaders(),
+    const response = await apiClient.get(`/admin/projects`, {
+      
       params
     });
     return response.data;
   },
 
   async assignProjectManager(projectId: number, userId: number): Promise<{ message: string; project_id: number; assigned_pm: any }> {
-    const response = await axios.post(
-      `${API_URL}/admin/projects/${projectId}/assign-pm`,
-      { user_id: userId },
-      getAuthHeaders()
-    );
+    const response = await apiClient.post(`/admin/projects/${projectId}/assign-pm`, { user_id: userId });
     return response.data;
   },
 
@@ -150,13 +131,13 @@ export const adminApi = {
   // ============================================
 
   async getSystemStats(): Promise<SystemStats> {
-    const response = await axios.get(`${API_URL}/admin/stats`, getAuthHeaders());
+    const response = await apiClient.get(`/admin/stats`);
     return response.data;
   },
 
   async getRecentActivity(limit?: number): Promise<{ activities: Activity[] }> {
-    const response = await axios.get(`${API_URL}/admin/activity`, {
-      ...getAuthHeaders(),
+    const response = await apiClient.get(`/admin/activity`, {
+      
       params: { limit }
     });
     return response.data;
@@ -167,24 +148,24 @@ export const adminApi = {
   // ============================================
 
   async getSettings(): Promise<{ settings: SystemSettings }> {
-    const response = await axios.get(`${API_URL}/admin/settings`, getAuthHeaders());
+    const response = await apiClient.get(`/admin/settings`);
     return response.data;
   },
 
   async updateSettings(settings: Partial<SystemSettings>): Promise<{ message: string; settings: SystemSettings }> {
-    const response = await axios.put(`${API_URL}/admin/settings`, settings, getAuthHeaders());
+    const response = await apiClient.put(`/admin/settings`, settings);
     return response.data;
   },
 
   // Upload signature image (base64)
   async uploadSignature(signatureImage: string): Promise<{ success: boolean; message: string; signatureEnabled: boolean }> {
-    const response = await axios.post(`${API_URL}/admin/settings/signature`, { signatureImage }, getAuthHeaders());
+    const response = await apiClient.post(`/admin/settings/signature`, { signatureImage });
     return response.data;
   },
 
   // Delete signature image
   async deleteSignature(): Promise<{ success: boolean; message: string }> {
-    const response = await axios.delete(`${API_URL}/admin/settings/signature`, getAuthHeaders());
+    const response = await apiClient.delete(`/admin/settings/signature`);
     return response.data;
   },
 
@@ -197,15 +178,15 @@ export const adminApi = {
     per_page?: number;
     status?: string;
   }): Promise<{ boqs: BOQItem[]; pagination: any }> {
-    const response = await axios.get(`${API_URL}/admin/boqs`, {
-      ...getAuthHeaders(),
+    const response = await apiClient.get(`/admin/boqs`, {
+      
       params
     });
     return response.data;
   },
 
   async approveBOQ(boqId: number, data: { approved: boolean; comments?: string }): Promise<{ message: string; boq_id: number; status: string }> {
-    const response = await axios.post(`${API_URL}/admin/boqs/${boqId}/approve`, data, getAuthHeaders());
+    const response = await apiClient.post(`/admin/boqs/${boqId}/approve`, data);
     return response.data;
   }
 };

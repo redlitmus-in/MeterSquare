@@ -8,6 +8,7 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import InternalRevisionTimeline from './InternalRevisionTimeline';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
+import { API_BASE_URL } from '@/api/config';
 
 interface RevisionComparisonPageProps {
   boqList: BOQ[];
@@ -138,18 +139,19 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
     setIsSendingToTD(true);
     try {
       await onSendToTD(boq);
-      // Refresh data after sending
+
+      // Immediately update selectedBoq with expected new status
+      // This ensures UI reflects the change immediately without waiting for refresh
+      const expectedStatus = (boq.revision_number || 0) > 0 ? 'pending_revision' : 'pending';
+      setSelectedBoq({
+        ...boq,
+        status: expectedStatus
+      });
+
+      // Refresh data after sending to get the actual server state
       if (onRefresh) {
         await onRefresh();
       }
-
-      // Wait a bit for the data to refresh, then update selectedBoq with latest status
-      setTimeout(() => {
-        const updatedBoq = boqList.find(b => b.boq_id === boq.boq_id);
-        if (updatedBoq) {
-          setSelectedBoq(updatedBoq);
-        }
-      }, 500);
 
       // Reload revision data
       await loadRevisionData(boq);
@@ -165,7 +167,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
     setIsLoading(true);
     try {
       // 🔥 Fetch FULL detailed BOQ from /boq/{boq_id} endpoint (like Internal Revisions does)
-      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+      const API_URL = API_BASE_URL;
       const token = localStorage.getItem('access_token');
 
       const response = await fetch(`${API_URL}/boq/${boq.boq_id}`, {

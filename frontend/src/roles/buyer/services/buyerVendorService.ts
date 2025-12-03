@@ -1,6 +1,8 @@
-import axios from 'axios';
+import { apiClient } from '@/api/config';
+import { API_BASE_URL } from '@/api/config';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+// Use centralized API URL from config - no hardcoded fallbacks
+const API_URL = API_BASE_URL;
 
 export interface Vendor {
   vendor_id?: number;
@@ -85,10 +87,9 @@ class BuyerVendorService {
   // Create new vendor
   async createVendor(vendorData: Omit<Vendor, 'vendor_id'>): Promise<Vendor> {
     try {
-      const response = await axios.post<VendorResponse>(
-        `${API_URL}/vendor/create`,
-        vendorData,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post<VendorResponse>(
+        `/vendor/create`,
+        vendorData
       );
 
       if (response.data.success && response.data.vendor) {
@@ -124,9 +125,8 @@ class BuyerVendorService {
       if (params?.page) queryParams.append('page', params.page.toString());
       if (params?.per_page) queryParams.append('per_page', params.per_page.toString());
 
-      const response = await axios.get<VendorListResponse>(
-        `${API_URL}/vendor/all?${queryParams.toString()}`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<VendorListResponse>(
+        `/vendor/all?${queryParams.toString()}`
       );
 
       if (response.data.success) {
@@ -162,9 +162,8 @@ class BuyerVendorService {
       if (params?.page) queryParams.append('page', params.page.toString());
       if (params?.per_page) queryParams.append('per_page', params.per_page.toString());
 
-      const response = await axios.get<VendorListResponse>(
-        `${API_URL}/vendor/all-with-products?${queryParams.toString()}`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<VendorListResponse>(
+        `/vendor/all-with-products?${queryParams.toString()}`
       );
 
       if (response.data.success) {
@@ -186,9 +185,8 @@ class BuyerVendorService {
   // Get vendor by ID
   async getVendorById(vendorId: number): Promise<Vendor> {
     try {
-      const response = await axios.get<VendorResponse>(
-        `${API_URL}/vendor/${vendorId}`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<VendorResponse>(
+        `/vendor/${vendorId}`
       );
 
       if (response.data.success && response.data.vendor) {
@@ -210,10 +208,9 @@ class BuyerVendorService {
   // Update vendor
   async updateVendor(vendorId: number, vendorData: Partial<Vendor>): Promise<Vendor> {
     try {
-      const response = await axios.put<VendorResponse>(
-        `${API_URL}/vendor/${vendorId}`,
-        vendorData,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.put<VendorResponse>(
+        `/vendor/${vendorId}`,
+        vendorData
       );
 
       if (response.data.success && response.data.vendor) {
@@ -238,9 +235,8 @@ class BuyerVendorService {
   // Delete vendor (soft delete)
   async deleteVendor(vendorId: number): Promise<void> {
     try {
-      const response = await axios.delete<VendorResponse>(
-        `${API_URL}/vendor/${vendorId}`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.delete<VendorResponse>(
+        `/vendor/${vendorId}`
       );
 
       if (!response.data.success) {
@@ -261,10 +257,9 @@ class BuyerVendorService {
   // Add product to vendor
   async addVendorProduct(vendorId: number, productData: Omit<VendorProduct, 'product_id' | 'vendor_id'>): Promise<VendorProduct> {
     try {
-      const response = await axios.post<ProductResponse>(
-        `${API_URL}/vendor/${vendorId}/products`,
-        productData,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.post<ProductResponse>(
+        `/vendor/${vendorId}/products`,
+        productData
       );
 
       if (response.data.success && response.data.product) {
@@ -286,9 +281,8 @@ class BuyerVendorService {
   // Get vendor products
   async getVendorProducts(vendorId: number): Promise<VendorProduct[]> {
     try {
-      const response = await axios.get<ProductResponse>(
-        `${API_URL}/vendor/${vendorId}/products`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<ProductResponse>(
+        `/vendor/${vendorId}/products`
       );
 
       if (response.data.success && response.data.products) {
@@ -310,10 +304,9 @@ class BuyerVendorService {
   // Update vendor product
   async updateVendorProduct(vendorId: number, productId: number, productData: Partial<VendorProduct>): Promise<VendorProduct> {
     try {
-      const response = await axios.put<ProductResponse>(
-        `${API_URL}/vendor/${vendorId}/products/${productId}`,
-        productData,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.put<ProductResponse>(
+        `/vendor/${vendorId}/products/${productId}`,
+        productData
       );
 
       if (response.data.success && response.data.product) {
@@ -335,9 +328,8 @@ class BuyerVendorService {
   // Delete vendor product
   async deleteVendorProduct(vendorId: number, productId: number): Promise<void> {
     try {
-      const response = await axios.delete<ProductResponse>(
-        `${API_URL}/vendor/${vendorId}/products/${productId}`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.delete<ProductResponse>(
+        `/vendor/${vendorId}/products/${productId}`
       );
 
       if (!response.data.success) {
@@ -358,9 +350,8 @@ class BuyerVendorService {
   // Get vendor categories
   async getVendorCategories(): Promise<string[]> {
     try {
-      const response = await axios.get<{ success: boolean; categories: string[] }>(
-        `${API_URL}/vendor/categories`,
-        { headers: this.getAuthHeaders() }
+      const response = await apiClient.get<{ success: boolean; categories: string[] }>(
+        `/vendor/categories`
       );
 
       if (response.data.success) {

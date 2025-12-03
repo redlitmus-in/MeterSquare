@@ -9,7 +9,8 @@ import {
   ChevronDownIcon
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
-import axios from 'axios';
+import { apiClient } from '@/api/config';
+import { API_BASE_URL } from '@/api/config';
 import { useAuthStore } from '@/store/authStore';
 
 interface SubItem {
@@ -91,7 +92,6 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
   const [justification, setJustification] = useState('');
   const [fetchingOverhead, setFetchingOverhead] = useState(false);
 
-  const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
   const token = localStorage.getItem('access_token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -100,7 +100,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
     const fetchProjects = async () => {
       try {
         setLoading(true);
-        const response = await axios.get(`${API_URL}/projects/assigned-to-me`, { headers });
+        const response = await apiClient.get(`/projects/assigned-to-me`, { headers });
         setProjects(response.data.projects || []);
       } catch (error) {
         console.error('Error fetching projects:', error);
@@ -119,8 +119,8 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
       const fetchItemOverhead = async () => {
         try {
           setFetchingOverhead(true);
-          const response = await axios.get(
-            `${API_URL}/boq/${selectedBoq.boq_id}/item-overhead/${selectedItem.item_id}`,
+          const response = await apiClient.get(
+            `/boq/${selectedBoq.boq_id}/item-overhead/${selectedItem.item_id}`,
             { headers }
           );
           setItemOverhead(response.data);

@@ -57,6 +57,7 @@ import InactivityModal from '@/components/modals/InactivityModal';
 import DataRecoveryModal from '@/components/modals/DataRecoveryModal';
 import SaveDraftModal from '@/components/modals/SaveDraftModal';
 import { BOQ_CONFIG } from '@/config/boqConfig';
+import { API_BASE_URL } from '@/api/config';
 
 // Backend-aligned interfaces
 interface SubItemForm {
@@ -2067,7 +2068,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     if (itemToRemove.prelim_id) {
       try {
         const token = localStorage.getItem('access_token');
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'}/preliminary-master/${itemToRemove.prelim_id}`, {
+        const response = await fetch(`${API_BASE_URL}/preliminary-master/${itemToRemove.prelim_id}`, {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',
@@ -2612,7 +2613,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       }
       // Edit mode - Update existing BOQ
       else if (editMode && existingBoqData?.boq_id) {
-        const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+        const API_URL = API_BASE_URL;
         const token = localStorage.getItem('access_token');
 
         const subtotal = items.reduce((sum, item) => {
@@ -2895,7 +2896,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       }
       // Use new_purchase endpoint for PM/SE adding extra items
       else if (isNewPurchase && existingBoqId) {
-        const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+        const API_URL = API_BASE_URL;
         const token = localStorage.getItem('access_token');
 
         const newPurchasePayload = {

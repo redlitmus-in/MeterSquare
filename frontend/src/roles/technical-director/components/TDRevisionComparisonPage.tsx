@@ -6,6 +6,7 @@ import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelp
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import InternalRevisionTimeline from '@/roles/estimator/components/InternalRevisionTimeline';
+import { API_BASE_URL } from '@/api/config';
 
 interface BOQ {
   boq_id: number;
@@ -173,7 +174,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     setIsLoading(true);
     try {
       // 🔥 Fetch FULL detailed BOQ from /boq/{boq_id} endpoint (like Internal Revisions does)
-      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+      const API_URL = API_BASE_URL;
       const token = localStorage.getItem('access_token');
 
       const response = await fetch(`${API_URL}/boq/${boq.boq_id}`, {

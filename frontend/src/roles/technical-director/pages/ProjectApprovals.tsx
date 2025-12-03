@@ -38,7 +38,6 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
-import axios from 'axios';
 import { apiClient } from '@/api/config';
 import { formatCurrency } from '@/utils/formatters';
 import { Badge } from '@/components/ui/badge';
@@ -466,7 +465,7 @@ const ProjectApprovals: React.FC = () => {
     try {
       setLoadingDayExtensions(true);
       const token = localStorage.getItem('access_token') || localStorage.getItem('token');
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
+      const apiUrl = API_BASE_URL;
 
       console.log(`Fetching day extensions for BOQ ${boqId}...`);
 

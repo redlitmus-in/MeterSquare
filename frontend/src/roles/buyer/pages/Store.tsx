@@ -8,9 +8,12 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { useAutoSync } from '@/hooks/useAutoSync';
 import { storeService, StoreItem } from '../services/storeService';
-import axios from 'axios';
+import { apiClient } from '@/api/config';
+import { API_BASE_URL } from '@/api/config';
+import { STALE_TIMES } from '@/lib/constants';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+// Use centralized API URL from config
+const API_URL = API_BASE_URL;
 
 interface MaterialRequest {
   request_id: number;
@@ -62,14 +65,14 @@ const Store: React.FC = () => {
     queryKey: ['buyer-store-items'],
     fetchFn: () => storeService.getStoreItems(),
     realtimeTables: ['inventory_materials'],
-    staleTime: 30000,
+    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
   });
 
   // Fetch my requests
   const fetchMyRequests = async () => {
     setIsLoadingRequests(true);
     try {
-      const response = await axios.get(`${API_URL}/internal_material_requests`, {
+      const response = await apiClient.get(`/internal_material_requests`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
@@ -95,7 +98,7 @@ const Store: React.FC = () => {
   const fetchProjectsForMaterial = async (materialId: number) => {
     setIsLoadingProjects(true);
     try {
-      const response = await axios.get(`${API_URL}/buyer/store/projects-by-material/${materialId}`, {
+      const response = await apiClient.get(`/buyer/store/projects-by-material/${materialId}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
@@ -175,8 +178,8 @@ const Store: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      const response = await axios.post(
-        `${API_URL}/internal_material_request`,
+      const response = await apiClient.post(
+        `/internal_material_request`,
         {
           inventory_material_id: selectedItem.id,
           material_name: selectedItem.name,

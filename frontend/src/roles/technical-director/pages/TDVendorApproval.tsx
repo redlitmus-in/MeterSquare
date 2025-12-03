@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
-import axios from 'axios';
+import { apiClient } from '@/api/config';
 import { removeQueries } from '@/lib/queryClient';
 
 interface BOQAssignment {
@@ -94,7 +94,7 @@ const TDVendorApproval: React.FC = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await axios.get('/api/se-boq-vendor-requests', {
+      const response = await apiClient.get('/api/se-boq-vendor-requests', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setAssignments(response.data.assignments || []);
@@ -110,7 +110,7 @@ const TDVendorApproval: React.FC = () => {
     try {
       setActionLoading(assignmentId);
       const token = localStorage.getItem('token');
-      await axios.post(
+      await apiClient.post(
         `/api/buyer/se-boq/${assignmentId}/td-approve-vendor`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
@@ -143,7 +143,7 @@ const TDVendorApproval: React.FC = () => {
     try {
       setActionLoading(assignmentToReject.assignment_id);
       const token = localStorage.getItem('token');
-      await axios.post(
+      await apiClient.post(
         `/api/buyer/se-boq/${assignmentToReject.assignment_id}/td-reject-vendor`,
         { rejection_reason: rejectionReason },
         { headers: { Authorization: `Bearer ${token}` } }

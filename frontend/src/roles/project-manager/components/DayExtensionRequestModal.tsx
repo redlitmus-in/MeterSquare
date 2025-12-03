@@ -12,6 +12,7 @@ import {
   ChevronUpIcon
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { API_BASE_URL } from '@/api/config';
 
 interface DayExtensionRequestModalProps {
   isOpen: boolean;
@@ -54,9 +55,8 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
     try {
       setCheckingPending(true);
       const token = localStorage.getItem('access_token') || localStorage.getItem('token');
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
 
-      const response = await fetch(`${apiUrl}/boq/${boqId}/day-extension-history`, {
+      const response = await fetch(`${API_BASE_URL}/boq/${boqId}/day-extension-history`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -146,8 +146,7 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
-      const response = await fetch(`${apiUrl}/boq/${boqId}/request-day-extension`, {
+      const response = await fetch(`${API_BASE_URL}/boq/${boqId}/request-day-extension`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

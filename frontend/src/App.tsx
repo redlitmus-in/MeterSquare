@@ -6,7 +6,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useAdminViewStore } from '@/store/adminViewStore';
 import { UserRole } from '@/types';
 import { validateSupabaseConnection } from '@/utils/environment';
-import { setupCacheValidator } from '@/utils/clearCache';
+import { setupCacheValidator, clearApiCaches } from '@/utils/clearCache';
 import { queryClient } from '@/lib/queryClient';
 import { setupRealtimeSubscriptions } from '@/lib/realtimeSubscriptions';
 import { initializeNotificationService } from '@/store/notificationStore';
@@ -736,13 +736,17 @@ function App() {
           realtimeNotificationHub.disconnect();
         }
       };
-    } else {
-      // Clear credentials on logout
-      realtimeNotificationHub.disconnect();
     }
+    // Clear credentials on logout
+    realtimeNotificationHub.disconnect();
+    return undefined;
   }, [isAuthenticated]); // REMOVED 'user' from dependencies to prevent unnecessary re-runs
 
   useEffect(() => {
+    // Clear all API caches on app load to ensure fresh data
+    // This prevents stale data issues after hard refresh
+    clearApiCaches();
+
     // Setup cache validation for role mismatches
     setupCacheValidator();
 

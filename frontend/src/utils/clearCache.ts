@@ -1,3 +1,6 @@
+import { queryClient } from '@/lib/queryClient';
+import { clearCache as clearAxiosCache } from '@/api/config';
+
 /**
  * Utility to clear all cached authentication and user data
  * Use this when you need to force a fresh start or fix role mismatches
@@ -8,10 +11,16 @@ export const clearAllCachedData = () => {
   localStorage.removeItem('user');
   localStorage.removeItem('auth-storage');
   localStorage.removeItem('sidebarCollapsed');
-  
+
   // Clear session storage if any
   sessionStorage.clear();
-  
+
+  // Clear React Query cache
+  queryClient.clear();
+
+  // Clear axios in-memory cache
+  clearAxiosCache();
+
   console.log('All cached data has been cleared');
 };
 
@@ -22,8 +31,20 @@ export const clearAllCachedData = () => {
 export const clearUserCache = () => {
   localStorage.removeItem('user');
   localStorage.removeItem('auth-storage');
-  
+
   console.log('User cache cleared, auth token preserved');
+};
+
+/**
+ * Clear all API/data caches to ensure fresh data
+ * Called on page load/refresh to prevent stale data
+ */
+export const clearApiCaches = () => {
+  // Clear React Query cache
+  queryClient.clear();
+
+  // Clear axios in-memory cache
+  clearAxiosCache();
 };
 
 // Auto-clear cache on window focus if role mismatch detected

@@ -14,6 +14,7 @@ import {
   ChevronUpIcon
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { API_BASE_URL } from '@/api/config';
 
 interface ExtensionRequest {
   boq_id: number;
@@ -101,9 +102,8 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
     try {
       setLoadingHistory(true);
       const token = localStorage.getItem('access_token') || localStorage.getItem('token');
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
 
-      const response = await fetch(`${apiUrl}/boq/${boqId}/day-extension-history`, {
+      const response = await fetch(`${API_BASE_URL}/boq/${boqId}/day-extension-history`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -190,13 +190,12 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
 
     try {
       const token = localStorage.getItem('access_token') || localStorage.getItem('token');
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
 
       let endpoint = '';
       let body = {};
 
       if (action === 'approve') {
-        endpoint = `${apiUrl}/boq/${extensionRequest.boq_id}/approve_day_extension`;
+        endpoint = `${API_BASE_URL}/boq/${extensionRequest.boq_id}/approve_day_extension`;
         // Use edited_days if request was edited, otherwise use requested_days
         const daysToApprove = extensionRequest.is_edited
           ? (extensionRequest.edited_days || extensionRequest.actual_days || extensionRequest.requested_days)
@@ -209,13 +208,13 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
         console.log(`Approving with ${daysToApprove} days (edited: ${extensionRequest.is_edited}, edited_days: ${extensionRequest.edited_days})`);
       } else if (action === 'alter') {
         // Use edit endpoint instead of approve
-        endpoint = `${apiUrl}/boq/${extensionRequest.boq_id}/edit_day_extension`;
+        endpoint = `${API_BASE_URL}/boq/${extensionRequest.boq_id}/edit_day_extension`;
         body = {
           edited_days: alteredDays,
           reason: editReason.trim() || `TD modified from ${extensionRequest.requested_days} to ${alteredDays} days`
         };
       } else if (action === 'reject') {
-        endpoint = `${apiUrl}/boq/${extensionRequest.boq_id}/reject_day_extension`;
+        endpoint = `${API_BASE_URL}/boq/${extensionRequest.boq_id}/reject_day_extension`;
         body = {
           rejection_reason: rejectionReason.trim()
         };
