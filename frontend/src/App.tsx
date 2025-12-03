@@ -840,8 +840,7 @@ function App() {
             }
           }}
         />
-        {/* Global Notification System - available on all authenticated pages */}
-        {isAuthenticated && <NotificationSystem />}
+        {/* NotificationSystem is rendered in DashboardLayout with proper positioning */}
         <Suspense fallback={<PageLoader />}>
           <Routes>
         {/* Public Routes */}

@@ -76,6 +76,16 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPriority, setSelectedPriority] = useState<string>('all');
   const [toastNotifications, setToastNotifications] = useState<NotificationData[]>([]);
+
+  // Delay rendering to prevent flash during page load
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsReady(true);
+    }, 300); // Wait for page to load before showing bell icon
+    return () => clearTimeout(timer);
+  }, []);
   
   // Refs for click outside detection
   const panelRef = useRef<HTMLDivElement>(null);
@@ -445,6 +455,11 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     'bottom-right': 'bottom-4 right-4',
     'bottom-left': 'bottom-4 left-4'
   };
+
+  // Don't render until page is loaded to prevent flash during loading
+  if (!isReady) {
+    return null;
+  }
 
   return (
     <>
