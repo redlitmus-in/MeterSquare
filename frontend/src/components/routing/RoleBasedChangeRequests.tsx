@@ -14,37 +14,37 @@ const RoleBasedChangeRequests: React.FC = () => {
   const { viewingAsRole } = useAdminViewStore();
   const location = useLocation();
   const userRole = (user as any)?.role || '';
-  const userRoleId = (user as any)?.role_id;
   const userRoleLower = userRole.toLowerCase();
 
   // Check if we're on extra-material route
   const isExtraMaterial = location.pathname.includes('extra-material');
 
   // Check if admin is viewing as another role
-  const isAdmin = userRoleLower === 'admin' || userRoleId === 5;
+  const isAdmin = userRoleLower === 'admin';
   const isAdminViewing = isAdmin && viewingAsRole && viewingAsRole !== 'admin';
 
   // Use viewing role if admin is viewing as another role, otherwise use actual role
   const effectiveRole = isAdminViewing ? viewingAsRole.toLowerCase() : userRoleLower;
 
-  // Also check role_id for more reliable role detection
-  const isPM = userRoleId === 6 || effectiveRole.includes('project') || effectiveRole.includes('manager');
-  const isTD = userRoleId === 7 || effectiveRole.includes('technical') || effectiveRole.includes('director');
-  const isEstimator = userRoleId === 4 || effectiveRole === 'estimator';
-  const isSE = userRoleId === 3 || effectiveRole.includes('site') || effectiveRole.includes('engineer');
-  const isMEP = userRoleId === 11 || effectiveRole.includes('mep');
+  // Role detection based ONLY on role_name (no hardcoded role_id)
+  // Exact matching from roles_config.py
+  const isPM = effectiveRole === 'projectmanager';
+  const isTD = effectiveRole === 'technicaldirector';
+  const isEstimator = effectiveRole === 'estimator';
+  const isSE = effectiveRole === 'siteengineer' || effectiveRole === 'sitesupervisor';
+  const isMEP = effectiveRole === 'mep' || effectiveRole === 'mepsupervisor';
 
-  console.log('[RoleBasedChangeRequests] User role:', userRole, 'Role ID:', userRoleId, 'Effective role:', effectiveRole, 'isPM:', isPM, 'isTD:', isTD, 'Path:', location.pathname);
+  console.log('[RoleBasedChangeRequests] User role:', userRole, 'Effective role:', effectiveRole, 'isPM:', isPM, 'isSE:', isSE, 'isTD:', isTD, 'isMEP:', isMEP, 'Path:', location.pathname);
 
   // Determine which component to render based on role and route
   let Component;
 
   if (isExtraMaterial) {
-    // Extra Material routing
-    if (isSE) {
-      Component = SEExtraMaterialPage;
-    } else if (isPM || isMEP) {
+    // Extra Material routing - CHECK PM FIRST to avoid conflicts
+    if (isPM || isMEP) {
       Component = PMChangeRequestsPage;
+    } else if (isSE) {
+      Component = SEExtraMaterialPage;
     } else if (isAdmin && !isAdminViewing) {
       Component = SEExtraMaterialPage;
     } else {
