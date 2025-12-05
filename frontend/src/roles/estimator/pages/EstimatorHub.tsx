@@ -62,6 +62,7 @@ import {
   XCircle as XCircleIcon,
   CheckCircle as CheckCircleIcon,
   ArrowRight,
+  User as UserIcon,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Label } from '@/components/ui/label';
@@ -432,7 +433,7 @@ const EstimatorHub: React.FC = () => {
 
     const approvedCount = boqs.filter(b => {
       const s = b.status?.toLowerCase();
-      return s === 'pm_approved' || s === 'pending_td_approval' || s === 'approved' || s === 'revision_approved' || s === 'sent_for_confirmation' || s === 'client_confirmed';
+      return s === 'pm_approved' || s === 'pending_td_approval' || s === 'approved' || s === 'revision_approved' || s === 'sent_for_confirmation' || s === 'client_confirmed' || s === 'items_assigned';
     }).length;
 
     const revisionsCount = boqs.filter(b => {
@@ -874,12 +875,12 @@ const EstimatorHub: React.FC = () => {
           return status === 'under_revision' || status === 'pending_revision' || status === 'revision_approved';
         });
       } else if (activeTab === 'approved') {
-        // Approved: PM approved, TD approved (includes all stages after approvals until PM assignment)
+        // Approved: PM approved, TD approved (includes all stages after approvals and items assigned to SE)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
 
-          // Show if PM approved, pending TD approval, TD approved, revision approved, sent to client, or client confirmed (but not yet PM assigned/completed)
-          return (status === 'pm_approved' || status === 'pending_td_approval' || status === 'approved' || status === 'revision_approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
+          // Show if PM approved, pending TD approval, TD approved, revision approved, sent to client, client confirmed, or items assigned to SE
+          return status === 'pm_approved' || status === 'pending_td_approval' || status === 'approved' || status === 'revision_approved' || status === 'sent_for_confirmation' || status === 'client_confirmed' || status === 'items_assigned';
         });
       } else if (activeTab === 'rejected') {
         // Rejected: TD rejected OR client rejected OR PM rejected
@@ -1562,7 +1563,7 @@ const EstimatorHub: React.FC = () => {
     const revisionNumber = boq.revision_number || 0;
 
     // Draft: Not sent to TD/PM yet (can edit/delete/send) - status NOT in workflow states
-    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_td_approval' && status !== 'pm_approved' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'pm_rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
+    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_td_approval' && status !== 'pm_approved' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'pm_rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled' && status !== 'items_assigned');
     // Sent to TD or PM: Waiting for approval
     const isSentToTD = status === 'pending' || status === 'pending_pm_approval';
     // PM Approved: Ready to send to TD for final approval
@@ -1589,8 +1590,10 @@ const EstimatorHub: React.FC = () => {
     const isClientRejected = status === 'client_rejected';
     // Client cancelled: Permanently cancelled, no actions allowed
     const isClientCancelled = status === 'client_cancelled';
-    // Can Edit: Estimator can edit BOQ if it's draft OR sent to client OR any revision status (but NOT after TD approval)
-    const canEdit = isDraft || isSentToClient || isUnderRevision || isPendingRevision;
+    // Items Assigned: PM has assigned items to SE, view-only for estimator
+    const isItemsAssigned = status === 'items_assigned';
+    // Can Edit: Estimator can edit BOQ if it's draft OR sent to client OR any revision status (but NOT after TD approval or items assigned)
+    const canEdit = (isDraft || isSentToClient || isUnderRevision || isPendingRevision) && !isItemsAssigned;
 
     return (
       <div
@@ -1785,8 +1788,8 @@ const EstimatorHub: React.FC = () => {
             <span className="sm:hidden">View</span>
           </button>
 
-          {/* Show Compare button only if revision number > 0 and not in approved/client/cancelled statuses */}
-          {revisionNumber > 0 && !isApprovedByTD && !isSentToClient && !isClientConfirmed && !isClientCancelled && (
+          {/* Show Compare button only if revision number > 0 and not in approved/client/cancelled/items_assigned statuses */}
+          {revisionNumber > 0 && !isApprovedByTD && !isSentToClient && !isClientConfirmed && !isClientCancelled && !isItemsAssigned && (
             <button
               className="text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm font-semibold"
               onClick={() => {
@@ -2048,6 +2051,12 @@ const EstimatorHub: React.FC = () => {
                 Client Approved
               </div>
             )
+          ) : isItemsAssigned ? (
+            /* Items assigned to SE - view only for estimator */
+            <div className="col-span-2 flex items-center justify-center text-xs text-blue-700 font-medium">
+              <UserIcon className="h-4 w-4 text-blue-600 mr-1" />
+              Items Assigned to SE
+            </div>
           ) : isClientRejected ? (
             /* Client rejected - can revise, send to TD, or cancel project */
             <>

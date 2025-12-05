@@ -718,7 +718,8 @@ class EstimatorService {
         boq.status === 'Draft' || boq.status === 'pending' || boq.status === 'In_Review'
       ).length;
       const approvedBOQs = allBOQs.filter(boq =>
-        boq.status === 'Approved' || boq.status === 'approved'
+        boq.status === 'Approved' || boq.status === 'approved' ||
+        boq.status === 'items_assigned' || boq.status === 'Items_Assigned'
       ).length;
       const rejectedBOQs = allBOQs.filter(boq =>
         boq.status === 'Rejected' || boq.status === 'rejected'
