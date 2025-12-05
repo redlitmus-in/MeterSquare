@@ -95,14 +95,14 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
           const boqQty = item.original_boq_quantity || item.boq_quantity;
 
           // Calculate already purchased quantity for this material
-          // Include ALL roles (PM, SE, etc.) for safety - exclude only current request and rejected requests
+          // Only count approved/completed requests - not pending ones
+          const PURCHASED_STATUSES = ['approved', 'purchase_completed', 'assigned_to_buyer'];
           let alreadyPurchased = 0;
           if (item.master_material_id) {
             alreadyPurchased = allChangeRequests
               .filter((req: any) =>
-                req.status !== 'rejected' &&
+                PURCHASED_STATUSES.includes(req.status) &&
                 req.cr_id !== changeRequest.cr_id
-                // Removed item_id filter to include ALL purchases across all roles/items for same material
               )
               .reduce((total, req) => {
                 // Check both materials_data and sub_items_data
@@ -110,8 +110,12 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                   ...(req.materials_data || []),
                   ...(req.sub_items_data || [])
                 ];
+                // Match by material ID AND sub_item for per-sub-item tracking
                 const matchingMaterial = allMaterials.find(
-                  (m: any) => m.master_material_id === item.master_material_id
+                  (m: any) => m.master_material_id === item.master_material_id &&
+                              (m.sub_item_id === item.sub_item_id ||
+                               m.sub_item_name === item.sub_item_name ||
+                               String(m.sub_item_id) === String(item.sub_item_id))
                 );
                 return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
               }, 0);

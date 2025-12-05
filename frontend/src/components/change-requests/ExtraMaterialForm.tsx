@@ -1274,10 +1274,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             const isBOQMaterial = hasValidMaterialId && material.original_boq_quantity !== undefined;
 
                             // If it's a BOQ material, calculate already purchased (excluding this request)
+                            // Only count requests that are approved or completed - not pending ones
                             let alreadyPurchased = 0;
                             if (isBOQMaterial) {
                               alreadyPurchased = existingRequests
-                                .filter(req => req.status !== 'rejected' && req.cr_id !== request.cr_id)
+                                .filter(req => ['approved', 'purchase_completed', 'assigned_to_buyer'].includes(req.status) && req.cr_id !== request.cr_id)
                                 .reduce((total, req) => {
                                   const allMaterials = [
                                     ...(req.materials_data || []),
@@ -1467,8 +1468,10 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         totalRequestsAvailable: existingRequests.length
                       });
 
+                      // Only count requests that are approved or completed - not pending ones
+                      const PURCHASED_STATUSES = ['approved', 'purchase_completed', 'assigned_to_buyer'];
                       const alreadyPurchased = existingRequests
-                        .filter(req => req.status !== 'rejected')
+                        .filter(req => PURCHASED_STATUSES.includes(req.status))
                         .reduce((total, req) => {
                           const allMaterials = [
                             ...(req.materials_data || []),
@@ -1480,7 +1483,10 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           const matchingMaterial = allMaterials.find(
                             (m: any) => {
                               const materialMatches = m.material_name === material.material_name || m.master_material_id === materialKey;
-                              const subItemMatches = m.sub_item_id === subItem.sub_item_id || m.sub_item_name === subItem.sub_item_name;
+                              // Match sub_item by ID or name (handle string format "subitem_123_1_1")
+                              const subItemMatches = m.sub_item_id === subItem.sub_item_id ||
+                                                     m.sub_item_name === subItem.sub_item_name ||
+                                                     String(m.sub_item_id) === String(subItem.sub_item_id);
                               return materialMatches && subItemMatches;
                             }
                           );
@@ -1520,14 +1526,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               <span className="text-gray-600">BOQ Allocated:</span>
                               <span className="font-semibold text-gray-900">{boqQuantity} {material.unit}</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-orange-600">Already Purchased (This Sub-Item):</span>
-                              <span className={`font-semibold ${
-                                alreadyPurchased > 0 ? 'text-orange-700' : 'text-gray-500'
-                              }`}>
-                                {alreadyPurchased} {material.unit}
-                              </span>
-                            </div>
+                            {/* Only show "Already Purchased" when there are actual purchases */}
+                            {alreadyPurchased > 0 && (
+                              <div className="flex justify-between">
+                                <span className="text-orange-600">Already Purchased (This Sub-Item):</span>
+                                <span className="font-semibold text-orange-700">
+                                  {alreadyPurchased} {material.unit}
+                                </span>
+                              </div>
+                            )}
                             <div className="flex justify-between pt-0.5 border-t border-gray-200">
                               <span className="text-gray-700 font-medium">Available:</span>
                               <span className={`font-bold ${
@@ -1561,10 +1568,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                 <div className="flex gap-2">
                   {subItem.materials && subItem.materials.length > 0 && (() => {
                     // Check if there are any available materials (not fully consumed)
+                    // Only count approved/completed requests as "purchased"
+                    const PURCHASED_STATUSES = ['approved', 'purchase_completed', 'assigned_to_buyer'];
                     const availableMaterials = subItem.materials.filter(material => {
                       const materialKey = material.material_id || material.material_name;
                       const alreadyPurchased = existingRequests
-                        .filter(req => req.status !== 'rejected')
+                        .filter(req => PURCHASED_STATUSES.includes(req.status))
                         .reduce((total, req) => {
                           const allMaterials = [
                             ...(req.materials_data || []),
@@ -1575,7 +1584,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           const matchingMaterial = allMaterials.find(
                             (m: any) => {
                               const materialMatches = m.material_name === material.material_name || m.master_material_id === materialKey;
-                              const subItemMatches = m.sub_item_id === subItem.sub_item_id || m.sub_item_name === subItem.sub_item_name;
+                              const subItemMatches = m.sub_item_id === subItem.sub_item_id ||
+                                                     m.sub_item_name === subItem.sub_item_name ||
+                                                     String(m.sub_item_id) === String(subItem.sub_item_id);
                               return materialMatches && subItemMatches;
                             }
                           );
@@ -1679,9 +1690,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         {subItem.materials
                           .filter(material => {
                             // Calculate already purchased quantity for this material
+                            // Only count approved/completed requests as "purchased"
+                            const PURCHASED_STATUSES = ['approved', 'purchase_completed', 'assigned_to_buyer'];
                             const materialKey = material.material_id || material.material_name;
                             const alreadyPurchased = existingRequests
-                              .filter(req => req.status !== 'rejected')
+                              .filter(req => PURCHASED_STATUSES.includes(req.status))
                               .reduce((total, req) => {
                                 const allMaterials = [
                                   ...(req.materials_data || []),
@@ -1692,7 +1705,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                                 const matchingMaterial = allMaterials.find(
                                   (m: any) => {
                                     const materialMatches = m.material_name === material.material_name || m.master_material_id === materialKey;
-                                    const subItemMatches = m.sub_item_id === subItem.sub_item_id || m.sub_item_name === subItem.sub_item_name;
+                                    const subItemMatches = m.sub_item_id === subItem.sub_item_id ||
+                                                           m.sub_item_name === subItem.sub_item_name ||
+                                                           String(m.sub_item_id) === String(subItem.sub_item_id);
                                     return materialMatches && subItemMatches;
                                   }
                                 );
@@ -1855,8 +1870,10 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         (() => {
                           // Calculate already purchased quantity from existing requests
                           // Track per-sub-item allocation - includes ALL roles for same sub-item
+                          // Only count approved/completed requests as "purchased"
+                          const PURCHASED_STATUSES = ['approved', 'purchase_completed', 'assigned_to_buyer'];
                           const alreadyPurchased = existingRequests
-                            .filter(req => req.status !== 'rejected')
+                            .filter(req => PURCHASED_STATUSES.includes(req.status))
                             .reduce((total, req) => {
                               // Check both materials_data and sub_items_data
                               const allMaterials = [
@@ -1868,7 +1885,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               const matchingMaterial = allMaterials.find(
                                 (m: any) => {
                                   const materialMatches = m.material_name === material.materialName || m.master_material_id === material.materialId;
-                                  const subItemMatches = m.sub_item_id === material.subItemId || m.sub_item_name === material.subItemName;
+                                  const subItemMatches = m.sub_item_id === material.subItemId ||
+                                                         m.sub_item_name === material.subItemName ||
+                                                         String(m.sub_item_id) === String(material.subItemId);
                                   return materialMatches && subItemMatches;
                                 }
                               );
