@@ -1,0 +1,158 @@
+from flask import Blueprint, g, jsonify
+from controllers.vendor_controller import (
+    create_vendor,
+    get_all_vendors,
+    get_all_vendors_with_products,
+    get_vendor_by_id,
+    update_vendor,
+    delete_vendor,
+    add_vendor_product,
+    get_vendor_products,
+    update_vendor_product,
+    delete_vendor_product,
+    get_vendor_categories
+)
+from controllers.auth_controller import jwt_required
+
+# Create blueprint with URL prefix
+vendor_routes = Blueprint('vendor_routes', __name__, url_prefix='/api/vendor')
+
+# Helper function - Vendor routes accessible by Buyer, TD (for approval), or Admin
+def check_vendor_access():
+    """Check if current user can access Vendor operations"""
+    current_user = g.user
+    original_role = current_user.get('role', '')
+    user_role = original_role.lower().replace('_', '').replace(' ', '')
+
+    allowed_roles = ['buyer', 'technicaldirector', 'admin']
+    if user_role not in allowed_roles:
+        return jsonify({"error": "Access denied. Buyer, TD, or Admin role required."}), 403
+
+    return None
+
+
+# Vendor CRUD routes
+@vendor_routes.route('/create', methods=['POST'])
+@jwt_required
+def create_vendor_route():
+    """Create a new vendor (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return create_vendor()
+
+
+@vendor_routes.route('/all', methods=['GET'])
+@jwt_required
+def get_all_vendors_route():
+    """Get all vendors (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return get_all_vendors()
+
+
+@vendor_routes.route('/all-with-products', methods=['GET'])
+@jwt_required
+def get_all_vendors_with_products_route():
+    """Get all vendors with their products in one call - optimized (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return get_all_vendors_with_products()
+
+
+@vendor_routes.route('/<int:vendor_id>', methods=['GET'])
+@jwt_required
+def get_vendor_by_id_route(vendor_id):
+    """Get vendor by ID (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return get_vendor_by_id(vendor_id)
+
+
+@vendor_routes.route('/<int:vendor_id>', methods=['PUT'])
+@jwt_required
+def update_vendor_route(vendor_id):
+    """Update vendor details (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return update_vendor(vendor_id)
+
+
+@vendor_routes.route('/<int:vendor_id>', methods=['DELETE'])
+@jwt_required
+def delete_vendor_route(vendor_id):
+    """Soft delete a vendor (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return delete_vendor(vendor_id)
+
+
+# Vendor products routes
+@vendor_routes.route('/<int:vendor_id>/products', methods=['POST'])
+@jwt_required
+def add_vendor_product_route(vendor_id):
+    """Add product/service to vendor (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return add_vendor_product(vendor_id)
+
+
+@vendor_routes.route('/<int:vendor_id>/products', methods=['GET'])
+@jwt_required
+def get_vendor_products_route(vendor_id):
+    """Get all products for a vendor (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return get_vendor_products(vendor_id)
+
+
+@vendor_routes.route('/<int:vendor_id>/products/<int:product_id>', methods=['PUT'])
+@jwt_required
+def update_vendor_product_route(vendor_id, product_id):
+    """Update vendor product (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return update_vendor_product(vendor_id, product_id)
+
+
+@vendor_routes.route('/<int:vendor_id>/products/<int:product_id>', methods=['DELETE'])
+@jwt_required
+def delete_vendor_product_route(vendor_id, product_id):
+    """Delete vendor product (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return delete_vendor_product(vendor_id, product_id)
+
+
+# Utility routes
+@vendor_routes.route('/categories', methods=['GET'])
+@jwt_required
+def get_vendor_categories_route():
+    """Get list of vendor categories (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return get_vendor_categories()
+
+# DEBUG endpoint - temporary
+@vendor_routes.route('/debug-role', methods=['GET'])
+@jwt_required
+def debug_role():
+    """Debug endpoint to check current user role"""
+    current_user = g.user
+    return jsonify({
+        "user_id": current_user.get('user_id'),
+        "email": current_user.get('email'),
+        "role": current_user.get('role'),
+        "role_id": current_user.get('role_id'),
+        "role_name": current_user.get('role_name')
+    }), 200

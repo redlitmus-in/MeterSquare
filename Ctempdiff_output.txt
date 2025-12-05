@@ -1,0 +1,2603 @@
+1c1
+< import React, { useState, useEffect, useCallback, useMemo } from 'react';
+---
+> import React, { useState, useEffect } from 'react';
+367,452d366
+<   // ✅ PERFORMANCE: useCallback handlers to prevent unnecessary re-renders
+<   // These handlers are used frequently in the UI and benefit from memoization
+<   const handleSetDeletingBoq = useCallback((boq: BOQ | null) => {
+<     setDeletingBoq(boq);
+<   }, []);
+< 
+<   const handleSetDeletingProject = useCallback((project: any) => {
+<     setDeletingProject(project);
+<   }, []);
+< 
+<   const handleSetViewingProject = useCallback((project: any) => {
+<     setViewingProject(project);
+<   }, []);
+< 
+<   const handleShowCancelModal = useCallback((boq: BOQ) => {
+<     setBoqToCancel(boq);
+<     setShowCancelModal(true);
+<   }, []);
+< 
+<   const handleShowRevisionModal = useCallback((boq: BOQ) => {
+<     setSelectedBoqForRevision(boq);
+<     setShowRevisionModal(true);
+<   }, []);
+< 
+<   const handleShowEmailModal = useCallback((boq: BOQ, mode: 'td' | 'client') => {
+<     setBoqToEmail(boq);
+<     setEmailMode(mode);
+<     setShowSendEmailModal(true);
+<   }, []);
+< 
+<   const handlePageChange = useCallback((page: number) => {
+<     setCurrentPage(page);
+<   }, []);
+< 
+<   const handleBoqPageChange = useCallback((page: number) => {
+<     setBoqCurrentPage(page);
+<   }, []);
+< 
+<   // ✅ PERFORMANCE: Memoized tab counts to prevent expensive recalculations on every render
+<   const tabCounts = useMemo(() => {
+<     const pendingProjectsCount = projects.filter(p => {
+<       const projectBoqs = boqs.filter(boq => boq.project?.project_id == p.project_id);
+<       return projectBoqs.length === 0 || projectBoqs.every(boq => {
+<         const status = boq.status?.toLowerCase() || '';
+<         return !status || status === 'draft';
+<       });
+<     }).length;
+< 
+<     const sentCount = boqs.filter(b => {
+<       const status = b.status?.toLowerCase();
+<       return status === 'pending' || status === 'pending_pm_approval';
+<     }).length;
+< 
+<     const approvedCount = boqs.filter(b => {
+<       const s = b.status?.toLowerCase();
+<       return s === 'pm_approved' || s === 'pending_td_approval' || s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed';
+<     }).length;
+< 
+<     const revisionsCount = boqs.filter(b => {
+<       const s = b.status?.toLowerCase();
+<       return s === 'under_revision' || s === 'pending_revision' || s === 'revision_approved';
+<     }).length;
+< 
+<     const rejectedCount = boqs.filter(b => {
+<       const s = b.status?.toLowerCase();
+<       return s === 'rejected' || s === 'client_rejected' || s === 'pm_rejected';
+<     }).length;
+< 
+<     const completedCount = boqs.filter(b => b.status?.toLowerCase() === 'completed').length;
+<     const cancelledCount = boqs.filter(b => b.status?.toLowerCase() === 'client_cancelled').length;
+< 
+<     return {
+<       pending: pendingProjectsCount,
+<       sent: sentCount,
+<       approved: approvedCount,
+<       revisions: revisionsCount,
+<       rejected: rejectedCount,
+<       completed: completedCount,
+<       cancelled: cancelledCount
+<     };
+<   }, [boqs, projects]);
+< 
+<   const handleShowProjectDialog = useCallback(() => {
+<     setShowProjectDialog(true);
+<   }, []);
+< 
+488,501d401
+<     // TODO: Re-enable with longer interval (30s+) after backend optimization
+<     // const intervalId = setInterval(() => {
+<     //   loadBOQs(false); // Auto-refresh BOQs in background without showing loading spinner
+<     // }, 2000); // 2 seconds for instant updates
+< 
+<     return () => {
+<       abortController.abort();
+<       // clearInterval(intervalId);
+<     };
+<   }, [currentPage]);
+< 
+<   // ✅ RELOAD BOQs when real-time update is received (e.g., TD approves BOQ)
+<   useEffect(() => {
+<     // Skip initial mount (timestamp is set on mount)
+609c509,511
+<             pm_assigned: boq.pm_assigned || false
+---
+>             pm_assigned: boq.pm_assigned || false,
+>             last_pm_user_id: boq.last_pm_user_id,  // Last PM this BOQ was sent to
+>             last_pm_name: boq.last_pm_name  // Name of last PM
+800c702
+<                  status === 'internal_revision_pending';
+---
+>             status === 'internal_revision_pending';
+925a828
+>       const sentBoqIds: number[] = [];
+931a835
+>           sentBoqIds.push(boq.boq_id!);
+940c844,849
+<         await loadBOQs(); // Refresh the BOQ list to get updated email_sent status
+---
+>         // Optimistic update - immediately update local state
+>         setBOQs(prevBoqs => prevBoqs.map(b =>
+>           sentBoqIds.includes(b.boq_id!)
+>             ? { ...b, status: 'Pending' as BOQStatus, email_sent: true }
+>             : b
+>         ));
+941a851,852
+>         // Also refresh from server in background
+>         loadBOQs();
+992,995c903,904
+<     setIsSendingToPM(true);
+<     try {
+<       // Find BOQ for this project
+<       const projectBoqs = boqs.filter(boq => boq.project?.project_id == projectToSendToPM.project_id);
+---
+>     // Find BOQ for this project
+>     const projectBoqs = boqs.filter(boq => boq.project?.project_id == projectToSendToPM.project_id);
+997,1001c906,909
+<       if (projectBoqs.length === 0) {
+<         showError('No BOQ found for this project');
+<         setIsSendingToPM(false);
+<         return;
+<       }
+---
+>     if (projectBoqs.length === 0) {
+>       showError('No BOQ found for this project');
+>       return;
+>     }
+1003,1004c911,912
+<       const boq = projectBoqs[0]; // Get the first BOQ
+<       const selectedPMData = projectManagers.find(pm => pm.user_id === selectedPM);
+---
+>     const boq = projectBoqs[0]; // Get the first BOQ
+>     const selectedPMData = projectManagers.find(pm => pm.user_id === selectedPM);
+1005a914,916
+>     setIsSendingToPM(true);
+>     setSendingBOQId(boq.boq_id);
+>     try {
+1014c925,933
+<         await loadBOQs(); // Refresh BOQ list
+---
+>         // Optimistic update - immediately update local state
+>         setBOQs(prevBoqs => prevBoqs.map(b =>
+>           b.boq_id === boq.boq_id
+>             ? { ...b, status: 'Pending_PM_Approval' as BOQStatus, last_pm_user_id: selectedPM, last_pm_name: selectedPMData?.full_name }
+>             : b
+>         ));
+>         setActiveTab('sent'); // Switch to "Send BOQ" tab to show the moved BOQ
+>         // Also refresh from server in background
+>         loadBOQs();
+1022a942,976
+>       setSendingBOQId(null);
+>     }
+>   };
+> 
+>   // Resend to the same PM who rejected (without showing selection modal)
+>   const handleResendToSamePM = async (boq: any) => {
+>     if (!boq.last_pm_user_id) {
+>       // Fallback to showing PM selection modal if no last PM stored
+>       handleSendToPM(boq);
+>       return;
+>     }
+> 
+>     setSendingBOQId(boq.boq_id);
+>     try {
+>       const response = await estimatorService.sendBOQToProjectManager(boq.boq_id, boq.last_pm_user_id);
+> 
+>       if (response.success) {
+>         showSuccess(`Successfully resent BOQ to ${boq.last_pm_name || 'Project Manager'}`);
+>         // Optimistic update - immediately update local state
+>         setBOQs(prevBoqs => prevBoqs.map(b =>
+>           b.boq_id === boq.boq_id
+>             ? { ...b, status: 'Pending_PM_Approval' as BOQStatus }
+>             : b
+>         ));
+>         setActiveTab('sent');
+>         // Also refresh from server in background
+>         loadBOQs();
+>       } else {
+>         showError(response.message || 'Failed to resend BOQ to Project Manager');
+>       }
+>     } catch (error) {
+>       console.error('Error resending BOQ to PM:', error);
+>       showError('Failed to resend BOQ to Project Manager');
+>     } finally {
+>       setSendingBOQId(null);
+1503c1457
+<                   onClick={() => handleSetDeletingBoq(boq)}
+---
+>                   onClick={() => setDeletingBoq(boq)}
+1544c1498
+<           {/* TD Approval/Rejection/Cancellation Remarks */}
+---
+>           {/* Approval/Rejection/Cancellation Remarks */}
+1548c1502,1505
+<             const isRejected = statusLower === 'rejected' || statusLower === 'client_rejected';
+---
+>             const isTDRejected = statusLower === 'rejected';
+>             const isPMRejectedStatus = statusLower === 'pm_rejected';
+>             const isClientRejectedStatus = statusLower === 'client_rejected';
+>             const isRejected = isTDRejected || isPMRejectedStatus || isClientRejectedStatus;
+1551c1508
+<             // For cancelled/rejected: show client_rejection_reason
+---
+>             // For cancelled/rejected: show client_rejection_reason (which now also stores PM rejection reason)
+1565a1523,1532
+>             // Determine label based on who rejected/approved
+>             const getLabel = () => {
+>               if (isApproved) return 'Approval Comments:';
+>               if (isCancelled) return 'Cancellation Reason:';
+>               if (isPMRejectedStatus) return 'PM Rejection Reason:';
+>               if (isTDRejected) return 'TD Rejection Reason:';
+>               if (isClientRejectedStatus) return 'Client Rejection Reason:';
+>               return 'Rejection Reason:';
+>             };
+> 
+1574a1542,1549
+>             // Use indigo color for PM rejection, red for TD/Client rejection
+>             const getColorClass = (type: 'bg' | 'text' | 'border') => {
+>               if (isApproved) return type === 'bg' ? 'bg-green-50' : type === 'border' ? 'border-green-200' : 'text-green-700';
+>               if (isCancelled) return type === 'bg' ? 'bg-gray-50' : type === 'border' ? 'border-gray-300' : 'text-gray-700';
+>               if (isPMRejectedStatus) return type === 'bg' ? 'bg-indigo-50' : type === 'border' ? 'border-indigo-200' : 'text-indigo-700';
+>               return type === 'bg' ? 'bg-red-50' : type === 'border' ? 'border-red-200' : 'text-red-700';
+>             };
+> 
+1576,1582c1551
+<               <div className={`mt-2 rounded-lg p-2 border ${
+<                 isApproved
+<                   ? 'bg-green-50 border-green-200'
+<                   : isCancelled
+<                     ? 'bg-gray-50 border-gray-300'
+<                     : 'bg-red-50 border-red-200'
+<               }`}>
+---
+>               <div className={`mt-2 rounded-lg p-2 border ${getColorClass('bg')} ${getColorClass('border')}`}>
+1587c1556
+<                     <XCircleIcon className={`w-3.5 h-3.5 ${isCancelled ? 'text-gray-600' : 'text-red-600'} mt-0.5 flex-shrink-0`} />
+---
+>                     <XCircleIcon className={`w-3.5 h-3.5 ${isCancelled ? 'text-gray-600' : isPMRejectedStatus ? 'text-indigo-600' : 'text-red-600'} mt-0.5 flex-shrink-0`} />
+1590,1593c1559,1560
+<                     <p className={`text-[10px] font-semibold mb-0.5 ${
+<                       isApproved ? 'text-green-700' : (isCancelled ? 'text-gray-700' : 'text-red-700')
+<                     }`}>
+<                       {isApproved ? 'Approval Comments:' : (isCancelled ? 'Cancellation Reason:' : 'Rejection Reason:')}
+---
+>                     <p className={`text-[10px] font-semibold mb-0.5 ${getColorClass('text')}`}>
+>                       {getLabel()}
+1595,1597c1562,1563
+<                     <p className={`text-[10px] leading-relaxed ${
+<                       isApproved ? 'text-green-600' : (isCancelled ? 'text-gray-600' : 'text-red-600')
+<                     }`}>
+---
+>                     <p className={`text-[10px] leading-relaxed ${isApproved ? 'text-green-600' : (isCancelled ? 'text-gray-600' : isPMRejectedStatus ? 'text-indigo-600' : 'text-red-600')
+>                       }`}>
+1603,1605c1569,1570
+<                         className={`text-[10px] font-medium mt-0.5 hover:underline ${
+<                           isApproved ? 'text-green-700' : (isCancelled ? 'text-gray-700' : 'text-red-700')
+<                         }`}
+---
+>                         className={`text-[10px] font-medium mt-0.5 hover:underline ${isApproved ? 'text-green-700' : (isCancelled ? 'text-gray-700' : isPMRejectedStatus ? 'text-indigo-700' : 'text-red-700')
+>                           }`}
+1981c1946
+<             /* PM Rejected - Can edit, send to PM, or send to TD */
+---
+>             /* PM Rejected - Can edit and send back to PM for re-approval */
+2010,2023c1975,1979
+<                 className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
+<                 onClick={async () => {
+<                   // Direct send to TD without email popup (like Internal Revisions)
+<                   const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
+<                   if (result.success) {
+<                     showSuccess('BOQ sent to Technical Director successfully!');
+<                     await loadBOQs();
+<                     // Switch to Revisions tab to see the sent BOQ
+<                     setActiveTab('revisions');
+<                   } else {
+<                     showError(result.message || 'Failed to send BOQ');
+<                   }
+<                 }}
+<                 title="Send revised BOQ to Technical Director for approval"
+---
+>                 className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+>                 style={{ backgroundColor: 'rgb(79, 70, 229)' }}
+>                 onClick={() => handleResendToSamePM(boq)}
+>                 disabled={sendingBOQId === boq.boq_id}
+>                 title={`Resend to ${boq.last_pm_name || 'Project Manager'}`}
+2025,2027c1981,1989
+<                 <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+<                 <span className="hidden sm:inline">Send to TD</span>
+<                 <span className="sm:hidden">TD</span>
+---
+>                 {sendingBOQId === boq.boq_id ? (
+>                   <div className="scale-50">
+>                     <ModernLoadingSpinners variant="dots" size="sm" color="white" />
+>                   </div>
+>                 ) : (
+>                   <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+>                 )}
+>                 <span className="hidden sm:inline">Resend to PM</span>
+>                 <span className="sm:hidden">PM</span>
+2204c2166
+<                             <Button variant="ghost" size="sm" onClick={() => handleShowCancelModal(boq)} className="h-8 w-8 p-0" title="Cancel Project">
+---
+>                             <Button variant="ghost" size="sm" onClick={() => { setBoqToCancel(boq); setShowCancelModal(true); }} className="h-8 w-8 p-0" title="Cancel Project">
+2243c2205
+<                             <Button variant="ghost" size="sm" onClick={() => handleShowRevisionModal(boq)} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Revisions">
+---
+>                             <Button variant="ghost" size="sm" onClick={() => { setSelectedBoqForRevision(boq); setShowRevisionModal(true); }} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Revisions">
+2247c2209
+<                             <Button variant="ghost" size="sm" onClick={() => handleShowCancelModal(boq)} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Cancel Project">
+---
+>                             <Button variant="ghost" size="sm" onClick={() => { setBoqToCancel(boq); setShowCancelModal(true); }} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Cancel Project">
+2561,2572c2523,2534
+<       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
+<         {/* Search Bar with Controls */}
+<         <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
+<           <div className="relative flex-1 max-w-full sm:max-w-md">
+<             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+<             <Input
+<               placeholder="Search by title, project, or client..."
+<               value={searchTerm}
+<               onChange={(e) => setSearchTerm(e.target.value)}
+<               className="pl-10 border-gray-200 focus:border-gray-300 focus:ring-0 text-sm"
+<             />
+<           </div>
+---
+>         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
+>           {/* Search Bar with Controls */}
+>           <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
+>             <div className="relative flex-1 max-w-full sm:max-w-md">
+>               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+>               <Input
+>                 placeholder="Search by title, project, or client..."
+>                 value={searchTerm}
+>                 onChange={(e) => setSearchTerm(e.target.value)}
+>                 className="pl-10 border-gray-200 focus:border-gray-300 focus:ring-0 text-sm"
+>               />
+>             </div>
+2574,2576c2536,2567
+<           <div className="flex items-center gap-3">
+<             {/* View Mode Toggle */}
+<             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+---
+>             <div className="flex items-center gap-3">
+>               {/* View Mode Toggle */}
+>               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+>                 <Button
+>                   size="sm"
+>                   variant={viewMode === 'cards' ? 'default' : 'ghost'}
+>                   className={`h-8 px-2 sm:px-3 ${viewMode === 'cards' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+>                   style={viewMode === 'cards' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
+>                   onClick={() => {
+>                     setViewMode('cards');
+>                     setCurrentPage(1);
+>                   }}
+>                 >
+>                   <LayoutGrid className="h-4 w-4 sm:mr-1.5" />
+>                   <span className="hidden sm:inline">Cards</span>
+>                 </Button>
+>                 <Button
+>                   size="sm"
+>                   variant={viewMode === 'table' ? 'default' : 'ghost'}
+>                   className={`h-8 px-2 sm:px-3 ${viewMode === 'table' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+>                   style={viewMode === 'table' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
+>                   onClick={() => {
+>                     setViewMode('table');
+>                     setCurrentPage(1);
+>                   }}
+>                 >
+>                   <List className="h-4 w-4 sm:mr-1.5" />
+>                   <span className="hidden sm:inline">Table</span>
+>                 </Button>
+>               </div>
+> 
+>               {/* New Project Button */}
+2577a2569,2570
+>                 onClick={() => setShowProjectDialog(true)}
+>                 className="bg-red-600 hover:bg-red-700 text-white shadow-md h-8 whitespace-nowrap"
+2579,2585d2571
+<                 variant={viewMode === 'cards' ? 'default' : 'ghost'}
+<                 className={`h-8 px-2 sm:px-3 ${viewMode === 'cards' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+<                 style={viewMode === 'cards' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
+<                 onClick={() => {
+<                   setViewMode('cards');
+<                   setCurrentPage(1);
+<                 }}
+2587,2601c2573,2574
+<                 <LayoutGrid className="h-4 w-4 sm:mr-1.5" />
+<                 <span className="hidden sm:inline">Cards</span>
+<               </Button>
+<               <Button
+<                 size="sm"
+<                 variant={viewMode === 'table' ? 'default' : 'ghost'}
+<                 className={`h-8 px-2 sm:px-3 ${viewMode === 'table' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+<                 style={viewMode === 'table' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
+<                 onClick={() => {
+<                   setViewMode('table');
+<                   setCurrentPage(1);
+<                 }}
+<               >
+<                 <List className="h-4 w-4 sm:mr-1.5" />
+<                 <span className="hidden sm:inline">Table</span>
+---
+>                 <Plus className="h-4 w-4 mr-1 sm:mr-2" />
+>                 <span className="text-xs sm:text-sm">New Project</span>
+2604,2613d2576
+< 
+<             {/* New Project Button */}
+<             <Button
+<               onClick={handleShowProjectDialog}
+<               className="bg-red-600 hover:bg-red-700 text-white shadow-md h-8 whitespace-nowrap"
+<               size="sm"
+<             >
+<               <Plus className="h-4 w-4 mr-1 sm:mr-2" />
+<               <span className="text-xs sm:text-sm">New Project</span>
+<             </Button>
+2615d2577
+<         </div>
+2617,2620c2579,2582
+<         {/* Content Tabs - Match TD Style */}
+<         <div className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6">
+<           <Tabs value={activeTab} onValueChange={setActiveTab}>
+<             <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-6">
+---
+>           {/* Content Tabs - Match TD Style */}
+>           <div className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6">
+>             <Tabs value={activeTab} onValueChange={setActiveTab}>
+>               <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-6">
+2627c2589,2596
+<                 <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.pending})</span>
+---
+>                 <span className="ml-1 sm:ml-2 text-gray-400">({projects.filter(p => {
+>                   const projectBoqs = boqs.filter(boq => boq.project?.project_id == p.project_id);
+>                   // Only show projects that have NO BOQs or only have draft BOQs
+>                   return projectBoqs.length === 0 || projectBoqs.every(boq => {
+>                     const status = boq.status?.toLowerCase() || '';
+>                     return !status || status === 'draft';
+>                   });
+>                 }).length})</span>
+2635c2604,2607
+<                 <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.sent})</span>
+---
+>                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
+>                   const status = b.status?.toLowerCase();
+>                   return status === 'pending' || status === 'pending_pm_approval';
+>                 }).length})</span>
+2643c2615,2618
+<                 <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.approved})</span>
+---
+>                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
+>                   const s = b.status?.toLowerCase();
+>                   return s === 'pm_approved' || s === 'pending_td_approval' || s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed';
+>                 }).length})</span>
+2651c2626,2629
+<                 <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.revisions})</span>
+---
+>                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
+>                   const s = b.status?.toLowerCase();
+>                   return s === 'under_revision' || s === 'pending_revision' || s === 'revision_approved';
+>                 }).length})</span>
+2659c2637,2640
+<                 <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.rejected})</span>
+---
+>                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
+>                   const s = b.status?.toLowerCase();
+>                   return s === 'rejected' || s === 'client_rejected' || s === 'pm_rejected';
+>                 }).length})</span>
+2667c2648
+<                 <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.completed})</span>
+---
+>                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'completed').length})</span>
+2675c2656
+<                 <span className="ml-1 sm:ml-2 text-gray-400">({tabCounts.cancelled})</span>
+---
+>                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'client_cancelled').length})</span>
+2679,2709c2660,2667
+<             <TabsContent value="projects" className="mt-0 p-0">
+<               <div className="space-y-4 sm:space-y-6">
+<                 <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending Projects</h2>
+< 
+<                 {(() => {
+<                   // Pagination logic - backend returns paginated data
+<                   const totalPages = Math.ceil(totalProjects / itemsPerPage);
+<                   const startIndex = (currentPage - 1) * itemsPerPage;
+< 
+<                   return (
+<                     <>
+<                       {viewMode === 'cards' ? (
+<                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+<                   {filteredProjects
+<                     .filter(project => {
+<                       // Only show projects that have NO BOQs or only have draft BOQs
+<                       const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+<                       return projectBoqs.length === 0 || projectBoqs.every(boq => {
+<                         const status = boq.status?.toLowerCase() || '';
+<                         return !status || status === 'draft';
+<                       });
+<                     })
+<                     .map((project, index) => {
+<                     // Count BOQs for this project
+<                     const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+<                     const boqCount = projectBoqs.length;
+<                     const hasSentBoq = projectBoqs.some(boq =>
+<                       boq.email_sent === true ||
+<                       boq.status?.toLowerCase() === 'pending' ||
+<                       boq.status?.toLowerCase() === 'sent_for_confirmation'
+<                     );
+---
+>               <TabsContent value="projects" className="mt-0 p-0">
+>                 <div className="space-y-4 sm:space-y-6">
+>                   <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending Projects</h2>
+> 
+>                   {(() => {
+>                     // Pagination logic - backend returns paginated data
+>                     const totalPages = Math.ceil(totalProjects / itemsPerPage);
+>                     const startIndex = (currentPage - 1) * itemsPerPage;
+2712,2742c2670,2735
+<                     <div
+<                       key={project.project_id}
+<                       className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
+<                     >
+<                       {/* Header */}
+<                       <div className="p-4">
+<                         <div className="flex items-start justify-between mb-2">
+<                           <div className="flex-1">
+<                             <h3 className="font-semibold text-gray-900 text-base">{project.project_name}</h3>
+<                             <p className="text-xs text-gray-500 mt-0.5">Project Code: {project.project_code || 'N/A'}</p>
+<                           </div>
+<                           <div className="flex items-center gap-1">
+<                             <button
+<                               className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
+<                               onClick={() => {
+<                                 setEditingProject(project);
+<                                 setShowProjectDialog(true);
+<                               }}
+<                               title="Edit Project"
+<                             >
+<                               <Edit className="h-4 w-4" />
+<                             </button>
+<                             <button
+<                               className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
+<                               onClick={() => handleSetDeletingProject(project)}
+<                               title="Delete Project"
+<                             >
+<                               <Trash2 className="h-4 w-4" />
+<                             </button>
+<                           </div>
+<                         </div>
+---
+>                       <>
+>                         {viewMode === 'cards' ? (
+>                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+>                             {filteredProjects
+>                               .filter(project => {
+>                                 // Only show projects that have NO BOQs or only have draft BOQs
+>                                 const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+>                                 return projectBoqs.length === 0 || projectBoqs.every(boq => {
+>                                   const status = boq.status?.toLowerCase() || '';
+>                                   return !status || status === 'draft';
+>                                 });
+>                               })
+>                               .map((project, index) => {
+>                                 // Count BOQs for this project
+>                                 const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+>                                 const boqCount = projectBoqs.length;
+>                                 const hasSentBoq = projectBoqs.some(boq =>
+>                                   boq.email_sent === true ||
+>                                   boq.status?.toLowerCase() === 'pending' ||
+>                                   boq.status?.toLowerCase() === 'sent_for_confirmation'
+>                                 );
+> 
+>                                 return (
+>                                   <div
+>                                     key={project.project_id}
+>                                     className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
+>                                   >
+>                                     {/* Header */}
+>                                     <div className="p-4">
+>                                       <div className="flex items-start justify-between mb-2">
+>                                         <div className="flex-1">
+>                                           <h3 className="font-semibold text-gray-900 text-base">{project.project_name}</h3>
+>                                           <p className="text-xs text-gray-500 mt-0.5">Project Code: {project.project_code || 'N/A'}</p>
+>                                         </div>
+>                                         <div className="flex items-center gap-1">
+>                                           <button
+>                                             className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
+>                                             onClick={() => {
+>                                               setEditingProject(project);
+>                                               setShowProjectDialog(true);
+>                                             }}
+>                                             title="Edit Project"
+>                                           >
+>                                             <Edit className="h-4 w-4" />
+>                                           </button>
+>                                           <button
+>                                             className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
+>                                             onClick={() => setDeletingProject(project)}
+>                                             title="Delete Project"
+>                                           >
+>                                             <Trash2 className="h-4 w-4" />
+>                                           </button>
+>                                         </div>
+>                                       </div>
+> 
+>                                       <div className="space-y-1 text-sm text-gray-600">
+>                                         <div className="flex items-center gap-1.5">
+>                                           <Building2 className="h-3.5 w-3.5 text-gray-400" />
+>                                           <span className="truncate">{project.client || 'No client'}</span>
+>                                         </div>
+>                                         <div className="flex items-center gap-1.5">
+>                                           <MapPin className="h-3.5 w-3.5 text-gray-400" />
+>                                           <span className="truncate">{project.location || 'No location'}</span>
+>                                         </div>
+>                                       </div>
+>                                     </div>
+2744,2754c2737,2741
+<                         <div className="space-y-1 text-sm text-gray-600">
+<                           <div className="flex items-center gap-1.5">
+<                             <Building2 className="h-3.5 w-3.5 text-gray-400" />
+<                             <span className="truncate">{project.client || 'No client'}</span>
+<                           </div>
+<                           <div className="flex items-center gap-1.5">
+<                             <MapPin className="h-3.5 w-3.5 text-gray-400" />
+<                             <span className="truncate">{project.location || 'No location'}</span>
+<                           </div>
+<                         </div>
+<                       </div>
+---
+>                                     {/* Stats */}
+>                                     <div className="px-4 pb-3 text-center text-sm">
+>                                       <span className="font-bold text-blue-600 text-lg">{boqCount}</span>
+>                                       <span className="text-gray-600 ml-1">BOQ Items</span>
+>                                     </div>
+2756,2760c2743,2759
+<                       {/* Stats */}
+<                       <div className="px-4 pb-3 text-center text-sm">
+<                         <span className="font-bold text-blue-600 text-lg">{boqCount}</span>
+<                         <span className="text-gray-600 ml-1">BOQ Items</span>
+<                       </div>
+---
+>                                     {/* Info */}
+>                                     <div className="px-4 pb-3 space-y-1.5 text-xs">
+>                                       <div className="flex justify-between">
+>                                         <span className="text-gray-500">Work Type:</span>
+>                                         <span className="font-medium text-gray-700">{project.work_type || 'Contract'}</span>
+>                                       </div>
+>                                       <div className="flex justify-between">
+>                                         <span className="text-gray-500">Site Engineer:</span>
+>                                         <span className="font-medium text-gray-700">{project.site_engineer || 'Not Assigned'}</span>
+>                                       </div>
+>                                       {project.created_at && (
+>                                         <div className="flex justify-between">
+>                                           <span className="text-gray-500">Created:</span>
+>                                           <span className="font-medium text-gray-700">{format(new Date(project.created_at), 'dd MMM yyyy')}</span>
+>                                         </div>
+>                                       )}
+>                                     </div>
+2762,2775c2761,3136
+<                       {/* Info */}
+<                       <div className="px-4 pb-3 space-y-1.5 text-xs">
+<                         <div className="flex justify-between">
+<                           <span className="text-gray-500">Work Type:</span>
+<                           <span className="font-medium text-gray-700">{project.work_type || 'Contract'}</span>
+<                         </div>
+<                         <div className="flex justify-between">
+<                           <span className="text-gray-500">Site Engineer:</span>
+<                           <span className="font-medium text-gray-700">{project.site_engineer || 'Not Assigned'}</span>
+<                         </div>
+<                         {project.created_at && (
+<                           <div className="flex justify-between">
+<                             <span className="text-gray-500">Created:</span>
+<                             <span className="font-medium text-gray-700">{format(new Date(project.created_at), 'dd MMM yyyy')}</span>
+---
+>                                     {/* Actions */}
+>                                     <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-wrap gap-1 sm:gap-2">
+>                                       <button
+>                                         className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+>                                         style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+>                                         onClick={() => setViewingProject(project)}
+>                                       >
+>                                         <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+>                                         <span className="hidden sm:inline">View Details</span>
+>                                         <span className="sm:hidden">View</span>
+>                                       </button>
+>                                       {(() => {
+>                                         // Check if draft is for THIS specific project using project-specific localStorage key
+>                                         let isDraftForThisProject = false;
+>                                         let projectDraftData = null;
+>                                         try {
+>                                           const draftKey = `boq_draft_create_${project.project_id}`;
+>                                           const savedDraft = localStorage.getItem(draftKey);
+>                                           if (savedDraft) {
+>                                             const parsedDraft = JSON.parse(savedDraft);
+>                                             projectDraftData = parsedDraft.data || parsedDraft;
+>                                             isDraftForThisProject = projectDraftData && projectDraftData.boqName && projectDraftData.selectedProjectId === project.project_id;
+>                                           }
+>                                         } catch (error) {
+>                                           console.error('Error checking project draft:', error);
+>                                         }
+>                                         return boqCount === 0 ? (
+>                                           isDraftForThisProject ? (
+>                                             <button
+>                                               className="flex-1 min-w-[90px] bg-transparent border-2 border-orange-500 text-orange-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+>                                               style={{
+>                                                 boxShadow: '0 0 0 3px rgba(249, 115, 22, 0.15)'
+>                                               }}
+>                                               onMouseEnter={(e) => {
+>                                                 e.currentTarget.style.backgroundColor = '#f97316';
+>                                                 e.currentTarget.style.color = 'white';
+>                                               }}
+>                                               onMouseLeave={(e) => {
+>                                                 e.currentTarget.style.backgroundColor = 'transparent';
+>                                                 e.currentTarget.style.color = '#ea580c';
+>                                               }}
+>                                               onClick={() => handleCreateBOQ(project)}
+>                                               title={`Resume draft: ${projectDraftData?.boqName || 'Unsaved BOQ'}`}
+>                                             >
+>                                               <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+>                                               <span className="hidden sm:inline">Resume Draft</span>
+>                                               <span className="sm:hidden">Draft</span>
+>                                             </button>
+>                                           ) : (
+>                                             <button
+>                                               className="flex-1 min-w-[90px] bg-transparent border-2 border-red-500 text-red-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+>                                               style={{
+>                                                 boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.15)'
+>                                               }}
+>                                               onMouseEnter={(e) => {
+>                                                 e.currentTarget.style.backgroundColor = '#ef4444';
+>                                                 e.currentTarget.style.color = 'white';
+>                                               }}
+>                                               onMouseLeave={(e) => {
+>                                                 e.currentTarget.style.backgroundColor = 'transparent';
+>                                                 e.currentTarget.style.color = '#ef4444';
+>                                               }}
+>                                               onClick={() => handleCreateBOQ(project)}
+>                                             >
+>                                               <Plus className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+>                                               <span className="hidden sm:inline">Create BOQ</span>
+>                                               <span className="sm:hidden">Create</span>
+>                                             </button>
+>                                           )
+>                                         ) : hasSentBoq ? (
+>                                           <button
+>                                             className="bg-green-100 text-green-600 text-[10px] sm:text-xs h-8 rounded cursor-not-allowed flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+>                                             disabled
+>                                             title="BOQ already sent to TD"
+>                                           >
+>                                             <CheckCircle className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+>                                             <span className="hidden sm:inline">BOQ Sent</span>
+>                                             <span className="sm:hidden">Sent</span>
+>                                           </button>
+>                                         ) : (
+>                                           <button
+>                                             className="bg-gray-100 text-gray-400 text-[10px] sm:text-xs h-8 rounded cursor-not-allowed flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+>                                             disabled
+>                                             title="BOQ already created for this project"
+>                                           >
+>                                             <FileText className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+>                                             <span className="hidden sm:inline">BOQ Created</span>
+>                                             <span className="sm:hidden">Created</span>
+>                                           </button>
+>                                         );
+>                                       })()}
+>                                       {!hasSentBoq && boqCount > 0 ? (
+>                                         <>
+>                                           <button
+>                                             className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
+>                                             style={{ backgroundColor: 'rgb(79, 70, 229)' }}
+>                                             onClick={() => handleSendToPM(project)}
+>                                             disabled={projectToSendToPM?.project_id === project.project_id}
+>                                             title="Send to Project Manager"
+>                                           >
+>                                             {isSendingToPM && projectToSendToPM?.project_id === project.project_id ? (
+>                                               <>
+>                                                 <div className="scale-50">
+>                                                   <ModernLoadingSpinners variant="dots" size="sm" color="white" />
+>                                                 </div>
+>                                                 <span className="hidden sm:inline">Sending...</span>
+>                                                 <span className="sm:hidden">...</span>
+>                                               </>
+>                                             ) : (
+>                                               <>
+>                                                 <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+>                                                 <span className="hidden sm:inline">Send to PM</span>
+>                                                 <span className="sm:hidden">PM</span>
+>                                               </>
+>                                             )}
+>                                           </button>
+>                                           <button
+>                                             className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
+>                                             style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+>                                             onClick={() => handleSendToTD(project)}
+>                                             disabled={sendingProjectId === project.project_id}
+>                                             title="Send to Technical Director"
+>                                           >
+>                                             {sendingProjectId === project.project_id ? (
+>                                               <>
+>                                                 <div className="scale-50">
+>                                                   <ModernLoadingSpinners variant="dots" size="sm" color="white" />
+>                                                 </div>
+>                                                 <span className="hidden sm:inline">Sending...</span>
+>                                                 <span className="sm:hidden">...</span>
+>                                               </>
+>                                             ) : (
+>                                               <>
+>                                                 <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+>                                                 <span className="hidden sm:inline">Send to TD</span>
+>                                                 <span className="sm:hidden">TD</span>
+>                                               </>
+>                                             )}
+>                                           </button>
+>                                         </>
+>                                       ) : null}
+>                                     </div>
+>                                   </div>
+>                                 );
+>                               })}
+> 
+>                             {projects.length === 0 && !searchTerm && (
+>                               <div className="col-span-full bg-gradient-to-br from-gray-50 to-blue-50/30 border-2 border-dashed border-blue-200 rounded-2xl">
+>                                 <div className="flex flex-col items-center justify-center py-16">
+>                                   <div className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-full mb-4">
+>                                     <FolderOpen className="h-12 w-12 text-blue-600" />
+>                                   </div>
+>                                   <h3 className="text-xl font-bold text-gray-900 mb-2">No projects yet</h3>
+>                                   <p className="text-sm text-gray-500 mb-6">Create your first project to start managing BOQs</p>
+>                                   <Button
+>                                     onClick={() => setShowProjectDialog(true)}
+>                                     className="bg-green-600 hover:bg-green-700 text-white shadow-md"
+>                                   >
+>                                     <Plus className="h-5 w-5 mr-2" />
+>                                     Create First Project
+>                                   </Button>
+>                                 </div>
+>                               </div>
+>                             )}
+>                           </div>
+>                         ) : (
+>                           <div className="overflow-x-auto bg-white rounded-lg shadow-sm">
+>                             <Table>
+>                               <TableHeader>
+>                                 <TableRow className="bg-red-50/50 border-b-2 border-red-100">
+>                                   <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[80px]">Code</TableHead>
+>                                   <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[200px]">Project</TableHead>
+>                                   <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[180px]">Client & Location</TableHead>
+>                                   <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[140px]">Work Type</TableHead>
+>                                   <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 text-center min-w-[100px]">BOQ Items</TableHead>
+>                                   <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[100px]">Status</TableHead>
+>                                   <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[120px]">Created</TableHead>
+>                                   <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 text-center min-w-[140px]">Actions</TableHead>
+>                                 </TableRow>
+>                               </TableHeader>
+>                               <TableBody>
+>                                 {filteredProjects.length === 0 ? (
+>                                   <TableRow>
+>                                     <TableCell colSpan={8} className="text-center py-12 text-gray-500">
+>                                       <div className="flex flex-col items-center">
+>                                         <FolderOpen className="h-12 w-12 text-gray-300 mb-3" />
+>                                         <p className="text-base">No projects found</p>
+>                                       </div>
+>                                     </TableCell>
+>                                   </TableRow>
+>                                 ) : (
+>                                   filteredProjects
+>                                     .filter(project => {
+>                                       // Filter out projects with sent BOQs from All Projects tab
+>                                       const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+>                                       const hasSentBoq = projectBoqs.some(boq =>
+>                                         boq.email_sent === true ||
+>                                         boq.status?.toLowerCase() === 'pending' ||
+>                                         boq.status?.toLowerCase() === 'sent_for_confirmation'
+>                                       );
+>                                       return !hasSentBoq;
+>                                     })
+>                                     .map((project) => {
+>                                       const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+>                                       const boqCount = projectBoqs.length;
+>                                       const hasSentBoq = projectBoqs.some(boq =>
+>                                         boq.email_sent === true ||
+>                                         boq.status?.toLowerCase() === 'pending' ||
+>                                         boq.status?.toLowerCase() === 'sent_for_confirmation'
+>                                       );
+> 
+>                                       return (
+>                                         <TableRow key={project.project_id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors duration-150">
+>                                           <TableCell className="py-5 px-6">
+>                                             <span className="text-xs font-semibold text-black">
+>                                               {project.project_code || '-'}
+>                                             </span>
+>                                           </TableCell>
+>                                           <TableCell className="py-5 px-6">
+>                                             <div className="flex items-center gap-3">
+>                                               <div className="p-2 bg-blue-50 rounded-lg">
+>                                                 <Building2 className="h-4 w-4 text-blue-600" />
+>                                               </div>
+>                                               <div className="max-w-[180px] break-words">
+>                                                 <div className="font-semibold text-gray-900">{project.project_name}</div>
+>                                               </div>
+>                                             </div>
+>                                           </TableCell>
+>                                           <TableCell className="py-5 px-6">
+>                                             <div className="space-y-1">
+>                                               <div className="text-gray-900 font-medium break-words max-w-[160px]">{project.client || 'N/A'}</div>
+>                                               <div className="flex items-center gap-1.5 text-gray-500 text-sm">
+>                                                 <MapPin className="h-3.5 w-3.5 flex-shrink-0" />
+>                                                 <span className="break-words">{project.location || 'N/A'}</span>
+>                                               </div>
+>                                             </div>
+>                                           </TableCell>
+>                                           <TableCell className="py-5 px-6">
+>                                             <div className="text-gray-700 break-words max-w-[140px]">{project.work_type || 'N/A'}</div>
+>                                           </TableCell>
+>                                           <TableCell className="py-5 px-6 text-center">
+>                                             <div className="inline-flex items-center gap-1.5">
+>                                               <FileText className="h-4 w-4 text-gray-400" />
+>                                               <span className="font-semibold text-gray-900">{boqCount}</span>
+>                                             </div>
+>                                           </TableCell>
+>                                           <TableCell className="py-5 px-6">
+>                                             <Badge className={`${project.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'} px-3 py-1 rounded-full font-medium text-xs`}>
+>                                               {project.status || 'active'}
+>                                             </Badge>
+>                                           </TableCell>
+>                                           <TableCell className="py-5 px-6">
+>                                             <div className="text-gray-600 text-sm whitespace-nowrap">
+>                                               {project.created_at ? format(new Date(project.created_at), 'dd MMM yyyy') : 'N/A'}
+>                                             </div>
+>                                           </TableCell>
+>                                           <TableCell className="py-5 px-6">
+>                                             <div className="flex items-center justify-center gap-1">
+>                                               <Button
+>                                                 variant="ghost"
+>                                                 size="sm"
+>                                                 onClick={() => setViewingProject(project)}
+>                                                 className="h-7 w-7 p-0 hover:bg-gray-100"
+>                                                 title="View Details"
+>                                               >
+>                                                 <Eye className="h-3.5 w-3.5" />
+>                                               </Button>
+>                                               {boqCount === 0 ? (
+>                                                 // Check if draft is for THIS specific project
+>                                                 hasSavedDraft && draftData?.selectedProjectId === project.project_id ? (
+>                                                   <Button
+>                                                     variant="ghost"
+>                                                     size="sm"
+>                                                     onClick={() => handleCreateBOQ(project)}
+>                                                     className="h-7 w-7 p-0 hover:bg-orange-50"
+>                                                     title={`Resume draft: ${draftData?.boqName || 'Unsaved BOQ'}`}
+>                                                   >
+>                                                     <Clock className="h-3.5 w-3.5 text-orange-600" />
+>                                                   </Button>
+>                                                 ) : (
+>                                                   <Button
+>                                                     variant="ghost"
+>                                                     size="sm"
+>                                                     onClick={() => handleCreateBOQ(project)}
+>                                                     className="h-7 w-7 p-0 hover:bg-green-50"
+>                                                     title="Create BOQ"
+>                                                   >
+>                                                     <Plus className="h-3.5 w-3.5 text-green-600" />
+>                                                   </Button>
+>                                                 )
+>                                               ) : hasSentBoq ? (
+>                                                 <Button
+>                                                   variant="ghost"
+>                                                   size="sm"
+>                                                   disabled
+>                                                   className="h-7 w-7 p-0 cursor-not-allowed opacity-60"
+>                                                   title="BOQ already sent to TD"
+>                                                 >
+>                                                   <CheckCircle className="h-3.5 w-3.5 text-green-600" />
+>                                                 </Button>
+>                                               ) : (
+>                                                 <Button
+>                                                   variant="ghost"
+>                                                   size="sm"
+>                                                   disabled
+>                                                   className="h-7 w-7 p-0 cursor-not-allowed opacity-40"
+>                                                   title="BOQ already created for this project"
+>                                                 >
+>                                                   <FileText className="h-3.5 w-3.5 text-gray-400" />
+>                                                 </Button>
+>                                               )}
+>                                               {!hasSentBoq && boqCount > 0 && (
+>                                                 <>
+>                                                   <Button
+>                                                     variant="ghost"
+>                                                     size="sm"
+>                                                     onClick={() => handleSendToPM(project)}
+>                                                     disabled={projectToSendToPM?.project_id === project.project_id}
+>                                                     className="h-7 w-7 p-0 hover:bg-indigo-50 disabled:opacity-50"
+>                                                     title="Send to PM"
+>                                                   >
+>                                                     {isSendingToPM && projectToSendToPM?.project_id === project.project_id ? (
+>                                                       <div className="scale-[0.4]">
+>                                                         <ModernLoadingSpinners variant="dots" size="sm" color="indigo" />
+>                                                       </div>
+>                                                     ) : (
+>                                                       <Send className="h-3.5 w-3.5 text-indigo-600" />
+>                                                     )}
+>                                                   </Button>
+>                                                   <Button
+>                                                     variant="ghost"
+>                                                     size="sm"
+>                                                     onClick={() => handleSendToTD(project)}
+>                                                     disabled={sendingProjectId === project.project_id}
+>                                                     className="h-7 w-7 p-0 hover:bg-green-50 disabled:opacity-50"
+>                                                     title="Send to TD"
+>                                                   >
+>                                                     {sendingProjectId === project.project_id ? (
+>                                                       <div className="scale-[0.4]">
+>                                                         <ModernLoadingSpinners variant="dots" size="sm" color="green" />
+>                                                       </div>
+>                                                     ) : (
+>                                                       <Send className="h-3.5 w-3.5 text-green-600" />
+>                                                     )}
+>                                                   </Button>
+>                                                 </>
+>                                               )}
+>                                               <Button
+>                                                 variant="ghost"
+>                                                 size="sm"
+>                                                 onClick={() => {
+>                                                   setEditingProject(project);
+>                                                   setShowProjectDialog(true);
+>                                                 }}
+>                                                 className="h-7 w-7 p-0 hover:bg-blue-50"
+>                                                 title="Edit Project"
+>                                               >
+>                                                 <Edit className="h-3.5 w-3.5 text-blue-600" />
+>                                               </Button>
+>                                               <Button
+>                                                 variant="ghost"
+>                                                 size="sm"
+>                                                 onClick={() => setDeletingProject(project)}
+>                                                 className="h-7 w-7 p-0 hover:bg-red-50"
+>                                                 title="Delete Project"
+>                                               >
+>                                                 <Trash2 className="h-3.5 w-3.5 text-red-600" />
+>                                               </Button>
+>                                             </div>
+>                                           </TableCell>
+>                                         </TableRow>
+>                                       );
+>                                     })
+>                                 )}
+>                               </TableBody>
+>                             </Table>
+2778d3138
+<                       </div>
+2780,2807c3140,3146
+<                       {/* Actions */}
+<                       <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-wrap gap-1 sm:gap-2">
+<                         <button
+<                           className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+<                           style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+<                           onClick={() => handleSetViewingProject(project)}
+<                         >
+<                           <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+<                           <span className="hidden sm:inline">View Details</span>
+<                           <span className="sm:hidden">View</span>
+<                         </button>
+<                         {(() => {
+<                           // Check if draft is for THIS specific project using project-specific localStorage key
+<                           let isDraftForThisProject = false;
+<                           let projectDraftData = null;
+<                           try {
+<                             const draftKey = `boq_draft_create_${project.project_id}`;
+<                             const savedDraft = localStorage.getItem(draftKey);
+<                             if (savedDraft) {
+<                               const parsedDraft = JSON.parse(savedDraft);
+<                               projectDraftData = parsedDraft.data || parsedDraft;
+<                               isDraftForThisProject = projectDraftData && projectDraftData.boqName && projectDraftData.selectedProjectId === project.project_id;
+<                             }
+<                           } catch (error) {
+<                             console.error('Error checking project draft:', error);
+<                           }
+<                           return boqCount === 0 ? (
+<                             isDraftForThisProject ? (
+---
+>                         {/* Pagination */}
+>                         {totalProjects > itemsPerPage && (
+>                           <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+>                             <div className="text-sm text-gray-600 font-medium">
+>                               Showing {startIndex + 1} to {Math.min(startIndex + filteredProjects.length, totalProjects)} of {totalProjects} projects
+>                             </div>
+>                             <div className="flex items-center gap-2">
+2809,2822c3148,3151
+<                                 className="flex-1 min-w-[90px] bg-transparent border-2 border-orange-500 text-orange-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+<                                 style={{
+<                                   boxShadow: '0 0 0 3px rgba(249, 115, 22, 0.15)'
+<                                 }}
+<                                 onMouseEnter={(e) => {
+<                                   e.currentTarget.style.backgroundColor = '#f97316';
+<                                   e.currentTarget.style.color = 'white';
+<                                 }}
+<                                 onMouseLeave={(e) => {
+<                                   e.currentTarget.style.backgroundColor = 'transparent';
+<                                   e.currentTarget.style.color = '#ea580c';
+<                                 }}
+<                                 onClick={() => handleCreateBOQ(project)}
+<                                 title={`Resume draft: ${projectDraftData?.boqName || 'Unsaved BOQ'}`}
+---
+>                                 onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+>                                 disabled={currentPage === 1}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+2824,2826c3153
+<                                 <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+<                                 <span className="hidden sm:inline">Resume Draft</span>
+<                                 <span className="sm:hidden">Draft</span>
+---
+>                                 Previous
+2828,2899c3155,3179
+<                             ) : (
+<                             <button
+<                               className="flex-1 min-w-[90px] bg-transparent border-2 border-red-500 text-red-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+<                               style={{
+<                                 boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.15)'
+<                               }}
+<                               onMouseEnter={(e) => {
+<                                 e.currentTarget.style.backgroundColor = '#ef4444';
+<                                 e.currentTarget.style.color = 'white';
+<                               }}
+<                               onMouseLeave={(e) => {
+<                                 e.currentTarget.style.backgroundColor = 'transparent';
+<                                 e.currentTarget.style.color = '#ef4444';
+<                               }}
+<                               onClick={() => handleCreateBOQ(project)}
+<                             >
+<                               <Plus className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+<                               <span className="hidden sm:inline">Create BOQ</span>
+<                               <span className="sm:hidden">Create</span>
+<                             </button>
+<                             )
+<                           ) : hasSentBoq ? (
+<                           <button
+<                             className="bg-green-100 text-green-600 text-[10px] sm:text-xs h-8 rounded cursor-not-allowed flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+<                             disabled
+<                             title="BOQ already sent to TD"
+<                           >
+<                             <CheckCircle className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+<                             <span className="hidden sm:inline">BOQ Sent</span>
+<                             <span className="sm:hidden">Sent</span>
+<                           </button>
+<                         ) : (
+<                           <button
+<                             className="bg-gray-100 text-gray-400 text-[10px] sm:text-xs h-8 rounded cursor-not-allowed flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+<                             disabled
+<                             title="BOQ already created for this project"
+<                           >
+<                             <FileText className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+<                             <span className="hidden sm:inline">BOQ Created</span>
+<                             <span className="sm:hidden">Created</span>
+<                           </button>
+<                           );
+<                         })()}
+<                         {!hasSentBoq && boqCount > 0 ? (
+<                           <>
+<                             <button
+<                               className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
+<                               style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+<                               onClick={() => handleSendToTD(project)}
+<                               disabled={sendingProjectId === project.project_id}
+<                               title="Send to Technical Director"
+<                             >
+<                               {sendingProjectId === project.project_id ? (
+<                                 <>
+<                                   <div className="scale-50">
+<                                     <ModernLoadingSpinners variant="dots" size="sm" color="white" />
+<                                   </div>
+<                                   <span className="hidden sm:inline">Sending...</span>
+<                                   <span className="sm:hidden">...</span>
+<                                 </>
+<                               ) : (
+<                                 <>
+<                                   <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+<                                   <span className="hidden sm:inline">Send to TD</span>
+<                                   <span className="sm:hidden">TD</span>
+<                                 </>
+<                               )}
+<                             </button>
+<                           </>
+<                         ) : null}
+<                       </div>
+<                     </div>
+---
+>                               {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+>                                 <button
+>                                   key={page}
+>                                   onClick={() => setCurrentPage(page)}
+>                                   className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${currentPage === page
+>                                     ? 'border-[rgb(36,61,138)] bg-blue-50'
+>                                     : 'border-gray-300 hover:bg-gray-50'
+>                                     }`}
+>                                   style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+>                                 >
+>                                   {page}
+>                                 </button>
+>                               ))}
+>                               <button
+>                                 onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+>                                 disabled={currentPage === totalPages}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+>                               >
+>                                 Next
+>                               </button>
+>                             </div>
+>                           </div>
+>                         )}
+>                       </>
+2901,2920c3181
+<                   })}
+< 
+<                   {projects.length === 0 && !searchTerm && (
+<                     <div className="col-span-full bg-gradient-to-br from-gray-50 to-blue-50/30 border-2 border-dashed border-blue-200 rounded-2xl">
+<                       <div className="flex flex-col items-center justify-center py-16">
+<                         <div className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-full mb-4">
+<                           <FolderOpen className="h-12 w-12 text-blue-600" />
+<                         </div>
+<                         <h3 className="text-xl font-bold text-gray-900 mb-2">No projects yet</h3>
+<                         <p className="text-sm text-gray-500 mb-6">Create your first project to start managing BOQs</p>
+<                         <Button
+<                           onClick={handleShowProjectDialog}
+<                           className="bg-green-600 hover:bg-green-700 text-white shadow-md"
+<                         >
+<                           <Plus className="h-5 w-5 mr-2" />
+<                           Create First Project
+<                         </Button>
+<                       </div>
+<                     </div>
+<                   )}
+---
+>                   })()}
+2922,3116c3183
+<                 ) : (
+<                   <div className="overflow-x-auto bg-white rounded-lg shadow-sm">
+<                     <Table>
+<                       <TableHeader>
+<                         <TableRow className="bg-red-50/50 border-b-2 border-red-100">
+<                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[80px]">Code</TableHead>
+<                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[200px]">Project</TableHead>
+<                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[180px]">Client & Location</TableHead>
+<                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[140px]">Work Type</TableHead>
+<                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 text-center min-w-[100px]">BOQ Items</TableHead>
+<                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[100px]">Status</TableHead>
+<                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[120px]">Created</TableHead>
+<                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 text-center min-w-[140px]">Actions</TableHead>
+<                         </TableRow>
+<                       </TableHeader>
+<                       <TableBody>
+<                         {filteredProjects.length === 0 ? (
+<                           <TableRow>
+<                             <TableCell colSpan={8} className="text-center py-12 text-gray-500">
+<                               <div className="flex flex-col items-center">
+<                                 <FolderOpen className="h-12 w-12 text-gray-300 mb-3" />
+<                                 <p className="text-base">No projects found</p>
+<                               </div>
+<                             </TableCell>
+<                           </TableRow>
+<                         ) : (
+<                           filteredProjects
+<                             .filter(project => {
+<                               // Filter out projects with sent BOQs from All Projects tab
+<                               const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+<                               const hasSentBoq = projectBoqs.some(boq =>
+<                                 boq.email_sent === true ||
+<                                 boq.status?.toLowerCase() === 'pending' ||
+<                                 boq.status?.toLowerCase() === 'sent_for_confirmation'
+<                               );
+<                               return !hasSentBoq;
+<                             })
+<                             .map((project) => {
+<                             const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+<                             const boqCount = projectBoqs.length;
+<                             const hasSentBoq = projectBoqs.some(boq =>
+<                               boq.email_sent === true ||
+<                               boq.status?.toLowerCase() === 'pending' ||
+<                               boq.status?.toLowerCase() === 'sent_for_confirmation'
+<                             );
+< 
+<                             return (
+<                               <TableRow key={project.project_id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors duration-150">
+<                                 <TableCell className="py-5 px-6">
+<                                   <span className="text-xs font-semibold text-black">
+<                                     {project.project_code || '-'}
+<                                   </span>
+<                                 </TableCell>
+<                                 <TableCell className="py-5 px-6">
+<                                   <div className="flex items-center gap-3">
+<                                     <div className="p-2 bg-blue-50 rounded-lg">
+<                                       <Building2 className="h-4 w-4 text-blue-600" />
+<                                     </div>
+<                                     <div className="max-w-[180px] break-words">
+<                                       <div className="font-semibold text-gray-900">{project.project_name}</div>
+<                                     </div>
+<                                   </div>
+<                                 </TableCell>
+<                                 <TableCell className="py-5 px-6">
+<                                   <div className="space-y-1">
+<                                     <div className="text-gray-900 font-medium break-words max-w-[160px]">{project.client || 'N/A'}</div>
+<                                     <div className="flex items-center gap-1.5 text-gray-500 text-sm">
+<                                       <MapPin className="h-3.5 w-3.5 flex-shrink-0" />
+<                                       <span className="break-words">{project.location || 'N/A'}</span>
+<                                     </div>
+<                                   </div>
+<                                 </TableCell>
+<                                 <TableCell className="py-5 px-6">
+<                                   <div className="text-gray-700 break-words max-w-[140px]">{project.work_type || 'N/A'}</div>
+<                                 </TableCell>
+<                                 <TableCell className="py-5 px-6 text-center">
+<                                   <div className="inline-flex items-center gap-1.5">
+<                                     <FileText className="h-4 w-4 text-gray-400" />
+<                                     <span className="font-semibold text-gray-900">{boqCount}</span>
+<                                   </div>
+<                                 </TableCell>
+<                                 <TableCell className="py-5 px-6">
+<                                   <Badge className={`${project.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'} px-3 py-1 rounded-full font-medium text-xs`}>
+<                                     {project.status || 'active'}
+<                                   </Badge>
+<                                 </TableCell>
+<                                 <TableCell className="py-5 px-6">
+<                                   <div className="text-gray-600 text-sm whitespace-nowrap">
+<                                     {project.created_at ? format(new Date(project.created_at), 'dd MMM yyyy') : 'N/A'}
+<                                   </div>
+<                                 </TableCell>
+<                                 <TableCell className="py-5 px-6">
+<                                   <div className="flex items-center justify-center gap-1">
+<                                     <Button
+<                                       variant="ghost"
+<                                       size="sm"
+<                                       onClick={() => handleSetViewingProject(project)}
+<                                       className="h-7 w-7 p-0 hover:bg-gray-100"
+<                                       title="View Details"
+<                                     >
+<                                       <Eye className="h-3.5 w-3.5" />
+<                                     </Button>
+<                                     {boqCount === 0 ? (
+<                                       // Check if draft is for THIS specific project
+<                                       hasSavedDraft && draftData?.selectedProjectId === project.project_id ? (
+<                                         <Button
+<                                           variant="ghost"
+<                                           size="sm"
+<                                           onClick={() => handleCreateBOQ(project)}
+<                                           className="h-7 w-7 p-0 hover:bg-orange-50"
+<                                           title={`Resume draft: ${draftData?.boqName || 'Unsaved BOQ'}`}
+<                                         >
+<                                           <Clock className="h-3.5 w-3.5 text-orange-600" />
+<                                         </Button>
+<                                       ) : (
+<                                         <Button
+<                                           variant="ghost"
+<                                           size="sm"
+<                                           onClick={() => handleCreateBOQ(project)}
+<                                           className="h-7 w-7 p-0 hover:bg-green-50"
+<                                           title="Create BOQ"
+<                                         >
+<                                           <Plus className="h-3.5 w-3.5 text-green-600" />
+<                                         </Button>
+<                                       )
+<                                     ) : hasSentBoq ? (
+<                                       <Button
+<                                         variant="ghost"
+<                                         size="sm"
+<                                         disabled
+<                                         className="h-7 w-7 p-0 cursor-not-allowed opacity-60"
+<                                         title="BOQ already sent to TD"
+<                                       >
+<                                         <CheckCircle className="h-3.5 w-3.5 text-green-600" />
+<                                       </Button>
+<                                     ) : (
+<                                       <Button
+<                                         variant="ghost"
+<                                         size="sm"
+<                                         disabled
+<                                         className="h-7 w-7 p-0 cursor-not-allowed opacity-40"
+<                                         title="BOQ already created for this project"
+<                                       >
+<                                         <FileText className="h-3.5 w-3.5 text-gray-400" />
+<                                       </Button>
+<                                     )}
+<                                     {!hasSentBoq && boqCount > 0 && (
+<                                       <Button
+<                                         variant="ghost"
+<                                         size="sm"
+<                                         onClick={() => handleSendToTD(project)}
+<                                         disabled={sendingToTD}
+<                                         className="h-7 w-7 p-0 hover:bg-green-50 disabled:opacity-50"
+<                                         title="Send to TD"
+<                                       >
+<                                         {sendingToTD ? (
+<                                           <div className="scale-[0.4]">
+<                                             <ModernLoadingSpinners variant="dots" size="sm" color="green" />
+<                                           </div>
+<                                         ) : (
+<                                           <Send className="h-3.5 w-3.5 text-green-600" />
+<                                         )}
+<                                       </Button>
+<                                     )}
+<                                     <Button
+<                                       variant="ghost"
+<                                       size="sm"
+<                                       onClick={() => {
+<                                         setEditingProject(project);
+<                                         setShowProjectDialog(true);
+<                                       }}
+<                                       className="h-7 w-7 p-0 hover:bg-blue-50"
+<                                       title="Edit Project"
+<                                     >
+<                                       <Edit className="h-3.5 w-3.5 text-blue-600" />
+<                                     </Button>
+<                                     <Button
+<                                       variant="ghost"
+<                                       size="sm"
+<                                       onClick={() => handleSetDeletingProject(project)}
+<                                       className="h-7 w-7 p-0 hover:bg-red-50"
+<                                       title="Delete Project"
+<                                     >
+<                                       <Trash2 className="h-3.5 w-3.5 text-red-600" />
+<                                     </Button>
+<                                   </div>
+<                                 </TableCell>
+<                               </TableRow>
+<                             );
+<                           })
+<                         )}
+<                       </TableBody>
+<                     </Table>
+<                   </div>
+<                 )}
+---
+>               </TabsContent>
+3118,3162c3185,3191
+<                 {/* Pagination */}
+<                 {totalProjects > itemsPerPage && (
+<                   <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+<                     <div className="text-sm text-gray-600 font-medium">
+<                       Showing {startIndex + 1} to {Math.min(startIndex + filteredProjects.length, totalProjects)} of {totalProjects} projects
+<                     </div>
+<                     <div className="flex items-center gap-2">
+<                       <button
+<                         onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+<                         disabled={currentPage === 1}
+<                         className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                         style={{ color: 'rgb(36, 61, 138)' }}
+<                       >
+<                         Previous
+<                       </button>
+<                       {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+<                         <button
+<                           key={page}
+<                           onClick={() => setCurrentPage(page)}
+<                           className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+<                             currentPage === page
+<                               ? 'border-[rgb(36,61,138)] bg-blue-50'
+<                               : 'border-gray-300 hover:bg-gray-50'
+<                           }`}
+<                           style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+<                         >
+<                           {page}
+<                         </button>
+<                       ))}
+<                       <button
+<                         onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+<                         disabled={currentPage === totalPages}
+<                         className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                         style={{ color: 'rgb(36, 61, 138)' }}
+<                       >
+<                         Next
+<                       </button>
+<                     </div>
+<                   </div>
+<                 )}
+<                     </>
+<                   );
+<                 })()}
+<               </div>
+<             </TabsContent>
+---
+>               <TabsContent value="sent" className="mt-0 p-0">
+>                 <div className="space-y-4 sm:space-y-6">
+>                   {(() => {
+>                     const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+>                     const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+>                     const endIndex = startIndex + itemsPerPage;
+>                     const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+3164,3184c3193,3199
+<             <TabsContent value="sent" className="mt-0 p-0">
+<               <div className="space-y-4 sm:space-y-6">
+<                 {(() => {
+<                   const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+<                   const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+<                   const endIndex = startIndex + itemsPerPage;
+<                   const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+< 
+<                   return (
+<                     <>
+<                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+<                         <h2 className="text-lg sm:text-xl font-bold text-gray-900">BOQs Sent for Review</h2>
+<                         <div className="text-xs sm:text-sm text-gray-600">
+<                           {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} pending review
+<                         </div>
+<                       </div>
+<                       {viewMode === 'cards' ? (
+<                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+<                           {paginatedBOQs.map((boq) => (
+<                             <BOQCard key={boq.boq_id} boq={boq} />
+<                           ))}
+---
+>                     return (
+>                       <>
+>                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+>                           <h2 className="text-lg sm:text-xl font-bold text-gray-900">BOQs Sent for Review</h2>
+>                           <div className="text-xs sm:text-sm text-gray-600">
+>                             {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} pending review
+>                           </div>
+3186,3194c3201,3205
+<                       ) : (
+<                         <BOQTable boqList={paginatedBOQs} />
+<                       )}
+< 
+<                       {/* Pagination Controls */}
+<                       {totalBoqPages > 1 && (
+<                         <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+<                           <div className="text-sm text-gray-600">
+<                             Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+---
+>                         {viewMode === 'cards' ? (
+>                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+>                             {paginatedBOQs.map((boq) => (
+>                               <BOQCard key={boq.boq_id} boq={boq} />
+>                             ))}
+3196,3205c3207,3217
+<                           <div className="flex items-center gap-2">
+<                             <button
+<                               onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+<                               disabled={boqCurrentPage === 1}
+<                               className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                               style={{ color: 'rgb(36, 61, 138)' }}
+<                             >
+<                               Previous
+<                             </button>
+<                             {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+---
+>                         ) : (
+>                           <BOQTable boqList={paginatedBOQs} />
+>                         )}
+> 
+>                         {/* Pagination Controls */}
+>                         {totalBoqPages > 1 && (
+>                           <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+>                             <div className="text-sm text-gray-600">
+>                               Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+>                             </div>
+>                             <div className="flex items-center gap-2">
+3207,3210c3219,3230
+<                                 key={page}
+<                                 onClick={() => setBoqCurrentPage(page)}
+<                                 className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+<                                   boqCurrentPage === page
+---
+>                                 onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+>                                 disabled={boqCurrentPage === 1}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+>                               >
+>                                 Previous
+>                               </button>
+>                               {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+>                                 <button
+>                                   key={page}
+>                                   onClick={() => setBoqCurrentPage(page)}
+>                                   className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${boqCurrentPage === page
+3213,3214c3233,3243
+<                                 }`}
+<                                 style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+---
+>                                     }`}
+>                                   style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+>                                 >
+>                                   {page}
+>                                 </button>
+>                               ))}
+>                               <button
+>                                 onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+>                                 disabled={boqCurrentPage === totalBoqPages}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+3216c3245
+<                                 {page}
+---
+>                                 Next
+3218,3226c3247
+<                             ))}
+<                             <button
+<                               onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+<                               disabled={boqCurrentPage === totalBoqPages}
+<                               className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                               style={{ color: 'rgb(36, 61, 138)' }}
+<                             >
+<                               Next
+<                             </button>
+---
+>                             </div>
+3228,3234c3249,3254
+<                         </div>
+<                       )}
+<                     </>
+<                   );
+<                 })()}
+<               </div>
+<             </TabsContent>
+---
+>                         )}
+>                       </>
+>                     );
+>                   })()}
+>                 </div>
+>               </TabsContent>
+3236,3242c3256,3262
+<             <TabsContent value="approved" className="mt-0 p-0">
+<               <div className="space-y-4 sm:space-y-6">
+<                 {(() => {
+<                   const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+<                   const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+<                   const endIndex = startIndex + itemsPerPage;
+<                   const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+---
+>               <TabsContent value="approved" className="mt-0 p-0">
+>                 <div className="space-y-4 sm:space-y-6">
+>                   {(() => {
+>                     const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+>                     const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+>                     const endIndex = startIndex + itemsPerPage;
+>                     const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+3244,3256c3264,3270
+<                   return (
+<                     <>
+<                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+<                         <h2 className="text-lg sm:text-xl font-bold text-gray-900">Approved BOQs</h2>
+<                         <div className="text-xs sm:text-sm text-gray-600">
+<                           {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} approved by Technical Director
+<                         </div>
+<                       </div>
+<                       {viewMode === 'cards' ? (
+<                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+<                           {paginatedBOQs.map((boq) => (
+<                             <BOQCard key={boq.boq_id} boq={boq} />
+<                           ))}
+---
+>                     return (
+>                       <>
+>                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+>                           <h2 className="text-lg sm:text-xl font-bold text-gray-900">Approved BOQs</h2>
+>                           <div className="text-xs sm:text-sm text-gray-600">
+>                             {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} approved by Technical Director
+>                           </div>
+3258,3266c3272,3276
+<                       ) : (
+<                         <BOQTable boqList={paginatedBOQs} />
+<                       )}
+< 
+<                       {/* Pagination Controls */}
+<                       {totalBoqPages > 1 && (
+<                         <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+<                           <div className="text-sm text-gray-600">
+<                             Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+---
+>                         {viewMode === 'cards' ? (
+>                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+>                             {paginatedBOQs.map((boq) => (
+>                               <BOQCard key={boq.boq_id} boq={boq} />
+>                             ))}
+3268,3277c3278,3288
+<                           <div className="flex items-center gap-2">
+<                             <button
+<                               onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+<                               disabled={boqCurrentPage === 1}
+<                               className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                               style={{ color: 'rgb(36, 61, 138)' }}
+<                             >
+<                               Previous
+<                             </button>
+<                             {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+---
+>                         ) : (
+>                           <BOQTable boqList={paginatedBOQs} />
+>                         )}
+> 
+>                         {/* Pagination Controls */}
+>                         {totalBoqPages > 1 && (
+>                           <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+>                             <div className="text-sm text-gray-600">
+>                               Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+>                             </div>
+>                             <div className="flex items-center gap-2">
+3279,3282c3290,3301
+<                                 key={page}
+<                                 onClick={() => setBoqCurrentPage(page)}
+<                                 className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+<                                   boqCurrentPage === page
+---
+>                                 onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+>                                 disabled={boqCurrentPage === 1}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+>                               >
+>                                 Previous
+>                               </button>
+>                               {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+>                                 <button
+>                                   key={page}
+>                                   onClick={() => setBoqCurrentPage(page)}
+>                                   className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${boqCurrentPage === page
+3285,3286c3304,3314
+<                                 }`}
+<                                 style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+---
+>                                     }`}
+>                                   style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+>                                 >
+>                                   {page}
+>                                 </button>
+>                               ))}
+>                               <button
+>                                 onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+>                                 disabled={boqCurrentPage === totalBoqPages}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+3288c3316
+<                                 {page}
+---
+>                                 Next
+3290,3298c3318
+<                             ))}
+<                             <button
+<                               onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+<                               disabled={boqCurrentPage === totalBoqPages}
+<                               className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                               style={{ color: 'rgb(36, 61, 138)' }}
+<                             >
+<                               Next
+<                             </button>
+---
+>                             </div>
+3300,3306c3320,3325
+<                         </div>
+<                       )}
+<                     </>
+<                   );
+<                 })()}
+<               </div>
+<             </TabsContent>
+---
+>                         )}
+>                       </>
+>                     );
+>                   })()}
+>                 </div>
+>               </TabsContent>
+3308,3345c3327,3365
+<             <TabsContent value="revisions" className="mt-0 p-0">
+<               <RevisionComparisonPage
+<                 boqList={filteredBOQs}
+<                 onSendToTD={async (boq) => {
+<                   // Send directly to TD without email modal
+<                   // Note: revision_boq endpoint is used during BOQ editing (in BOQCreationForm)
+<                   // This sendBOQEmail just notifies TD after the revision is saved
+<                   const result = await estimatorService.sendBOQEmail(boq.boq_id!, {
+<                     comments: (boq.revision_number || 0) > 0
+<                       ? `Sending Revision ${boq.revision_number} for review`
+<                       : 'Sending BOQ for review'
+<                   });
+<                   if (result.success) {
+<                     showSuccess('BOQ sent to Technical Director successfully!');
+<                     loadBOQs();
+<                   } else {
+<                     showError(result.message || 'Failed to send BOQ to TD');
+<                   }
+<                 }}
+<                 onSendToClient={(boq) => {
+<                   // Open send to client modal with preview and download options
+<                   setBoqToEmail(boq);
+<                   setEmailMode('client');
+<                   setShowSendEmailModal(true);
+<                 }}
+<                 onEdit={async (boq) => {
+<                   setIsLoadingBoqForEdit(true);
+<                   try {
+<                     if (boq.boq_id) {
+<                       const result = await estimatorService.getBOQById(boq.boq_id);
+<                       if (result.success && result.data) {
+<                         setEditingBoq(result.data);
+<                         setSelectedProjectForBOQ(result.data.project || boq.project);
+<                         setIsRevisionEdit(true);
+<                         setFullScreenBoqMode('edit');
+<                         setShowFullScreenBOQ(true);
+<                       } else {
+<                         showError('Failed to load BOQ details');
+---
+>               <TabsContent value="revisions" className="mt-0 p-0">
+>                 <RevisionComparisonPage
+>                   boqList={filteredBOQs}
+>                   onSendToTD={async (boq) => {
+>                     // Send directly to TD without email modal
+>                     // Note: revision_boq endpoint is used during BOQ editing (in BOQCreationForm)
+>                     // This sendBOQEmail just notifies TD after the revision is saved
+>                     const result = await estimatorService.sendBOQEmail(boq.boq_id!, {
+>                       comments: (boq.revision_number || 0) > 0
+>                         ? `Sending Revision ${boq.revision_number} for review`
+>                         : 'Sending BOQ for review'
+>                     });
+>                     if (result.success) {
+>                       showSuccess('BOQ sent to Technical Director successfully!');
+>                       loadBOQs();
+>                     } else {
+>                       showError(result.message || 'Failed to send BOQ to TD');
+>                     }
+>                   }}
+>                   onSendToClient={(boq) => {
+>                     // Open send to client modal with preview and download options
+>                     setBoqToEmail(boq);
+>                     setEmailMode('client');
+>                     setShowSendEmailModal(true);
+>                   }}
+>                   onEdit={async (boq) => {
+>                     setIsLoadingBoqForEdit(true);
+>                     try {
+>                       if (boq.boq_id) {
+>                         const result = await estimatorService.getBOQById(boq.boq_id);
+>                         if (result.success && result.data) {
+>                           setEditingBoq(result.data);
+>                           setSelectedProjectForBOQ(result.data.project || boq.project);
+>                           setIsRevisionEdit(true);
+>                           setFullScreenBoqMode('edit');
+>                           setShowFullScreenBOQ(true);
+>                         } else {
+>                           showError('Failed to load BOQ details');
+>                         }
+3346a3367,3368
+>                     } finally {
+>                       setIsLoadingBoqForEdit(false);
+3348,3382c3370,3401
+<                   } finally {
+<                     setIsLoadingBoqForEdit(false);
+<                   }
+<                 }}
+<                 onViewDetails={(boq) => {
+<                   setSelectedBoqForDetails(boq);
+<                   setFullScreenBoqMode('view');
+<                   setShowFullScreenBOQ(true);
+<                 }}
+<                 onCompare={(currentBoq, previousRevision) => {
+<                   setSelectedBoqForComparison(currentBoq);
+<                   setShowComparisonModal(true);
+<                 }}
+<                 onClientApproval={async (boq) => {
+<                   const result = await estimatorService.confirmClientApproval(boq.boq_id!);
+<                   if (result.success) {
+<                     showSuccess(result.message);
+<                     loadBOQs();
+<                   } else {
+<                     showError(result.message);
+<                   }
+<                 }}
+<                 onRevisionRequest={(boq) => {
+<                   setSelectedBoqForRevision(boq);
+<                   setShowRevisionModal(true);
+<                 }}
+<                 onCancel={(boq) => {
+<                   setBoqToCancel(boq);
+<                   setShowCancelModal(true);
+<                 }}
+<                 onRefresh={async () => {
+<                   await loadBOQs(false); // Silent refresh - no loading spinner
+<                 }}
+<               />
+<             </TabsContent>
+---
+>                   }}
+>                   onViewDetails={(boq) => {
+>                     setSelectedBoqForDetails(boq);
+>                     setFullScreenBoqMode('view');
+>                     setShowFullScreenBOQ(true);
+>                   }}
+>                   onCompare={(currentBoq, previousRevision) => {
+>                     setSelectedBoqForComparison(currentBoq);
+>                     setShowComparisonModal(true);
+>                   }}
+>                   onClientApproval={async (boq) => {
+>                     const result = await estimatorService.confirmClientApproval(boq.boq_id!);
+>                     if (result.success) {
+>                       showSuccess(result.message);
+>                       loadBOQs();
+>                     } else {
+>                       showError(result.message);
+>                     }
+>                   }}
+>                   onRevisionRequest={(boq) => {
+>                     setSelectedBoqForRevision(boq);
+>                     setShowRevisionModal(true);
+>                   }}
+>                   onCancel={(boq) => {
+>                     setBoqToCancel(boq);
+>                     setShowCancelModal(true);
+>                   }}
+>                   onRefresh={async () => {
+>                     await loadBOQs(false); // Silent refresh - no loading spinner
+>                   }}
+>                 />
+>               </TabsContent>
+3384,3390c3403,3414
+<             <TabsContent value="rejected" className="mt-0 p-0">
+<               <div className="space-y-4 sm:space-y-6">
+<                 {(() => {
+<                   const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+<                   const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+<                   const endIndex = startIndex + itemsPerPage;
+<                   const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+---
+>               <TabsContent value="rejected" className="mt-0 p-0">
+>                 <div className="space-y-4 sm:space-y-6">
+>                   {(() => {
+>                     const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+>                     const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+>                     const endIndex = startIndex + itemsPerPage;
+>                     const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+> 
+>                     // Count PM rejected vs TD rejected
+>                     const pmRejectedCount = filteredBOQs.filter(b => b.status?.toLowerCase() === 'pm_rejected').length;
+>                     const tdRejectedCount = filteredBOQs.filter(b => b.status?.toLowerCase() === 'rejected').length;
+>                     const clientRejectedCount = filteredBOQs.filter(b => b.status?.toLowerCase() === 'client_rejected').length;
+3392,3404c3416,3436
+<                   return (
+<                     <>
+<                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+<                         <h2 className="text-lg sm:text-xl font-bold text-gray-900">Rejected BOQs</h2>
+<                         <div className="text-xs sm:text-sm text-gray-600">
+<                           {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} rejected by Technical Director
+<                         </div>
+<                       </div>
+<                       {viewMode === 'cards' ? (
+<                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+<                           {paginatedBOQs.map((boq) => (
+<                             <BOQCard key={boq.boq_id} boq={boq} />
+<                           ))}
+---
+>                     return (
+>                       <>
+>                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+>                           <h2 className="text-lg sm:text-xl font-bold text-gray-900">Rejected BOQs</h2>
+>                           <div className="flex flex-wrap gap-2 text-xs sm:text-sm">
+>                             {pmRejectedCount > 0 && (
+>                               <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full">
+>                                 {pmRejectedCount} by PM
+>                               </span>
+>                             )}
+>                             {tdRejectedCount > 0 && (
+>                               <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full">
+>                                 {tdRejectedCount} by TD
+>                               </span>
+>                             )}
+>                             {clientRejectedCount > 0 && (
+>                               <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded-full">
+>                                 {clientRejectedCount} by Client
+>                               </span>
+>                             )}
+>                           </div>
+3406,3414c3438,3442
+<                       ) : (
+<                         <BOQTable boqList={paginatedBOQs} />
+<                       )}
+< 
+<                       {/* Pagination Controls */}
+<                       {totalBoqPages > 1 && (
+<                         <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+<                           <div className="text-sm text-gray-600">
+<                             Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+---
+>                         {viewMode === 'cards' ? (
+>                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+>                             {paginatedBOQs.map((boq) => (
+>                               <BOQCard key={boq.boq_id} boq={boq} />
+>                             ))}
+3416,3425c3444,3454
+<                           <div className="flex items-center gap-2">
+<                             <button
+<                               onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+<                               disabled={boqCurrentPage === 1}
+<                               className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                               style={{ color: 'rgb(36, 61, 138)' }}
+<                             >
+<                               Previous
+<                             </button>
+<                             {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+---
+>                         ) : (
+>                           <BOQTable boqList={paginatedBOQs} />
+>                         )}
+> 
+>                         {/* Pagination Controls */}
+>                         {totalBoqPages > 1 && (
+>                           <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+>                             <div className="text-sm text-gray-600">
+>                               Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+>                             </div>
+>                             <div className="flex items-center gap-2">
+3427,3430c3456,3467
+<                                 key={page}
+<                                 onClick={() => setBoqCurrentPage(page)}
+<                                 className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+<                                   boqCurrentPage === page
+---
+>                                 onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+>                                 disabled={boqCurrentPage === 1}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+>                               >
+>                                 Previous
+>                               </button>
+>                               {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+>                                 <button
+>                                   key={page}
+>                                   onClick={() => setBoqCurrentPage(page)}
+>                                   className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${boqCurrentPage === page
+3433,3434c3470,3480
+<                                 }`}
+<                                 style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+---
+>                                     }`}
+>                                   style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+>                                 >
+>                                   {page}
+>                                 </button>
+>                               ))}
+>                               <button
+>                                 onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+>                                 disabled={boqCurrentPage === totalBoqPages}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+3436c3482
+<                                 {page}
+---
+>                                 Next
+3438,3446c3484
+<                             ))}
+<                             <button
+<                               onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+<                               disabled={boqCurrentPage === totalBoqPages}
+<                               className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                               style={{ color: 'rgb(36, 61, 138)' }}
+<                             >
+<                               Next
+<                             </button>
+---
+>                             </div>
+3448,3454c3486,3491
+<                         </div>
+<                       )}
+<                     </>
+<                   );
+<                 })()}
+<               </div>
+<             </TabsContent>
+---
+>                         )}
+>                       </>
+>                     );
+>                   })()}
+>                 </div>
+>               </TabsContent>
+3456,3462c3493,3499
+<             <TabsContent value="completed" className="mt-0 p-0">
+<               <div className="space-y-4 sm:space-y-6">
+<                 {(() => {
+<                   const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+<                   const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+<                   const endIndex = startIndex + itemsPerPage;
+<                   const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+---
+>               <TabsContent value="completed" className="mt-0 p-0">
+>                 <div className="space-y-4 sm:space-y-6">
+>                   {(() => {
+>                     const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+>                     const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+>                     const endIndex = startIndex + itemsPerPage;
+>                     const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+3464,3476c3501,3507
+<                   return (
+<                     <>
+<                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+<                         <h2 className="text-lg sm:text-xl font-bold text-gray-900">Completed BOQs</h2>
+<                         <div className="text-xs sm:text-sm text-gray-600">
+<                           {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} marked as completed
+<                         </div>
+<                       </div>
+<                       {viewMode === 'cards' ? (
+<                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+<                           {paginatedBOQs.map((boq) => (
+<                             <BOQCard key={boq.boq_id} boq={boq} />
+<                           ))}
+---
+>                     return (
+>                       <>
+>                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+>                           <h2 className="text-lg sm:text-xl font-bold text-gray-900">Completed BOQs</h2>
+>                           <div className="text-xs sm:text-sm text-gray-600">
+>                             {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} marked as completed
+>                           </div>
+3478,3486c3509,3513
+<                       ) : (
+<                         <BOQTable boqList={paginatedBOQs} />
+<                       )}
+< 
+<                       {/* Pagination Controls */}
+<                       {totalBoqPages > 1 && (
+<                         <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+<                           <div className="text-sm text-gray-600">
+<                             Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+---
+>                         {viewMode === 'cards' ? (
+>                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+>                             {paginatedBOQs.map((boq) => (
+>                               <BOQCard key={boq.boq_id} boq={boq} />
+>                             ))}
+3488,3497c3515,3525
+<                           <div className="flex items-center gap-2">
+<                             <button
+<                               onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+<                               disabled={boqCurrentPage === 1}
+<                               className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                               style={{ color: 'rgb(36, 61, 138)' }}
+<                             >
+<                               Previous
+<                             </button>
+<                             {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+---
+>                         ) : (
+>                           <BOQTable boqList={paginatedBOQs} />
+>                         )}
+> 
+>                         {/* Pagination Controls */}
+>                         {totalBoqPages > 1 && (
+>                           <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+>                             <div className="text-sm text-gray-600">
+>                               Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+>                             </div>
+>                             <div className="flex items-center gap-2">
+3499,3502c3527,3538
+<                                 key={page}
+<                                 onClick={() => setBoqCurrentPage(page)}
+<                                 className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+<                                   boqCurrentPage === page
+---
+>                                 onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+>                                 disabled={boqCurrentPage === 1}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+>                               >
+>                                 Previous
+>                               </button>
+>                               {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+>                                 <button
+>                                   key={page}
+>                                   onClick={() => setBoqCurrentPage(page)}
+>                                   className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${boqCurrentPage === page
+3505,3506c3541,3551
+<                                 }`}
+<                                 style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+---
+>                                     }`}
+>                                   style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+>                                 >
+>                                   {page}
+>                                 </button>
+>                               ))}
+>                               <button
+>                                 onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+>                                 disabled={boqCurrentPage === totalBoqPages}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+3508c3553
+<                                 {page}
+---
+>                                 Next
+3510,3518c3555
+<                             ))}
+<                             <button
+<                               onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+<                               disabled={boqCurrentPage === totalBoqPages}
+<                               className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                               style={{ color: 'rgb(36, 61, 138)' }}
+<                             >
+<                               Next
+<                             </button>
+---
+>                             </div>
+3520,3526c3557,3562
+<                         </div>
+<                       )}
+<                     </>
+<                   );
+<                 })()}
+<               </div>
+<             </TabsContent>
+---
+>                         )}
+>                       </>
+>                     );
+>                   })()}
+>                 </div>
+>               </TabsContent>
+3528,3534c3564,3570
+<             <TabsContent value="cancelled" className="mt-0 p-0">
+<               <div className="space-y-4 sm:space-y-6">
+<                 {(() => {
+<                   const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+<                   const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+<                   const endIndex = startIndex + itemsPerPage;
+<                   const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+---
+>               <TabsContent value="cancelled" className="mt-0 p-0">
+>                 <div className="space-y-4 sm:space-y-6">
+>                   {(() => {
+>                     const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+>                     const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+>                     const endIndex = startIndex + itemsPerPage;
+>                     const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+3536,3548c3572,3578
+<                   return (
+<                     <>
+<                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+<                         <h2 className="text-lg sm:text-xl font-bold text-gray-900">Cancelled BOQs</h2>
+<                         <div className="text-xs sm:text-sm text-gray-600">
+<                           {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} cancelled
+<                         </div>
+<                       </div>
+<                       {viewMode === 'cards' ? (
+<                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+<                           {paginatedBOQs.map((boq) => (
+<                             <BOQCard key={boq.boq_id} boq={boq} />
+<                           ))}
+---
+>                     return (
+>                       <>
+>                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+>                           <h2 className="text-lg sm:text-xl font-bold text-gray-900">Cancelled BOQs</h2>
+>                           <div className="text-xs sm:text-sm text-gray-600">
+>                             {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} cancelled
+>                           </div>
+3550,3558c3580,3584
+<                       ) : (
+<                         <BOQTable boqList={paginatedBOQs} />
+<                       )}
+< 
+<                       {/* Pagination Controls */}
+<                       {totalBoqPages > 1 && (
+<                         <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+<                           <div className="text-sm text-gray-600">
+<                             Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+---
+>                         {viewMode === 'cards' ? (
+>                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+>                             {paginatedBOQs.map((boq) => (
+>                               <BOQCard key={boq.boq_id} boq={boq} />
+>                             ))}
+3560,3569c3586,3596
+<                           <div className="flex items-center gap-2">
+<                             <button
+<                               onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+<                               disabled={boqCurrentPage === 1}
+<                               className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                               style={{ color: 'rgb(36, 61, 138)' }}
+<                             >
+<                               Previous
+<                             </button>
+<                             {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+---
+>                         ) : (
+>                           <BOQTable boqList={paginatedBOQs} />
+>                         )}
+> 
+>                         {/* Pagination Controls */}
+>                         {totalBoqPages > 1 && (
+>                           <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+>                             <div className="text-sm text-gray-600">
+>                               Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+>                             </div>
+>                             <div className="flex items-center gap-2">
+3571,3574c3598,3609
+<                                 key={page}
+<                                 onClick={() => setBoqCurrentPage(page)}
+<                                 className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+<                                   boqCurrentPage === page
+---
+>                                 onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+>                                 disabled={boqCurrentPage === 1}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+>                               >
+>                                 Previous
+>                               </button>
+>                               {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+>                                 <button
+>                                   key={page}
+>                                   onClick={() => setBoqCurrentPage(page)}
+>                                   className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${boqCurrentPage === page
+3577,3578c3612,3622
+<                                 }`}
+<                                 style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+---
+>                                     }`}
+>                                   style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+>                                 >
+>                                   {page}
+>                                 </button>
+>                               ))}
+>                               <button
+>                                 onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+>                                 disabled={boqCurrentPage === totalBoqPages}
+>                                 className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+>                                 style={{ color: 'rgb(36, 61, 138)' }}
+3580c3624
+<                                 {page}
+---
+>                                 Next
+3582,3590c3626
+<                             ))}
+<                             <button
+<                               onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+<                               disabled={boqCurrentPage === totalBoqPages}
+<                               className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+<                               style={{ color: 'rgb(36, 61, 138)' }}
+<                             >
+<                               Next
+<                             </button>
+---
+>                             </div>
+3592,3599c3628,3635
+<                         </div>
+<                       )}
+<                     </>
+<                   );
+<                 })()}
+<               </div>
+<             </TabsContent>
+<           </Tabs>
+---
+>                         )}
+>                       </>
+>                     );
+>                   })()}
+>                 </div>
+>               </TabsContent>
+>             </Tabs>
+>           </div>
+3601d3636
+<       </div>
+3839,3861c3874,3902
+<                     <div className="space-y-3">
+<                       {projectBoqs.map((boq) => (
+<                         <div key={boq.boq_id} className="bg-white border border-blue-100 rounded-lg p-4 hover:shadow-lg hover:border-blue-300 transition-all">
+<                           <div className="flex items-start justify-between">
+<                             <div className="flex-1">
+<                               <div className="flex items-center gap-3 mb-2">
+<                                 <div className="p-2 bg-blue-50 rounded-lg">
+<                                   <FileText className="h-4 w-4 text-blue-600" />
+<                                 </div>
+<                                 <div>
+<                                   <h4 className="font-bold text-gray-900">{boq.title}</h4>
+<                                   <p className="text-xs text-gray-500">BOQ ID: #{boq.boq_id}</p>
+<                                 </div>
+<                               </div>
+<                               <div className="flex items-center gap-6 ml-11">
+<                                 <div className="flex items-center gap-2">
+<                                   <span className="text-xs text-gray-500">Status:</span>
+<                                   {getStatusBadge(boq.status, boq.client_rejection_reason)}
+<                                 </div>
+<                                 {boq.total_cost && (
+<                                   <div className="flex items-center gap-2">
+<                                     <span className="text-xs text-gray-500">Total:</span>
+<                                     <span className="text-sm font-bold text-green-700">{formatCurrency(boq.total_cost)}</span>
+---
+>                         <div className="space-y-3">
+>                           {projectBoqs.map((boq) => (
+>                             <div key={boq.boq_id} className="bg-white border border-blue-100 rounded-lg p-4 hover:shadow-lg hover:border-blue-300 transition-all">
+>                               <div className="flex items-start justify-between">
+>                                 <div className="flex-1">
+>                                   <div className="flex items-center gap-3 mb-2">
+>                                     <div className="p-2 bg-blue-50 rounded-lg">
+>                                       <FileText className="h-4 w-4 text-blue-600" />
+>                                     </div>
+>                                     <div>
+>                                       <h4 className="font-bold text-gray-900">{boq.title}</h4>
+>                                       <p className="text-xs text-gray-500">BOQ ID: #{boq.boq_id}</p>
+>                                     </div>
+>                                   </div>
+>                                   <div className="flex items-center gap-6 ml-11">
+>                                     <div className="flex items-center gap-2">
+>                                       <span className="text-xs text-gray-500">Status:</span>
+>                                       {getStatusBadge(boq.status, boq.client_rejection_reason)}
+>                                     </div>
+>                                     {boq.total_cost && (
+>                                       <div className="flex items-center gap-2">
+>                                         <span className="text-xs text-gray-500">Total:</span>
+>                                         <span className="text-sm font-bold text-green-700">{formatCurrency(boq.total_cost)}</span>
+>                                       </div>
+>                                     )}
+>                                     <div className="flex items-center gap-2">
+>                                       <span className="text-xs text-gray-500">Created:</span>
+>                                       <span className="text-xs text-gray-700">{boq.created_at ? format(new Date(boq.created_at), 'dd MMM yyyy') : 'N/A'}</span>
+>                                     </div>
+3863,3866d3903
+<                                 )}
+<                                 <div className="flex items-center gap-2">
+<                                   <span className="text-xs text-gray-500">Created:</span>
+<                                   <span className="text-xs text-gray-700">{boq.created_at ? format(new Date(boq.created_at), 'dd MMM yyyy') : 'N/A'}</span>
+3868,3901c3905,3940
+<                               </div>
+<                             </div>
+<                             <div className="flex gap-2">
+<                               <button
+<                                 className="px-4 py-2 text-white text-sm rounded-lg hover:opacity-90 transition-all font-semibold flex items-center gap-2"
+<                                 style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+<                                 onClick={() => {
+<                                   setSelectedBoqForDetails(boq);
+<                                   setFullScreenBoqMode('view');
+<                                   setShowFullScreenBOQ(true);
+<                                   setViewingProject(null);
+<                                 }}
+<                               >
+<                                 <Eye className="h-4 w-4" />
+<                                 View
+<                               </button>
+<                               <Button
+<                                 size="sm"
+<                                 variant="outline"
+<                                 className="text-green-600 hover:text-green-700 hover:bg-green-50 border-green-300"
+<                                 onClick={async () => {
+<                                   console.log('✏️ Project View - Edit BOQ clicked');
+<                                   setIsLoadingBoqForEdit(true);
+<                                   try {
+<                                     if (boq.boq_id) {
+<                                       const result = await estimatorService.getBOQById(boq.boq_id);
+<                                       if (result.success && result.data) {
+<                                         setEditingBoq(result.data);
+<                                         setSelectedProjectForBOQ(result.data.project || boq.project);
+<                                         setFullScreenBoqMode('edit');
+<                                         setShowFullScreenBOQ(true);
+<                                         setViewingProject(null);
+<                                       } else {
+<                                         showError('Failed to load BOQ details');
+---
+>                                 <div className="flex gap-2">
+>                                   <button
+>                                     className="px-4 py-2 text-white text-sm rounded-lg hover:opacity-90 transition-all font-semibold flex items-center gap-2"
+>                                     style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+>                                     onClick={() => {
+>                                       setSelectedBoqForDetails(boq);
+>                                       setFullScreenBoqMode('view');
+>                                       setShowFullScreenBOQ(true);
+>                                       setViewingProject(null);
+>                                     }}
+>                                   >
+>                                     <Eye className="h-4 w-4" />
+>                                     View
+>                                   </button>
+>                                   <Button
+>                                     size="sm"
+>                                     variant="outline"
+>                                     className="text-green-600 hover:text-green-700 hover:bg-green-50 border-green-300"
+>                                     onClick={async () => {
+>                                       console.log('✏️ Project View - Edit BOQ clicked');
+>                                       setIsLoadingBoqForEdit(true);
+>                                       try {
+>                                         if (boq.boq_id) {
+>                                           const result = await estimatorService.getBOQById(boq.boq_id);
+>                                           if (result.success && result.data) {
+>                                             setEditingBoq(result.data);
+>                                             setSelectedProjectForBOQ(result.data.project || boq.project);
+>                                             setFullScreenBoqMode('edit');
+>                                             setShowFullScreenBOQ(true);
+>                                             setViewingProject(null);
+>                                           } else {
+>                                             showError('Failed to load BOQ details');
+>                                           }
+>                                         }
+>                                       } finally {
+>                                         setIsLoadingBoqForEdit(false);
+3903,3921c3942,3958
+<                                     }
+<                                   } finally {
+<                                     setIsLoadingBoqForEdit(false);
+<                                   }
+<                                 }}
+<                               >
+<                                 <Edit className="h-4 w-4" />
+<                               </Button>
+<                               <Button
+<                                 size="sm"
+<                                 variant="outline"
+<                                 className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-300"
+<                                 onClick={() => {
+<                                   setDeletingBoq(boq);
+<                                   setViewingProject(null);
+<                                 }}
+<                               >
+<                                 <Trash2 className="h-4 w-4" />
+<                               </Button>
+---
+>                                     }}
+>                                   >
+>                                     <Edit className="h-4 w-4" />
+>                                   </Button>
+>                                   <Button
+>                                     size="sm"
+>                                     variant="outline"
+>                                     className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-300"
+>                                     onClick={() => {
+>                                       setDeletingBoq(boq);
+>                                       setViewingProject(null);
+>                                     }}
+>                                   >
+>                                     <Trash2 className="h-4 w-4" />
+>                                   </Button>
+>                                 </div>
+>                               </div>
+3923c3960
+<                           </div>
+---
+>                           ))}
+3925,3926d3961
+<                       ))}
+<                     </div>
+4229,4233c4264,4267
+<                       className={`w-full p-4 rounded-lg border-2 transition-all text-left ${
+<                         selectedPM === pm.user_id
+<                           ? 'border-blue-500 bg-blue-50'
+<                           : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+<                       }`}
+---
+>                       className={`w-full p-4 rounded-lg border-2 transition-all text-left ${selectedPM === pm.user_id
+>                         ? 'border-blue-500 bg-blue-50'
+>                         : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+>                         }`}
+4517,4521c4551,4554
+<             <div className={`px-6 py-4 border-b ${
+<               remarksModalData.type === 'approval'
+<                 ? 'bg-green-50 border-green-200'
+<                 : 'bg-red-50 border-red-200'
+<             }`}>
+---
+>             <div className={`px-6 py-4 border-b ${remarksModalData.type === 'approval'
+>               ? 'bg-green-50 border-green-200'
+>               : 'bg-red-50 border-red-200'
+>               }`}>
+4530,4532c4563,4564
+<                     <h3 className={`text-lg font-semibold ${
+<                       remarksModalData.type === 'approval' ? 'text-green-900' : 'text-red-900'
+<                     }`}>
+---
+>                     <h3 className={`text-lg font-semibold ${remarksModalData.type === 'approval' ? 'text-green-900' : 'text-red-900'
+>                       }`}>
+4555,4561c4587,4589
+<               <div className={`rounded-lg p-4 ${
+<                 remarksModalData.type === 'approval'
+<                   ? 'bg-green-50 border border-green-200'
+<                   : 'bg-red-50 border border-red-200'
+<               }`}>
+<                 <p className={`text-sm leading-relaxed whitespace-pre-wrap ${
+<                   remarksModalData.type === 'approval' ? 'text-green-800' : 'text-red-800'
+---
+>               <div className={`rounded-lg p-4 ${remarksModalData.type === 'approval'
+>                 ? 'bg-green-50 border border-green-200'
+>                 : 'bg-red-50 border border-red-200'
+4562a4591,4592
+>                 <p className={`text-sm leading-relaxed whitespace-pre-wrap ${remarksModalData.type === 'approval' ? 'text-green-800' : 'text-red-800'
+>                   }`}>

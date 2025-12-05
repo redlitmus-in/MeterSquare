@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>BOQ - Internal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <style>
+    @page { size:A4; margin:15mm; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: 'Roboto', Arial, sans-serif; color:#222; font-size:11px; line-height:1.4; }
+    .container { max-width:100%; margin:0 auto; }
+
+    /* Header */
+    .logo-section { text-align:center; margin-bottom:16px; }
+    .logo-section img { max-height:80px; }
+    .quotation-title { text-align:center; color:#1565c0; font-size:28px; font-weight:700; margin:8px 0 4px 0; }
+    .quotation-subtitle { text-align:center; color:#666; font-size:14px; font-style:italic; margin-bottom:16px; }
+
+    /* Project Info Box */
+    .project-info { border:2px solid #1565c0; margin-bottom:20px; }
+    .project-info table { width:100%; border-collapse:collapse; }
+    .project-info td { padding:8px 12px; border:1px solid #1565c0; }
+    .project-info td:first-child { background:#e3f2fd; font-weight:600; width:30%; }
+
+    /* Main Table */
+    table.boq-table { width:100%; border-collapse:collapse; margin-bottom:20px; border:1px solid #333; }
+    table.boq-table th, table.boq-table td { border:1px solid #333; padding:6px 8px; vertical-align:top; }
+    table.boq-table thead th { background:#1565c0; color:white; font-weight:700; text-align:center; font-size:10px; }
+    table.boq-table tbody td { font-size:10px; }
+
+    /* Item Header Row */
+    .item-header { background:#e3f2fd !important; font-weight:600; }
+
+    /* RAW MATERIALS & LABOUR sections */
+    .section-header { background:#ef5350 !important; color:white !important; font-weight:700; text-align:center; }
+    .material-row, .labour-row { background:#fff; }
+
+    /* Cost breakdown rows */
+    .cost-row { background:#fff9c4; }
+    .profit-row { background:#c8e6c9; color:#2e7d32; font-weight:600; }
+    .actual-profit-row { background:#a5d6a7; color:#1b5e20; font-weight:700; }
+
+    /* Cost Analysis Box */
+    .cost-analysis { margin:20px 0; border:2px solid #333; }
+    .cost-analysis-title { background:#1565c0; color:white; padding:8px; font-weight:700; text-align:center; font-size:14px; }
+    .cost-analysis table { width:100%; border-collapse:collapse; }
+    .cost-analysis td { padding:8px 12px; border:1px solid #333; font-size:12px; }
+    .cost-analysis td:first-child { background:#f5f5f5; font-weight:600; width:60%; }
+    .cost-analysis td:last-child { text-align:right; font-weight:700; }
+    .cost-analysis .green { color:#2e7d32; }
+    .cost-analysis .red { color:#c62828; }
+
+    /* Alignment helpers */
+    .right { text-align:right; }
+    .center { text-align:center; }
+
+    /* Page break control */
+    .page-break { page-break-after:always; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Logo & Title -->
+    <div class="logo-section">
+      <img src="{{ logo_url }}" alt="MeterSquare Interiors LLC" onerror="this.style.display='none'"/>
+    </div>
+
+    <h1 class="quotation-title">QUOTATION</h1>
+    <div class="quotation-subtitle">Bill of Quantities</div>
+
+    <!-- Project Information -->
+    <div class="project-info">
+      <table>
+        <tr>
+          <td>Project Name:</td>
+          <td>{{ project_name }}</td>
+        </tr>
+        <tr>
+          <td>Client Name:</td>
+          <td>{{ client_name }}</td>
+        </tr>
+        <tr>
+          <td>Location:</td>
+          <td>{{ location }}</td>
+        </tr>
+        <tr>
+          <td>Quotation Date:</td>
+          <td>{{ quotation_date }}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- BOQ Items -->
+    {% for section in sections %}
+      {% for item in section.items %}
+        <table class="boq-table">
+          <thead>
+            <tr>
+              <th style="width:8%;">S.No</th>
+              <th style="width:35%;">Item Name</th>
+              <th style="width:10%;">QTY</th>
+              <th style="width:10%;">UNITS</th>
+              <th style="width:15%;">UNIT PRICE(AED)</th>
+              <th style="width:22%;">TOTAL (AED)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Item Header -->
+            <tr class="item-header">
+              <td>{{ item.sno }}</td>
+              <td>
+                <strong>{{ item.name }}</strong>
+                {% if item.scope %}<div>Scope:<br>{{ item.scope }}</div>{% endif %}
+                {% if item.size %}<div>Size:<br>{{ item.size }}</div>{% endif %}
+              </td>
+              <td class="center">{{ item.qty }}</td>
+              <td class="center">{{ item.units }}</td>
+              <td class="right">{{ '{:,.0f}'.format(item.unit_price) if item.unit_price is not none else '-' }}</td>
+              <td class="right">{{ '{:,.0f}'.format(item.total) if item.total is not none else '-' }}</td>
+            </tr>
+
+            <!-- RAW MATERIALS Section -->
+            {% if item.materials and item.materials|length > 0 %}
+            <tr>
+              <td colspan="6" class="section-header">RAW MATERIALS</td>
+            </tr>
+            {% for material in item.materials %}
+            <tr class="material-row">
+              <td></td>
+              <td>{{ material.name }}</td>
+              <td class="center">{{ '{:,.0f}'.format(material.qty) }}</td>
+              <td class="center">{{ material.unit }}</td>
+              <td class="right">{{ '{:,.0f}'.format(material.rate) }}</td>
+              <td class="right">{{ '{:,.0f}'.format(material.total) }}</td>
+            </tr>
+            {% endfor %}
+            {% endif %}
+
+            <!-- LABOUR Section -->
+            {% if item.labour and item.labour|length > 0 %}
+            <tr>
+              <td colspan="6" class="section-header">LABOUR</td>
+            </tr>
+            {% for lab in item.labour %}
+            <tr class="labour-row">
+              <td></td>
+              <td>{{ lab.role }}</td>
+              <td class="center">{{ '{:,.0f}'.format(lab.hours) }}Hrs</td>
+              <td class="center">{{ lab.work_type or 'Dailwages' }}</td>
+              <td class="right">{{ '{:,.0f}'.format(lab.rate) }}</td>
+              <td class="right">{{ '{:,.0f}'.format(lab.total) }}</td>
+            </tr>
+            {% endfor %}
+            {% endif %}
+
+            <!-- Cost Breakdown -->
+            <tr class="cost-row">
+              <td colspan="3" rowspan="4" style="padding:8px;">
+                Planned profit is taken from the {{ item.overhead_percent }}% inputs we gave during the planning.<br><br>
+                Difference between the client rate and internal expenditure planning.
+              </td>
+              <td colspan="2">Misc</td>
+              <td class="right">{{ item.misc_percent }}%</td>
+              <td class="right">{{ '{:,.0f}'.format(item.misc_amount) }}</td>
+            </tr>
+            <tr class="cost-row">
+              <td colspan="2">Overhead&Profit</td>
+              <td class="right">{{ item.overhead_percent }}%</td>
+              <td class="right">{{ '{:,.0f}'.format(item.overhead_amount) }}</td>
+            </tr>
+            <tr class="cost-row">
+              <td colspan="2">Transport</td>
+              <td class="right">{{ item.transport_percent }}%</td>
+              <td class="right">{{ '{:,.0f}'.format(item.transport_amount) }}</td>
+            </tr>
+            <tr class="cost-row">
+              <td colspan="2"><strong>Total</strong></td>
+              <td colspan="2" class="right"><strong>{{ '{:,.0f}'.format(item.internal_cost) }}</strong></td>
+            </tr>
+
+            <!-- Profit Analysis -->
+            <tr class="profit-row">
+              <td colspan="4"></td>
+              <td>Planned profit</td>
+              <td class="right">{{ '{:,.0f}'.format(item.planned_profit) }}</td>
+            </tr>
+            <tr class="actual-profit-row">
+              <td colspan="4"></td>
+              <td>Acutual Profit</td>
+              <td class="right">{{ '{:,.0f}'.format(item.actual_profit) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      {% endfor %}
+    {% endfor %}
+
+    <!-- Cost Analysis Summary -->
+    <div class="cost-analysis">
+      <div class="cost-analysis-title">Cost analysis</div>
+      <table>
+        <tr>
+          <td>Client Cost</td>
+          <td>{{ '{:,.0f}'.format(client_cost) }}</td>
+        </tr>
+        <tr>
+          <td>Internal Cost</td>
+          <td class="red">{{ '{:,.0f}'.format(internal_cost) }}</td>
+        </tr>
+        <tr>
+          <td>Negotiable Margin ( Excluding planned profit of {{ '{:,.0f}'.format(total_planned_profit) }} AED)</td>
+          <td class="green">{{ '{:,.0f}'.format(project_margin) }}</td>
+        </tr>
+      </table>
+    </div>
+
+  </div>
+</body>
+</html>

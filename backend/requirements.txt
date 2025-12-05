@@ -1,0 +1,41 @@
+# MeterSquare ERP Backend Requirements
+
+# Flask and extensions
+Flask==2.3.3
+Flask-CORS==4.0.0
+Flask-SQLAlchemy==3.0.5
+Flask-Migrate==4.0.5
+Flask-SocketIO==5.3.6
+python-socketio==5.11.1
+python-engineio==4.9.0
+
+# Database
+psycopg2-binary==2.9.7
+SQLAlchemy==2.0.21
+
+# Authentication and Security
+PyJWT==2.8.0
+python-dotenv==1.0.0
+
+# Email (for OTP)
+secure-smtplib==0.1.1
+
+# Utilities
+requests==2.31.0
+python-dateutil==2.8.2
+numpy==1.26.4
+pandas==2.2.0
+openpyxl==3.1.2
+pdfplumber==0.11.0
+PyPDF2==3.0.1
+supabase==2.9.0
+
+# Development
+pytest==7.4.2
+pytest-flask==1.2.0
+
+reportlab==4.4.4
+
+flask-compress==1.23
+flask-limiter==4.0.0
+flask-caching==2.3.1
