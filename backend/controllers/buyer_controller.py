@@ -43,18 +43,33 @@ def _parse_custom_terms(saved_customization):
         return []
 
 
-def process_materials_with_negotiated_prices(cr):
+def process_materials_with_negotiated_prices(cr, boq_details=None):
     """
     Helper function to process materials and apply negotiated prices
     Returns (materials_list, cr_total)
 
     NOTE: cr_total uses ORIGINAL prices (not negotiated)
     Individual materials show negotiated_price separately
+
+    Also enriches unit_price from BOQ for existing materials when stored price is 0
     """
     sub_items_data = cr.sub_items_data or cr.materials_data or []
     cr_total = 0
     materials_list = []
     material_vendor_selections = cr.material_vendor_selections or {}
+
+    # Build BOQ material price lookup for enrichment
+    boq_material_prices = {}
+    if boq_details is None and cr.boq_id:
+        boq_details = BOQDetails.query.filter_by(boq_id=cr.boq_id, is_deleted=False).first()
+
+    if boq_details and boq_details.boq_details:
+        boq_items = boq_details.boq_details.get('items', [])
+        for item_idx, item in enumerate(boq_items):
+            for sub_item_idx, sub_item in enumerate(item.get('sub_items', [])):
+                for mat_idx, boq_material in enumerate(sub_item.get('materials', [])):
+                    material_id = f"mat_{cr.boq_id}_{item_idx+1}_{sub_item_idx+1}_{mat_idx+1}"
+                    boq_material_prices[material_id] = boq_material.get('unit_price', 0)
 
     if cr.sub_items_data:
         for sub_item in sub_items_data:
@@ -66,6 +81,11 @@ def process_materials_with_negotiated_prices(cr):
                         quantity = material.get('quantity') or 0
                         original_unit_price = material.get('unit_price') or 0
 
+                        # Enrich unit_price from BOQ for existing materials when stored price is 0
+                        master_material_id = material.get('master_material_id')
+                        if (original_unit_price == 0 or not original_unit_price) and master_material_id:
+                            original_unit_price = boq_material_prices.get(master_material_id, 0)
+
                         # Check if there's a negotiated price for this material
                         vendor_selection = material_vendor_selections.get(material_name, {})
                         negotiated_price = vendor_selection.get('negotiated_price')
@@ -76,9 +96,10 @@ def process_materials_with_negotiated_prices(cr):
                         cr_total += material_total
                         materials_list.append({
                             "material_name": material_name,
+                            "master_material_id": master_material_id,
                             "quantity": quantity,
                             "unit": material.get('unit', ''),
-                            "unit_price": original_unit_price,  # Keep original price
+                            "unit_price": original_unit_price,  # Keep original price (enriched from BOQ if needed)
                             "total_price": material_total,  # Based on original price
                             "negotiated_price": negotiated_price if negotiated_price is not None else None,
                             "original_unit_price": original_unit_price  # Add original for reference
@@ -87,6 +108,11 @@ def process_materials_with_negotiated_prices(cr):
                     material_name = sub_item.get('material_name', '')
                     quantity = sub_item.get('quantity') or 0
                     original_unit_price = sub_item.get('unit_price') or 0
+
+                    # Enrich unit_price from BOQ for existing materials when stored price is 0
+                    master_material_id = sub_item.get('master_material_id')
+                    if (original_unit_price == 0 or not original_unit_price) and master_material_id:
+                        original_unit_price = boq_material_prices.get(master_material_id, 0)
 
                     # Check if there's a negotiated price for this material
                     vendor_selection = material_vendor_selections.get(material_name, {})
@@ -98,10 +124,14 @@ def process_materials_with_negotiated_prices(cr):
                     cr_total += sub_total
                     materials_list.append({
                         "material_name": material_name,
+                        "master_material_id": master_material_id,
                         "sub_item_name": sub_item.get('sub_item_name', ''),
+                        "brand": sub_item.get('brand', ''),
+                        "specification": sub_item.get('specification', ''),
+                        "size": sub_item.get('size', ''),
                         "quantity": quantity,
                         "unit": sub_item.get('unit', ''),
-                        "unit_price": original_unit_price,  # Keep original price
+                        "unit_price": original_unit_price,  # Keep original price (enriched from BOQ if needed)
                         "total_price": sub_total,  # Based on original price
                         "negotiated_price": negotiated_price if negotiated_price is not None else None,
                         "original_unit_price": original_unit_price  # Add original for reference
@@ -111,6 +141,11 @@ def process_materials_with_negotiated_prices(cr):
             material_name = material.get('material_name', '')
             quantity = material.get('quantity', 0)
             original_unit_price = material.get('unit_price', 0)
+
+            # Enrich unit_price from BOQ for existing materials when stored price is 0
+            master_material_id = material.get('master_material_id')
+            if (original_unit_price == 0 or not original_unit_price) and master_material_id:
+                original_unit_price = boq_material_prices.get(master_material_id, 0)
 
             # Check if there's a negotiated price for this material
             vendor_selection = material_vendor_selections.get(material_name, {})
@@ -122,10 +157,14 @@ def process_materials_with_negotiated_prices(cr):
             cr_total += material_total
             materials_list.append({
                 "material_name": material_name,
+                "master_material_id": master_material_id,
                 "sub_item_name": material.get('sub_item_name', ''),
+                "brand": material.get('brand', ''),
+                "specification": material.get('specification', ''),
+                "size": material.get('size', ''),
                 "quantity": quantity,
                 "unit": material.get('unit', ''),
-                "unit_price": original_unit_price,  # Keep original price
+                "unit_price": original_unit_price,  # Keep original price (enriched from BOQ if needed)
                 "total_price": material_total,  # Based on original price
                 "negotiated_price": negotiated_price if negotiated_price is not None else None,
                 "original_unit_price": original_unit_price  # Add original for reference
@@ -873,10 +912,15 @@ def get_buyer_pending_purchases():
         if is_admin_viewing:
             # SIMPLIFIED QUERY: Show ALL CRs assigned to any buyer (for admin viewing)
             # Exclude purchase_completed status - those should go to completed tab
+            # Exclude rejected items - those should only show in rejected tab
             change_requests = ChangeRequest.query.filter(
                 ChangeRequest.assigned_to_buyer_user_id.isnot(None),
                 ChangeRequest.is_deleted == False,
-                func.trim(ChangeRequest.status) != 'purchase_completed'
+                func.trim(ChangeRequest.status) != 'purchase_completed',
+                or_(
+                    ChangeRequest.vendor_selection_status.is_(None),
+                    ChangeRequest.vendor_selection_status != 'rejected'
+                )
             ).all()
 
         else:
@@ -905,7 +949,12 @@ def get_buyer_pending_purchases():
                         ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
                     )
                 ),
-                ChangeRequest.is_deleted == False
+                ChangeRequest.is_deleted == False,
+                # Exclude rejected items - those should only show in rejected tab
+                or_(
+                    ChangeRequest.vendor_selection_status.is_(None),
+                    ChangeRequest.vendor_selection_status != 'rejected'
+                )
             ).all()
 
         pending_purchases = []
@@ -922,64 +971,9 @@ def get_buyer_pending_purchases():
             if not boq:
                 continue
 
-            # Use sub_items_data (new structure) or fallback to materials_data (legacy)
-            sub_items_data = cr.sub_items_data or cr.materials_data or []
-            cr_total = 0
-
-            # Process sub-items to extract materials
-            materials_list = []
-
-            # Handle both new sub_items_data format and legacy materials_data format
-            if cr.sub_items_data:
-                # New format: sub_items_data contains sub-items with materials inside
-                for sub_item in sub_items_data:
-                    # Each sub-item can have materials array or be a material itself
-                    if isinstance(sub_item, dict):
-                        # Check if this sub_item has materials array
-                        sub_materials = sub_item.get('materials', [])
-                        if sub_materials:
-                            # Sub-item contains materials array
-                            for material in sub_materials:
-                                material_total = float(material.get('total_price', 0) or 0)
-                                cr_total += material_total
-                                materials_list.append({
-                                    "material_name": material.get('material_name', ''),
-                                    "quantity": material.get('quantity', 0),
-                                    "unit": material.get('unit', ''),
-                                    "unit_price": material.get('unit_price', 0),
-                                    "total_price": material_total,
-                                    "brand": material.get('brand'),
-                                    "specification": material.get('specification')
-                                })
-                        else:
-                            # Sub-item is the material itself
-                            sub_total = float(sub_item.get('total_price', 0) or 0)
-                            cr_total += sub_total
-                            materials_list.append({
-                                "material_name": sub_item.get('material_name', ''),
-                                "sub_item_name": sub_item.get('sub_item_name', ''),
-                                "quantity": sub_item.get('quantity', 0),
-                                "unit": sub_item.get('unit', ''),
-                                "unit_price": sub_item.get('unit_price', 0),
-                                "total_price": sub_total,
-                                "brand": sub_item.get('brand'),
-                                "specification": sub_item.get('specification')
-                            })
-            else:
-                # Legacy format: materials_data is direct array of materials
-                for material in sub_items_data:
-                    material_total = float(material.get('total_price', 0) or 0)
-                    cr_total += material_total
-                    materials_list.append({
-                        "material_name": material.get('material_name', ''),
-                        "sub_item_name": material.get('sub_item_name', ''),
-                        "quantity": material.get('quantity', 0),
-                        "unit": material.get('unit', ''),
-                        "unit_price": material.get('unit_price', 0),
-                        "total_price": material_total,
-                        "brand": material.get('brand'),
-                        "specification": material.get('specification')
-                    })
+            # Use the helper function to process materials with BOQ price enrichment
+            boq_details = BOQDetails.query.filter_by(boq_id=cr.boq_id, is_deleted=False).first()
+            materials_list, cr_total = process_materials_with_negotiated_prices(cr, boq_details)
 
             total_cost += cr_total
 
@@ -1083,7 +1077,8 @@ def get_buyer_pending_purchases():
                     for po_child in po_children_for_parent
                 )
 
-            # For admin view: Skip parent PO if all children are sent for TD approval or approved
+            # For buyer/TD view: Skip parent PO if all children are sent for TD approval or approved
+            # Parent is hidden because the split children (POChild) are shown separately
             if is_admin_viewing and all_children_sent_to_td_or_approved:
                 continue
 
@@ -2380,6 +2375,333 @@ def update_vendor_price(vendor_id):
         return jsonify({"error": f"Failed to update vendor price: {str(e)}"}), 500
 
 
+def update_po_child_prices(po_child_id):
+    """
+    Update negotiated prices for POChild materials
+    Allows buyer to edit prices based on vendor negotiation
+    Returns original and negotiated prices for diff display
+    """
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_name = current_user.get('full_name', 'Unknown User')
+
+        data = request.get_json()
+        materials_updates = data.get('materials')  # Array of {material_name, negotiated_price}
+
+        if not materials_updates or not isinstance(materials_updates, list):
+            return jsonify({"error": "materials array is required"}), 400
+
+        # Get the POChild
+        po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
+        if not po_child:
+            return jsonify({"error": "Purchase order not found"}), 404
+
+        # Verify POChild is approved (vendor_approved status) - buyer can edit prices after TD approval
+        if po_child.status not in ['vendor_approved', 'pending_td_approval']:
+            return jsonify({"error": "Can only edit prices for approved purchase orders"}), 400
+
+        # Get current materials_data
+        materials_data = po_child.materials_data or []
+        if not materials_data:
+            return jsonify({"error": "No materials found in this purchase order"}), 400
+
+        # Create a lookup map for updates
+        updates_map = {update['material_name']: update for update in materials_updates}
+
+        # Update materials with negotiated prices
+        updated_materials = []
+        new_total_cost = 0
+
+        for material in materials_data:
+            material_name = material.get('material_name', '')
+            original_price = material.get('original_unit_price') or material.get('unit_price', 0)
+            quantity = material.get('quantity', 0)
+
+            # Store original price if not already stored
+            if 'original_unit_price' not in material:
+                material['original_unit_price'] = original_price
+
+            # Check if there's an update for this material
+            if material_name in updates_map:
+                update = updates_map[material_name]
+                negotiated_price = update.get('negotiated_price')
+
+                if negotiated_price is not None and negotiated_price > 0:
+                    material['negotiated_price'] = float(negotiated_price)
+                    material['unit_price'] = float(negotiated_price)  # Update unit_price to negotiated
+                    material['total_price'] = float(quantity) * float(negotiated_price)
+                    material['price_updated_by'] = user_name
+                    material['price_updated_at'] = datetime.utcnow().isoformat()
+                else:
+                    # Clear negotiated price if set to null/0
+                    material.pop('negotiated_price', None)
+                    material['unit_price'] = float(original_price)
+                    material['total_price'] = float(quantity) * float(original_price)
+            else:
+                # No update for this material, recalculate with current price
+                current_price = material.get('negotiated_price') or material.get('unit_price', 0)
+                material['total_price'] = float(quantity) * float(current_price)
+
+            new_total_cost += material.get('total_price', 0)
+            updated_materials.append(material)
+
+        # Update POChild with new materials_data and total
+        from sqlalchemy.orm.attributes import flag_modified
+        po_child.materials_data = updated_materials
+        flag_modified(po_child, 'materials_data')
+        po_child.materials_total_cost = new_total_cost
+        po_child.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        # Prepare response with price diff information
+        materials_response = []
+        for material in updated_materials:
+            original_price = material.get('original_unit_price', 0)
+            negotiated_price = material.get('negotiated_price')
+            current_price = negotiated_price if negotiated_price else original_price
+            price_diff = float(current_price) - float(original_price) if negotiated_price else 0
+
+            materials_response.append({
+                'material_name': material.get('material_name', ''),
+                'quantity': material.get('quantity', 0),
+                'unit': material.get('unit', ''),
+                'original_unit_price': original_price,
+                'negotiated_price': negotiated_price,
+                'unit_price': current_price,
+                'total_price': material.get('total_price', 0),
+                'price_diff': price_diff,
+                'price_diff_percentage': round((price_diff / float(original_price)) * 100, 2) if original_price else 0,
+                'price_updated_by': material.get('price_updated_by'),
+                'price_updated_at': material.get('price_updated_at')
+            })
+
+        return jsonify({
+            "success": True,
+            "message": "Prices updated successfully",
+            "po_child_id": po_child_id,
+            "formatted_id": po_child.get_formatted_id(),
+            "materials": materials_response,
+            "original_total": sum(m.get('original_unit_price', 0) * m.get('quantity', 0) for m in updated_materials),
+            "new_total": new_total_cost,
+            "total_diff": new_total_cost - sum(m.get('original_unit_price', 0) * m.get('quantity', 0) for m in updated_materials)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error updating POChild prices: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to update prices: {str(e)}"}), 500
+
+
+def update_purchase_prices(cr_id):
+    """
+    Update negotiated prices for Purchase (Change Request) materials
+    Allows buyer to edit prices based on vendor negotiation before sending for TD approval
+    Returns original and negotiated prices for diff display
+    """
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_name = current_user.get('full_name', 'Unknown User')
+
+        data = request.get_json()
+        materials_updates = data.get('materials')  # Array of {material_name, negotiated_price}
+
+        if not materials_updates or not isinstance(materials_updates, list):
+            return jsonify({"error": "materials array is required"}), 400
+
+        # Get the Change Request
+        cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Verify CR is in appropriate status for price editing
+        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm', 'pending']
+        if cr.status not in allowed_statuses:
+            return jsonify({"error": f"Cannot edit prices for purchase with status: {cr.status}"}), 400
+
+        # Get current materials data
+        materials_data = cr.sub_items_data or cr.materials_data or []
+        if not materials_data:
+            return jsonify({"error": "No materials found in this purchase"}), 400
+
+        # Create a lookup map for updates
+        updates_map = {update['material_name']: update for update in materials_updates}
+
+        # Update material_vendor_selections to store negotiated prices
+        # This is where process_materials_with_negotiated_prices looks for them
+        material_vendor_selections = cr.material_vendor_selections or {}
+        for update in materials_updates:
+            material_name = update['material_name']
+            negotiated_price = update.get('negotiated_price')
+
+            if material_name not in material_vendor_selections:
+                material_vendor_selections[material_name] = {}
+
+            if negotiated_price is not None and negotiated_price > 0:
+                material_vendor_selections[material_name]['negotiated_price'] = float(negotiated_price)
+                material_vendor_selections[material_name]['price_updated_by'] = user_name
+                material_vendor_selections[material_name]['price_updated_at'] = datetime.utcnow().isoformat()
+            else:
+                # Clear negotiated price
+                material_vendor_selections[material_name].pop('negotiated_price', None)
+                material_vendor_selections[material_name].pop('price_updated_by', None)
+                material_vendor_selections[material_name].pop('price_updated_at', None)
+
+        # Update materials with negotiated prices
+        updated_materials = []
+        new_total_cost = 0
+
+        for material in materials_data:
+            # Handle nested materials structure
+            if isinstance(material, dict) and 'materials' in material:
+                sub_materials = material.get('materials', [])
+                updated_sub_materials = []
+                for sub_mat in sub_materials:
+                    material_name = sub_mat.get('material_name', '')
+                    original_price = sub_mat.get('original_unit_price') or sub_mat.get('unit_price', 0)
+                    quantity = sub_mat.get('quantity', 0)
+
+                    # Store original price if not already stored
+                    if 'original_unit_price' not in sub_mat:
+                        sub_mat['original_unit_price'] = original_price
+
+                    # Check if there's an update for this material
+                    if material_name in updates_map:
+                        update = updates_map[material_name]
+                        negotiated_price = update.get('negotiated_price')
+
+                        if negotiated_price is not None and negotiated_price > 0:
+                            sub_mat['negotiated_price'] = float(negotiated_price)
+                            sub_mat['unit_price'] = float(negotiated_price)
+                            sub_mat['total_price'] = float(quantity) * float(negotiated_price)
+                            sub_mat['price_updated_by'] = user_name
+                            sub_mat['price_updated_at'] = datetime.utcnow().isoformat()
+                        else:
+                            # Clear negotiated price if set to null/0
+                            sub_mat.pop('negotiated_price', None)
+                            sub_mat['unit_price'] = float(original_price)
+                            sub_mat['total_price'] = float(quantity) * float(original_price)
+                    else:
+                        current_price = sub_mat.get('negotiated_price') or sub_mat.get('unit_price', 0)
+                        sub_mat['total_price'] = float(quantity) * float(current_price)
+
+                    new_total_cost += sub_mat.get('total_price', 0)
+                    updated_sub_materials.append(sub_mat)
+
+                material['materials'] = updated_sub_materials
+                updated_materials.append(material)
+            else:
+                # Direct material (not nested)
+                material_name = material.get('material_name', '')
+                original_price = material.get('original_unit_price') or material.get('unit_price', 0)
+                quantity = material.get('quantity', 0)
+
+                # Store original price if not already stored
+                if 'original_unit_price' not in material:
+                    material['original_unit_price'] = original_price
+
+                # Check if there's an update for this material
+                if material_name in updates_map:
+                    update = updates_map[material_name]
+                    negotiated_price = update.get('negotiated_price')
+
+                    if negotiated_price is not None and negotiated_price > 0:
+                        material['negotiated_price'] = float(negotiated_price)
+                        material['unit_price'] = float(negotiated_price)
+                        material['total_price'] = float(quantity) * float(negotiated_price)
+                        material['price_updated_by'] = user_name
+                        material['price_updated_at'] = datetime.utcnow().isoformat()
+                    else:
+                        # Clear negotiated price if set to null/0
+                        material.pop('negotiated_price', None)
+                        material['unit_price'] = float(original_price)
+                        material['total_price'] = float(quantity) * float(original_price)
+                else:
+                    current_price = material.get('negotiated_price') or material.get('unit_price', 0)
+                    material['total_price'] = float(quantity) * float(current_price)
+
+                new_total_cost += material.get('total_price', 0)
+                updated_materials.append(material)
+
+        # Update CR with new materials data and material_vendor_selections
+        from sqlalchemy.orm.attributes import flag_modified
+        if cr.sub_items_data:
+            cr.sub_items_data = updated_materials
+            flag_modified(cr, 'sub_items_data')
+        else:
+            cr.materials_data = updated_materials
+            flag_modified(cr, 'materials_data')
+
+        # Save material_vendor_selections (where negotiated prices are stored for the API)
+        cr.material_vendor_selections = material_vendor_selections
+        flag_modified(cr, 'material_vendor_selections')
+
+        cr.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        # Prepare response with price diff information
+        materials_response = []
+
+        def extract_materials_for_response(mats, vendor_selections):
+            result = []
+            for mat in mats:
+                if isinstance(mat, dict) and 'materials' in mat:
+                    result.extend(extract_materials_for_response(mat['materials'], vendor_selections))
+                else:
+                    material_name = mat.get('material_name', '')
+                    original_price = mat.get('original_unit_price') or mat.get('unit_price', 0)
+
+                    # Get negotiated price from material_vendor_selections
+                    vendor_sel = vendor_selections.get(material_name, {})
+                    negotiated_price = vendor_sel.get('negotiated_price')
+                    price_updated_by = vendor_sel.get('price_updated_by')
+                    price_updated_at = vendor_sel.get('price_updated_at')
+
+                    current_price = negotiated_price if negotiated_price else original_price
+                    price_diff = float(current_price) - float(original_price) if negotiated_price else 0
+
+                    result.append({
+                        'material_name': material_name,
+                        'quantity': mat.get('quantity', 0),
+                        'unit': mat.get('unit', ''),
+                        'original_unit_price': original_price,
+                        'negotiated_price': negotiated_price,
+                        'unit_price': current_price,
+                        'total_price': float(mat.get('quantity', 0)) * float(current_price),
+                        'price_diff': price_diff,
+                        'price_diff_percentage': round((price_diff / float(original_price)) * 100, 2) if original_price else 0,
+                        'price_updated_by': price_updated_by,
+                        'price_updated_at': price_updated_at
+                    })
+            return result
+
+        materials_response = extract_materials_for_response(updated_materials, material_vendor_selections)
+
+        original_total = sum(m.get('original_unit_price', 0) * m.get('quantity', 0) for m in materials_response)
+        negotiated_total = sum(m.get('total_price', 0) for m in materials_response)
+
+        return jsonify({
+            "success": True,
+            "message": "Prices updated successfully",
+            "cr_id": cr_id,
+            "materials": materials_response,
+            "original_total": original_total,
+            "new_total": negotiated_total,
+            "total_diff": negotiated_total - original_total
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error updating Purchase prices: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to update prices: {str(e)}"}), 500
+
+
 def select_vendor_for_material(cr_id):
     """Select vendor for specific material(s) in purchase order"""
     try:
@@ -2424,7 +2746,8 @@ def select_vendor_for_material(cr_id):
         # Both buyer and TD can change vendor when status is pending_td_approval
         # Buyer may want to update their selection before TD approves
         # Also allow 'split_to_sub_crs' for re-selecting vendor on rejected PO Children
-        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm', 'pending_td_approval', 'split_to_sub_crs']
+        # Allow 'rejected' for when vendor selection was rejected and buyer needs to resubmit
+        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm', 'pending_td_approval', 'split_to_sub_crs', 'rejected']
 
         if cr.status not in allowed_statuses:
             return jsonify({"error": f"Cannot select vendor. Current status: {cr.status}"}), 400
@@ -3212,18 +3535,39 @@ def create_po_children(cr_id):
                             parent_material = pm
                             break
 
-                # Calculate price
+                # Calculate price - vendor's negotiated price or parent material price
                 unit_price = negotiated_price if negotiated_price else (parent_material.get('unit_price', 0) if parent_material else 0)
                 material_total = unit_price * quantity
                 total_cost += material_total
+
+                # Get BOQ price for comparison (original_unit_price if stored, or lookup from BOQ)
+                boq_unit_price = 0
+                if parent_material:
+                    # First try original_unit_price (if stored during CR creation)
+                    boq_unit_price = parent_material.get('original_unit_price', 0)
+                    # Fallback to unit_price from sub_items_data (if not negotiated)
+                    if not boq_unit_price:
+                        # Check if parent CR has sub_items_data with original prices
+                        sub_items = parent_cr.sub_items_data or []
+                        for sub in sub_items:
+                            if sub.get('material_name') == material_name:
+                                boq_unit_price = sub.get('unit_price', 0) or sub.get('original_unit_price', 0)
+                                break
+                    # If still no price, use the parent material price as fallback
+                    if not boq_unit_price:
+                        boq_unit_price = parent_material.get('unit_price', 0)
+
+                boq_total_price = boq_unit_price * quantity if boq_unit_price else 0
 
                 po_materials.append({
                     'material_name': material_name,
                     'sub_item_name': parent_material.get('sub_item_name', '') if parent_material else '',
                     'quantity': quantity,
                     'unit': unit,
-                    'unit_price': unit_price,
-                    'total_price': material_total,
+                    'unit_price': unit_price,  # Vendor's price
+                    'total_price': material_total,  # Vendor's total
+                    'boq_unit_price': boq_unit_price,  # Original BOQ price for comparison
+                    'boq_total_price': boq_total_price,  # BOQ total for comparison
                     'master_material_id': parent_material.get('master_material_id') if parent_material else None
                 })
 
@@ -4089,8 +4433,57 @@ def get_pending_po_children():
             elif parent_cr and parent_cr.boq_id:
                 boq = BOQ.query.get(parent_cr.boq_id)
 
+            # Enrich materials with BOQ prices for comparison
+            enriched_materials = []
+            po_materials = po_child.materials_data or []
+
+            # Build BOQ price lookup - get REAL BOQ prices from BOQ details
+            boq_price_lookup = {}
+
+            # First, try to get prices from BOQ details (most accurate)
+            boq_id = po_child.boq_id or (parent_cr.boq_id if parent_cr else None)
+            if boq_id:
+                boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+                if boq_details and boq_details.boq_details:
+                    boq_items = boq_details.boq_details.get('items', [])
+                    for item in boq_items:
+                        for sub_item in item.get('sub_items', []):
+                            for boq_mat in sub_item.get('materials', []):
+                                mat_name = boq_mat.get('material_name', '').lower().strip()
+                                if mat_name:
+                                    boq_price_lookup[mat_name] = boq_mat.get('unit_price', 0)
+
+            # Fallback to parent CR's sub_items_data
+            if not boq_price_lookup and parent_cr:
+                sub_items = parent_cr.sub_items_data or []
+                for sub in sub_items:
+                    mat_name = sub.get('material_name', '').lower().strip()
+                    if mat_name and (sub.get('original_unit_price') or sub.get('unit_price')):
+                        boq_price_lookup[mat_name] = sub.get('original_unit_price') or sub.get('unit_price', 0)
+
+                # Also check materials_data
+                if not boq_price_lookup:
+                    materials = parent_cr.materials_data or []
+                    for mat in materials:
+                        mat_name = mat.get('material_name', '').lower().strip()
+                        if mat_name and (mat.get('original_unit_price') or mat.get('unit_price')):
+                            boq_price_lookup[mat_name] = mat.get('original_unit_price') or mat.get('unit_price', 0)
+
+            for material in po_materials:
+                mat_copy = dict(material)
+                # Add BOQ price if not already present
+                if not mat_copy.get('boq_unit_price'):
+                    mat_name = material.get('material_name', '').lower().strip()
+                    boq_price = boq_price_lookup.get(mat_name, 0)
+                    mat_copy['boq_unit_price'] = boq_price
+                    mat_copy['boq_total_price'] = boq_price * material.get('quantity', 0) if boq_price else 0
+                enriched_materials.append(mat_copy)
+
+            po_dict = po_child.to_dict()
+            po_dict['materials'] = enriched_materials  # Override with enriched materials
+
             result.append({
-                **po_child.to_dict(),
+                **po_dict,
                 'project_name': project.project_name if project else 'Unknown',
                 'project_code': project.project_code if project else None,
                 'client': project.client if project else None,

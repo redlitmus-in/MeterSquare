@@ -488,8 +488,8 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <Package className="w-5 h-5" />
                       Materials Breakdown
                     </h3>
-                    {/* Edit button - only show for purchases pending TD approval (not yet approved/rejected) */}
-                    {purchase.status === 'pending' && !isEditMode && purchase.vendor_selection_pending_td_approval && purchase.vendor_selection_status === 'pending_td_approval' && (
+                    {/* Edit button - only show when pending TD approval (not after TD approved or completed) */}
+                    {purchase.vendor_selection_status === 'pending_td_approval' && !isEditMode && (
                       <Button
                         onClick={() => setIsEditMode(true)}
                         className="bg-blue-600 hover:bg-blue-700 text-white"

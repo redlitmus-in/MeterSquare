@@ -146,10 +146,69 @@ const StockTake: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading inventory items...</p>
+      <div className="min-h-screen bg-gray-50">
+        {/* Header Skeleton */}
+        <div className="bg-white shadow-sm border-b border-gray-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <div className="flex items-center justify-between">
+              <div className="animate-pulse">
+                <div className="h-8 bg-gray-200 rounded w-40 mb-2"></div>
+                <div className="h-4 bg-gray-200 rounded w-64"></div>
+              </div>
+              <div className="flex items-center gap-3 animate-pulse">
+                <div className="h-10 bg-gray-200 rounded-lg w-24"></div>
+                <div className="h-10 bg-gray-200 rounded-lg w-36"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Stats Cards Skeleton */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6 animate-pulse">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="h-4 bg-gray-200 rounded w-24 mb-2"></div>
+                    <div className="h-8 bg-gray-200 rounded w-16"></div>
+                  </div>
+                  <div className="h-12 w-12 bg-gray-200 rounded-full"></div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Info Banner Skeleton */}
+          <div className="bg-gray-100 rounded-lg p-4 mb-6 animate-pulse">
+            <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+          </div>
+          {/* Details Section Skeleton */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6 animate-pulse">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[...Array(3)].map((_, i) => (
+                <div key={i}>
+                  <div className="h-4 bg-gray-200 rounded w-24 mb-2"></div>
+                  <div className="h-10 bg-gray-200 rounded w-full"></div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Table Skeleton */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden animate-pulse">
+            <div className="h-12 bg-gray-100"></div>
+            <div className="divide-y divide-gray-100">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="px-6 py-4 flex items-center gap-4">
+                  <div className="h-4 bg-gray-200 rounded w-20"></div>
+                  <div className="h-4 bg-gray-200 rounded w-40"></div>
+                  <div className="h-4 bg-gray-200 rounded w-24"></div>
+                  <div className="h-4 bg-gray-200 rounded w-20"></div>
+                  <div className="h-8 bg-gray-200 rounded w-28"></div>
+                  <div className="h-4 bg-gray-200 rounded w-16"></div>
+                  <div className="h-8 bg-gray-200 rounded w-32 flex-1"></div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     );

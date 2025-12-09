@@ -94,12 +94,12 @@ const ChangeRequestsPage: React.FC = () => {
         );
       }
 
-      showSuccess('Change request submitted successfully');
+      showSuccess('PO submitted successfully');
       setShowForm(false);
       refetch(); // Trigger background refresh
     } catch (error: any) {
       console.error('Error submitting change request:', error);
-      showError(error.response?.data?.error || 'Failed to submit change request');
+      showError(error.response?.data?.error || 'Failed to submit PO');
     } finally {
       setIsSubmitting(false);
     }

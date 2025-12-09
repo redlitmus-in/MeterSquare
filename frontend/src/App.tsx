@@ -82,7 +82,9 @@ const MaterialsManagement = lazy(() => import('@/roles/production-manager/pages/
 const ReceiveStock = lazy(() => import('@/roles/production-manager/pages/ReceiveStock'));
 const DispatchMaterials = lazy(() => import('@/roles/production-manager/pages/DispatchMaterials'));
 const StockTake = lazy(() => import('@/roles/production-manager/pages/StockTake'));
+const StockManagement = lazy(() => import('@/roles/production-manager/pages/StockManagement'));
 const M2StoreReports = lazy(() => import('@/roles/production-manager/pages/M2StoreReports'));
+const ReturnableAssets = lazy(() => import('@/roles/production-manager/pages/ReturnableAssets'));
 
 // Admin Pages - Mix of custom admin pages and role pages
 const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
@@ -1006,11 +1008,16 @@ function App() {
                 <M2StoreLanding />
               </ProductionManagerRoute>
             } />
+            {/* Redirect old materials route to combined inventory management */}
             <Route path="m2-store/materials" element={
+              <Navigate to="/production-manager/m2-store/stock" replace />
+            } />
+            <Route path="m2-store/stock" element={
               <ProductionManagerRoute>
-                <MaterialsManagement />
+                <StockManagement />
               </ProductionManagerRoute>
             } />
+            {/* Legacy routes - redirect to new Stock Management page */}
             <Route path="m2-store/receive" element={
               <ProductionManagerRoute>
                 <ReceiveStock />
@@ -1029,6 +1036,11 @@ function App() {
             <Route path="m2-store/reports" element={
               <ProductionManagerRoute>
                 <M2StoreReports />
+              </ProductionManagerRoute>
+            } />
+            <Route path="m2-store/returnable-assets" element={
+              <ProductionManagerRoute>
+                <ReturnableAssets />
               </ProductionManagerRoute>
             } />
 

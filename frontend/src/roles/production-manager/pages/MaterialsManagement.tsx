@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Search, Filter, Package, AlertTriangle, CheckCircle, X, Save, Info, RefreshCw, Edit2, Trash2, Bell, ClipboardList, Check, XCircle } from 'lucide-react';
 import { inventoryService, InventoryMaterial, InternalMaterialRequest } from '../services/inventoryService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
-import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 
 type ViewTab = 'materials' | 'requests';
@@ -437,8 +436,23 @@ const MaterialsManagement: React.FC = () => {
       {/* Materials Table */}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         {loading ? (
-          <div className="flex justify-center items-center h-64">
-            <ModernLoadingSpinners size="lg" />
+          <div className="animate-pulse">
+            {/* Table Header Skeleton */}
+            <div className="bg-gray-50 h-12"></div>
+            {/* Table Rows Skeleton */}
+            <div className="divide-y divide-gray-200">
+              {[...Array(8)].map((_, i) => (
+                <div key={i} className="px-6 py-4 flex items-center gap-4">
+                  <div className="h-4 bg-gray-200 rounded w-24"></div>
+                  <div className="h-4 bg-gray-200 rounded w-40"></div>
+                  <div className="h-4 bg-gray-200 rounded w-24"></div>
+                  <div className="h-4 bg-gray-200 rounded w-20"></div>
+                  <div className="h-4 bg-gray-200 rounded w-24"></div>
+                  <div className="h-5 bg-gray-200 rounded-full w-20"></div>
+                  <div className="h-4 bg-gray-200 rounded w-16"></div>
+                </div>
+              ))}
+            </div>
           </div>
         ) : (
           <>
@@ -486,13 +500,8 @@ const MaterialsManagement: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {material.category || '-'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        <div>
-                          <div className="font-medium">{material.current_stock} {material.unit}</div>
-                          <div className="text-gray-500 text-xs">
-                            Min: {material.min_stock_level || 0}
-                          </div>
-                        </div>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
+                        {material.current_stock} {material.unit}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {formatCurrency(material.unit_price)}
@@ -594,8 +603,23 @@ const MaterialsManagement: React.FC = () => {
           </div>
 
           {requestsLoading ? (
-            <div className="flex justify-center items-center h-64">
-              <ModernLoadingSpinners size="lg" />
+            <div className="animate-pulse">
+              {/* Table Header Skeleton */}
+              <div className="bg-gray-50 h-12"></div>
+              {/* Table Rows Skeleton */}
+              <div className="divide-y divide-gray-200">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="px-6 py-4 flex items-center gap-4">
+                    <div className="h-4 bg-gray-200 rounded w-16"></div>
+                    <div className="h-4 bg-gray-200 rounded w-32"></div>
+                    <div className="h-4 bg-gray-200 rounded w-16"></div>
+                    <div className="h-4 bg-gray-200 rounded w-20"></div>
+                    <div className="h-5 bg-gray-200 rounded-full w-20"></div>
+                    <div className="h-4 bg-gray-200 rounded w-24"></div>
+                    <div className="h-8 bg-gray-200 rounded w-24"></div>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : !Array.isArray(requests) || requests.length === 0 ? (
             <div className="text-center py-12">

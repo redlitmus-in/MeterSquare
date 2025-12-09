@@ -148,7 +148,7 @@ const ChangeRequestsPage: React.FC = () => {
     // Check if materials are new or existing to determine routing
     const request = changeRequests.find(r => r.cr_id === crId);
     if (!request) {
-      showError('Change request not found');
+      showError('PO not found');
       return;
     }
 
@@ -202,13 +202,13 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.approve(crId, 'Approved by PM', buyerId);
       if (response.success) {
-        showSuccess(response.message || 'Change request approved successfully');
+        showSuccess(response.message || 'PO approved successfully');
         refetch(); // Trigger background refresh
       } else {
         showError(response.message);
       }
     } catch (error) {
-      showError('Failed to approve change request');
+      showError('Failed to approve PO');
     }
   };
 
@@ -255,7 +255,7 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.reject(rejectingCrId, reason);
       if (response.success) {
-        showSuccess('Change request rejected');
+        showSuccess('PO rejected');
         refetch(); // Trigger background refresh
         setShowRejectionModal(false);
         setRejectingCrId(null);
@@ -263,7 +263,7 @@ const ChangeRequestsPage: React.FC = () => {
         showError(response.message);
       }
     } catch (error) {
-      showError('Failed to reject change request');
+      showError('Failed to reject PO');
     }
   };
 
@@ -278,7 +278,7 @@ const ChangeRequestsPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error in handleReview:', error);
-      showError('Failed to load change request details');
+      showError('Failed to load PO details');
     }
   };
 
@@ -296,7 +296,7 @@ const ChangeRequestsPage: React.FC = () => {
     refetch();
     setShowEditModal(false);
     setSelectedChangeRequest(null);
-    showSuccess('Change request updated successfully');
+    showSuccess('PO updated successfully');
   };
 
   const handleApproveFromModal = async () => {

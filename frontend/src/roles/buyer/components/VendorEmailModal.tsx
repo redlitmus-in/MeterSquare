@@ -576,9 +576,17 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
               <span style="color: #4B5563;">PO Number:</span>
               <span style="font-weight: 600; color: #2563EB;">PO-${purchase.cr_id}</span>
             </div>
-            <div style="display: flex; justify-content: space-between;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span style="color: #4B5563;">Vendor:</span>
+              <span style="font-weight: 600; color: #2563EB;">${purchase.vendor_name || '-'}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
               <span style="color: #4B5563;">Total Items:</span>
               <span style="font-weight: 600; color: #2563EB;">${purchase.materials_count}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: #4B5563;">Total Amount:</span>
+              <span style="font-weight: 600; color: #2563EB;">AED ${purchase.total_cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</span>
             </div>
           </div>
         </div>
@@ -896,6 +904,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                             <ul className="space-y-1 ml-4 list-disc">
                               <li>Total Items: {purchase.materials_count}</li>
                               <li>Project: {purchase.project_name}</li>
+                              <li>Total Amount: <span className="font-semibold">AED {purchase.total_cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</span></li>
                             </ul>
                           </div>
                         </div>
@@ -1467,8 +1476,16 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                   <span className="font-semibold text-blue-600">PO-{purchase.cr_id}</span>
                                 </div>
                                 <div className="flex justify-between">
+                                  <span className="text-gray-600">Vendor:</span>
+                                  <span className="font-semibold text-blue-600">{purchase.vendor_name || '-'}</span>
+                                </div>
+                                <div className="flex justify-between">
                                   <span className="text-gray-600">Total Items:</span>
                                   <span className="font-semibold text-blue-600">{purchase.materials_count}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600">Total Amount:</span>
+                                  <span className="font-semibold text-blue-600">AED {purchase.total_cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</span>
                                 </div>
                               </div>
                             </div>

@@ -209,7 +209,7 @@ const Dashboard: React.FC = () => {
       height: 280
     },
     title: {
-      text: 'Change Requests Overview',
+      text: 'Purchase Orders Overview',
       align: 'center',
       style: { fontSize: '14px', fontWeight: '600', color: '#1f2937' }
     },
@@ -366,7 +366,7 @@ const Dashboard: React.FC = () => {
           >
             <div className="flex items-center gap-2 mb-3">
               <DocumentTextIcon className="w-5 h-5 text-blue-600" />
-              <h3 className="font-semibold text-gray-900">Change Requests</h3>
+              <h3 className="font-semibold text-gray-900">Purchase Orders</h3>
             </div>
             <div className="space-y-2">
               <div className="flex justify-between">

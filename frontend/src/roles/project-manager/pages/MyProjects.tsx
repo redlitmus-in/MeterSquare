@@ -2153,7 +2153,7 @@ const MyProjects: React.FC = () => {
           if (selectedChangeRequest) {
             const response = await changeRequestService.approve(selectedChangeRequest.cr_id);
             if (response.success) {
-              showSuccess('Change request approved');
+              showSuccess('PO approved');
               setShowChangeRequestModal(false);
               setSelectedChangeRequest(null);
               if (selectedProject?.boq_id) {
@@ -2171,7 +2171,7 @@ const MyProjects: React.FC = () => {
 
             const response = await changeRequestService.reject(selectedChangeRequest.cr_id, reason);
             if (response.success) {
-              showSuccess('Change request rejected');
+              showSuccess('PO rejected');
               setShowChangeRequestModal(false);
               setSelectedChangeRequest(null);
               if (selectedProject?.boq_id) {

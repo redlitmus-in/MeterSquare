@@ -17,6 +17,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { apiClient } from '@/api/config';
+import { removeQueries } from '@/lib/queryClient';
 import { useAuthStore } from '@/store/authStore';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 import { useExtraMaterialsAutoSync } from '@/hooks/useAutoSync';
@@ -407,11 +408,11 @@ const ExtraMaterialPage: React.FC = () => {
         setSelectedRequest(cr);
         setShowEditModal(true);
       } else {
-        showError('Failed to load change request');
+        showError('Failed to load PO');
       }
     } catch (error) {
-      console.error('Error loading change request for edit:', error);
-      showError('Failed to load change request');
+      console.error('Error loading PO for edit:', error);
+      showError('Failed to load PO');
     }
   };
 
@@ -420,7 +421,7 @@ const ExtraMaterialPage: React.FC = () => {
     refetch();
     setShowEditModal(false);
     setSelectedRequest(null);
-    showSuccess('Change request updated successfully');
+    showSuccess('PO updated successfully');
   };
 
   const handleSendToPM = async (requestId: number) => {
@@ -464,17 +465,14 @@ const ExtraMaterialPage: React.FC = () => {
         });
       }
 
-      // Remove cache completely and refetch fresh data
+      // Switch to Request tab immediately to show the moved item
+      setActiveTab('request');
+
+      // Remove cache and refetch fresh data
       removeQueries(['change-requests']);
       removeQueries(['extra-materials']);
       removeQueries(['se-change-requests']);
-      // Small delay to ensure backend has processed the status change
-      await new Promise(resolve => setTimeout(resolve, 500));
-      const freshData = await refetch();
-      console.log('🔄 Fresh data after send:', freshData?.data);
-      // Switch to Request tab to show the moved item
-      console.log('🔄 Switching to Request tab after successful send');
-      setActiveTab('request');
+      await refetch();
     } catch (error: any) {
       console.error('Error sending request:', error);
       showError(error.response?.data?.error || 'Failed to send request');
@@ -499,12 +497,11 @@ const ExtraMaterialPage: React.FC = () => {
       showSuccess('Request deleted successfully');
       setShowDeleteModal(false);
       setDeleteRequestId(null);
-      // Remove cache completely and refetch fresh data
+
+      // Remove cache and refetch fresh data
       removeQueries(['change-requests']);
       removeQueries(['extra-materials']);
       removeQueries(['se-change-requests']);
-      // Small delay to ensure backend has processed the deletion
-      await new Promise(resolve => setTimeout(resolve, 500));
       await refetch();
     } catch (error: any) {
       console.error('Error deleting request:', error);

@@ -302,6 +302,28 @@ def complete_po_child_purchase_route(po_child_id):
     return complete_po_child_purchase(po_child_id)
 
 
+@buyer_routes.route('/po-child/<int:po_child_id>/update-prices', methods=['PUT'])
+@jwt_required
+def update_po_child_prices_route(po_child_id):
+    """Update negotiated prices for POChild materials (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    from controllers.buyer_controller import update_po_child_prices
+    return update_po_child_prices(po_child_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/update-prices', methods=['PUT'])
+@jwt_required
+def update_purchase_prices_route(cr_id):
+    """Update negotiated prices for Purchase (Change Request) materials (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    from controllers.buyer_controller import update_purchase_prices
+    return update_purchase_prices(cr_id)
+
+
 @buyer_routes.route('/purchase/<int:cr_id>/preview-vendor-email', methods=['GET'])
 @jwt_required
 def preview_vendor_email_route(cr_id):

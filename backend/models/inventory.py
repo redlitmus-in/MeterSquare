@@ -18,6 +18,7 @@ class InventoryMaterial(db.Model):
     unit_price = db.Column(db.Float, nullable=False)
     description = db.Column(db.Text, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+    is_returnable = db.Column(db.Boolean, default=False)  # Whether material can be returned/reused
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -39,6 +40,7 @@ class InventoryMaterial(db.Model):
             'unit_price': self.unit_price,
             'description': self.description,
             'is_active': self.is_active,
+            'is_returnable': self.is_returnable,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by,
             'last_modified_at': self.last_modified_at.isoformat() if self.last_modified_at else None,
@@ -140,4 +142,173 @@ class InternalMaterialRequest(db.Model):
             'created_by': self.created_by,
             'last_modified_at': self.last_modified_at.isoformat() if self.last_modified_at else None,
             'last_modified_by': self.last_modified_by
+        }
+
+
+class MaterialReturn(db.Model):
+    """Material Returns - Track returned materials with condition and disposal workflow"""
+    __tablename__ = "material_returns"
+
+    return_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    inventory_material_id = db.Column(db.Integer, db.ForeignKey('inventory_materials.inventory_material_id'), nullable=False)
+    project_id = db.Column(db.Integer, nullable=False)  # Required - project material is returned from
+    quantity = db.Column(db.Float, nullable=False)
+    condition = db.Column(db.String(20), nullable=False)  # Good, Damaged, Defective
+    add_to_stock = db.Column(db.Boolean, default=False)  # Only applicable for 'Good' condition
+    return_reason = db.Column(db.Text, nullable=True)
+    reference_number = db.Column(db.String(100), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    # Disposal workflow fields (for Damaged/Defective items)
+    disposal_status = db.Column(db.String(30), nullable=True)  # pending_review, approved_disposal, disposed, repaired
+    disposal_reviewed_by = db.Column(db.String(255), nullable=True)
+    disposal_reviewed_at = db.Column(db.DateTime, nullable=True)
+    disposal_notes = db.Column(db.Text, nullable=True)
+    disposal_value = db.Column(db.Float, default=0.0)  # Write-off value
+
+    # Audit fields
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+
+    # Link to transaction if stock was updated
+    inventory_transaction_id = db.Column(db.Integer, nullable=True)
+
+    # Relationships
+    inventory_material = db.relationship('InventoryMaterial', backref='returns', lazy=True)
+
+    def to_dict(self):
+        return {
+            'return_id': self.return_id,
+            'inventory_material_id': self.inventory_material_id,
+            'project_id': self.project_id,
+            'quantity': self.quantity,
+            'condition': self.condition,
+            'add_to_stock': self.add_to_stock,
+            'return_reason': self.return_reason,
+            'reference_number': self.reference_number,
+            'notes': self.notes,
+            'disposal_status': self.disposal_status,
+            'disposal_reviewed_by': self.disposal_reviewed_by,
+            'disposal_reviewed_at': self.disposal_reviewed_at.isoformat() if self.disposal_reviewed_at else None,
+            'disposal_notes': self.disposal_notes,
+            'disposal_value': self.disposal_value,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'created_by': self.created_by,
+            'inventory_transaction_id': self.inventory_transaction_id,
+            # Include material details for convenience
+            'material_name': self.inventory_material.material_name if self.inventory_material else None,
+            'material_code': self.inventory_material.material_code if self.inventory_material else None,
+            'unit': self.inventory_material.unit if self.inventory_material else None
+        }
+
+
+class MaterialDeliveryNote(db.Model):
+    """Material Delivery Notes - Track material dispatches to project sites"""
+    __tablename__ = "material_delivery_notes"
+
+    delivery_note_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    delivery_note_number = db.Column(db.String(50), unique=True, nullable=False)  # MDN-2025-001
+    project_id = db.Column(db.Integer, nullable=False)
+    delivery_date = db.Column(db.DateTime, nullable=False)
+    attention_to = db.Column(db.String(255), nullable=True)  # Site engineer/supervisor name
+    delivery_from = db.Column(db.String(255), default='M2 Store')  # Store location
+    requested_by = db.Column(db.String(255), nullable=True)
+    request_date = db.Column(db.DateTime, nullable=True)
+    vehicle_number = db.Column(db.String(100), nullable=True)
+    driver_name = db.Column(db.String(255), nullable=True)
+    driver_contact = db.Column(db.String(50), nullable=True)
+    prepared_by = db.Column(db.String(255), nullable=False)
+    checked_by = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(20), default='DRAFT')  # DRAFT, ISSUED, IN_TRANSIT, DELIVERED, PARTIAL, CANCELLED
+    notes = db.Column(db.Text, nullable=True)
+
+    # Delivery confirmation fields
+    received_by = db.Column(db.String(255), nullable=True)
+    received_at = db.Column(db.DateTime, nullable=True)
+    receiver_notes = db.Column(db.Text, nullable=True)
+
+    # Audit fields
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_modified_by = db.Column(db.String(255), nullable=True)
+    issued_at = db.Column(db.DateTime, nullable=True)
+    issued_by = db.Column(db.String(255), nullable=True)
+    dispatched_at = db.Column(db.DateTime, nullable=True)
+    dispatched_by = db.Column(db.String(255), nullable=True)
+
+    # Relationships
+    items = db.relationship('DeliveryNoteItem', backref='delivery_note', lazy=True, cascade='all, delete-orphan')
+
+    def to_dict(self):
+        return {
+            'delivery_note_id': self.delivery_note_id,
+            'delivery_note_number': self.delivery_note_number,
+            'project_id': self.project_id,
+            'delivery_date': self.delivery_date.isoformat() if self.delivery_date else None,
+            'attention_to': self.attention_to,
+            'delivery_from': self.delivery_from,
+            'requested_by': self.requested_by,
+            'request_date': self.request_date.isoformat() if self.request_date else None,
+            'vehicle_number': self.vehicle_number,
+            'driver_name': self.driver_name,
+            'driver_contact': self.driver_contact,
+            'prepared_by': self.prepared_by,
+            'checked_by': self.checked_by,
+            'status': self.status,
+            'notes': self.notes,
+            'received_by': self.received_by,
+            'received_at': self.received_at.isoformat() if self.received_at else None,
+            'receiver_notes': self.receiver_notes,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'created_by': self.created_by,
+            'last_modified_at': self.last_modified_at.isoformat() if self.last_modified_at else None,
+            'last_modified_by': self.last_modified_by,
+            'issued_at': self.issued_at.isoformat() if self.issued_at else None,
+            'issued_by': self.issued_by,
+            'dispatched_at': (self.dispatched_at.isoformat() + 'Z') if self.dispatched_at else None,
+            'dispatched_by': self.dispatched_by,
+            'items': [item.to_dict() for item in self.items] if self.items else [],
+            'total_items': len(self.items) if self.items else 0
+        }
+
+
+class DeliveryNoteItem(db.Model):
+    """Delivery Note Items - Individual materials in a delivery note"""
+    __tablename__ = "delivery_note_items"
+
+    item_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    delivery_note_id = db.Column(db.Integer, db.ForeignKey('material_delivery_notes.delivery_note_id'), nullable=False)
+    inventory_material_id = db.Column(db.Integer, db.ForeignKey('inventory_materials.inventory_material_id'), nullable=False)
+    internal_request_id = db.Column(db.Integer, db.ForeignKey('internal_inventory_material_requests.request_id'), nullable=True)
+    quantity = db.Column(db.Float, nullable=False)
+    unit_price = db.Column(db.Float, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    # Received quantity tracking (for partial deliveries)
+    quantity_received = db.Column(db.Float, nullable=True)
+
+    # Link to transaction when stock is deducted
+    inventory_transaction_id = db.Column(db.Integer, nullable=True)
+
+    # Relationships
+    inventory_material = db.relationship('InventoryMaterial', backref='delivery_note_items', lazy=True)
+    internal_request = db.relationship('InternalMaterialRequest', backref='delivery_note_items', lazy=True)
+
+    def to_dict(self):
+        return {
+            'item_id': self.item_id,
+            'delivery_note_id': self.delivery_note_id,
+            'inventory_material_id': self.inventory_material_id,
+            'internal_request_id': self.internal_request_id,
+            'quantity': self.quantity,
+            'unit_price': self.unit_price,
+            'notes': self.notes,
+            'quantity_received': self.quantity_received,
+            'inventory_transaction_id': self.inventory_transaction_id,
+            # Include material details
+            'material_code': self.inventory_material.material_code if self.inventory_material else None,
+            'material_name': self.inventory_material.material_name if self.inventory_material else None,
+            'brand': self.inventory_material.brand if self.inventory_material else None,
+            'unit': self.inventory_material.unit if self.inventory_material else None
         }

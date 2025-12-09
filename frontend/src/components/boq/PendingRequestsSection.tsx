@@ -55,7 +55,7 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
       const response = await changeRequestService.sendForReview(crId);
 
       if (response.success) {
-        showSuccess(response.message || `Change request sent for review`);
+        showSuccess(response.message || `PO sent for review`);
         onStatusUpdate?.();
       } else {
         showError(response.message || 'Failed to send request');
@@ -73,7 +73,7 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
     try {
       const response = await changeRequestService.approve(crId, 'Approved by Project Manager');
       if (response.success) {
-        showSuccess('Change request approved successfully');
+        showSuccess('PO approved successfully');
         onStatusUpdate?.();
       } else {
         showError(response.message || 'Failed to approve request');
@@ -97,7 +97,7 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
     try {
       const response = await changeRequestService.reject(crId, reason);
       if (response.success) {
-        showSuccess('Change request rejected');
+        showSuccess('PO rejected');
         onStatusUpdate?.();
       } else {
         showError(response.message || 'Failed to reject request');

@@ -260,10 +260,71 @@ const DispatchMaterials: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading dispatch requests...</p>
+      <div className="min-h-screen bg-gray-50">
+        {/* Header Skeleton */}
+        <div className="bg-white shadow-sm border-b border-gray-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <div className="flex items-center justify-between animate-pulse">
+              <div>
+                <div className="h-8 bg-gray-200 rounded w-48 mb-2"></div>
+                <div className="h-4 bg-gray-200 rounded w-64"></div>
+              </div>
+              <div className="h-10 bg-gray-200 rounded-lg w-24"></div>
+            </div>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Summary Stats Skeleton */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6 animate-pulse">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="h-3 bg-gray-200 rounded w-16 mb-2"></div>
+                    <div className="h-7 bg-gray-200 rounded w-12"></div>
+                  </div>
+                  <div className="h-8 w-8 bg-gray-200 rounded"></div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Status Filter Tabs Skeleton */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-1 mb-6 flex flex-wrap gap-1 animate-pulse">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-10 bg-gray-200 rounded-md flex-1 min-w-[100px]"></div>
+            ))}
+          </div>
+          {/* Search Skeleton */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6 animate-pulse">
+            <div className="h-10 bg-gray-200 rounded-lg w-full"></div>
+          </div>
+          {/* Request List Skeleton */}
+          <div className="space-y-4 animate-pulse">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="h-6 bg-gray-200 rounded w-32"></div>
+                      <div className="h-5 bg-gray-200 rounded-full w-20"></div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      {[...Array(4)].map((_, j) => (
+                        <div key={j}>
+                          <div className="h-3 bg-gray-200 rounded w-16 mb-1"></div>
+                          <div className="h-5 bg-gray-200 rounded w-24"></div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-100">
+                  <div className="h-9 bg-gray-200 rounded-lg w-24"></div>
+                  <div className="h-9 bg-gray-200 rounded-lg w-36"></div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );

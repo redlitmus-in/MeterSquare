@@ -1149,42 +1149,54 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                     ({material.quantity} {material.unit})
                                   </span>
                                   {(() => {
-                                    // Calculate estimated amount based on selected vendor's price
+                                    // Get BOQ price from original purchase materials
+                                    const boqMaterial = purchase.materials?.find(m => m.material_name === material.material_name);
+                                    const boqUnitPrice = boqMaterial?.unit_price || 0;
+                                    const boqTotalAmount = boqUnitPrice * material.quantity;
+
+                                    // Calculate vendor price
+                                    let vendorTotalAmount: number | null = null;
                                     if (material.selected_vendors.length > 0) {
                                       const selectedVendor = material.selected_vendors[0];
 
                                       // Use negotiated price if available
                                       if (selectedVendor.negotiated_price) {
-                                        const totalAmount = selectedVendor.negotiated_price * material.quantity;
-                                        return (
-                                          <Badge className="bg-blue-100 text-blue-800 text-xs font-medium">
-                                            Est. AED {totalAmount.toFixed(2)}
-                                          </Badge>
-                                        );
-                                      }
+                                        vendorTotalAmount = selectedVendor.negotiated_price * material.quantity;
+                                      } else {
+                                        // Otherwise, try to find lowest price from vendor's matching products
+                                        const vendorProductsList = vendorProducts.get(selectedVendor.vendor_id) || [];
+                                        const vendorCategory = vendors.find(v => v.vendor_id === selectedVendor.vendor_id)?.category?.toLowerCase().trim() || '';
+                                        const matchingProducts = vendorProductsList.filter(p => {
+                                          const productName = p.product_name?.toLowerCase().trim() || '';
+                                          const productCategory = p.category?.toLowerCase().trim() || '';
+                                          return isProductMatchingMaterial(productName, productCategory, vendorCategory, material.material_name.toLowerCase());
+                                        });
 
-                                      // Otherwise, try to find lowest price from vendor's matching products
-                                      const vendorProductsList = vendorProducts.get(selectedVendor.vendor_id) || [];
-                                      const vendorCategory = vendors.find(v => v.vendor_id === selectedVendor.vendor_id)?.category?.toLowerCase().trim() || '';
-                                      const matchingProducts = vendorProductsList.filter(p => {
-                                        const productName = p.product_name?.toLowerCase().trim() || '';
-                                        const productCategory = p.category?.toLowerCase().trim() || '';
-                                        return isProductMatchingMaterial(productName, productCategory, vendorCategory, material.material_name.toLowerCase());
-                                      });
-
-                                      if (matchingProducts.length > 0) {
-                                        const lowestPrice = Math.min(...matchingProducts.map(p => p.unit_price || 0).filter(p => p > 0));
-                                        if (lowestPrice > 0) {
-                                          const totalAmount = lowestPrice * material.quantity;
-                                          return (
-                                            <Badge className="bg-blue-100 text-blue-800 text-xs font-medium">
-                                              Est. AED {totalAmount.toFixed(2)}
-                                            </Badge>
-                                          );
+                                        if (matchingProducts.length > 0) {
+                                          const lowestPrice = Math.min(...matchingProducts.map(p => p.unit_price || 0).filter(p => p > 0));
+                                          if (lowestPrice > 0) {
+                                            vendorTotalAmount = lowestPrice * material.quantity;
+                                          }
                                         }
                                       }
                                     }
-                                    return null;
+
+                                    return (
+                                      <div className="flex items-center gap-2">
+                                        {/* BOQ Amount - Always show if available */}
+                                        {boqTotalAmount > 0 && (
+                                          <Badge className="bg-gray-100 text-gray-700 text-xs font-medium">
+                                            BOQ: AED {boqTotalAmount.toFixed(2)}
+                                          </Badge>
+                                        )}
+                                        {/* Vendor Amount - Show if vendor selected */}
+                                        {vendorTotalAmount !== null && (
+                                          <Badge className="bg-blue-100 text-blue-800 text-xs font-medium">
+                                            Vendor: AED {vendorTotalAmount.toFixed(2)}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    );
                                   })()}
                                   <Badge
                                     variant="outline"
@@ -1382,17 +1394,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                 <div className="flex-shrink-0">
                                                   <Button
                                                     size="sm"
-                                                    variant="ghost"
+                                                    variant="outline"
                                                     onClick={(e) => {
                                                       e.stopPropagation();
                                                       const currentPrice = negotiatedPrice ||
                                                                          (matchingProducts.length > 0 ? matchingProducts[0].unit_price : undefined);
                                                       handleStartEditPrice(material.material_name, vendor.vendor_id!, currentPrice);
                                                     }}
-                                                    className="h-7 w-7 p-0"
+                                                    className="h-8 w-8 p-0 border-2 border-amber-400 bg-amber-50 hover:bg-amber-100"
                                                     title="Edit price"
                                                   >
-                                                    <Edit className="w-3.5 h-3.5 text-gray-600" />
+                                                    <Edit className="w-4 h-4 text-amber-600" />
                                                   </Button>
                                                 </div>
                                               )}
@@ -1462,7 +1474,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                 )}
                                               </div>
 
-                                              {/* Total Estimate */}
+                                              {/* Total Estimate with BOQ Comparison */}
                                               <div className="flex-shrink-0 text-right min-w-[90px]">
                                                 {(negotiatedPrice ? negotiatedPrice * material.quantity : totalEstimate) > 0 ? (
                                                   <>
@@ -1474,7 +1486,37 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                     {negotiatedPrice && totalEstimate > 0 && (
                                                       <div className="text-[10px] text-gray-400 line-through">AED {totalEstimate.toFixed(2)}</div>
                                                     )}
-                                                    <div className="text-[10px] text-gray-500">total</div>
+                                                    {/* BOQ Comparison - Below the amount */}
+                                                    {(() => {
+                                                      const boqMaterial = purchase.materials?.find(m => m.material_name === material.material_name);
+                                                      const boqTotal = (boqMaterial?.unit_price || 0) * material.quantity;
+                                                      const vendorTotal = negotiatedPrice ? negotiatedPrice * material.quantity : totalEstimate;
+
+                                                      if (boqTotal > 0 && vendorTotal > 0) {
+                                                        const diff = vendorTotal - boqTotal;
+                                                        const isOver = diff > 0;
+                                                        const isUnder = diff < 0;
+
+                                                        return (
+                                                          <div className={`text-[10px] font-semibold mt-0.5 ${
+                                                            isOver
+                                                              ? 'text-red-600'
+                                                              : isUnder
+                                                                ? 'text-green-600'
+                                                                : 'text-gray-500'
+                                                          }`}>
+                                                            {isOver ? (
+                                                              <span>+{diff.toFixed(0)} over</span>
+                                                            ) : isUnder ? (
+                                                              <span>{diff.toFixed(0)} under</span>
+                                                            ) : (
+                                                              <span>on budget</span>
+                                                            )}
+                                                          </div>
+                                                        );
+                                                      }
+                                                      return <div className="text-[10px] text-gray-500">total</div>;
+                                                    })()}
                                                   </>
                                                 ) : (
                                                   <div className="text-xs text-gray-400">-</div>
@@ -1584,6 +1626,65 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                             )}
                                                           </div>
                                                         </div>
+
+                                                        {/* Price Comparison Section */}
+                                                        {(() => {
+                                                          const boqMaterial = purchase.materials?.find(m => m.material_name === material.material_name);
+                                                          const boqUnitPrice = boqMaterial?.unit_price || 0;
+                                                          const boqTotalAmount = boqUnitPrice * material.quantity;
+                                                          const vendorUnitPrice = negotiatedPrice || lowestPrice;
+                                                          const vendorTotalAmount = vendorUnitPrice * material.quantity;
+                                                          const priceDiff = vendorTotalAmount - boqTotalAmount;
+                                                          const isOverBudget = priceDiff > 0;
+
+                                                          return (
+                                                            <div className="bg-gradient-to-r from-blue-50 to-green-50 p-3 rounded border border-blue-200">
+                                                              <div className="text-xs font-medium text-gray-700 mb-2">
+                                                                Price Comparison
+                                                              </div>
+                                                              <div className="grid grid-cols-2 gap-4">
+                                                                {/* BOQ Price */}
+                                                                <div className="bg-white p-2 rounded border border-gray-200">
+                                                                  <div className="text-[10px] text-gray-500 mb-1">BOQ Estimate</div>
+                                                                  <div className="text-xs">
+                                                                    <span className="text-gray-600">Unit: </span>
+                                                                    <span className="font-semibold text-gray-800">AED {boqUnitPrice.toFixed(2)}</span>
+                                                                  </div>
+                                                                  <div className="text-xs mt-1">
+                                                                    <span className="text-gray-600">Total: </span>
+                                                                    <span className="font-bold text-gray-800">AED {boqTotalAmount.toFixed(2)}</span>
+                                                                  </div>
+                                                                </div>
+                                                                {/* Vendor Price */}
+                                                                <div className="bg-white p-2 rounded border border-blue-200">
+                                                                  <div className="text-[10px] text-blue-600 mb-1">Vendor Price</div>
+                                                                  <div className="text-xs">
+                                                                    <span className="text-gray-600">Unit: </span>
+                                                                    <span className="font-semibold text-blue-700">AED {vendorUnitPrice.toFixed(2)}</span>
+                                                                  </div>
+                                                                  <div className="text-xs mt-1">
+                                                                    <span className="text-gray-600">Total: </span>
+                                                                    <span className="font-bold text-blue-700">AED {vendorTotalAmount.toFixed(2)}</span>
+                                                                  </div>
+                                                                </div>
+                                                              </div>
+                                                              {/* Difference */}
+                                                              {boqTotalAmount > 0 && vendorTotalAmount > 0 && (
+                                                                <div className={`mt-2 text-xs text-center py-1 rounded ${
+                                                                  isOverBudget ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                                                                }`}>
+                                                                  {isOverBudget ? (
+                                                                    <span>Over Budget: +AED {priceDiff.toFixed(2)}</span>
+                                                                  ) : priceDiff < 0 ? (
+                                                                    <span>Under Budget: AED {Math.abs(priceDiff).toFixed(2)} saved</span>
+                                                                  ) : (
+                                                                    <span>On Budget</span>
+                                                                  )}
+                                                                </div>
+                                                              )}
+                                                            </div>
+                                                          );
+                                                        })()}
 
                                                         {/* Matching Products List */}
                                                         <div className="bg-white p-3 rounded border border-gray-200">

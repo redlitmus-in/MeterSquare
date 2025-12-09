@@ -1,28 +1,4 @@
 {
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "A code edit was just made. Remind the developer: 'Code changed! Consider running the codebase-auditor agent to review changes for errors, duplicates, and best practices.'",
-            "statusMessage": "Checking code change..."
-          }
-        ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "A new file was just written. Remind the developer: 'New file created! Consider running the codebase-auditor agent to review for errors, duplicates, and best practices.'",
-            "statusMessage": "Checking new file..."
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Bash(npm run type-check:*)",
@@ -62,9 +38,34 @@
       "Bash(test:*)",
       "Bash(/home/development1/Desktop/MeterSquare/backend/venv/bin/python3:*)",
       "Bash(lsof:*)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "A code edit was just made. Remind the developer: 'Code changed! Consider running the codebase-auditor agent to review changes for errors, duplicates, and best practices.'",
+            "statusMessage": "Checking code change..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "A new file was just written. Remind the developer: 'New file created! Consider running the codebase-auditor agent to review for errors, duplicates, and best practices.'",
+            "statusMessage": "Checking new file..."
+          }
+        ]
+      }
+    ]
   }
 }

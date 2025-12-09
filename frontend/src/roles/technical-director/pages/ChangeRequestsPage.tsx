@@ -48,7 +48,7 @@ import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState('pending');
+  const [activeTab, setActiveTab] = useState('vendor_approvals');
   const [vendorApprovalsSubTab, setVendorApprovalsSubTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
@@ -115,14 +115,14 @@ const ChangeRequestsPage: React.FC = () => {
       } else {
         // Only show error toast on initial load to avoid spam
         if (showLoadingSpinner) {
-          showError(response.message || 'Failed to load change requests');
+          showError(response.message || 'Failed to load POs');
         }
       }
     } catch (error) {
       console.error('Error loading change requests:', error);
       // Only show error toast on initial load to avoid spam
       if (showLoadingSpinner) {
-        showError('Failed to load change requests');
+        showError('Failed to load POs');
       }
     } finally {
       if (showLoadingSpinner) {
@@ -179,13 +179,24 @@ const ChangeRequestsPage: React.FC = () => {
           vendor_selection_pending_td_approval: true,
           vendor_selection_status: cr.vendor_selection_status,
           // Map materials_data to materials array format expected by VendorSelectionModal
-          materials: (cr.materials_data || []).map(mat => ({
-            material_name: mat.material_name || '',
-            quantity: mat.quantity || 0,
-            unit: mat.unit || '',
-            unit_price: mat.unit_price || 0,
-            total_price: mat.total_price || 0
-          })),
+          // Include BOQ price from sub_items_data for comparison
+          materials: (cr.materials_data || []).map(mat => {
+            // Find matching material in sub_items_data to get BOQ price
+            const subItemMatch = (cr.sub_items_data || []).find(
+              (sub: any) => sub.material_name?.toLowerCase().trim() === mat.material_name?.toLowerCase().trim()
+            );
+            const boqPrice = subItemMatch?.unit_price || subItemMatch?.original_unit_price || 0;
+
+            return {
+              material_name: mat.material_name || '',
+              quantity: mat.quantity || 0,
+              unit: mat.unit || '',
+              unit_price: mat.unit_price || 0,
+              total_price: mat.total_price || 0,
+              boq_unit_price: boqPrice,  // BOQ price for comparison
+              boq_total_price: boqPrice * (mat.quantity || 0)
+            };
+          }),
           // Add missing required fields from Purchase interface
           boq_id: cr.boq_id,
           boq_name: cr.boq_name || '',
@@ -463,7 +474,7 @@ const ChangeRequestsPage: React.FC = () => {
         // Regular change request rejection
         const response = await changeRequestService.reject(rejectingCrId, reason);
         if (response.success) {
-          showSuccess('Change request rejected');
+          showSuccess('PO rejected');
           loadChangeRequests();
         } else {
           showError(response.message);
@@ -488,7 +499,7 @@ const ChangeRequestsPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error in handleReview:', error);
-      showError('Failed to load change request details');
+      showError('Failed to load PO details');
     }
   };
 
@@ -503,7 +514,7 @@ const ChangeRequestsPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error in handleEdit:', error);
-      showError('Failed to load change request details');
+      showError('Failed to load PO details');
     }
   };
 
@@ -701,7 +712,7 @@ const ChangeRequestsPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading vendor approval details:', error);
-      showError('Failed to load change request details');
+      showError('Failed to load PO details');
     }
   };
 
@@ -894,6 +905,7 @@ const ChangeRequestsPage: React.FC = () => {
         <div className="bg-white rounded-xl shadow border border-blue-100 p-3">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-3">
+              {/* Pending tab - COMMENTED OUT
               <TabsTrigger
                 value="pending"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-yellow-500 data-[state=active]:text-yellow-600 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
@@ -902,6 +914,8 @@ const ChangeRequestsPage: React.FC = () => {
                 Pending
                 <span className="ml-1 text-gray-400">({stats.pending})</span>
               </TabsTrigger>
+              */}
+              {/* Approved tab - COMMENTED OUT
               <TabsTrigger
                 value="approved"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
@@ -910,6 +924,7 @@ const ChangeRequestsPage: React.FC = () => {
                 Approved
                 <span className="ml-1 text-gray-400">({stats.approved})</span>
               </TabsTrigger>
+              */}
               <TabsTrigger
                 value="vendor_approvals"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:text-orange-600 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
@@ -1219,25 +1234,46 @@ const ChangeRequestsPage: React.FC = () => {
                             <Package className="h-2.5 w-2.5" />
                             Materials ({poChild.materials?.length || 0})
                           </div>
-                          <div className="bg-gray-50 rounded border border-gray-200 max-h-24 overflow-y-auto">
+                          <div className="bg-gray-50 rounded border border-gray-200 max-h-28 overflow-y-auto">
                             {poChild.materials && poChild.materials.length > 0 ? (
                               <div className="divide-y divide-gray-100">
-                                {poChild.materials.map((material, idx) => (
-                                  <div key={idx} className="px-1.5 py-1 text-[9px]">
-                                    <div className="flex justify-between items-start gap-1">
-                                      <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
-                                      <span className="text-green-700 font-bold whitespace-nowrap">
-                                        AED {(material.unit_price || 0).toLocaleString()}
-                                      </span>
+                                {poChild.materials.map((material: any, idx: number) => {
+                                  const boqPrice = material.boq_unit_price || 0;
+                                  const vendorPrice = material.unit_price || 0;
+                                  const priceDiff = vendorPrice - boqPrice;
+                                  const isOverBudget = priceDiff > 0;
+
+                                  return (
+                                    <div key={idx} className="px-1.5 py-1 text-[9px]">
+                                      <div className="flex justify-between items-start gap-1">
+                                        <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
+                                        <div className="text-right whitespace-nowrap">
+                                          <span className="text-blue-700 font-bold">
+                                            AED {vendorPrice.toLocaleString()}
+                                          </span>
+                                          {boqPrice > 0 && boqPrice !== vendorPrice && (
+                                            <span className="text-gray-400 text-[8px] ml-0.5">
+                                              (BOQ:{boqPrice})
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-between text-gray-500 mt-0.5">
+                                        <span>{material.quantity} {material.unit}</span>
+                                        <div className="text-right">
+                                          <span className="font-semibold text-gray-700">
+                                            = AED {(material.total_price || 0).toLocaleString()}
+                                          </span>
+                                          {boqPrice > 0 && priceDiff !== 0 && (
+                                            <span className={`ml-0.5 text-[8px] font-bold ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
+                                              {isOverBudget ? '+' : ''}{Math.round(priceDiff * material.quantity)}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div className="flex justify-between text-gray-500 mt-0.5">
-                                      <span>{material.quantity} {material.unit}</span>
-                                      <span className="font-semibold text-gray-700">
-                                        = AED {(material.total_price || 0).toLocaleString()}
-                                      </span>
-                                    </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             ) : (
                               <div className="px-2 py-2 text-[9px] text-gray-400 text-center">
@@ -1247,7 +1283,7 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                           <div className="flex justify-between mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
                             <span className="text-gray-600 font-semibold">Total Cost:</span>
-                            <span className="font-bold text-green-700">AED {(poChild.materials_total_cost || 0).toLocaleString()}</span>
+                            <span className="font-bold text-blue-700">AED {(poChild.materials_total_cost || 0).toLocaleString()}</span>
                           </div>
                         </div>
 
@@ -1308,25 +1344,46 @@ const ChangeRequestsPage: React.FC = () => {
                             <Package className="h-2.5 w-2.5" />
                             Materials ({poChild.materials?.length || 0})
                           </div>
-                          <div className="bg-gray-50 rounded border border-gray-200 max-h-24 overflow-y-auto">
+                          <div className="bg-gray-50 rounded border border-gray-200 max-h-28 overflow-y-auto">
                             {poChild.materials && poChild.materials.length > 0 ? (
                               <div className="divide-y divide-gray-100">
-                                {poChild.materials.map((material, idx) => (
-                                  <div key={idx} className="px-1.5 py-1 text-[9px]">
-                                    <div className="flex justify-between items-start gap-1">
-                                      <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
-                                      <span className="text-blue-700 font-bold whitespace-nowrap">
-                                        AED {(material.unit_price || 0).toLocaleString()}
-                                      </span>
+                                {poChild.materials.map((material: any, idx: number) => {
+                                  const boqPrice = material.boq_unit_price || 0;
+                                  const vendorPrice = material.unit_price || 0;
+                                  const priceDiff = vendorPrice - boqPrice;
+                                  const isOverBudget = priceDiff > 0;
+
+                                  return (
+                                    <div key={idx} className="px-1.5 py-1 text-[9px]">
+                                      <div className="flex justify-between items-start gap-1">
+                                        <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
+                                        <div className="text-right whitespace-nowrap">
+                                          <span className="text-blue-700 font-bold">
+                                            AED {vendorPrice.toLocaleString()}
+                                          </span>
+                                          {boqPrice > 0 && boqPrice !== vendorPrice && (
+                                            <span className="text-gray-400 text-[8px] ml-0.5">
+                                              (BOQ:{boqPrice})
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-between text-gray-500 mt-0.5">
+                                        <span>{material.quantity} {material.unit}</span>
+                                        <div className="text-right">
+                                          <span className="font-semibold text-gray-700">
+                                            = AED {(material.total_price || 0).toLocaleString()}
+                                          </span>
+                                          {boqPrice > 0 && priceDiff !== 0 && (
+                                            <span className={`ml-0.5 text-[8px] font-bold ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
+                                              {isOverBudget ? '+' : ''}{Math.round(priceDiff * material.quantity)}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div className="flex justify-between text-gray-500 mt-0.5">
-                                      <span>{material.quantity} {material.unit}</span>
-                                      <span className="font-semibold text-gray-700">
-                                        = AED {(material.total_price || 0).toLocaleString()}
-                                      </span>
-                                    </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             ) : (
                               <div className="px-2 py-2 text-[9px] text-gray-400 text-center">
@@ -1336,7 +1393,7 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                           <div className="flex justify-between mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
                             <span className="text-gray-600 font-semibold">Total Cost:</span>
-                            <span className="font-bold text-green-700">AED {(poChild.materials_total_cost || 0).toLocaleString()}</span>
+                            <span className="font-bold text-blue-700">AED {(poChild.materials_total_cost || 0).toLocaleString()}</span>
                           </div>
                         </div>
 
@@ -1508,25 +1565,39 @@ const ChangeRequestsPage: React.FC = () => {
                             <Package className="h-2.5 w-2.5" />
                             Materials ({purchase.materials_count})
                           </div>
-                          <div className="bg-gray-50 rounded border border-gray-200 max-h-24 overflow-y-auto">
+                          <div className="bg-gray-50 rounded border border-gray-200 max-h-28 overflow-y-auto">
                             {purchase.materials && purchase.materials.length > 0 ? (
                               <div className="divide-y divide-gray-100">
-                                {purchase.materials.map((material, idx) => (
-                                  <div key={idx} className="px-1.5 py-1 text-[9px]">
-                                    <div className="flex justify-between items-start gap-1">
-                                      <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
-                                      <span className="text-orange-700 font-bold whitespace-nowrap">
-                                        AED {(material.unit_price || 0).toLocaleString()}
-                                      </span>
+                                {purchase.materials.map((material: any, idx: number) => {
+                                  const boqPrice = material.boq_unit_price || 0;
+                                  const vendorPrice = material.unit_price || 0;
+                                  const priceDiff = vendorPrice - boqPrice;
+                                  const isOverBudget = priceDiff > 0;
+
+                                  return (
+                                    <div key={idx} className="px-1.5 py-1 text-[9px]">
+                                      <div className="flex justify-between items-start gap-1">
+                                        <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
+                                        <div className="text-right whitespace-nowrap">
+                                          <span className="text-blue-700 font-bold">
+                                            AED {vendorPrice.toLocaleString()}
+                                          </span>
+                                          {boqPrice > 0 && boqPrice !== vendorPrice && (
+                                            <span className="text-gray-400 text-[8px] ml-0.5">
+                                              (BOQ:{boqPrice})
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-between text-gray-500 mt-0.5">
+                                        <span>{material.quantity} {material.unit}</span>
+                                        <span className="font-semibold text-gray-700">
+                                          = AED {(material.total_price || 0).toLocaleString()}
+                                        </span>
+                                      </div>
                                     </div>
-                                    <div className="flex justify-between text-gray-500 mt-0.5">
-                                      <span>{material.quantity} {material.unit}</span>
-                                      <span className="font-semibold text-gray-700">
-                                        = AED {(material.total_price || 0).toLocaleString()}
-                                      </span>
-                                    </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             ) : (
                               <div className="px-2 py-2 text-[9px] text-gray-400 text-center">
@@ -1534,11 +1605,25 @@ const ChangeRequestsPage: React.FC = () => {
                               </div>
                             )}
                           </div>
-                          {/* Total Cost */}
-                          <div className="flex justify-between mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
-                            <span className="text-gray-600 font-semibold">Total Cost:</span>
-                            <span className="font-bold text-green-700">AED {(purchase.total_cost || 0).toLocaleString()}</span>
-                          </div>
+                          {/* Total Cost with BOQ comparison */}
+                          {(() => {
+                            const vendorTotal = purchase.total_cost || 0;
+                            const boqTotal = purchase.materials?.reduce((sum: number, m: any) => sum + (m.boq_total_price || 0), 0) || 0;
+                            return (
+                              <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600 font-semibold">Vendor Total:</span>
+                                  <span className="font-bold text-blue-700">AED {vendorTotal.toLocaleString()}</span>
+                                </div>
+                                {boqTotal > 0 && (
+                                  <div className="flex justify-between mt-0.5">
+                                    <span className="text-gray-500">BOQ Total:</span>
+                                    <span className="font-semibold text-gray-600">AED {boqTotal.toLocaleString()}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
 
                         {/* Actions - Compact */}
@@ -1994,7 +2079,7 @@ const ChangeRequestsPage: React.FC = () => {
           setSelectedChangeRequest(null);
         }}
         onSubmit={handleRejectionSubmit}
-        title={rejectingPOChildId ? "Reject Vendor Selection" : rejectingCrId && vendorApprovals.some(p => p.cr_id === rejectingCrId) ? "Reject Vendor Selection" : "Reject Change Request"}
+        title={rejectingPOChildId ? "Reject Vendor Selection" : rejectingCrId && vendorApprovals.some(p => p.cr_id === rejectingCrId) ? "Reject Vendor Selection" : "Reject PO"}
       />
     </div>
   );

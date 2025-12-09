@@ -4,7 +4,7 @@ import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send } from 'luci
 import { ChangeRequestItem } from '@/services/changeRequestService';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
-import { isEstimator, isTechnicalDirector, isSiteEngineer } from '@/utils/roleHelpers';
+import { isEstimator, isTechnicalDirector, isSiteEngineer, isProjectManager } from '@/utils/roleHelpers';
 import EditChangeRequestModal from './EditChangeRequestModal';
 
 interface ChangeRequestDetailsModalProps {
@@ -112,10 +112,23 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
   const isHighValue = changeRequest.approval_required_from === 'technical_director';
 
-  // Use role helper functions instead of hardcoded IDs
+  // Use role helper functions with fallback string checks for robustness
+  const userRoleLower = user?.role?.toLowerCase() || '';
+  const userRoleNameLower = user?.role_name?.toLowerCase() || '';
+
   const userIsEstimator = isEstimator(user);
   const userIsTechnicalDirector = isTechnicalDirector(user);
-  const userIsSiteEngineer = isSiteEngineer(user);
+
+  // Check Site Engineer with fallback string matching
+  const userIsSiteEngineer = isSiteEngineer(user) ||
+                             userRoleLower === 'siteengineer' ||
+                             userRoleLower === 'site_engineer' ||
+                             userRoleLower === 'site engineer' ||
+                             userRoleLower === 'sitesupervisor' ||
+                             userRoleLower === 'site_supervisor' ||
+                             userRoleNameLower === 'site_supervisor' ||
+                             userRoleNameLower === 'siteengineer';
+
   const userIsBuyer = user?.role?.toLowerCase() === 'buyer' || user?.role_name?.toLowerCase() === 'buyer';
 
   // Final statuses where no actions should be allowed
@@ -142,11 +155,17 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   // Check if there are any new materials (determines if pricing columns should be shown)
   const hasNewMaterials = materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined);
 
-  // Determine if user is PM
-  const userIsProjectManager = user?.role?.toLowerCase() === 'project_manager' || user?.role_name?.toLowerCase() === 'project_manager';
+  // Check Project Manager with fallback string matching
+  const userIsProjectManager = isProjectManager(user) ||
+                               userRoleLower === 'project_manager' ||
+                               userRoleLower === 'projectmanager' ||
+                               userRoleLower === 'project manager' ||
+                               userRoleNameLower === 'project_manager' ||
+                               userRoleNameLower === 'projectmanager';
 
-  // Buyers and PM should always see pricing columns for both existing and new materials
-  const shouldShowPricing = userIsBuyer || userIsProjectManager || (!userIsSiteEngineer && hasNewMaterials);
+  // Hide pricing for Site Engineers and Project Managers
+  // Only Buyers, Estimators, TD, and Admin can see pricing
+  const shouldShowPricing = !userIsSiteEngineer && !userIsProjectManager;
 
   // Handler for approval with updated materials
   const handleApproveWithUpdatedPrices = () => {
@@ -178,7 +197,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   </div>
                   <div>
                     <h1 className="text-lg sm:text-2xl font-bold text-white">
-                      Change Request CR-{changeRequest.cr_id || 'N/A'}
+                      PO-{changeRequest.cr_id || 'N/A'}
                     </h1>
                     <p className="text-xs sm:text-sm text-white/80 mt-0.5 sm:mt-1 truncate max-w-[180px] sm:max-w-none">
                       BOQ: {changeRequest.boq_name || `#${changeRequest.boq_id}` || 'N/A'}
@@ -539,8 +558,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   </div>
                 </div>
 
-                {/* Negotiable Margin Summary - Only show for NEW materials and hide from Site Engineers */}
-                {!userIsSiteEngineer && changeRequest.negotiable_margin_analysis && materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined) && (() => {
+                {/* Negotiable Margin Summary - Only show for NEW materials and hide from Site Engineers and PMs */}
+                {shouldShowPricing && changeRequest.negotiable_margin_analysis && materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined) && (() => {
                   // Check if budget is invalid (zero or negative allocation)
                   const hasInvalidBudget = changeRequest.negotiable_margin_analysis.original_allocated <= 0;
 
@@ -712,21 +731,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <p className="text-xs sm:text-sm font-medium text-red-900">{changeRequest.vendor_rejection_reason}</p>
                         </div>
                       )}
-                    </div>
-                  </div>
-                )}
-
-                {/* TD Approval Required Info - Only show if high value AND vendor not already approved */}
-                {isHighValue && changeRequest.vendor_selection_status !== 'approved' && (
-                  <div className="bg-white rounded-lg shadow-sm p-3 sm:p-4 mb-4 sm:mb-6 border-l-4 border-blue-500">
-                    <div className="flex items-start gap-2 sm:gap-3">
-                      <AlertCircle className="w-4 sm:w-5 h-4 sm:h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-semibold text-blue-900 text-xs sm:text-sm">Technical Director Approval Required</p>
-                        <p className="text-xs sm:text-sm text-blue-700 mt-0.5 sm:mt-1">
-                          This request exceeds AED 50,000 and requires approval from the Technical Director
-                        </p>
-                      </div>
                     </div>
                   </div>
                 )}

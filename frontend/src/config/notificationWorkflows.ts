@@ -193,10 +193,10 @@ export const NOTIFICATION_WORKFLOWS: NotificationWorkflow[] = [
 
   // ============= CHANGE REQUEST WORKFLOWS =============
 
-  // 14. PM creates change request
+  // 14. PM creates PO
   {
     id: 'pm_create_cr',
-    name: 'New Change Request',
+    name: 'New PO',
     triggerEvent: 'cr.created',
     senderRole: 'project-manager',
     recipientRole: 'technical-director',
@@ -206,10 +206,10 @@ export const NOTIFICATION_WORKFLOWS: NotificationWorkflow[] = [
     metadata: { priority: 'high', category: 'change_request' }
   },
 
-  // 15. TD approves change request
+  // 15. TD approves PO
   {
     id: 'td_approve_cr',
-    name: 'Change Request Approved',
+    name: 'PO Approved',
     triggerEvent: 'cr.approved',
     senderRole: 'technical-director',
     recipientRole: 'project-manager',
@@ -219,10 +219,10 @@ export const NOTIFICATION_WORKFLOWS: NotificationWorkflow[] = [
     metadata: { priority: 'medium', category: 'change_request' }
   },
 
-  // 16. TD rejects change request
+  // 16. TD rejects PO
   {
     id: 'td_reject_cr',
-    name: 'Change Request Rejected',
+    name: 'PO Rejected',
     triggerEvent: 'cr.rejected',
     senderRole: 'technical-director',
     recipientRole: 'project-manager',
@@ -376,8 +376,8 @@ export const NOTIFICATION_WORKFLOWS: NotificationWorkflow[] = [
     senderRole: 'system',
     recipientRole: 'production-manager',
     notificationType: 'alert',
-    redirectPath: '/m2-store/materials',
-    redirectTab: 'low_stock',
+    redirectPath: '/m2-store/stock',
+    redirectTab: 'materials',
     metadata: { priority: 'urgent', category: 'production' }
   },
 
