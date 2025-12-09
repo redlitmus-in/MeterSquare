@@ -485,21 +485,27 @@ TRN# {company.get('trn', 'N/A')}'''
         custom_terms = terms.get('custom_terms', [])
         selected_terms = [t for t in custom_terms if t.get('selected', False)]
 
-        # Build payment terms text from selected terms
-        if selected_terms:
-            payment_text_parts = [t.get('text', '') for t in selected_terms if t.get('text', '')]
-            payment_terms_combined = ', '.join(payment_text_parts) if payment_text_parts else ''
-        else:
-            # Fallback to legacy payment_terms field
-            payment_terms_combined = terms.get('payment_terms', '100% CDC after delivery')
-
         delivery_terms = terms.get('delivery_terms', '')
 
         elements.append(Spacer(1, 10))
 
-        # Payment Terms line
-        if payment_terms_combined:
-            elements.append(Paragraph(f'<b>Payment Terms:</b> {payment_terms_combined}', self.styles['LPONormal']))
+        # Payment Terms - show as numbered list if multiple, or single line if one
+        if selected_terms:
+            payment_text_parts = [t.get('text', '') for t in selected_terms if t.get('text', '')]
+            if len(payment_text_parts) == 1:
+                # Single term - show on same line
+                elements.append(Paragraph(f'<b>Payment Terms:</b> {payment_text_parts[0]}', self.styles['LPONormal']))
+            elif len(payment_text_parts) > 1:
+                # Multiple terms - show as numbered list
+                elements.append(Paragraph('<b>Payment Terms:</b>', self.styles['LPONormal']))
+                for idx, term_text in enumerate(payment_text_parts, 1):
+                    safe_term = term_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    elements.append(Paragraph(f'&nbsp;&nbsp;&nbsp;&nbsp;{idx}. {safe_term}', self.styles['LPONormal']))
+        else:
+            # Fallback to legacy payment_terms field
+            payment_terms_combined = terms.get('payment_terms', '100% CDC after delivery')
+            if payment_terms_combined:
+                elements.append(Paragraph(f'<b>Payment Terms:</b> {payment_terms_combined}', self.styles['LPONormal']))
 
         # Delivery Terms line
         if delivery_terms:
