@@ -308,22 +308,24 @@ class WhatsAppService:
         Returns:
             dict: Response with success status
         """
-        # Message body - simple and clean
-        body_text = f"""*🛒 PURCHASE ORDER*
-━━━━━━━━━━━━━━━━━━━━━━
-
-📋 *PO Number:* PO-{purchase_data.get('cr_id', 'N/A')}
+        # Message body - matching the exact format from design
+        body_text = f"""Subject: *Purchase Order Confirmation - PO-{purchase_data.get('cr_id', 'N/A')}*
 
 Dear *{vendor_data.get('company_name', 'Vendor')}*,
 
-Please find the attached Local Purchase Order (LPO) document for your reference.
+Attached is our New Local Purchase Order (LPO) document.
 
-Kindly review the details and confirm the order. Please share the expected delivery timeline at your earliest convenience.
+*We kindly request you to:*
+• Confirm receipt and acceptance of the order.
+• Provide the expected delivery timeline.
 
-Thank you.
+We appreciate your swift response.
 
-_MeterSquare Interiors LLC_
-📞 {buyer_data.get('phone', '')}"""
+Regards,
+MeterSquare Interiors LLC
+{buyer_data.get('phone', '')}
+
+_MeterSquare Interiors LLC_"""
 
         log.info(f"=== SENDING PURCHASE ORDER via WhatsApp ===")
         log.info(f"Phone: {phone_number}")

@@ -241,8 +241,15 @@ class LPOPDFGenerator:
         elements.append(Spacer(1, 8))
         grand_total = lpo_data.get('totals', {}).get('grand_total', 0)
         amount_words = self._number_to_words(grand_total)
+        # Include fils (cents) in words if present
+        fils = int(round((grand_total - int(grand_total)) * 100))
+        if fils > 0:
+            fils_words = self._number_to_words(fils)
+            amount_text = f'{self._number_to_words(int(grand_total))} and Fils {fils_words}'
+        else:
+            amount_text = amount_words
         elements.append(Paragraph(
-            f'<b>AED: {grand_total:,.2f}/- ({amount_words} Only)</b>',
+            f'<b>AED: {grand_total:,.2f}/- (Dirhams: {amount_text} Only)</b>',
             self.styles['LPONormal']
         ))
 
@@ -343,7 +350,7 @@ class LPOPDFGenerator:
             colWidths=[7.5*inch]
         )
         contact_bar.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1a365d')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#ec2024')),  # Red color to match company branding
             ('TOPPADDING', (0, 0), (-1, -1), 3),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
         ]))
@@ -470,49 +477,33 @@ TRN# {company.get('trn', 'N/A')}'''
         return elements
 
     def _generate_terms_section(self, lpo_data):
-        """Generate general terms and conditions and payment terms"""
+        """Generate payment terms and delivery terms section"""
         elements = []
         terms = lpo_data.get('terms', {})
 
-        general_terms = terms.get('general_terms', [])
-        payment_terms_list = terms.get('payment_terms_list', [])
+        # Get custom/payment terms (selected ones only)
+        custom_terms = terms.get('custom_terms', [])
+        selected_terms = [t for t in custom_terms if t.get('selected', False)]
 
-        # General Terms and Conditions Section
-        if general_terms:
-            elements.append(Spacer(1, 10))
-            elements.append(Paragraph('<b><u>General Terms and Conditions:</u></b>', self.styles['SectionHeader']))
-            elements.append(Spacer(1, 3))
-
-            # Create numbered terms list
-            for i, term in enumerate(general_terms, 1):
-                # Escape HTML special characters
-                safe_term = term.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                term_text = f'<b>{i}</b>&nbsp;&nbsp;&nbsp;{safe_term}'
-                elements.append(Paragraph(term_text, self.styles['LPOSmall']))
-                elements.append(Spacer(1, 2))
-
-        # Payment Terms Section
-        if payment_terms_list:
-            elements.append(Spacer(1, 8))
-            elements.append(Paragraph('<b>Payment Terms:</b>', self.styles['SectionHeader']))
-
-            # Create bullet point payment terms
-            payment_text_parts = []
-            for term in payment_terms_list:
-                safe_term = term.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                payment_text_parts.append(safe_term)
-
-            # Join with line breaks for display
-            payment_content = '<br/>'.join([f'&nbsp;&nbsp;&nbsp;&nbsp;{t}' for t in payment_text_parts])
-            elements.append(Paragraph(payment_content, self.styles['LPONormal']))
+        # Build payment terms text from selected terms
+        if selected_terms:
+            payment_text_parts = [t.get('text', '') for t in selected_terms if t.get('text', '')]
+            payment_terms_combined = ', '.join(payment_text_parts) if payment_text_parts else ''
         else:
-            # Fallback to old simple payment terms
-            payment_terms = terms.get('payment_terms', '100% after delivery')
-            completion_terms = terms.get('completion_terms', 'As agreed')
+            # Fallback to legacy payment_terms field
+            payment_terms_combined = terms.get('payment_terms', '100% CDC after delivery')
 
-            elements.append(Spacer(1, 5))
-            elements.append(Paragraph(f'<b>Payment Terms:</b> {payment_terms}', self.styles['LPONormal']))
-            elements.append(Paragraph(f'<b>Completion Terms:</b> {completion_terms}', self.styles['LPONormal']))
+        delivery_terms = terms.get('delivery_terms', '')
+
+        elements.append(Spacer(1, 10))
+
+        # Payment Terms line
+        if payment_terms_combined:
+            elements.append(Paragraph(f'<b>Payment Terms:</b> {payment_terms_combined}', self.styles['LPONormal']))
+
+        # Delivery Terms line
+        if delivery_terms:
+            elements.append(Paragraph(f'<b>Delivery Terms:</b> {delivery_terms}', self.styles['LPONormal']))
 
         return elements
 
@@ -540,10 +531,17 @@ TRN# {company.get('trn', 'N/A')}'''
             md_img = self._get_image_from_base64(md_signature, width=1.2*inch, height=0.5*inch)
             if md_img:
                 md_content.append(md_img)
-        md_content.append(Paragraph(
-            f'<br/><b>{md_name}</b><br/><font color="#1a365d">Managing Director</font><br/>{system_sig_text}',
-            self.styles['LPOSmall']
-        ))
+        # Only show name above title if name is different from title (actual person name)
+        if md_name and md_name != 'Managing Director':
+            md_content.append(Paragraph(
+                f'<br/><b>{md_name}</b><br/><font color="#1a365d">Managing Director</font><br/>{system_sig_text}',
+                self.styles['LPOSmall']
+            ))
+        else:
+            md_content.append(Paragraph(
+                f'<br/><br/><font color="#1a365d"><b>Managing Director</b></font><br/>{system_sig_text}',
+                self.styles['LPOSmall']
+            ))
 
         # Stamp cell (center) - reduced size for better fit
         stamp_cell = []
@@ -558,10 +556,17 @@ TRN# {company.get('trn', 'N/A')}'''
             td_img = self._get_image_from_base64(td_signature, width=1.2*inch, height=0.5*inch)
             if td_img:
                 td_content.append(td_img)
-        td_content.append(Paragraph(
-            f'<br/><b>{td_name}</b><br/><font color="#1a365d">Technical Director</font><br/>{system_sig_text}',
-            self.styles['LPOSmall']
-        ))
+        # Only show name above title if name is different from title (actual person name)
+        if td_name and td_name != 'Technical Director':
+            td_content.append(Paragraph(
+                f'<br/><b>{td_name}</b><br/><font color="#1a365d">Technical Director</font><br/>{system_sig_text}',
+                self.styles['LPOSmall']
+            ))
+        else:
+            td_content.append(Paragraph(
+                f'<br/><br/><font color="#1a365d"><b>Technical Director</b></font><br/>{system_sig_text}',
+                self.styles['LPOSmall']
+            ))
 
         # Build signature table
         sig_data = []
@@ -578,7 +583,11 @@ TRN# {company.get('trn', 'N/A')}'''
             ]))
             row.append(md_table)
         else:
-            row.append(Paragraph(f'<br/><br/><b>{md_name}</b><br/><font color="#1a365d">Managing Director</font>', self.styles['LPOSmall']))
+            # Fallback - only show name if different from title
+            if md_name and md_name != 'Managing Director':
+                row.append(Paragraph(f'<br/><br/><b>{md_name}</b><br/><font color="#1a365d">Managing Director</font>', self.styles['LPOSmall']))
+            else:
+                row.append(Paragraph(f'<br/><br/><font color="#1a365d"><b>Managing Director</b></font>', self.styles['LPOSmall']))
 
         # Stamp column - center
         if stamp_cell:
@@ -600,7 +609,11 @@ TRN# {company.get('trn', 'N/A')}'''
             ]))
             row.append(td_table)
         else:
-            row.append(Paragraph(f'<br/><br/><b>{td_name}</b><br/><font color="#1a365d">Technical Director</font>', self.styles['LPOSmall']))
+            # Fallback - only show name if different from title
+            if td_name and td_name != 'Technical Director':
+                row.append(Paragraph(f'<br/><br/><b>{td_name}</b><br/><font color="#1a365d">Technical Director</font>', self.styles['LPOSmall']))
+            else:
+                row.append(Paragraph(f'<br/><br/><font color="#1a365d"><b>Technical Director</b></font>', self.styles['LPOSmall']))
 
         sig_data.append(row)
 

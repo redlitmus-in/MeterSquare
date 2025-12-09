@@ -28,6 +28,21 @@ PUBLIC_URL_BASE = f"{supabase_url}/storage/v1/object/public/{SUPABASE_BUCKET}/"
 supabase: Client = create_client(supabase_url, supabase_key) if supabase_url and supabase_key else None
 
 
+def _parse_custom_terms(saved_customization):
+    """Helper to safely parse custom_terms from saved customization"""
+    if not saved_customization:
+        return []
+    try:
+        # Try to get custom_terms attribute
+        custom_terms_str = getattr(saved_customization, 'custom_terms', None)
+        if custom_terms_str:
+            return json.loads(custom_terms_str)
+        return []
+    except Exception as e:
+        log.warning(f"Error parsing custom_terms: {e}")
+        return []
+
+
 def process_materials_with_negotiated_prices(cr):
     """
     Helper function to process materials and apply negotiated prices
@@ -5321,7 +5336,7 @@ def send_vendor_whatsapp(cr_id):
                         },
                         "company": {
                             "name": settings.company_name if settings else "Meter Square Interiors LLC",
-                            "contact_person": buyer.full_name or "Procurement Team",
+                            "contact_person": getattr(settings, 'company_contact_person', 'Mr. Mohammed Sabir') if settings else "Mr. Mohammed Sabir",
                             "division": "Admin",
                             "phone": settings.company_phone if settings else "",
                             "fax": getattr(settings, 'company_fax', '') if settings else "",
@@ -5342,10 +5357,9 @@ def send_vendor_whatsapp(cr_id):
                             "grand_total": round(grand_total, 2)
                         },
                         "terms": {
-                            "payment_terms": saved_customization.payment_terms if saved_customization and saved_customization.payment_terms else (getattr(settings, 'default_payment_terms', '100% after delivery') if settings else "100% after delivery"),
-                            "completion_terms": saved_customization.completion_terms if saved_customization and saved_customization.completion_terms else "As agreed",
-                            "general_terms": general_terms_list,
-                            "payment_terms_list": payment_terms_list_data
+                            "payment_terms": saved_customization.payment_terms if saved_customization and saved_customization.payment_terms else (getattr(settings, 'default_payment_terms', '100% CDC after delivery') if settings else "100% CDC after delivery"),
+                            "delivery_terms": saved_customization.completion_terms if saved_customization and saved_customization.completion_terms else "",
+                            "custom_terms": _parse_custom_terms(saved_customization)
                         },
                         "signatures": {
                             "md_name": getattr(settings, 'md_name', 'Managing Director') if settings else "Managing Director",
@@ -7025,7 +7039,7 @@ def preview_lpo_pdf(cr_id):
             },
             "company": {
                 "name": settings.company_name if settings else "Meter Square Interiors LLC",
-                "contact_person": buyer.full_name if buyer else "Procurement Team",
+                "contact_person": getattr(settings, 'company_contact_person', 'Mr. Mohammed Sabir') if settings else "Mr. Mohammed Sabir",
                 "division": "Admin",
                 "phone": settings.company_phone if settings else "",
                 "fax": getattr(settings, 'company_fax', '') if settings else "",
@@ -7046,10 +7060,9 @@ def preview_lpo_pdf(cr_id):
                 "grand_total": round(grand_total, 2)
             },
             "terms": {
-                "payment_terms": saved_customization.payment_terms if saved_customization and saved_customization.payment_terms else (getattr(settings, 'default_payment_terms', '100% after delivery') if settings else "100% after delivery"),
-                "completion_terms": saved_customization.completion_terms if saved_customization and saved_customization.completion_terms else "As agreed",
-                "general_terms": json.loads(saved_customization.general_terms) if saved_customization and saved_customization.general_terms else (json.loads(getattr(settings, 'lpo_general_terms', '[]') or '[]') if settings else []),
-                "payment_terms_list": json.loads(saved_customization.payment_terms_list) if saved_customization and saved_customization.payment_terms_list else (json.loads(getattr(settings, 'lpo_payment_terms_list', '[]') or '[]') if settings else [])
+                "payment_terms": saved_customization.payment_terms if saved_customization and saved_customization.payment_terms else (getattr(settings, 'default_payment_terms', '100% CDC after delivery') if settings else "100% CDC after delivery"),
+                "delivery_terms": saved_customization.completion_terms if saved_customization and saved_customization.completion_terms else "",
+                "custom_terms": _parse_custom_terms(saved_customization)
             },
             "signatures": {
                 "md_name": getattr(settings, 'md_name', 'Managing Director') if settings else "Managing Director",
@@ -7121,7 +7134,14 @@ def save_lpo_customization(cr_id):
         customization.custom_message = lpo_info.get('custom_message', '')
         customization.subject = vendor.get('subject', '')
         customization.payment_terms = terms.get('payment_terms', '')
-        customization.completion_terms = terms.get('completion_terms', '')
+        customization.completion_terms = terms.get('completion_terms', '') or terms.get('delivery_terms', '')
+
+        # Save custom_terms (safely handle if column doesn't exist yet)
+        try:
+            customization.custom_terms = json.dumps(terms.get('custom_terms', []))
+        except Exception as e:
+            log.warning(f"Could not save custom_terms: {e}")
+
         customization.general_terms = json.dumps(terms.get('general_terms', []))
         customization.payment_terms_list = json.dumps(terms.get('payment_terms_list', []))
         customization.include_signatures = data.get('include_signatures', True)
@@ -7232,7 +7252,14 @@ def save_lpo_default_template():
         template.custom_message = lpo_info.get('custom_message', '')
         template.subject = vendor.get('subject', '')
         template.payment_terms = terms.get('payment_terms', '')
-        template.completion_terms = terms.get('completion_terms', '')
+        template.completion_terms = terms.get('completion_terms', '') or terms.get('delivery_terms', '')
+
+        # Save custom_terms (safely handle if column doesn't exist yet)
+        try:
+            template.custom_terms = json.dumps(terms.get('custom_terms', []))
+        except Exception as e:
+            log.warning(f"Could not save custom_terms to template: {e}")
+
         template.general_terms = json.dumps(terms.get('general_terms', []))
         template.payment_terms_list = json.dumps(terms.get('payment_terms_list', []))
         template.include_signatures = data.get('include_signatures', True)

@@ -18,8 +18,6 @@ import {
   MessageSquare,
   Phone,
   Plus,
-  ChevronDown,
-  ChevronUp,
   ArrowLeft
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -55,7 +53,10 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   // CC Email state - default company emails
   const defaultCcEmails = [
     { email: 'sajisamuel@metersquare.com', name: 'Saji Samuel', checked: true },
-    { email: 'info@metersquare.com', name: 'MeterSquare Info', checked: true },
+    { email: 'info@metersquare.com', name: 'Fasil', checked: true },
+    { email: 'admin@metersquare.com', name: 'Admin', checked: true },
+    { email: 'amjath@metersquare.com', name: 'Amjath', checked: true },
+    { email: 'sujith@metersquare.com', name: 'Suijth', checked: true },
   ];
   const [ccEmails, setCcEmails] = useState(defaultCcEmails);
   const [customCcEmails, setCustomCcEmails] = useState<Array<{ email: string; name: string }>>([]);
@@ -84,15 +85,12 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   // Signature selection state (buyer only selects checkbox, admin uploads)
   const [includeSignatures, setIncludeSignatures] = useState(true);
 
-  // Terms editor state
-  const [showTermsEditor, setShowTermsEditor] = useState(false);
-  const [showPaymentTermsEditor, setShowPaymentTermsEditor] = useState(false);
-  const [newTerm, setNewTerm] = useState('');
-  const [newPaymentTerm, setNewPaymentTerm] = useState('');
+  // Custom terms state
+  const [newCustomTerm, setNewCustomTerm] = useState('');
   const [editingTermIndex, setEditingTermIndex] = useState<number | null>(null);
-  const [editingPaymentTermIndex, setEditingPaymentTermIndex] = useState<number | null>(null);
+  const [editingTermText, setEditingTermText] = useState('');
 
-  // Sidebar tab state
+  // Sidebar tab state (unused but kept for future use)
   const [activeTab, setActiveTab] = useState<'email' | 'lpo' | 'terms'>('email');
 
   // Auto-save state
@@ -291,9 +289,11 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
         }
       };
 
-      // Check if this is a new project without customization (empty terms arrays)
-      // If so, try to load user's default template
-      const hasCustomTerms = (response.lpo_data.terms?.general_terms?.length > 0) ||
+      // Check if this is a new project without customization
+      // If custom_terms has saved data, use it; otherwise try to load default template
+      const hasSavedCustomTerms = (response.lpo_data.terms?.custom_terms?.length > 0);
+      const hasCustomTerms = hasSavedCustomTerms ||
+                             (response.lpo_data.terms?.general_terms?.length > 0) ||
                              (response.lpo_data.terms?.payment_terms_list?.length > 0) ||
                              (response.lpo_data.lpo_info?.custom_message);
 
@@ -317,6 +317,9 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                 ...enrichedLpoData.terms,
                 payment_terms: defaultTemplate.template.payment_terms || enrichedLpoData.terms.payment_terms,
                 completion_terms: defaultTemplate.template.completion_terms || enrichedLpoData.terms.completion_terms,
+                custom_terms: defaultTemplate.template.custom_terms?.length > 0
+                  ? defaultTemplate.template.custom_terms
+                  : enrichedLpoData.terms.custom_terms,
                 general_terms: defaultTemplate.template.general_terms?.length > 0
                   ? defaultTemplate.template.general_terms
                   : enrichedLpoData.terms.general_terms,
@@ -1090,34 +1093,6 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                   </div>
                                 </div>
 
-                                {/* Payment Terms */}
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="text-xs font-medium text-gray-600">Payment Terms</label>
-                                    <Input
-                                      value={lpoData.terms.payment_terms}
-                                      onChange={(e) => setLpoData({
-                                        ...lpoData,
-                                        terms: { ...lpoData.terms, payment_terms: e.target.value }
-                                      })}
-                                      className="mt-1 text-sm"
-                                      placeholder="e.g., 100% after delivery"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="text-xs font-medium text-gray-600">Completion Terms</label>
-                                    <Input
-                                      value={lpoData.terms.completion_terms}
-                                      onChange={(e) => setLpoData({
-                                        ...lpoData,
-                                        terms: { ...lpoData.terms, completion_terms: e.target.value }
-                                      })}
-                                      className="mt-1 text-sm"
-                                      placeholder="e.g., As agreed"
-                                    />
-                                  </div>
-                                </div>
-
                                 {/* Custom Message for PDF */}
                                 <div>
                                   <label className="text-xs font-medium text-gray-600">LPO Message (shown in PDF)</label>
@@ -1132,74 +1107,115 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                   <p className="text-xs text-gray-400 mt-1">Edit the message that appears in the LPO PDF</p>
                                 </div>
 
-                                {/* General Terms and Conditions Editor */}
+                                {/* Terms Section - AT BOTTOM */}
                                 <div className="border-t border-blue-200 pt-4">
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowTermsEditor(!showTermsEditor)}
-                                    className="flex items-center justify-between w-full text-left"
-                                  >
-                                    <span className="text-sm font-medium text-gray-700">General Terms and Conditions</span>
-                                    {showTermsEditor ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                  </button>
+                                  <div className="text-sm font-medium text-gray-700 mb-3">Terms & Conditions</div>
 
-                                  {showTermsEditor && (
-                                    <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
-                                      {/* Existing terms list with checkboxes */}
-                                      {(lpoData.terms.general_terms || []).map((term, index) => (
-                                        <div key={index} className="flex items-start gap-2 bg-gray-50 p-2 rounded text-sm">
+                                  {/* Delivery Terms */}
+                                  <div className="mb-4">
+                                    <label className="text-xs font-medium text-gray-600">Delivery Terms</label>
+                                    <Input
+                                      value={lpoData.terms.completion_terms || lpoData.terms.delivery_terms || ''}
+                                      onChange={(e) => setLpoData({
+                                        ...lpoData,
+                                        terms: { ...lpoData.terms, completion_terms: e.target.value, delivery_terms: e.target.value }
+                                      })}
+                                      className="mt-1 text-sm"
+                                      placeholder="e.g., 04.12.25"
+                                    />
+                                  </div>
+
+                                  {/* Payment Terms with Checkboxes */}
+                                  <div className="bg-gray-50 rounded-lg p-3">
+                                    <div className="text-xs font-medium text-gray-600 mb-2">Payment Terms (select to include in PDF)</div>
+
+                                    {/* Payment terms list with checkboxes */}
+                                    <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
+                                      {(lpoData.terms.custom_terms || []).map((term: {text: string, selected: boolean}, index: number) => (
+                                        <div key={index} className="flex items-center gap-2 bg-white p-2 rounded border border-gray-200">
                                           <input
                                             type="checkbox"
-                                            checked={true}
-                                            onChange={() => {
-                                              // Unchecking removes the term
-                                              const updatedTerms = (lpoData.terms.general_terms || []).filter((_, i) => i !== index);
+                                            checked={term.selected}
+                                            onChange={(e) => {
+                                              const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                              updatedTerms[index] = { ...term, selected: e.target.checked };
                                               setLpoData({
                                                 ...lpoData,
-                                                terms: { ...lpoData.terms, general_terms: updatedTerms }
+                                                terms: { ...lpoData.terms, custom_terms: updatedTerms }
                                               });
                                             }}
-                                            className="w-4 h-4 mt-0.5 text-blue-600 rounded focus:ring-blue-500"
+                                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                                           />
-                                          <span className="text-gray-500 font-medium min-w-[20px]">{index + 1}.</span>
                                           {editingTermIndex === index ? (
                                             <div className="flex-1 flex gap-2">
                                               <Input
-                                                value={term}
-                                                onChange={(e) => {
-                                                  const updatedTerms = [...(lpoData.terms.general_terms || [])];
-                                                  updatedTerms[index] = e.target.value;
-                                                  setLpoData({
-                                                    ...lpoData,
-                                                    terms: { ...lpoData.terms, general_terms: updatedTerms }
-                                                  });
+                                                value={editingTermText}
+                                                onChange={(e) => setEditingTermText(e.target.value)}
+                                                className="flex-1 text-xs"
+                                                autoFocus
+                                                onKeyDown={(e) => {
+                                                  if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    if (editingTermText.trim()) {
+                                                      const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                                      updatedTerms[index] = { ...term, text: editingTermText.trim() };
+                                                      setLpoData({
+                                                        ...lpoData,
+                                                        terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                                      });
+                                                    }
+                                                    setEditingTermIndex(null);
+                                                    setEditingTermText('');
+                                                  } else if (e.key === 'Escape') {
+                                                    setEditingTermIndex(null);
+                                                    setEditingTermText('');
+                                                  }
                                                 }}
-                                                className="flex-1 text-sm"
                                               />
-                                              <Button size="sm" variant="outline" onClick={() => setEditingTermIndex(null)}>
+                                              <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => {
+                                                  if (editingTermText.trim()) {
+                                                    const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                                    updatedTerms[index] = { ...term, text: editingTermText.trim() };
+                                                    setLpoData({
+                                                      ...lpoData,
+                                                      terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                                    });
+                                                  }
+                                                  setEditingTermIndex(null);
+                                                  setEditingTermText('');
+                                                }}
+                                              >
                                                 <Save className="w-3 h-3" />
                                               </Button>
                                             </div>
                                           ) : (
                                             <>
-                                              <span className="flex-1 text-gray-700 text-xs">{term}</span>
+                                              <span className="flex-1 text-xs text-gray-700">{term.text}</span>
                                               <button
                                                 type="button"
-                                                onClick={() => setEditingTermIndex(index)}
-                                                className="text-blue-500 hover:text-blue-700"
+                                                onClick={() => {
+                                                  setEditingTermIndex(index);
+                                                  setEditingTermText(term.text);
+                                                }}
+                                                className="text-blue-500 hover:text-blue-700 p-1"
+                                                title="Edit term"
                                               >
                                                 <Edit3 className="w-3 h-3" />
                                               </button>
                                               <button
                                                 type="button"
                                                 onClick={() => {
-                                                  const updatedTerms = (lpoData.terms.general_terms || []).filter((_, i) => i !== index);
+                                                  const updatedTerms = (lpoData.terms.custom_terms || []).filter((_: any, i: number) => i !== index);
                                                   setLpoData({
                                                     ...lpoData,
-                                                    terms: { ...lpoData.terms, general_terms: updatedTerms }
+                                                    terms: { ...lpoData.terms, custom_terms: updatedTerms }
                                                   });
                                                 }}
-                                                className="text-red-500 hover:text-red-700"
+                                                className="text-red-500 hover:text-red-700 p-1"
                                                 title="Delete term"
                                               >
                                                 <Trash2 className="w-3 h-3" />
@@ -1208,181 +1224,58 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                           )}
                                         </div>
                                       ))}
+                                      {(!lpoData.terms.custom_terms || lpoData.terms.custom_terms.length === 0) && (
+                                        <div className="text-xs text-gray-400 italic py-2">No payment terms added yet. Add your first term below.</div>
+                                      )}
+                                    </div>
 
-                                      {/* Add new term */}
-                                      <div className="flex gap-2 mt-2 sticky bottom-0 bg-white pt-2">
-                                        <Input
-                                          value={newTerm}
-                                          onChange={(e) => setNewTerm(e.target.value)}
-                                          placeholder="Add new term..."
-                                          className="flex-1 text-sm"
-                                          onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                              e.preventDefault();
-                                              if (newTerm.trim()) {
-                                                const currentTerms = lpoData.terms.general_terms || [];
-                                                setLpoData({
-                                                  ...lpoData,
-                                                  terms: {
-                                                    ...lpoData.terms,
-                                                    general_terms: [...currentTerms, newTerm.trim()]
-                                                  }
-                                                });
-                                                setNewTerm('');
-                                              }
-                                            }
-                                          }}
-                                        />
-                                        <Button
-                                          type="button"
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={(e) => {
+                                    {/* Add new payment term */}
+                                    <div className="flex gap-2">
+                                      <Input
+                                        value={newCustomTerm}
+                                        onChange={(e) => setNewCustomTerm(e.target.value)}
+                                        placeholder="e.g., 50% Advance, 100% CDC after delivery..."
+                                        className="flex-1 text-sm"
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
                                             e.preventDefault();
-                                            if (newTerm.trim()) {
-                                              const currentTerms = lpoData.terms.general_terms || [];
+                                            if (newCustomTerm.trim()) {
+                                              const currentTerms = lpoData.terms.custom_terms || [];
                                               setLpoData({
                                                 ...lpoData,
                                                 terms: {
                                                   ...lpoData.terms,
-                                                  general_terms: [...currentTerms, newTerm.trim()]
+                                                  custom_terms: [...currentTerms, { text: newCustomTerm.trim(), selected: true }]
                                                 }
                                               });
-                                              setNewTerm('');
+                                              setNewCustomTerm('');
                                             }
-                                          }}
-                                        >
-                                          <Plus className="w-3 h-3 mr-1" /> Add
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Payment Terms List Editor */}
-                                <div className="border-t border-blue-200 pt-4">
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowPaymentTermsEditor(!showPaymentTermsEditor)}
-                                    className="flex items-center justify-between w-full text-left"
-                                  >
-                                    <span className="text-sm font-medium text-gray-700">Payment Terms List</span>
-                                    {showPaymentTermsEditor ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                  </button>
-
-                                  {showPaymentTermsEditor && (
-                                    <div className="mt-3 space-y-2">
-                                      {/* Existing payment terms list with checkboxes */}
-                                      {(lpoData.terms.payment_terms_list || []).map((term, index) => (
-                                        <div key={index} className="flex items-center gap-2 bg-gray-50 p-2 rounded text-sm">
-                                          <input
-                                            type="checkbox"
-                                            checked={true}
-                                            onChange={() => {
-                                              // Unchecking removes the term
-                                              const updatedTerms = (lpoData.terms.payment_terms_list || []).filter((_, i) => i !== index);
-                                              setLpoData({
-                                                ...lpoData,
-                                                terms: { ...lpoData.terms, payment_terms_list: updatedTerms }
-                                              });
-                                            }}
-                                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                                          />
-                                          {editingPaymentTermIndex === index ? (
-                                            <div className="flex-1 flex gap-2">
-                                              <Input
-                                                value={term}
-                                                onChange={(e) => {
-                                                  const updatedTerms = [...(lpoData.terms.payment_terms_list || [])];
-                                                  updatedTerms[index] = e.target.value;
-                                                  setLpoData({
-                                                    ...lpoData,
-                                                    terms: { ...lpoData.terms, payment_terms_list: updatedTerms }
-                                                  });
-                                                }}
-                                                className="flex-1 text-sm"
-                                              />
-                                              <Button size="sm" variant="outline" onClick={() => setEditingPaymentTermIndex(null)}>
-                                                <Save className="w-3 h-3" />
-                                              </Button>
-                                            </div>
-                                          ) : (
-                                            <>
-                                              <span className="flex-1 text-gray-700">{term}</span>
-                                              <button
-                                                type="button"
-                                                onClick={() => setEditingPaymentTermIndex(index)}
-                                                className="text-blue-500 hover:text-blue-700"
-                                              >
-                                                <Edit3 className="w-3 h-3" />
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  const updatedTerms = (lpoData.terms.payment_terms_list || []).filter((_, i) => i !== index);
-                                                  setLpoData({
-                                                    ...lpoData,
-                                                    terms: { ...lpoData.terms, payment_terms_list: updatedTerms }
-                                                  });
-                                                }}
-                                                className="text-red-500 hover:text-red-700"
-                                                title="Delete payment term"
-                                              >
-                                                <Trash2 className="w-3 h-3" />
-                                              </button>
-                                            </>
-                                          )}
-                                        </div>
-                                      ))}
-
-                                      {/* Add new payment term */}
-                                      <div className="flex gap-2 mt-2">
-                                        <Input
-                                          value={newPaymentTerm}
-                                          onChange={(e) => setNewPaymentTerm(e.target.value)}
-                                          placeholder="e.g., 50% Advance"
-                                          className="flex-1 text-sm"
-                                          onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                              e.preventDefault();
-                                              if (newPaymentTerm.trim()) {
-                                                const currentTerms = lpoData.terms.payment_terms_list || [];
-                                                setLpoData({
-                                                  ...lpoData,
-                                                  terms: {
-                                                    ...lpoData.terms,
-                                                    payment_terms_list: [...currentTerms, newPaymentTerm.trim()]
-                                                  }
-                                                });
-                                                setNewPaymentTerm('');
+                                          }
+                                        }}
+                                      />
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                          if (newCustomTerm.trim()) {
+                                            const currentTerms = lpoData.terms.custom_terms || [];
+                                            setLpoData({
+                                              ...lpoData,
+                                              terms: {
+                                                ...lpoData.terms,
+                                                custom_terms: [...currentTerms, { text: newCustomTerm.trim(), selected: true }]
                                               }
-                                            }
-                                          }}
-                                        />
-                                        <Button
-                                          type="button"
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={(e) => {
-                                            e.preventDefault();
-                                            if (newPaymentTerm.trim()) {
-                                              const currentTerms = lpoData.terms.payment_terms_list || [];
-                                              setLpoData({
-                                                ...lpoData,
-                                                terms: {
-                                                  ...lpoData.terms,
-                                                  payment_terms_list: [...currentTerms, newPaymentTerm.trim()]
-                                                }
-                                              });
-                                              setNewPaymentTerm('');
-                                            }
-                                          }}
-                                        >
-                                          <Plus className="w-3 h-3 mr-1" /> Add
-                                        </Button>
-                                      </div>
+                                            });
+                                            setNewCustomTerm('');
+                                          }
+                                        }}
+                                      >
+                                        <Plus className="w-3 h-3 mr-1" /> Add
+                                      </Button>
                                     </div>
-                                  )}
+                                    <p className="text-xs text-gray-400 mt-2">Payment terms are saved and available for future projects</p>
+                                  </div>
                                 </div>
 
                                 {/* Signature Selection - Simple Checkbox */}

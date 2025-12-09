@@ -20,8 +20,9 @@ class LPOCustomization(db.Model):
     # Terms
     payment_terms = db.Column(db.String(255), default='')
     completion_terms = db.Column(db.String(255), default='')
-    general_terms = db.Column(db.Text, default='[]')  # JSON array
-    payment_terms_list = db.Column(db.Text, default='[]')  # JSON array
+    custom_terms = db.Column(db.Text, default='[]')  # JSON array of {text: string, selected: boolean}
+    general_terms = db.Column(db.Text, default='[]')  # JSON array (deprecated)
+    payment_terms_list = db.Column(db.Text, default='[]')  # JSON array (deprecated)
 
     # Signatures
     include_signatures = db.Column(db.Boolean, default=True)
@@ -44,6 +45,7 @@ class LPOCustomization(db.Model):
             'subject': self.subject or '',
             'payment_terms': self.payment_terms or '',
             'completion_terms': self.completion_terms or '',
+            'custom_terms': json.loads(self.custom_terms) if self.custom_terms else [],
             'general_terms': json.loads(self.general_terms) if self.general_terms else [],
             'payment_terms_list': json.loads(self.payment_terms_list) if self.payment_terms_list else [],
             'include_signatures': self.include_signatures,

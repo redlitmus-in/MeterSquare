@@ -59,6 +59,7 @@ class SystemSettings(db.Model):
     company_stamp_image = db.Column(db.Text)  # Company stamp/seal image (base64)
 
     # LPO PDF Settings - Company Info
+    company_contact_person = db.Column(db.String(255), default='Mr. Mohammed Sabir')  # Contact person for LPO
     company_trn = db.Column(db.String(50))  # Company TRN number
     company_fax = db.Column(db.String(50))  # Company fax number
     default_payment_terms = db.Column(db.Text, default='100% after delivery')

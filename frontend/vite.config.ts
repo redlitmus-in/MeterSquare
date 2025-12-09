@@ -65,6 +65,16 @@ export default defineConfig(({ mode }) => {
         '@/api': resolve(__dirname, './src/api'),
         '@/lib': resolve(__dirname, './src/lib'),
       },
+      // ✅ CRITICAL: Dedupe React to prevent multiple instances
+      // This ensures only ONE copy of React is used across all dependencies
+      // Prevents "Cannot read properties of undefined (reading 'createContext')" error
+      dedupe: [
+        'react',
+        'react-dom',
+        'react-router-dom',
+        '@tanstack/react-query',
+        'zustand'
+      ],
     },
 
     // ✅ CRITICAL PERFORMANCE: Pre-bundle dependencies for faster dev server and initial load
@@ -141,46 +151,67 @@ export default defineConfig(({ mode }) => {
             }
           },
 
-          // ✅ PERFORMANCE: Manual chunk splitting for optimal loading
-          // Separates heavy vendor libraries into their own chunks
-          // This reduces initial bundle size and allows parallel loading
+          // ✅ PERFORMANCE: Manual chunk splitting for lazy-loaded heavy libraries
+          // ⚠️ CRITICAL: React and React-dependent libs stay in main bundle (no chunk name)
+          // Only split out libraries that are lazy-loaded or used on specific pages
           manualChunks: (id) => {
-            // React core libraries - needed immediately
+            // ⚠️ NEVER split React - must stay with main bundle
+            // Returning undefined = stays with main entry chunk
             if (id.includes('node_modules/react/') ||
                 id.includes('node_modules/react-dom/') ||
-                id.includes('node_modules/react-router-dom/')) {
-              return 'react-core';
+                id.includes('node_modules/react-router-dom/') ||
+                id.includes('node_modules/scheduler/') ||
+                id.includes('node_modules/@remix-run/')) {
+              return; // Stay with main bundle
             }
-            // UI framework - large, split it out
-            if (id.includes('node_modules/@radix-ui/') ||
-                id.includes('node_modules/lucide-react/') ||
-                id.includes('node_modules/@heroicons/')) {
-              return 'ui-components';
+            // React context-dependent libs - stay with main bundle
+            if (id.includes('node_modules/@tanstack/') ||
+                id.includes('node_modules/zustand/') ||
+                id.includes('node_modules/react-hook-form/') ||
+                id.includes('node_modules/@hookform/') ||
+                id.includes('node_modules/sonner/')) {
+              return; // Stay with main bundle
             }
-            // Data processing libs - only needed for specific features
-            if (id.includes('node_modules/xlsx/') ||
-                id.includes('node_modules/jspdf/') ||
-                id.includes('node_modules/pdfmake/')) {
-              return 'data-export';
+            // Data export libs - LAZY LOADED, safe to split
+            if (id.includes('node_modules/xlsx/')) {
+              return 'xlsx-export';
             }
-            // Charts - only needed for dashboards
+            if (id.includes('node_modules/jspdf/') ||
+                id.includes('node_modules/jspdf-autotable/')) {
+              return 'pdf-export';
+            }
+            // Charts - LAZY LOADED on dashboard, safe to split
             if (id.includes('node_modules/highcharts/') ||
-                id.includes('node_modules/recharts/') ||
-                id.includes('node_modules/chart.js/')) {
+                id.includes('node_modules/highcharts-react-official/')) {
               return 'charts';
             }
-            // Form handling
-            if (id.includes('node_modules/react-hook-form/') ||
-                id.includes('node_modules/zod/') ||
-                id.includes('node_modules/@hookform/')) {
-              return 'forms';
+            // Supabase - used for auth/realtime, safe to split
+            if (id.includes('node_modules/@supabase/')) {
+              return 'supabase';
             }
-            // Supabase & realtime
-            if (id.includes('node_modules/@supabase/') ||
-                id.includes('node_modules/socket.io-client/')) {
+            // Socket.io - realtime, safe to split
+            if (id.includes('node_modules/socket.io')) {
               return 'realtime';
             }
-            // All other vendor modules
+            // Radix UI - used everywhere but large, split for parallel loading
+            if (id.includes('node_modules/@radix-ui/')) {
+              return 'ui-radix';
+            }
+            // Icons - large bundle, split for parallel loading
+            if (id.includes('node_modules/lucide-react/') ||
+                id.includes('node_modules/@heroicons/')) {
+              return 'ui-icons';
+            }
+            // Date utilities
+            if (id.includes('node_modules/date-fns/') ||
+                id.includes('node_modules/react-datepicker/')) {
+              return 'date-utils';
+            }
+            // Zod validation - used everywhere
+            if (id.includes('node_modules/zod/')) {
+              return 'validation';
+            }
+            // All other node_modules go to vendor chunk
             if (id.includes('node_modules/')) {
               return 'vendor';
             }

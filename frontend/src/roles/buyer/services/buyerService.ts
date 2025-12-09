@@ -272,9 +272,11 @@ export interface LPOTotals {
 
 export interface LPOTerms {
   payment_terms: string;
-  completion_terms: string;
-  general_terms?: string[];  // Array of general terms and conditions
-  payment_terms_list?: string[];  // Array of payment terms like "50% Advance", "40% On Delivery"
+  completion_terms?: string;  // Legacy field, kept for backward compatibility
+  delivery_terms?: string;    // New field for delivery terms date
+  custom_terms?: Array<{text: string, selected: boolean}>;  // Custom terms with checkbox selection
+  general_terms?: string[];   // Deprecated - no longer used in PDF
+  payment_terms_list?: string[];  // Deprecated - no longer used in PDF
 }
 
 export interface LPOSignatures {
