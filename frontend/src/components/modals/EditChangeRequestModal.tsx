@@ -44,19 +44,24 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
   const [materials, setMaterials] = useState<MaterialItem[]>([]);
   const [allChangeRequests, setAllChangeRequests] = useState<any[]>([]);
 
-  // Check if user is Site Engineer - hide price fields for SE
+  // Check user role for various permissions
   const userRoleLower = user?.role?.toLowerCase() || '';
   const isSiteEngineer = userRoleLower === 'siteengineer' ||
                          userRoleLower === 'site engineer' ||
                          userRoleLower === 'site_engineer';
 
+  const isProjectManager = userRoleLower === 'project manager' ||
+                           userRoleLower === 'project_manager' ||
+                           userRoleLower === 'projectmanager';
+
+  // Hide price fields for Site Engineer and Project Manager
+  const shouldHidePrices = isSiteEngineer || isProjectManager;
+
   // Check if user is Project Manager or Estimator - allow quantity editing
   const isProjectManagerOrEstimator =
-    user?.role?.toLowerCase() === 'project manager' ||
-    user?.role?.toLowerCase() === 'project_manager' ||
-    user?.role?.toLowerCase() === 'projectmanager' ||
-    user?.role?.toLowerCase() === 'estimator' ||
-    user?.role?.toLowerCase() === 'estimation';
+    isProjectManager ||
+    userRoleLower === 'estimator' ||
+    userRoleLower === 'estimation';
 
   // Fetch all change requests for this BOQ to calculate already purchased quantities
   useEffect(() => {
@@ -253,15 +258,15 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
       });
 
       if (response.success) {
-        showSuccess('Change request updated successfully');
+        showSuccess('PO updated successfully');
         if (onSuccess) onSuccess();
         onClose();
       } else {
-        showError(response.message || 'Failed to update change request');
+        showError(response.message || 'Failed to update PO');
       }
     } catch (error: any) {
-      console.error('Error updating change request:', error);
-      showError(error.response?.data?.error || 'Failed to update change request');
+      console.error('Error updating PO:', error);
+      showError(error.response?.data?.error || 'Failed to update PO');
     } finally {
       setLoading(false);
     }
@@ -298,7 +303,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                       <Package className="w-6 h-6 text-white" />
                     </div>
                     <h3 className="text-xl font-bold text-white">
-                      Edit Change Request #{changeRequest.cr_id}
+                      Edit PO #{changeRequest.cr_id}
                     </h3>
                   </div>
                   <button
@@ -568,8 +573,8 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                               />
                             </div>
 
-                            {/* Unit Price - Hidden for Site Engineers */}
-                            {!isSiteEngineer && (
+                            {/* Unit Price - Hidden for Site Engineers and Project Managers */}
+                            {!shouldHidePrices && (
                               <div>
                                 <label className="block text-xs font-medium text-gray-600 mb-1">
                                   Unit Price (AED)
@@ -596,8 +601,8 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                               </div>
                             )}
 
-                            {/* Total Price (Auto-calculated, read-only) - Hidden for Site Engineers */}
-                            {!isSiteEngineer && (
+                            {/* Total Price (Auto-calculated, read-only) - Hidden for Site Engineers and Project Managers */}
+                            {!shouldHidePrices && (
                               <div>
                                 <label className="block text-xs font-medium text-gray-600 mb-1">
                                   Total Amount
@@ -634,8 +639,8 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Total Summary - Hidden for Site Engineers */}
-                  {!isSiteEngineer && (
+                  {/* Total Summary - Hidden for Site Engineers and Project Managers */}
+                  {!shouldHidePrices && (
                     <div className="mb-6 p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg border border-blue-200">
                       <div className="flex justify-between items-center">
                         <span className="text-lg font-semibold text-blue-900">Total Request Amount:</span>
@@ -693,7 +698,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                   ) : (
                     <>
                       <Save className="h-4 w-4" />
-                      <span>Update Change Request</span>
+                      <span>Update PO</span>
                     </>
                   )}
                 </button>

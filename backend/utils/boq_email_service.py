@@ -2015,6 +2015,10 @@ class BOQEmailService:
                                         <td style="color: #000000; font-size: 14px; font-weight: bold;">Total Items:</td>
                                         <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{len(materials)}</td>
                                     </tr>
+                                    <tr>
+                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Total Amount:</td>
+                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">AED {total_cost:,.2f}</td>
+                                    </tr>
                                 </table>
 
                                 <!-- Materials Table -->

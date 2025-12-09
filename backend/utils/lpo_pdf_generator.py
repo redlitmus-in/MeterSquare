@@ -303,30 +303,38 @@ class LPOPDFGenerator:
         header_data = []
 
         # Logo cell - compact size with proper aspect ratio (same as BOQ PDF)
+        # With "DUBAI | SHARJAH | MUSCAT | COCHIN" below the logo
         if os.path.exists(logo_path):
             try:
                 # Use kind='proportional' to maintain aspect ratio like BOQ PDF
-                logo = Image(logo_path, width=1.8*inch, height=0.7*inch, kind='proportional')
+                logo_img = Image(logo_path, width=1.8*inch, height=0.7*inch, kind='proportional')
+                # Create a table to stack logo and locations text
+                locations_text = Paragraph(
+                    '<font size="7" color="#666666">DUBAI | SHARJAH | MUSCAT | COCHIN</font>',
+                    ParagraphStyle('LocationsInfo', fontSize=7, alignment=TA_LEFT, leading=9)
+                )
+                logo = Table([[logo_img], [locations_text]], colWidths=[2*inch])
+                logo.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 0),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ]))
             except:
-                logo = Paragraph('<b>METER SQUARE</b><br/><font size="7">INTERIORS LLC</font>',
+                logo = Paragraph('<b>METER SQUARE</b><br/><font size="7">INTERIORS LLC</font><br/><font size="7" color="#666666">DUBAI | SHARJAH | MUSCAT | COCHIN</font>',
                                 self.styles['LPOBold'])
         else:
-            logo = Paragraph('<b>METER SQUARE</b><br/><font size="7">INTERIORS LLC</font>',
+            logo = Paragraph('<b>METER SQUARE</b><br/><font size="7">INTERIORS LLC</font><br/><font size="7" color="#666666">DUBAI | SHARJAH | MUSCAT | COCHIN</font>',
                             self.styles['LPOBold'])
 
-        # Company info cell
+        # Company info cell - contact numbers only (locations moved below logo)
         company = lpo_data.get('company', {})
         company_info = Paragraph(
-            f'''<font size="7" color="#666666">DUBAI | SHARJAH | MUSCAT | COCHIN</font><br/>
-            <font size="6">Sharjah: 66015 | 06 5398189/90 | Fax: 06 5398289</font><br/>
+            f'''<font size="6">Sharjah: 66015 | 06 5398189/90 | Fax: 06 5398289</font><br/>
             <font size="6">Dubai: 89381 | 04 2596772 | Fax: 04 2647603</font>''',
             ParagraphStyle('HeaderInfo', fontSize=7, alignment=TA_RIGHT, leading=9)
-        )
-
-        # Certification logos placeholder
-        cert_text = Paragraph(
-            '<font size="6" color="#666666">ISO 9001 | UKAS</font>',
-            ParagraphStyle('CertInfo', fontSize=6, alignment=TA_RIGHT)
         )
 
         header_data.append([logo, company_info])

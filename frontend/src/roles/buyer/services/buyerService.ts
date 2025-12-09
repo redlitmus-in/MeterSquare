@@ -1461,6 +1461,115 @@ class BuyerService {
       throw new Error(error.response?.data?.error || 'Failed to complete purchase');
     }
   }
+
+  // Update negotiated prices for POChild materials
+  async updatePOChildPrices(poChildId: number, materials: Array<{
+    material_name: string;
+    negotiated_price: number | null;
+  }>): Promise<UpdatePOChildPricesResponse> {
+    try {
+      const response = await apiClient.put<UpdatePOChildPricesResponse>(
+        `/buyer/po-child/${poChildId}/update-prices`,
+        { materials }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to update prices');
+    } catch (error: any) {
+      console.error('Error updating PO child prices:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase order not found');
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response?.data?.error || 'Invalid request');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to update prices');
+    }
+  }
+
+  // Update negotiated prices for Purchase (Change Request) materials
+  async updatePurchasePrices(crId: number, materials: Array<{
+    material_name: string;
+    negotiated_price: number | null;
+  }>): Promise<UpdatePurchasePricesResponse> {
+    try {
+      const response = await apiClient.put<UpdatePurchasePricesResponse>(
+        `/buyer/purchase/${crId}/update-prices`,
+        { materials }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to update prices');
+    } catch (error: any) {
+      console.error('Error updating purchase prices:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response?.data?.error || 'Invalid request');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to update prices');
+    }
+  }
+}
+
+// Response type for POChild price update
+export interface UpdatePOChildPricesResponse {
+  success: boolean;
+  message: string;
+  po_child_id: number;
+  formatted_id: string;
+  materials: Array<{
+    material_name: string;
+    quantity: number;
+    unit: string;
+    original_unit_price: number;
+    negotiated_price: number | null;
+    unit_price: number;
+    total_price: number;
+    price_diff: number;
+    price_diff_percentage: number;
+    price_updated_by?: string;
+    price_updated_at?: string;
+  }>;
+  original_total: number;
+  new_total: number;
+  total_diff: number;
+  error?: string;
+}
+
+// Response type for Purchase (Change Request) price update
+export interface UpdatePurchasePricesResponse {
+  success: boolean;
+  message: string;
+  cr_id: number;
+  materials: Array<{
+    material_name: string;
+    quantity: number;
+    unit: string;
+    original_unit_price: number;
+    negotiated_price: number | null;
+    unit_price: number;
+    total_price: number;
+    price_diff: number;
+    price_diff_percentage: number;
+    price_updated_by?: string;
+    price_updated_at?: string;
+  }>;
+  original_total: number;
+  new_total: number;
+  total_diff: number;
+  error?: string;
 }
 
 export interface StoreAvailabilityMaterial {

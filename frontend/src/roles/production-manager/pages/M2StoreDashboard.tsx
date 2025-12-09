@@ -58,10 +58,60 @@ const M2StoreDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading dashboard data...</p>
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Header Skeleton */}
+          <div className="flex items-center justify-between mb-8 animate-pulse">
+            <div>
+              <div className="h-8 bg-gray-200 rounded w-64 mb-2"></div>
+              <div className="h-4 bg-gray-200 rounded w-48"></div>
+            </div>
+            <div className="h-4 bg-gray-200 rounded w-32"></div>
+          </div>
+          {/* KPI Cards Skeleton */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 animate-pulse">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="h-4 bg-gray-200 rounded w-24 mb-2"></div>
+                    <div className="h-8 bg-gray-200 rounded w-20 mb-2"></div>
+                    <div className="h-3 bg-gray-200 rounded w-28"></div>
+                  </div>
+                  <div className="h-14 w-14 bg-gray-200 rounded-full"></div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Middle Section Skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 animate-pulse">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="h-6 bg-gray-200 rounded w-40 mb-4"></div>
+                <div className="space-y-3">
+                  {[...Array(4)].map((_, j) => (
+                    <div key={j} className="flex items-center justify-between">
+                      <div className="h-4 bg-gray-200 rounded w-20"></div>
+                      <div className="h-4 bg-gray-200 rounded w-24"></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Bottom Section Skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-pulse">
+            {[...Array(2)].map((_, i) => (
+              <div key={i} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="h-6 bg-gray-200 rounded w-40 mb-4"></div>
+                <div className="space-y-3">
+                  {[...Array(5)].map((_, j) => (
+                    <div key={j} className="h-12 bg-gray-200 rounded"></div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );

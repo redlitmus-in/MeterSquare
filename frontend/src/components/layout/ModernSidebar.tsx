@@ -448,13 +448,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
 
     // Buyer specific navigation items
     const buyerItems: NavigationItem[] = [
-      // {
-      //   name: 'Materials to Purchase',
-      //   href: buildPath('/materials'),
-      //   icon: CubeIcon,
-      //   iconSolid: CubeSolid,
-      //   color: 'text-orange-600'
-      // },
       {
         name: 'Purchase Orders',
         href: buildPath('/purchase-orders'),
@@ -479,6 +472,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     ];
 
     // Production Manager specific navigation items - M2 Store Management
+    // Combined: Inventory Management (Materials + Stock In/Out) → Reports
     const productionManagerItems: NavigationItem[] = [
       {
         name: 'M2 Store',
@@ -487,42 +481,30 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         iconSolid: BuildingOfficeSolid,
         color: 'text-amber-600',
         children: [
+          // 1. INVENTORY - Combined Materials + Stock Management
           {
-            name: 'Materials Master',
-            href: buildPath('/m2-store/materials'),
+            name: 'Inventory Management',
+            href: buildPath('/m2-store/stock'),
+            icon: ClipboardDocumentCheckIcon,
+            iconSolid: ClipboardDocumentCheckSolid,
+            color: 'text-blue-600'
+          },
+          // 2. RETURNABLE ASSETS - Ladders, Tables, Tools
+          {
+            name: 'Returnable Assets',
+            href: buildPath('/m2-store/returnable-assets'),
             icon: CubeIcon,
             iconSolid: CubeSolid,
-            color: 'text-teal-600'
+            color: 'text-green-600'
           },
-          // NOTE: Below sections are temporarily commented out for production - will be enabled in future releases
-          // {
-          //   name: 'Receive Stock (GRN)',
-          //   href: buildPath('/m2-store/receive'),
-          //   icon: DocumentPlusIcon,
-          //   iconSolid: DocumentPlusSolid,
-          //   color: 'text-green-600'
-          // },
-          // {
-          //   name: 'Dispatch Materials',
-          //   href: buildPath('/m2-store/dispatch'),
-          //   icon: ShoppingCartIcon,
-          //   iconSolid: ShoppingSolid,
-          //   color: 'text-purple-600'
-          // },
-          // {
-          //   name: 'Stock Take',
-          //   href: buildPath('/m2-store/stock-take'),
-          //   icon: ClipboardDocumentCheckIcon,
-          //   iconSolid: ClipboardDocumentCheckSolid,
-          //   color: 'text-orange-600'
-          // },
-          // {
-          //   name: 'Reports & Analytics',
-          //   href: buildPath('/m2-store/reports'),
-          //   icon: DocumentTextIcon,
-          //   iconSolid: DocumentTextSolid,
-          //   color: 'text-indigo-600'
-          // }
+          // 3. REPORTS - Analytics & Reports
+          {
+            name: 'Reports & Analytics',
+            href: buildPath('/m2-store/reports'),
+            icon: DocumentTextIcon,
+            iconSolid: DocumentTextSolid,
+            color: 'text-indigo-600'
+          }
         ]
       }
     ];
@@ -614,12 +596,16 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         currentRole === UserRole.SITE_ENGINEER ||
         getRoleDisplayName(roleId || '') === 'Site Engineer';
 
-    // Check for Buyer - primarily use role name from backend
+    // Check for Buyer/Procurement - primarily use role name from backend
     const isBuyer = userRole === 'buyer' ||
+        userRole === 'procurement' ||
         roleId === 'buyer' ||
         roleIdLower === 'buyer' ||
+        roleIdLower === 'procurement' ||
         currentRole === 'buyer' ||
-        getRoleDisplayName(roleId || '') === 'Buyer';
+        currentRole === 'procurement' ||
+        getRoleDisplayName(roleId || '') === 'Buyer' ||
+        getRoleDisplayName(roleId || '') === 'Procurement';
 
     // Check for Production Manager - primarily use role name from backend
     const isProductionManager = userRole === 'productionmanager' ||

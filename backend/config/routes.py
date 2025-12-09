@@ -15,6 +15,7 @@ from routes.vendor_routes import vendor_routes
 from routes.terms_conditions_routes import terms_conditions_routes
 from routes.upload_image_route import image_routes
 from routes.inventory_routes import inventory_routes
+from routes.asset_routes import asset_routes
 
 # Import and register the routes from the route blueprints
 
@@ -36,3 +37,4 @@ def initialize_routes(app):
     app.register_blueprint(terms_conditions_routes)
     app.register_blueprint(image_routes)
     app.register_blueprint(inventory_routes)
+    app.register_blueprint(asset_routes)

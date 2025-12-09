@@ -5,6 +5,16 @@ from controllers.auth_controller import jwt_required
 # Create blueprint with URL prefix
 inventory_routes = Blueprint('inventory_routes', __name__, url_prefix='/api')
 
+
+# ==================== INVENTORY CONFIG ROUTES ====================
+
+@inventory_routes.route('/inventory/config', methods=['GET'])
+@jwt_required
+def get_inventory_config_route():
+    """Get inventory configuration (store name, currency, etc.)"""
+    return get_inventory_config()
+
+
 # ==================== INVENTORY ITEM ROUTES ====================
 
 @inventory_routes.route('/add_item_inventory', methods=['POST'])
@@ -175,3 +185,146 @@ def issue_material_route(request_id):
     """Issue material from inventory to fulfill internal request"""
     return issue_material_from_inventory(request_id)
 
+
+# ==================== MATERIAL RETURN ROUTES ====================
+
+@inventory_routes.route('/material_return', methods=['POST'])
+@jwt_required
+def create_material_return_route():
+    """Create a new material return with condition tracking"""
+    return create_material_return()
+
+
+@inventory_routes.route('/material_returns', methods=['GET'])
+@jwt_required
+def get_all_material_returns_route():
+    """Get all material returns with optional filters"""
+    return get_all_material_returns()
+
+
+@inventory_routes.route('/material_return/<int:return_id>', methods=['GET'])
+@jwt_required
+def get_material_return_route(return_id):
+    """Get specific material return by ID"""
+    return get_material_return_by_id(return_id)
+
+
+@inventory_routes.route('/project/<int:project_id>/dispatched_materials', methods=['GET'])
+@jwt_required
+def get_project_dispatched_materials_route(project_id):
+    """Get materials dispatched to a project that can be returned"""
+    return get_dispatched_materials_for_project(project_id)
+
+
+@inventory_routes.route('/material_returns/pending_disposal', methods=['GET'])
+@jwt_required
+def get_pending_disposal_route():
+    """Get all material returns pending disposal review"""
+    return get_pending_disposal_returns()
+
+
+@inventory_routes.route('/material_return/<int:return_id>/review_disposal', methods=['POST'])
+@jwt_required
+def review_disposal_route(return_id):
+    """Review and approve/reject disposal of damaged/defective materials"""
+    return review_disposal(return_id)
+
+
+@inventory_routes.route('/material_return/<int:return_id>/mark_disposed', methods=['POST'])
+@jwt_required
+def mark_disposed_route(return_id):
+    """Mark a material return as physically disposed"""
+    return mark_as_disposed(return_id)
+
+
+@inventory_routes.route('/material_return/<int:return_id>/add_to_stock', methods=['POST'])
+@jwt_required
+def add_repaired_to_stock_route(return_id):
+    """Add repaired material back to inventory stock"""
+    return add_repaired_to_stock(return_id)
+
+
+# ==================== MATERIAL DELIVERY NOTE ROUTES ====================
+
+@inventory_routes.route('/delivery_notes', methods=['POST'])
+@jwt_required
+def create_delivery_note_route():
+    """Create a new material delivery note"""
+    return create_delivery_note()
+
+
+@inventory_routes.route('/delivery_notes', methods=['GET'])
+@jwt_required
+def get_all_delivery_notes_route():
+    """Get all delivery notes with optional filters"""
+    return get_all_delivery_notes()
+
+
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>', methods=['GET'])
+@jwt_required
+def get_delivery_note_route(delivery_note_id):
+    """Get specific delivery note by ID"""
+    return get_delivery_note_by_id(delivery_note_id)
+
+
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>', methods=['PUT'])
+@jwt_required
+def update_delivery_note_route(delivery_note_id):
+    """Update a delivery note"""
+    return update_delivery_note(delivery_note_id)
+
+
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>', methods=['DELETE'])
+@jwt_required
+def delete_delivery_note_route(delivery_note_id):
+    """Delete a delivery note"""
+    return delete_delivery_note(delivery_note_id)
+
+
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>/items', methods=['POST'])
+@jwt_required
+def add_delivery_note_item_route(delivery_note_id):
+    """Add an item to a delivery note"""
+    return add_item_to_delivery_note(delivery_note_id)
+
+
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>/items/<int:item_id>', methods=['PUT'])
+@jwt_required
+def update_delivery_note_item_route(delivery_note_id, item_id):
+    """Update an item in a delivery note"""
+    return update_delivery_note_item(delivery_note_id, item_id)
+
+
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>/items/<int:item_id>', methods=['DELETE'])
+@jwt_required
+def remove_delivery_note_item_route(delivery_note_id, item_id):
+    """Remove an item from a delivery note"""
+    return remove_delivery_note_item(delivery_note_id, item_id)
+
+
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>/issue', methods=['POST'])
+@jwt_required
+def issue_delivery_note_route(delivery_note_id):
+    """Issue a delivery note - deducts stock"""
+    return issue_delivery_note(delivery_note_id)
+
+
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>/dispatch', methods=['POST'])
+@jwt_required
+def dispatch_delivery_note_route(delivery_note_id):
+    """Mark delivery note as dispatched (in transit)"""
+    return dispatch_delivery_note(delivery_note_id)
+
+
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>/confirm', methods=['POST'])
+@jwt_required
+def confirm_delivery_route(delivery_note_id):
+    """Confirm delivery receipt at site"""
+    return confirm_delivery(delivery_note_id)
+
+
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>/cancel', methods=['POST'])
+@jwt_required
+def cancel_delivery_note_route(delivery_note_id):
+    """Cancel a delivery note"""
+    return cancel_delivery_note(delivery_note_id)

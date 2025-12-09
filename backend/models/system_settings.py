@@ -14,6 +14,7 @@ class SystemSettings(db.Model):
 
     # General Settings
     company_name = db.Column(db.String(255), nullable=False, default='MeterSquare ERP')
+    store_name = db.Column(db.String(255), default='M2 Store')  # Default store/warehouse name
     company_email = db.Column(db.String(255))
     company_phone = db.Column(db.String(50))
     company_address = db.Column(db.Text)

@@ -213,7 +213,7 @@ const TDVendorApproval: React.FC = () => {
               : 'text-gray-600 hover:bg-gray-100'
           }`}
         >
-          Change Requests
+          Purchase Orders
         </button>
         <button
           onClick={() => setActiveTab('se_boq')}
@@ -272,7 +272,7 @@ const TDVendorApproval: React.FC = () => {
       {activeTab === 'change_requests' ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
           <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500 text-lg">Change Request vendor approvals coming soon</p>
+          <p className="text-gray-500 text-lg">PO vendor approvals coming soon</p>
         </div>
       ) : filteredAssignments.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">

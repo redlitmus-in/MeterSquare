@@ -506,15 +506,19 @@ class ComprehensiveNotificationService:
     # ==================== CHANGE REQUEST WORKFLOW NOTIFICATIONS ====================
 
     @staticmethod
-    def notify_cr_created(cr_id, project_name, creator_id, creator_name, creator_role, recipient_user_ids, recipient_role, request_type=None):
+    def notify_cr_created(cr_id, project_name, creator_id, creator_name, creator_role, recipient_user_ids, recipient_role, request_type=None, has_new_materials=False):
         """
         Notify PM/TD when change request is created
         Trigger: SE/PM creates CR
         Recipients: PM if SE created, TD if PM created
         Priority: URGENT
+
+        Args:
+            has_new_materials: True if request contains new materials (master_material_id is None),
+                             False if all materials are existing BOQ items
         """
         try:
-            log.info(f"[notify_cr_created] CR {cr_id} - Sending to {len(recipient_user_ids)} recipients: {recipient_user_ids}, role: {recipient_role}, request_type: {request_type}")
+            log.info(f"[notify_cr_created] CR {cr_id} - Sending to {len(recipient_user_ids)} recipients: {recipient_user_ids}, role: {recipient_role}, request_type: {request_type}, has_new_materials: {has_new_materials}")
 
             for user_id in recipient_user_ids:
                 # Check for duplicate notification
@@ -528,11 +532,19 @@ class ComprehensiveNotificationService:
                 action_url = f'/{recipient_role.lower().replace(" ", "-")}/{route}?cr_id={cr_id}'
                 log.info(f"[notify_cr_created] Creating notification for user {user_id}, action_url: {action_url}")
 
+                # Determine notification title based on whether materials are new or existing BOQ items
+                if has_new_materials:
+                    title = 'New Materials Purchase Request'
+                    message = f'{creator_name} ({creator_role}) created a new materials purchase request for {project_name}'
+                else:
+                    title = 'Existing BOQ Materials Purchase Request'
+                    message = f'{creator_name} ({creator_role}) created an existing BOQ materials purchase request for {project_name}'
+
                 notification = NotificationManager.create_notification(
                     user_id=user_id,
                     type='approval',
-                    title='New Materials Purchase Request',
-                    message=f'{creator_name} ({creator_role}) created a materials purchase request for {project_name}',
+                    title=title,
+                    message=message,
                     priority='urgent',
                     category='change_request',
                     action_required=True,

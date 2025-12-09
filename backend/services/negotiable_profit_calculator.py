@@ -86,28 +86,60 @@ class NegotiableProfitCalculator:
             summary = boq_json.get('summary', {})
             items = boq_json.get('items', [])
 
-            # Step 1: Calculate total negotiable margin from all sub-items
+            # Step 1: Calculate Total Margin from BOQ items
+            # Total Margin = Client Amount - Internal Cost
+            # Where Internal Cost = Materials + Labour + Misc + O&P + Transport
+            total_client_amount = 0.0
+            total_internal_cost = 0.0
             total_negotiable_margin = 0.0
+
             for item in items:
-                # Check if sub_items exists and is a non-empty list
+                # Get item-level percentages (fallback to common values)
+                misc_percentage = item.get('misc_percentage', 10) or 10
+                overhead_profit_percentage = item.get('overhead_profit_percentage', 25) or 25
+                transport_percentage = item.get('transport_percentage', 5) or 5
+
+                # Check if item has sub_items
                 sub_items = item.get('sub_items', [])
                 if sub_items and isinstance(sub_items, list):
                     for sub_item in sub_items:
-                        # negotiable_margin is stored as 'actual_profit' in database
-                        sub_negotiable = (
-                            sub_item.get('negotiable_margin', 0) or
-                            sub_item.get('actual_profit', 0) or
-                            0
-                        )
-                        total_negotiable_margin += sub_negotiable
+                        # Client Amount = quantity * rate (or base_total if available)
+                        sub_item_client_amount = sub_item.get('base_total', 0) or 0
+                        if sub_item_client_amount == 0:
+                            quantity = float(sub_item.get('quantity', 0) or 0)
+                            rate = float(sub_item.get('rate', 0) or 0)
+                            sub_item_client_amount = quantity * rate
+
+                        # Materials and Labour costs
+                        materials_cost = float(sub_item.get('materials_cost', 0) or 0)
+                        labour_cost = float(sub_item.get('labour_cost', 0) or 0)
+
+                        # Calculate percentage-based costs from client amount
+                        misc_amount = sub_item_client_amount * (misc_percentage / 100)
+                        overhead_profit_amount = sub_item_client_amount * (overhead_profit_percentage / 100)
+                        transport_amount = sub_item_client_amount * (transport_percentage / 100)
+
+                        # Internal Cost = Materials + Labour + Misc + O&P + Transport
+                        sub_item_internal_cost = materials_cost + labour_cost + misc_amount + overhead_profit_amount + transport_amount
+
+                        # Negotiable Margin = Client Amount - Internal Cost
+                        sub_item_margin = sub_item_client_amount - sub_item_internal_cost
+
+                        total_client_amount += sub_item_client_amount
+                        total_internal_cost += sub_item_internal_cost
+                        total_negotiable_margin += sub_item_margin
+
+                        log.debug(f"Sub-item '{sub_item.get('sub_item_name', '')}': "
+                                 f"Client={sub_item_client_amount}, Internal={sub_item_internal_cost}, Margin={sub_item_margin}")
 
             # Get discount if present
             discount_amount = summary.get('discount', 0) or 0
 
-            # Original allocated = Total negotiable margin - discount
+            # Original allocated = Total Margin - discount
             original_allocated = total_negotiable_margin - discount_amount
 
-            log.info(f"BOQ {boq_id}: Total negotiable margin={total_negotiable_margin}, Discount={discount_amount}, Original Allocated={original_allocated}")
+            log.info(f"BOQ {boq_id}: Client Amount={total_client_amount}, Internal Cost={total_internal_cost}, "
+                    f"Total Margin={total_negotiable_margin}, Discount={discount_amount}, Original Allocated={original_allocated}")
 
             # Step 2: Use provided already_consumed or default to 0
             if already_consumed is None:

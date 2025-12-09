@@ -770,7 +770,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     );
 
     if (response.data.success || response.data.data) {
-      showSuccess('Change request updated successfully');
+      showSuccess('PO updated successfully');
       if (onSuccess) onSuccess();
       if (onCancel) onCancel();
       if (onClose) onClose();
@@ -1989,33 +1989,31 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             Unit <span className="text-red-500">*</span>
                           </label>
                           {material.isNew ? (
-                            <div className="space-y-1">
+                            <div className="flex gap-1">
                               <select
-                                value={material.unit === 'Custom (Type below)' || !COMMON_UNITS.includes(material.unit) ? 'Custom (Type below)' : material.unit}
+                                value={COMMON_UNITS.filter(u => u !== 'Custom (Type below)').includes(material.unit) ? material.unit : 'other'}
                                 onChange={(e) => {
-                                  if (e.target.value === 'Custom (Type below)') {
-                                    updateMaterial(material.id, { unit: '' });
-                                  } else {
+                                  if (e.target.value !== 'other') {
                                     updateMaterial(material.id, { unit: e.target.value });
+                                  } else {
+                                    updateMaterial(material.id, { unit: '' });
                                   }
                                 }}
-                                className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
-                                required
+                                className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
                               >
-                                <option value="">Select unit</option>
-                                {COMMON_UNITS.map(unit => (
-                                  <option key={unit} value={unit}>
-                                    {unit}
-                                  </option>
+                                <option value="">Select</option>
+                                {COMMON_UNITS.filter(u => u !== 'Custom (Type below)').map(unit => (
+                                  <option key={unit} value={unit}>{unit}</option>
                                 ))}
+                                <option value="other">Other...</option>
                               </select>
-                              {(material.unit === 'Custom (Type below)' || (material.unit && !COMMON_UNITS.includes(material.unit))) && (
+                              {(!COMMON_UNITS.filter(u => u !== 'Custom (Type below)').includes(material.unit) || material.unit === '') && (
                                 <input
                                   type="text"
-                                  value={material.unit === 'Custom (Type below)' ? '' : material.unit}
+                                  value={material.unit}
                                   onChange={(e) => updateMaterial(material.id, { unit: e.target.value })}
-                                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
-                                  placeholder="Enter custom unit"
+                                  className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                                  placeholder="Type unit"
                                   required
                                 />
                               )}

@@ -186,11 +186,11 @@ const ChangeRequestsPage: React.FC = () => {
         setSelectedChangeRequest(response.data);
         setShowEditModal(true);
       } else {
-        showError(response.message || 'Failed to load change request details');
+        showError(response.message || 'Failed to load PO details');
       }
     } catch (error) {
-      console.error('Error loading change request for edit:', error);
-      showError('Failed to load change request details');
+      console.error('Error loading PO for edit:', error);
+      showError('Failed to load PO details');
     }
   };
 

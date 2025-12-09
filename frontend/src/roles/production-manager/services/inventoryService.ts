@@ -1,9 +1,5 @@
 import { apiClient } from '@/api/config';
 import { AxiosError } from 'axios';
-import { API_BASE_URL } from '@/api/config';
-
-// Use centralized API URL from config - no hardcoded fallbacks
-const API_URL = API_BASE_URL;
 
 // Interfaces
 export interface InventoryMaterial {
@@ -19,6 +15,7 @@ export interface InventoryMaterial {
   unit_price: number;
   description?: string;
   is_active?: boolean;
+  is_returnable?: boolean;  // Whether material can be returned/reused
   created_at?: string;
   created_by?: string;
   last_modified_at?: string;
@@ -65,6 +62,201 @@ export interface InternalMaterialRequest {
   created_by?: string;
   last_modified_at?: string;
   last_modified_by?: string;
+  // Enriched fields from backend
+  project_details?: {
+    project_id: number;
+    project_name: string;
+    project_code: string;
+    location?: string;
+  };
+  requester_details?: {
+    user_id: number;
+    full_name: string;
+    email: string;
+  };
+  material_details?: {
+    material_code: string;
+    current_stock: number;
+    unit: string;
+    unit_price: number;
+  };
+}
+
+export type MaterialCondition = 'Good' | 'Damaged' | 'Defective';
+export type DisposalStatus = 'pending_review' | 'approved_disposal' | 'disposed' | 'repaired' | null;
+
+export interface MaterialReturn {
+  return_id?: number;
+  inventory_material_id: number;
+  project_id: number;
+  quantity: number;
+  condition: MaterialCondition;
+  add_to_stock: boolean;
+  return_reason?: string;
+  reference_number?: string;
+  notes?: string;
+  disposal_status?: DisposalStatus;
+  disposal_reviewed_by?: string;
+  disposal_reviewed_at?: string;
+  disposal_notes?: string;
+  disposal_value?: number;
+  created_at?: string;
+  created_by?: string;
+  inventory_transaction_id?: number;
+  // Enriched fields from backend
+  material_name?: string;
+  material_code?: string;
+  unit?: string;
+  project_details?: {
+    project_id: number;
+    project_name: string;
+    project_code: string;
+    location?: string;
+  };
+}
+
+export interface CreateMaterialReturnData {
+  inventory_material_id: number;
+  project_id: number;
+  quantity: number;
+  condition: MaterialCondition;
+  add_to_stock?: boolean;
+  return_reason?: string;
+  reference_number?: string;
+  notes?: string;
+}
+
+export interface ReviewDisposalData {
+  action: 'approve' | 'repair';
+  disposal_value?: number;
+  notes?: string;
+}
+
+export interface DispatchedMaterial {
+  inventory_material_id: number;
+  material_code: string;
+  material_name: string;
+  brand?: string;
+  unit: string;
+  is_returnable: boolean;
+  dispatched_quantity: number;
+  returned_quantity: number;
+  returnable_quantity: number;
+}
+
+// ==================== DELIVERY NOTE INTERFACES ====================
+
+export type DeliveryNoteStatus = 'DRAFT' | 'ISSUED' | 'IN_TRANSIT' | 'DELIVERED' | 'PARTIAL' | 'CANCELLED';
+
+export interface DeliveryNoteItem {
+  item_id?: number;
+  delivery_note_id?: number;
+  inventory_material_id: number;
+  internal_request_id?: number;
+  quantity: number;
+  unit_price?: number;
+  notes?: string;
+  quantity_received?: number;
+  inventory_transaction_id?: number;
+  // Enriched fields
+  material_code?: string;
+  material_name?: string;
+  brand?: string;
+  unit?: string;
+}
+
+export interface MaterialDeliveryNote {
+  delivery_note_id?: number;
+  delivery_note_number?: string;
+  project_id: number;
+  delivery_date: string;
+  attention_to?: string;
+  delivery_from?: string;
+  requested_by?: string;
+  request_date?: string;
+  vehicle_number?: string;
+  driver_name?: string;
+  driver_contact?: string;
+  prepared_by?: string;
+  checked_by?: string;
+  status?: DeliveryNoteStatus;
+  notes?: string;
+  received_by?: string;
+  received_at?: string;
+  receiver_notes?: string;
+  created_at?: string;
+  created_by?: string;
+  last_modified_at?: string;
+  last_modified_by?: string;
+  issued_at?: string;
+  issued_by?: string;
+  dispatched_at?: string;
+  dispatched_by?: string;
+  items?: DeliveryNoteItem[];
+  total_items?: number;
+  project_details?: {
+    project_id: number;
+    project_name: string;
+    project_code: string;
+    location?: string;
+    project_managers?: Array<{
+      user_id: number;
+      full_name: string;
+      email: string;
+    }>;
+  };
+}
+
+export interface CreateDeliveryNoteData {
+  project_id: number;
+  delivery_date: string;
+  attention_to?: string;
+  delivery_from?: string;
+  requested_by?: string;
+  request_date?: string;
+  vehicle_number?: string;
+  driver_name?: string;
+  driver_contact?: string;
+  checked_by?: string;
+  notes?: string;
+}
+
+export interface AddDeliveryNoteItemData {
+  inventory_material_id: number;
+  quantity: number;
+  internal_request_id?: number;
+  notes?: string;
+}
+
+// ==================== CONFIG INTERFACES ====================
+
+export interface InventoryConfig {
+  store_name: string;
+  company_name: string;
+  currency: string;
+  delivery_note_prefix: string;
+}
+
+// ==================== PROJECT INTERFACES ====================
+
+export interface ProjectManager {
+  user_id: number;
+  full_name: string;
+  email: string;
+}
+
+export interface ProjectWithManagers {
+  project_id: number;
+  project_name: string;
+  project_code: string;
+  location?: string;
+  client?: string;
+  user_id?: number[] | null;  // Project manager IDs
+  mep_supervisor_id?: number[] | null;  // MEP supervisor IDs
+  site_supervisor_id?: number | null;  // Site supervisor ID
+  project_managers?: ProjectManager[];  // Enriched manager details
+  mep_supervisors?: ProjectManager[];  // Enriched MEP supervisor details
+  site_supervisors?: ProjectManager[];  // Enriched site supervisor/engineer details
 }
 
 class InventoryService {
@@ -228,7 +420,8 @@ class InventoryService {
         `/transactions`,
         { headers: this.getAuthHeader() }
       );
-      return response.data;
+      // Backend returns { transactions: [...] } or array directly
+      return response.data.transactions || response.data || [];
     } catch (error) {
       const axiosError = error as AxiosError;
       console.error('Error fetching transactions:', axiosError);
@@ -288,7 +481,8 @@ class InventoryService {
         `/internal_material_requests`,
         { headers: this.getAuthHeader() }
       );
-      return response.data;
+      // Backend returns { requests: [...], total: number }
+      return response.data.requests || response.data || [];
     } catch (error) {
       const axiosError = error as AxiosError;
       console.error('Error fetching internal requests:', axiosError);
@@ -307,7 +501,8 @@ class InventoryService {
         `/sent_internal_requests`,
         { headers: this.getAuthHeader() }
       );
-      return response.data;
+      // Backend returns { requests: [...], total: number }
+      return response.data.requests || response.data || [];
     } catch (error) {
       const axiosError = error as AxiosError;
       console.error('Error fetching sent requests:', axiosError);
@@ -529,6 +724,501 @@ class InventoryService {
       console.error('Error fetching dashboard data:', axiosError);
       throw new Error(
         (axiosError.response?.data as any)?.error || 'Failed to fetch dashboard data'
+      );
+    }
+  }
+
+  // ==================== MATERIAL RETURN METHODS ====================
+
+  /**
+   * Create a new material return with condition tracking
+   */
+  async createMaterialReturn(data: CreateMaterialReturnData): Promise<{
+    return: MaterialReturn;
+    stock_updated: boolean;
+    new_stock_level: number;
+    project_details: any;
+  }> {
+    try {
+      const response = await apiClient.post(
+        `/material_return`,
+        data,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error creating material return:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to create material return'
+      );
+    }
+  }
+
+  /**
+   * Get dispatched materials for a project that can be returned
+   * Returns materials with dispatched, returned, and returnable quantities
+   */
+  async getDispatchedMaterialsForProject(projectId: number): Promise<{
+    project_id: number;
+    materials: DispatchedMaterial[];
+    total: number;
+  }> {
+    try {
+      const response = await apiClient.get(
+        `/project/${projectId}/dispatched_materials`,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching dispatched materials:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to fetch dispatched materials'
+      );
+    }
+  }
+
+  /**
+   * Get all material returns with optional filters
+   */
+  async getAllMaterialReturns(filters?: {
+    project_id?: number;
+    condition?: MaterialCondition;
+    disposal_status?: DisposalStatus;
+    inventory_material_id?: number;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{ returns: MaterialReturn[]; total: number }> {
+    try {
+      const params = new URLSearchParams();
+      if (filters?.project_id) params.append('project_id', filters.project_id.toString());
+      if (filters?.condition) params.append('condition', filters.condition);
+      if (filters?.disposal_status) params.append('disposal_status', filters.disposal_status);
+      if (filters?.inventory_material_id) params.append('inventory_material_id', filters.inventory_material_id.toString());
+      if (filters?.start_date) params.append('start_date', filters.start_date);
+      if (filters?.end_date) params.append('end_date', filters.end_date);
+
+      const response = await apiClient.get(
+        `/material_returns?${params.toString()}`,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching material returns:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to fetch material returns'
+      );
+    }
+  }
+
+  /**
+   * Get a specific material return by ID
+   */
+  async getMaterialReturnById(id: number): Promise<MaterialReturn> {
+    try {
+      const response = await apiClient.get(
+        `/material_return/${id}`,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.return;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching material return:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to fetch material return'
+      );
+    }
+  }
+
+  /**
+   * Get all material returns pending disposal review
+   */
+  async getPendingDisposalReturns(): Promise<{ pending_disposals: MaterialReturn[]; total: number }> {
+    try {
+      const response = await apiClient.get(
+        `/material_returns/pending_disposal`,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching pending disposals:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to fetch pending disposals'
+      );
+    }
+  }
+
+  /**
+   * Review and approve/repair disposal of damaged/defective materials
+   */
+  async reviewDisposal(id: number, data: ReviewDisposalData): Promise<MaterialReturn> {
+    try {
+      const response = await apiClient.post(
+        `/material_return/${id}/review_disposal`,
+        data,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.return;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error reviewing disposal:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to review disposal'
+      );
+    }
+  }
+
+  /**
+   * Mark a material return as physically disposed
+   */
+  async markAsDisposed(id: number, notes?: string): Promise<MaterialReturn> {
+    try {
+      const response = await apiClient.post(
+        `/material_return/${id}/mark_disposed`,
+        { notes },
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.return;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error marking as disposed:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to mark as disposed'
+      );
+    }
+  }
+
+  /**
+   * Add repaired material back to inventory stock
+   */
+  async addRepairedToStock(id: number): Promise<{
+    return: MaterialReturn;
+    new_stock_level: number;
+  }> {
+    try {
+      const response = await apiClient.post(
+        `/material_return/${id}/add_to_stock`,
+        {},
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error adding repaired to stock:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to add repaired material to stock'
+      );
+    }
+  }
+
+  // ==================== PROJECT METHODS ====================
+
+  /**
+   * Get all projects with full details (for dropdown selections and manager lookup)
+   */
+  async getAllProjects(): Promise<ProjectWithManagers[]> {
+    try {
+      const response = await apiClient.get(
+        `/all_project`,
+        { headers: this.getAuthHeader() }
+      );
+      // Backend returns { projects: [...] } or array directly
+      return response.data.projects || response.data || [];
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching projects:', axiosError);
+      // Return empty array on error to allow page to load
+      return [];
+    }
+  }
+
+  // ==================== INVENTORY CONFIG METHODS ====================
+
+  /**
+   * Get inventory configuration (store name, currency, etc.)
+   */
+  async getInventoryConfig(): Promise<InventoryConfig> {
+    try {
+      const response = await apiClient.get(
+        `/inventory/config`,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching inventory config:', axiosError);
+      // Return defaults on error
+      return {
+        store_name: 'M2 Store',
+        company_name: 'MeterSquare ERP',
+        currency: 'AED',
+        delivery_note_prefix: 'MDN'
+      };
+    }
+  }
+
+  // ==================== MATERIAL DELIVERY NOTE METHODS ====================
+
+  /**
+   * Create a new delivery note
+   */
+  async createDeliveryNote(data: CreateDeliveryNoteData): Promise<MaterialDeliveryNote> {
+    try {
+      const response = await apiClient.post(
+        `/delivery_notes`,
+        data,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.delivery_note;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error creating delivery note:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to create delivery note'
+      );
+    }
+  }
+
+  /**
+   * Get all delivery notes with optional filters
+   */
+  async getAllDeliveryNotes(filters?: {
+    project_id?: number;
+    status?: DeliveryNoteStatus;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{ delivery_notes: MaterialDeliveryNote[]; total: number }> {
+    try {
+      const params = new URLSearchParams();
+      if (filters?.project_id) params.append('project_id', filters.project_id.toString());
+      if (filters?.status) params.append('status', filters.status);
+      if (filters?.start_date) params.append('start_date', filters.start_date);
+      if (filters?.end_date) params.append('end_date', filters.end_date);
+
+      const response = await apiClient.get(
+        `/delivery_notes?${params.toString()}`,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching delivery notes:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to fetch delivery notes'
+      );
+    }
+  }
+
+  /**
+   * Get a specific delivery note by ID
+   */
+  async getDeliveryNoteById(id: number): Promise<MaterialDeliveryNote> {
+    try {
+      const response = await apiClient.get(
+        `/delivery_note/${id}`,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.delivery_note;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching delivery note:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to fetch delivery note'
+      );
+    }
+  }
+
+  /**
+   * Update a delivery note
+   */
+  async updateDeliveryNote(id: number, data: Partial<CreateDeliveryNoteData>): Promise<MaterialDeliveryNote> {
+    try {
+      const response = await apiClient.put(
+        `/delivery_note/${id}`,
+        data,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.delivery_note;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error updating delivery note:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to update delivery note'
+      );
+    }
+  }
+
+  /**
+   * Delete a delivery note
+   */
+  async deleteDeliveryNote(id: number): Promise<{ message: string }> {
+    try {
+      const response = await apiClient.delete(
+        `/delivery_note/${id}`,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error deleting delivery note:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to delete delivery note'
+      );
+    }
+  }
+
+  /**
+   * Add an item to a delivery note
+   */
+  async addDeliveryNoteItem(deliveryNoteId: number, data: AddDeliveryNoteItemData): Promise<{
+    item: DeliveryNoteItem;
+    delivery_note: MaterialDeliveryNote;
+  }> {
+    try {
+      const response = await apiClient.post(
+        `/delivery_note/${deliveryNoteId}/items`,
+        data,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error adding item to delivery note:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to add item to delivery note'
+      );
+    }
+  }
+
+  /**
+   * Update an item in a delivery note
+   */
+  async updateDeliveryNoteItem(deliveryNoteId: number, itemId: number, data: {
+    quantity?: number;
+    notes?: string;
+  }): Promise<DeliveryNoteItem> {
+    try {
+      const response = await apiClient.put(
+        `/delivery_note/${deliveryNoteId}/items/${itemId}`,
+        data,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.item;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error updating delivery note item:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to update delivery note item'
+      );
+    }
+  }
+
+  /**
+   * Remove an item from a delivery note
+   */
+  async removeDeliveryNoteItem(deliveryNoteId: number, itemId: number): Promise<MaterialDeliveryNote> {
+    try {
+      const response = await apiClient.delete(
+        `/delivery_note/${deliveryNoteId}/items/${itemId}`,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.delivery_note;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error removing delivery note item:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to remove delivery note item'
+      );
+    }
+  }
+
+  /**
+   * Issue a delivery note (deducts stock)
+   */
+  async issueDeliveryNote(id: number): Promise<MaterialDeliveryNote> {
+    try {
+      const response = await apiClient.post(
+        `/delivery_note/${id}/issue`,
+        {},
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.delivery_note;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error issuing delivery note:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to issue delivery note'
+      );
+    }
+  }
+
+  /**
+   * Dispatch a delivery note (mark as in transit)
+   */
+  async dispatchDeliveryNote(id: number, data?: {
+    vehicle_number?: string;
+    driver_name?: string;
+    driver_contact?: string;
+  }): Promise<MaterialDeliveryNote> {
+    try {
+      const response = await apiClient.post(
+        `/delivery_note/${id}/dispatch`,
+        data || {},
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.delivery_note;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error dispatching delivery note:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to dispatch delivery note'
+      );
+    }
+  }
+
+  /**
+   * Confirm delivery receipt
+   */
+  async confirmDelivery(id: number, data?: {
+    received_by?: string;
+    receiver_notes?: string;
+    items_received?: Array<{ item_id: number; quantity_received: number }>;
+  }): Promise<MaterialDeliveryNote> {
+    try {
+      const response = await apiClient.post(
+        `/delivery_note/${id}/confirm`,
+        data || {},
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.delivery_note;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error confirming delivery:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to confirm delivery'
+      );
+    }
+  }
+
+  /**
+   * Cancel a delivery note
+   */
+  async cancelDeliveryNote(id: number): Promise<MaterialDeliveryNote> {
+    try {
+      const response = await apiClient.post(
+        `/delivery_note/${id}/cancel`,
+        {},
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.delivery_note;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error cancelling delivery note:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to cancel delivery note'
       );
     }
   }

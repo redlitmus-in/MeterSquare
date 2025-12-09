@@ -26,7 +26,9 @@ import {
   X,
   MessageSquare,
   Pencil,
-  Loader2
+  Loader2,
+  TrendingDown,
+  TrendingUp
 } from 'lucide-react';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -36,6 +38,7 @@ import { buyerService, Purchase, PurchaseListResponse, StoreAvailabilityResponse
 import PurchaseDetailsModal from '../components/PurchaseDetailsModal';
 import MaterialVendorSelectionModal from '../components/MaterialVendorSelectionModal';
 import VendorEmailModal from '../components/VendorEmailModal';
+import EditPricesModal from '../components/EditPricesModal';
 import { removeQueries } from '@/lib/queryClient';
 import { STALE_TIMES, REALTIME_TABLES } from '@/lib/constants';
 
@@ -54,6 +57,8 @@ const PurchaseOrders: React.FC = () => {
   const [checkingStoreAvailability, setCheckingStoreAvailability] = useState(false);
   const [completingFromStore, setCompletingFromStore] = useState(false);
   const [sendingWhatsAppId, setSendingWhatsAppId] = useState<number | null>(null);
+  const [isEditPricesModalOpen, setIsEditPricesModalOpen] = useState(false);
+  const [selectedPurchaseForPriceEdit, setSelectedPurchaseForPriceEdit] = useState<Purchase | null>(null);
 
   // ✅ OPTIMIZED: Fetch pending purchases - Real-time updates via Supabase (NO POLLING)
   // BEFORE: Polling every 2 seconds = 30 requests/minute per user
@@ -145,14 +150,16 @@ const PurchaseOrders: React.FC = () => {
 
   // Separate ongoing purchases by vendor approval status
   const pendingPurchaseItems = useMemo(() => {
-    // No vendor selected yet AND not pending TD approval
+    // No vendor selected yet AND not pending TD approval AND not rejected
     // POs with vendor_selection_pending_td_approval should be in Pending Approval tab, not here
-    return pendingPurchases.filter(p => !p.vendor_id && !p.vendor_selection_pending_td_approval);
+    // Rejected items should only show in Rejected tab
+    return pendingPurchases.filter(p => !p.vendor_id && !p.vendor_selection_pending_td_approval && !p.rejection_type);
   }, [pendingPurchases]);
 
   const vendorApprovedItems = useMemo(() => {
     // Vendor selected and approved by TD (no longer pending approval) - include both parent and sub-POs
-    return rawPendingPurchases.filter(p => p.vendor_id && !p.vendor_selection_pending_td_approval);
+    // Exclude rejected items
+    return rawPendingPurchases.filter(p => p.vendor_id && !p.vendor_selection_pending_td_approval && !p.rejection_type);
   }, [rawPendingPurchases]);
 
   // Approved PO children (new system - fetched from po_child table)
@@ -168,7 +175,8 @@ const PurchaseOrders: React.FC = () => {
   // Pending Approval tab: Show sub-POs as SEPARATE cards (not grouped under parent)
   const pendingApprovalPurchases = useMemo(() => {
     // Filter from RAW data (not grouped) to show sub-POs as individual cards
-    return rawPendingPurchases.filter(p => p.vendor_selection_pending_td_approval);
+    // Exclude rejected items
+    return rawPendingPurchases.filter(p => p.vendor_selection_pending_td_approval && !p.rejection_type);
   }, [rawPendingPurchases]);
 
   // Determine which purchases to show based on active tab and sub-tab
@@ -228,7 +236,7 @@ const PurchaseOrders: React.FC = () => {
     try {
       const response = await buyerService.resendChangeRequest(crId);
       if (response.success) {
-        showSuccess('Change request resent successfully!');
+        showSuccess('PO resent successfully!');
         // Remove cache completely and refetch fresh data
         removeQueries(['purchases']);
         removeQueries(['pending-purchases']);
@@ -247,7 +255,7 @@ const PurchaseOrders: React.FC = () => {
         showError(response.message || 'Failed to resend');
       }
     } catch (error: any) {
-      showError(error.message || 'Failed to resend change request');
+      showError(error.message || 'Failed to resend PO');
     }
   };
 
@@ -711,6 +719,53 @@ const PurchaseOrders: React.FC = () => {
                           </div>
                         </div>
                       </div>
+
+                      {/* Total Cost with Price Diff */}
+                      <div className="pt-2 border-t border-gray-100">
+                        {(() => {
+                          // Check if any materials have negotiated prices
+                          const materials = purchase.materials || [];
+                          const hasNegotiatedPrices = materials.some((m: any) =>
+                            m.negotiated_price !== undefined && m.negotiated_price !== null
+                          );
+                          const originalTotal = materials.reduce((sum: number, m: any) => {
+                            const originalPrice = m.original_unit_price || m.unit_price || 0;
+                            return sum + (originalPrice * (m.quantity || 0));
+                          }, 0);
+                          const currentTotal = purchase.total_cost || 0;
+                          const priceDiff = hasNegotiatedPrices ? currentTotal - originalTotal : 0;
+                          const diffPercentage = originalTotal > 0 ? (priceDiff / originalTotal) * 100 : 0;
+
+                          if (hasNegotiatedPrices && Math.abs(priceDiff) > 0.01) {
+                            return (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-500">Original</span>
+                                  <span className="text-xs text-gray-400 line-through">{formatCurrency(originalTotal)}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-500">Negotiated</span>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-sm font-bold text-green-700">{formatCurrency(currentTotal)}</span>
+                                    <Badge className={`text-[10px] px-1 py-0 ${
+                                      priceDiff < 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                    }`}>
+                                      {priceDiff < 0 ? <TrendingDown className="w-2.5 h-2.5 mr-0.5" /> : <TrendingUp className="w-2.5 h-2.5 mr-0.5" />}
+                                      {priceDiff < 0 ? '' : '+'}{diffPercentage.toFixed(1)}%
+                                    </Badge>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-gray-500">Total Cost</span>
+                              <span className="text-sm font-bold text-green-700">{formatCurrency(currentTotal)}</span>
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
 
                     {/* Action Buttons */}
@@ -769,23 +824,38 @@ const PurchaseOrders: React.FC = () => {
 
                       {/* First Row: Select Vendor OR Get from Store - Show if no vendor, no pending approval, AND (no store requests OR store request rejected) */}
                       {purchase.status === 'pending' && !purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (!purchase.has_store_requests || purchase.any_store_request_rejected) && (
-                        <div className="flex gap-1.5">
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex gap-1.5">
+                            <Button
+                              onClick={() => handleSelectVendor(purchase)}
+                              size="sm"
+                              className="flex-1 h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1"
+                            >
+                              <Store className="w-3 h-3 mr-1" />
+                              Select Vendor
+                            </Button>
+                            <Button
+                              onClick={() => handleGetFromStore(purchase)}
+                              size="sm"
+                              className="flex-1 h-7 text-xs bg-purple-500 hover:bg-purple-600 text-white px-2 py-1"
+                              title="Get materials directly from M2 Store"
+                            >
+                              <Package className="w-3 h-3 mr-1" />
+                              Get from Store
+                            </Button>
+                          </div>
+                          {/* Edit Prices Button */}
                           <Button
-                            onClick={() => handleSelectVendor(purchase)}
+                            onClick={() => {
+                              setSelectedPurchaseForPriceEdit(purchase);
+                              setIsEditPricesModalOpen(true);
+                            }}
+                            variant="outline"
                             size="sm"
-                            className="flex-1 h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1"
+                            className="w-full h-7 text-xs border-amber-400 text-amber-700 hover:bg-amber-50 px-2 py-1"
                           >
-                            <Store className="w-3 h-3 mr-1" />
-                            Select Vendor
-                          </Button>
-                          <Button
-                            onClick={() => handleGetFromStore(purchase)}
-                            size="sm"
-                            className="flex-1 h-7 text-xs bg-purple-500 hover:bg-purple-600 text-white px-2 py-1"
-                            title="Get materials directly from M2 Store"
-                          >
-                            <Package className="w-3 h-3 mr-1" />
-                            Get from Store
+                            <DollarSign className="w-3 h-3 mr-1" />
+                            Edit Prices
                           </Button>
                         </div>
                       )}
@@ -883,26 +953,16 @@ const PurchaseOrders: React.FC = () => {
                         View Details
                       </Button>
 
-                      {/* Rejected Item Actions */}
-                      {purchase.status === 'rejected' && (
-                        <div className="flex gap-1.5 w-full">
-                          <Button
-                            onClick={() => handleEdit(purchase)}
-                            size="sm"
-                            className="flex-1 h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1"
-                          >
-                            <Pencil className="w-3 h-3 mr-1" />
-                            Edit
-                          </Button>
-                          <Button
-                            onClick={() => handleResend(purchase.cr_id)}
-                            size="sm"
-                            className="flex-1 h-7 text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1"
-                          >
-                            <Check className="w-3 h-3 mr-1" />
-                            Resend
-                          </Button>
-                        </div>
+                      {/* Rejected Item Actions - Resend only for CR rejections (not vendor selection) */}
+                      {purchase.status === 'rejected' && purchase.rejection_type !== 'vendor_selection' && (
+                        <Button
+                          onClick={() => handleResend(purchase.cr_id)}
+                          size="sm"
+                          className="w-full h-7 text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1"
+                        >
+                          <Check className="w-3 h-3 mr-1" />
+                          Resend
+                        </Button>
                       )}
 
                       {/* Select New Vendor for Vendor Rejection */}
@@ -2039,6 +2099,24 @@ const PurchaseOrders: React.FC = () => {
             await new Promise(resolve => setTimeout(resolve, 500));
             await refetchPending();
             await refetchCompleted();
+          }}
+        />
+      )}
+
+      {/* Edit Prices Modal for Purchase */}
+      {selectedPurchaseForPriceEdit && (
+        <EditPricesModal
+          purchase={selectedPurchaseForPriceEdit}
+          isOpen={isEditPricesModalOpen}
+          onClose={() => {
+            setIsEditPricesModalOpen(false);
+            setSelectedPurchaseForPriceEdit(null);
+          }}
+          onPricesUpdated={async () => {
+            // Refetch pending purchases to show updated prices
+            removeQueries(['buyer-pending-purchases']);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await refetchPending();
           }}
         />
       )}

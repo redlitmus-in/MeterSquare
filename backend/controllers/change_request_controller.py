@@ -901,6 +901,11 @@ def send_for_review(cr_id):
         try:
             if next_approver_id:
                 project_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                # Determine if request has new materials (master_material_id is None)
+                has_new_materials = any(
+                    mat.get('master_material_id') is None
+                    for mat in (change_request.materials_data or [])
+                )
                 notification_service.notify_cr_created(
                     cr_id=cr_id,
                     project_name=project_name,
@@ -909,7 +914,8 @@ def send_for_review(cr_id):
                     creator_role=user_role,
                     recipient_user_ids=[next_approver_id],
                     recipient_role=next_role,
-                    request_type=change_request.request_type
+                    request_type=change_request.request_type,
+                    has_new_materials=has_new_materials
                 )
         except Exception as notif_error:
             log.error(f"Failed to send CR created notification: {notif_error}")
@@ -1523,10 +1529,67 @@ def get_change_request_by_id(cr_id):
             result['boq_name'] = change_request.boq.boq_name
             result['boq_status'] = change_request.boq.status
 
-        # Calculate negotiable margin analysis
+        # Calculate negotiable margin analysis and enrich with BOQ prices
         if change_request.boq:
             boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
             if boq_details:
+                # Build material lookup map for BOQ quantities AND unit prices
+                # This enriches SE-created requests that were saved with unit_price=0
+                material_boq_data = {}
+                if boq_details.boq_details:
+                    boq_items = boq_details.boq_details.get('items', [])
+                    for item_idx, item in enumerate(boq_items):
+                        for sub_item_idx, sub_item in enumerate(item.get('sub_items', [])):
+                            for mat_idx, boq_material in enumerate(sub_item.get('materials', [])):
+                                material_id = f"mat_{change_request.boq_id}_{item_idx+1}_{sub_item_idx+1}_{mat_idx+1}"
+                                material_boq_data[material_id] = {
+                                    'quantity': boq_material.get('quantity', 0),
+                                    'unit': boq_material.get('unit', 'nos'),
+                                    'unit_price': boq_material.get('unit_price', 0)
+                                }
+
+                # Enrich materials_data with BOQ prices if stored value is 0
+                if result.get('materials_data'):
+                    for material in result['materials_data']:
+                        material_id = material.get('master_material_id')
+                        if material_id and material_id in material_boq_data:
+                            boq_data = material_boq_data[material_id]
+                            material['original_boq_quantity'] = boq_data['quantity']
+                            if not material.get('unit_price') or material.get('unit_price') == 0:
+                                material['unit_price'] = boq_data.get('unit_price', 0)
+                                material['total_price'] = material.get('quantity', 0) * material.get('unit_price', 0)
+
+                # Enrich sub_items_data with BOQ prices if stored value is 0
+                if result.get('sub_items_data'):
+                    for sub_item in result['sub_items_data']:
+                        material_id = sub_item.get('master_material_id')
+                        if material_id and material_id in material_boq_data:
+                            boq_data = material_boq_data[material_id]
+                            sub_item['original_boq_quantity'] = boq_data['quantity']
+                            if not sub_item.get('unit_price') or sub_item.get('unit_price') == 0:
+                                sub_item['unit_price'] = boq_data.get('unit_price', 0)
+                                sub_item['total_price'] = sub_item.get('quantity', 0) * sub_item.get('unit_price', 0)
+
+                # ALWAYS recalculate materials_total_cost from enriched materials data
+                # Frontend uses: sub_items_data || materials_data (prefers sub_items_data)
+                # We must match the same logic to ensure displayed total matches margin calculation
+                displayed_total_cost = 0.0
+
+                # First try sub_items_data (frontend's preferred source)
+                sub_items = result.get('sub_items_data', [])
+                if sub_items and len(sub_items) > 0:
+                    for sub in sub_items:
+                        displayed_total_cost += sub.get('total_price', 0) or (sub.get('quantity', 0) * sub.get('unit_price', 0))
+
+                # Fallback to materials_data if sub_items_data is empty
+                if displayed_total_cost == 0:
+                    for mat in result.get('materials_data', []):
+                        displayed_total_cost += mat.get('total_price', 0) or (mat.get('quantity', 0) * mat.get('unit_price', 0))
+
+                # Update result with the calculated total
+                if displayed_total_cost > 0:
+                    result['materials_total_cost'] = round(displayed_total_cost, 2)
+
                 # Calculate already consumed from OTHER approved CRs (exclude current CR)
                 already_consumed = db.session.query(
                     db.func.coalesce(db.func.sum(ChangeRequest.materials_total_cost), 0)
@@ -1537,9 +1600,11 @@ def get_change_request_by_id(cr_id):
                     ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
                 ).scalar() or 0.0
 
-                # Calculate negotiable margin analysis
+                # Calculate negotiable margin analysis using the DISPLAYED total cost
+                # This ensures "This Request" value matches the materials table total
+                margin_total = displayed_total_cost if displayed_total_cost > 0 else (change_request.materials_total_cost or 0)
                 margin_analysis = negotiable_profit_calculator.calculate_change_request_margin(
-                    boq_details, change_request.materials_total_cost or 0, change_request.boq_id, already_consumed
+                    boq_details, margin_total, change_request.boq_id, already_consumed
                 )
 
                 if margin_analysis:
@@ -2649,7 +2714,9 @@ def get_boq_change_requests(boq_id):
         # Get BOQ details to access material quantities
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
 
-        # Build material lookup map for BOQ quantities
+        # Build material lookup map for BOQ quantities AND unit prices
+        # This is needed to enrich change requests created by Site Engineers
+        # (SEs don't see prices, so their requests are saved with unit_price=0)
         material_boq_quantities = {}
         if boq_details and boq_details.boq_details:
             boq_items = boq_details.boq_details.get('items', [])
@@ -2660,7 +2727,8 @@ def get_boq_change_requests(boq_id):
                         material_id = f"mat_{boq_id}_{item_idx+1}_{sub_item_idx+1}_{mat_idx+1}"
                         material_boq_quantities[material_id] = {
                             'quantity': boq_material.get('quantity', 0),
-                            'unit': boq_material.get('unit', 'nos')
+                            'unit': boq_material.get('unit', 'nos'),
+                            'unit_price': boq_material.get('unit_price', 0)  # Include unit price for enrichment
                         }
 
         # Get all change requests for this BOQ
@@ -2674,25 +2742,51 @@ def get_boq_change_requests(boq_id):
         for cr in change_requests:
             request_data = cr.to_dict()
 
-            # Enrich materials_data with BOQ quantities
+            # Enrich materials_data with BOQ quantities and unit prices
             if request_data.get('materials_data'):
                 enriched_materials = []
                 for material in request_data['materials_data']:
                     material_id = material.get('master_material_id')
                     if material_id and material_id in material_boq_quantities:
-                        material['original_boq_quantity'] = material_boq_quantities[material_id]['quantity']
+                        boq_data = material_boq_quantities[material_id]
+                        material['original_boq_quantity'] = boq_data['quantity']
+                        # Enrich unit_price from BOQ if stored value is 0 (SE-created requests)
+                        if not material.get('unit_price') or material.get('unit_price') == 0:
+                            material['unit_price'] = boq_data.get('unit_price', 0)
+                            # Also recalculate total_price
+                            material['total_price'] = material.get('quantity', 0) * material.get('unit_price', 0)
                     enriched_materials.append(material)
                 request_data['materials_data'] = enriched_materials
 
-            # Enrich sub_items_data with BOQ quantities
+            # Enrich sub_items_data with BOQ quantities and unit prices
             if request_data.get('sub_items_data'):
                 enriched_sub_items = []
                 for sub_item in request_data['sub_items_data']:
                     material_id = sub_item.get('master_material_id')
                     if material_id and material_id in material_boq_quantities:
-                        sub_item['original_boq_quantity'] = material_boq_quantities[material_id]['quantity']
+                        boq_data = material_boq_quantities[material_id]
+                        sub_item['original_boq_quantity'] = boq_data['quantity']
+                        # Enrich unit_price from BOQ if stored value is 0 (SE-created requests)
+                        if not sub_item.get('unit_price') or sub_item.get('unit_price') == 0:
+                            sub_item['unit_price'] = boq_data.get('unit_price', 0)
+                            # Also recalculate total_price
+                            sub_item['total_price'] = sub_item.get('quantity', 0) * sub_item.get('unit_price', 0)
                     enriched_sub_items.append(sub_item)
                 request_data['sub_items_data'] = enriched_sub_items
+
+            # Recalculate materials_total_cost if it was 0 (SE-created requests)
+            # Use enriched prices from either materials_data or sub_items_data
+            if not request_data.get('materials_total_cost') or request_data.get('materials_total_cost') == 0:
+                total_cost = 0.0
+                # Sum from materials_data
+                for mat in request_data.get('materials_data', []):
+                    total_cost += mat.get('total_price', 0) or (mat.get('quantity', 0) * mat.get('unit_price', 0))
+                # Sum from sub_items_data if materials_data is empty
+                if total_cost == 0:
+                    for sub in request_data.get('sub_items_data', []):
+                        total_cost += sub.get('total_price', 0) or (sub.get('quantity', 0) * sub.get('unit_price', 0))
+                if total_cost > 0:
+                    request_data['materials_total_cost'] = round(total_cost, 2)
 
             # Budget impact removed - columns dropped from database
 

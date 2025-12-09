@@ -55,11 +55,11 @@ const M2StoreLanding: React.FC = () => {
 
   const modules = [
     {
-      id: 'materials',
-      title: 'Materials Master',
-      description: 'Manage inventory items, stock levels, and material information',
+      id: 'inventory',
+      title: 'Inventory Management',
+      description: 'Manage materials, stock levels, receive and dispatch materials',
       icon: Package,
-      href: '/production-manager/m2-store/materials',
+      href: '/production-manager/m2-store/stock',
       gradient: 'from-blue-500 to-blue-600',
       lightBg: 'bg-blue-50',
       iconColor: 'text-blue-600',
@@ -70,7 +70,7 @@ const M2StoreLanding: React.FC = () => {
       title: 'Receive Stock',
       description: 'Record incoming materials and create goods received notes',
       icon: Truck,
-      href: '/production-manager/m2-store/receive',
+      href: '/production-manager/m2-store/stock',
       gradient: 'from-emerald-500 to-emerald-600',
       lightBg: 'bg-emerald-50',
       iconColor: 'text-emerald-600',
@@ -81,7 +81,7 @@ const M2StoreLanding: React.FC = () => {
       title: 'Dispatch Materials',
       description: 'Process and track material dispatch to project sites',
       icon: Send,
-      href: '/production-manager/m2-store/dispatch',
+      href: '/production-manager/m2-store/stock',
       gradient: 'from-violet-500 to-violet-600',
       lightBg: 'bg-violet-50',
       iconColor: 'text-violet-600',
@@ -135,65 +135,83 @@ const M2StoreLanding: React.FC = () => {
 
         {/* Quick Stats Bar */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total Items</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  {loading ? '...' : stats.totalItems.toLocaleString()}
-                </p>
+          {loading ? (
+            <>
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 animate-pulse">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="h-3 bg-gray-200 rounded w-20 mb-2"></div>
+                      <div className="h-7 bg-gray-200 rounded w-16 mt-1"></div>
+                    </div>
+                    <div className="w-10 h-10 bg-gray-200 rounded-lg"></div>
+                  </div>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total Items</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                      {stats.totalItems.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <Layers className="w-5 h-5 text-blue-600" />
+                  </div>
+                </div>
               </div>
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Layers className="w-5 h-5 text-blue-600" />
-              </div>
-            </div>
-          </div>
 
-          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Stock Value</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  {loading ? '...' : `₹${stats.totalValue >= 100000 ? `${(stats.totalValue / 100000).toFixed(1)}L` : stats.totalValue.toLocaleString()}`}
-                </p>
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Stock Value</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                      ₹{stats.totalValue >= 100000 ? `${(stats.totalValue / 100000).toFixed(1)}L` : stats.totalValue.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                    <TrendingUp className="w-5 h-5 text-emerald-600" />
+                  </div>
+                </div>
               </div>
-              <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-emerald-600" />
-              </div>
-            </div>
-          </div>
 
-          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Low Stock</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  {loading ? '...' : stats.lowStockCount}
-                </p>
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Low Stock</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                      {stats.lowStockCount}
+                    </p>
+                  </div>
+                  <div className={`w-10 h-10 ${stats.lowStockCount > 0 ? 'bg-orange-100' : 'bg-green-100'} rounded-lg flex items-center justify-center`}>
+                    {stats.lowStockCount > 0 ? (
+                      <AlertTriangle className="w-5 h-5 text-orange-600" />
+                    ) : (
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className={`w-10 h-10 ${stats.lowStockCount > 0 ? 'bg-orange-100' : 'bg-green-100'} rounded-lg flex items-center justify-center`}>
-                {stats.lowStockCount > 0 ? (
-                  <AlertTriangle className="w-5 h-5 text-orange-600" />
-                ) : (
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                )}
-              </div>
-            </div>
-          </div>
 
-          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pending</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  {loading ? '...' : stats.pendingRequests}
-                </p>
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pending</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                      {stats.pendingRequests}
+                    </p>
+                  </div>
+                  <div className="w-10 h-10 bg-violet-100 rounded-lg flex items-center justify-center">
+                    <Send className="w-5 h-5 text-violet-600" />
+                  </div>
+                </div>
               </div>
-              <div className="w-10 h-10 bg-violet-100 rounded-lg flex items-center justify-center">
-                <Send className="w-5 h-5 text-violet-600" />
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </div>
 
         {/* Module Cards */}
@@ -239,15 +257,15 @@ const M2StoreLanding: React.FC = () => {
         <div className="bg-gradient-to-r from-slate-700 to-slate-800 rounded-2xl p-6 text-white">
           <div className="flex flex-col md:flex-row items-center justify-between">
             <div className="mb-4 md:mb-0">
-              <h3 className="text-xl font-semibold mb-1">Need to add new materials?</h3>
-              <p className="text-slate-300 text-sm">Go to Materials Master to add, edit, or manage inventory items</p>
+              <h3 className="text-xl font-semibold mb-1">Need to manage inventory?</h3>
+              <p className="text-slate-300 text-sm">Go to Inventory Management to add, edit, receive or dispatch materials</p>
             </div>
             <button
-              onClick={() => navigate('/production-manager/m2-store/materials')}
+              onClick={() => navigate('/production-manager/m2-store/stock')}
               className="bg-white text-slate-800 px-6 py-3 rounded-xl font-medium hover:bg-slate-100 transition-colors flex items-center space-x-2"
             >
               <Package className="w-5 h-5" />
-              <span>Materials Master</span>
+              <span>Inventory Management</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
