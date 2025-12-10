@@ -7810,7 +7810,6 @@ def generate_lpo_pdf(cr_id):
             lpo_data['signatures']['md_signature'] = getattr(settings, 'md_signature_image', None)
             lpo_data['signatures']['td_signature'] = getattr(settings, 'td_signature_image', None)
             lpo_data['signatures']['stamp_image'] = getattr(settings, 'company_stamp_image', None)
-            print(f">>> GENERATE PDF - Updated signatures: md={settings.md_name}, td={settings.td_name}")
 
         # Generate PDF
         generator = LPOPDFGenerator()
