@@ -5695,6 +5695,12 @@ def send_vendor_whatsapp(cr_id):
         from models.po_child import POChild
         from models.vendor import Vendor
 
+        # Ensure clean database session state at start
+        try:
+            db.session.rollback()
+        except:
+            pass
+
         current_user = g.user
         buyer_id = current_user['user_id']
 
@@ -5852,8 +5858,9 @@ def send_vendor_whatsapp(cr_id):
                     saved_customization = None
                     try:
                         saved_customization = LPOCustomization.query.filter_by(cr_id=cr_id).first()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning(f"Error fetching LPOCustomization: {e}")
+                        db.session.rollback()  # Rollback to clear any failed transaction
 
                     # Get system settings
                     settings = SystemSettings.query.first()
@@ -5893,32 +5900,8 @@ def send_vendor_whatsapp(cr_id):
                     elif vendor.phone:
                         vendor_phone_formatted = vendor.phone
 
-                    # Parse JSON fields for terms
-                    general_terms_list = []
-                    payment_terms_list_data = []
-                    if saved_customization:
-                        try:
-                            if saved_customization.general_terms:
-                                general_terms_list = json.loads(saved_customization.general_terms) if isinstance(saved_customization.general_terms, str) else saved_customization.general_terms
-                        except:
-                            general_terms_list = []
-                        try:
-                            if saved_customization.payment_terms_list:
-                                payment_terms_list_data = json.loads(saved_customization.payment_terms_list) if isinstance(saved_customization.payment_terms_list, str) else saved_customization.payment_terms_list
-                        except:
-                            payment_terms_list_data = []
-
-                    # Fall back to system settings if no saved customization
-                    if not general_terms_list and settings:
-                        try:
-                            general_terms_list = json.loads(getattr(settings, 'lpo_general_terms', '[]') or '[]')
-                        except:
-                            general_terms_list = []
-                    if not payment_terms_list_data and settings:
-                        try:
-                            payment_terms_list_data = json.loads(getattr(settings, 'lpo_payment_terms_list', '[]') or '[]')
-                        except:
-                            payment_terms_list_data = []
+                    # Parse custom_terms from saved customization (new format - replaces old general_terms and payment_terms_list)
+                    custom_terms_data = _parse_custom_terms(saved_customization)
 
                     lpo_data = {
                         "vendor": {
@@ -5956,7 +5939,7 @@ def send_vendor_whatsapp(cr_id):
                         "terms": {
                             "payment_terms": saved_customization.payment_terms if saved_customization and saved_customization.payment_terms else (getattr(settings, 'default_payment_terms', '100% CDC after delivery') if settings else "100% CDC after delivery"),
                             "delivery_terms": saved_customization.completion_terms if saved_customization and saved_customization.completion_terms else "",
-                            "custom_terms": _parse_custom_terms(saved_customization)
+                            "custom_terms": custom_terms_data
                         },
                         "signatures": {
                             "md_name": getattr(settings, 'md_name', 'Managing Director') if settings else "Managing Director",
@@ -6011,6 +5994,11 @@ def send_vendor_whatsapp(cr_id):
                 log.error(f"Error in PDF generation/upload: {str(e)}")
                 import traceback
                 log.error(f"Traceback: {traceback.format_exc()}")
+                # Rollback any failed database transaction
+                try:
+                    db.session.rollback()
+                except:
+                    pass
                 # Continue without PDF
 
         # Send WhatsApp message
@@ -6055,6 +6043,11 @@ def send_vendor_whatsapp(cr_id):
         log.error(f"Error sending vendor WhatsApp: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
+        # Rollback any failed database transaction
+        try:
+            db.session.rollback()
+        except:
+            pass
         return jsonify({"error": f"Failed to send vendor WhatsApp: {str(e)}"}), 500
 
 

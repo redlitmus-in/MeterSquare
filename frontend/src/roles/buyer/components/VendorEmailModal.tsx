@@ -1145,13 +1145,21 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                           <input
                                             type="checkbox"
                                             checked={term.selected}
-                                            onChange={(e) => {
+                                            onChange={async (e) => {
                                               const updatedTerms = [...(lpoData.terms.custom_terms || [])];
                                               updatedTerms[index] = { ...term, selected: e.target.checked };
-                                              setLpoData({
+                                              const newLpoData = {
                                                 ...lpoData,
                                                 terms: { ...lpoData.terms, custom_terms: updatedTerms }
-                                              });
+                                              };
+                                              setLpoData(newLpoData);
+                                              // Auto-save after toggling checkbox
+                                              try {
+                                                await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures);
+                                                setLastSaved(new Date());
+                                              } catch (error) {
+                                                console.error('Failed to save after toggle:', error);
+                                              }
                                             }}
                                             className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                                           />
@@ -1185,14 +1193,22 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                                 type="button"
                                                 size="sm"
                                                 variant="outline"
-                                                onClick={() => {
+                                                onClick={async () => {
                                                   if (editingTermText.trim()) {
                                                     const updatedTerms = [...(lpoData.terms.custom_terms || [])];
                                                     updatedTerms[index] = { ...term, text: editingTermText.trim() };
-                                                    setLpoData({
+                                                    const newLpoData = {
                                                       ...lpoData,
                                                       terms: { ...lpoData.terms, custom_terms: updatedTerms }
-                                                    });
+                                                    };
+                                                    setLpoData(newLpoData);
+                                                    // Immediate save after editing term
+                                                    try {
+                                                      await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures);
+                                                      setLastSaved(new Date());
+                                                    } catch (error) {
+                                                      console.error('Failed to save after edit:', error);
+                                                    }
                                                   }
                                                   setEditingTermIndex(null);
                                                   setEditingTermText('');
@@ -1217,12 +1233,20 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                               </button>
                                               <button
                                                 type="button"
-                                                onClick={() => {
+                                                onClick={async () => {
                                                   const updatedTerms = (lpoData.terms.custom_terms || []).filter((_: any, i: number) => i !== index);
-                                                  setLpoData({
+                                                  const newLpoData = {
                                                     ...lpoData,
                                                     terms: { ...lpoData.terms, custom_terms: updatedTerms }
-                                                  });
+                                                  };
+                                                  setLpoData(newLpoData);
+                                                  // Immediate save after deleting term
+                                                  try {
+                                                    await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures);
+                                                    setLastSaved(new Date());
+                                                  } catch (error) {
+                                                    console.error('Failed to save after delete:', error);
+                                                  }
                                                 }}
                                                 className="text-red-500 hover:text-red-700 p-1"
                                                 title="Delete term"
@@ -1245,19 +1269,27 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                         onChange={(e) => setNewCustomTerm(e.target.value)}
                                         placeholder="e.g., 50% Advance, 100% CDC after delivery..."
                                         className="flex-1 text-sm"
-                                        onKeyDown={(e) => {
+                                        onKeyDown={async (e) => {
                                           if (e.key === 'Enter') {
                                             e.preventDefault();
                                             if (newCustomTerm.trim()) {
                                               const currentTerms = lpoData.terms.custom_terms || [];
-                                              setLpoData({
+                                              const newLpoData = {
                                                 ...lpoData,
                                                 terms: {
                                                   ...lpoData.terms,
                                                   custom_terms: [...currentTerms, { text: newCustomTerm.trim(), selected: true }]
                                                 }
-                                              });
+                                              };
+                                              setLpoData(newLpoData);
                                               setNewCustomTerm('');
+                                              // Immediate save after adding term
+                                              try {
+                                                await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures);
+                                                setLastSaved(new Date());
+                                              } catch (error) {
+                                                console.error('Failed to save term:', error);
+                                              }
                                             }
                                           }
                                         }}
@@ -1266,24 +1298,34 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                         type="button"
                                         size="sm"
                                         variant="outline"
-                                        onClick={() => {
+                                        onClick={async () => {
                                           if (newCustomTerm.trim()) {
                                             const currentTerms = lpoData.terms.custom_terms || [];
-                                            setLpoData({
+                                            const newLpoData = {
                                               ...lpoData,
                                               terms: {
                                                 ...lpoData.terms,
                                                 custom_terms: [...currentTerms, { text: newCustomTerm.trim(), selected: true }]
                                               }
-                                            });
+                                            };
+                                            setLpoData(newLpoData);
                                             setNewCustomTerm('');
+                                            // Immediate save after adding term
+                                            try {
+                                              await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures);
+                                              setLastSaved(new Date());
+                                            } catch (error) {
+                                              console.error('Failed to save term:', error);
+                                            }
                                           }
                                         }}
                                       >
                                         <Plus className="w-3 h-3 mr-1" /> Add
                                       </Button>
                                     </div>
-                                    <p className="text-xs text-gray-400 mt-2">Payment terms are saved and available for future projects</p>
+                                    <p className="text-xs text-gray-400 mt-2">
+                                      {isSaving ? 'Saving...' : lastSaved ? `Saved ${lastSaved.toLocaleTimeString()}` : 'Payment terms are saved and available for future projects'}
+                                    </p>
                                   </div>
                                 </div>
 
