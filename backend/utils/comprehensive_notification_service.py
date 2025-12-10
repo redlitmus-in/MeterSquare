@@ -1028,6 +1028,182 @@ class ComprehensiveNotificationService:
         except Exception as e:
             log.error(f"Error sending client revision rejected notification: {e}")
 
+    # ==================== RETURNABLE ASSETS NOTIFICATIONS ====================
+
+    @staticmethod
+    def notify_asset_dispatched(project_id, project_name, category_name, category_code, quantity,
+                                 dispatched_by_name, se_user_ids, notes=None, item_codes=None):
+        """
+        Notify Site Engineer(s) when assets are dispatched to their project
+        Trigger: Production Manager dispatches assets
+        Recipients: Site Engineers assigned to the project
+        Priority: NORMAL
+        """
+        try:
+            # Build item details message
+            if item_codes:
+                items_text = f"Items: {', '.join(item_codes)}"
+            else:
+                items_text = f"Quantity: {quantity}"
+
+            for se_user_id in se_user_ids:
+                # Check for duplicate
+                if check_duplicate_notification(se_user_id, f'Assets Dispatched', 'category_code', category_code, minutes=2):
+                    continue
+
+                notification = NotificationManager.create_notification(
+                    user_id=se_user_id,
+                    type='info',
+                    title=f'Assets Dispatched to Your Site',
+                    message=f'{quantity} x {category_name} ({category_code}) dispatched to {project_name} by {dispatched_by_name}. {items_text}' + (f' Notes: {notes}' if notes else ''),
+                    priority='normal',
+                    category='assets',
+                    action_required=False,
+                    action_url=f'/site-engineer/site-assets',
+                    action_label='View Assets',
+                    metadata={
+                        'project_id': project_id,
+                        'category_code': category_code,
+                        'category_name': category_name,
+                        'quantity': quantity,
+                        'workflow': 'returnable_assets',
+                        'action': 'dispatch'
+                    },
+                    sender_name=dispatched_by_name
+                )
+
+                send_notification_to_user(se_user_id, notification.to_dict())
+                log.info(f"Sent asset dispatch notification to SE {se_user_id} for project {project_id}")
+
+        except Exception as e:
+            log.error(f"Error sending asset dispatch notification: {e}")
+
+    @staticmethod
+    def send_asset_received_notification(project_id, project_name, category_name, quantity,
+                                          received_by, received_by_id):
+        """
+        Notify Production Manager when SE acknowledges receipt of dispatched assets
+        Trigger: Site Engineer marks asset as received
+        Recipients: Production Managers
+        Priority: NORMAL
+        """
+        try:
+            from models.user import User
+            from models.role import Role
+
+            # Get all Production Managers (join User with Role to query by role name)
+            pm_users = User.query.join(Role, User.role_id == Role.role_id).filter(
+                Role.role == 'production-manager',
+                User.is_active == True
+            ).all()
+            pm_user_ids = [pm.user_id for pm in pm_users]
+
+            for pm_user_id in pm_user_ids:
+                notification = NotificationManager.create_notification(
+                    user_id=pm_user_id,
+                    type='success',
+                    title=f'Asset Received at Site',
+                    message=f'{received_by} confirmed receipt of {quantity} x {category_name} at {project_name}',
+                    priority='normal',
+                    category='assets',
+                    action_required=False,
+                    action_url=f'/production-manager/returnable-assets',
+                    action_label='View Assets',
+                    metadata={
+                        'project_id': project_id,
+                        'category_name': category_name,
+                        'quantity': quantity,
+                        'workflow': 'returnable_assets',
+                        'action': 'received'
+                    },
+                    sender_name=received_by
+                )
+
+                send_notification_to_user(pm_user_id, notification.to_dict())
+                log.info(f"Sent asset received notification to PM {pm_user_id}")
+
+        except Exception as e:
+            log.error(f"Error sending asset received notification: {e}")
+
+    @staticmethod
+    def notify_asset_return_requested(project_id, project_name, category_name, category_code, quantity,
+                                       condition, pm_user_ids, returned_by_name, damage_description=None):
+        """
+        Notify Production Manager when assets are returned from site
+        Trigger: Site Engineer/PM initiates return
+        Recipients: Production Managers
+        Priority: NORMAL (HIGH if damaged)
+        """
+        try:
+            priority = 'high' if condition in ['damaged', 'poor'] else 'normal'
+            condition_text = f" (Condition: {condition})" if condition != 'good' else ''
+            damage_text = f" Damage: {damage_description}" if damage_description else ''
+
+            for pm_user_id in pm_user_ids:
+                notification = NotificationManager.create_notification(
+                    user_id=pm_user_id,
+                    type='info' if condition == 'good' else 'warning',
+                    title=f'Assets Returned from Site' if condition == 'good' else f'Damaged Assets Returned',
+                    message=f'{quantity} x {category_name} ({category_code}) returned from {project_name} by {returned_by_name}.{condition_text}{damage_text}',
+                    priority=priority,
+                    category='assets',
+                    action_required=condition in ['damaged', 'poor'],
+                    action_url=f'/production-manager/returnable-assets',
+                    action_label='Review Assets',
+                    metadata={
+                        'project_id': project_id,
+                        'category_code': category_code,
+                        'quantity': quantity,
+                        'condition': condition,
+                        'workflow': 'returnable_assets',
+                        'action': 'return'
+                    },
+                    sender_name=returned_by_name
+                )
+
+                send_notification_to_user(pm_user_id, notification.to_dict())
+                log.info(f"Sent asset return notification to PM {pm_user_id}")
+
+        except Exception as e:
+            log.error(f"Error sending asset return notification: {e}")
+
+    @staticmethod
+    def notify_asset_maintenance_complete(category_name, category_code, item_code, action,
+                                           pm_user_ids, completed_by_name):
+        """
+        Notify when maintenance is completed (repaired or written off)
+        Trigger: Maintenance action completed
+        Recipients: Production Managers
+        Priority: NORMAL
+        """
+        try:
+            action_text = 'repaired and returned to stock' if action == 'repair' else 'written off'
+
+            for pm_user_id in pm_user_ids:
+                notification = NotificationManager.create_notification(
+                    user_id=pm_user_id,
+                    type='success' if action == 'repair' else 'warning',
+                    title=f'Asset {action.title()} Complete',
+                    message=f'{category_name} ({item_code or category_code}) has been {action_text} by {completed_by_name}',
+                    priority='normal',
+                    category='assets',
+                    action_required=False,
+                    action_url=f'/production-manager/returnable-assets',
+                    action_label='View Assets',
+                    metadata={
+                        'category_code': category_code,
+                        'item_code': item_code,
+                        'action': action,
+                        'workflow': 'returnable_assets'
+                    },
+                    sender_name=completed_by_name
+                )
+
+                send_notification_to_user(pm_user_id, notification.to_dict())
+
+        except Exception as e:
+            log.error(f"Error sending maintenance complete notification: {e}")
+
 
 # Create singleton instance
 notification_service = ComprehensiveNotificationService()

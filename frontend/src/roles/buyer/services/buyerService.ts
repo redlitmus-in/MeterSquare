@@ -798,10 +798,14 @@ class BuyerService {
   }
 
   // Generate LPO PDF (returns blob for download)
-  async generateLPOPdf(crId: number, lpoData: LPOData): Promise<Blob> {
+  async generateLPOPdf(crId: number, lpoData: LPOData, poChildId?: number): Promise<Blob> {
     try {
+      let url = `/buyer/purchase/${crId}/generate-lpo-pdf`;
+      if (poChildId) {
+        url += `?po_child_id=${poChildId}`;
+      }
       const response = await apiClient.post(
-        `/buyer/purchase/${crId}/generate-lpo-pdf`,
+        url,
         { lpo_data: lpoData },
         {
           headers: this.getAuthHeaders(),
@@ -880,6 +884,7 @@ class BuyerService {
       general_terms: string[];
       payment_terms_list: string[];
       include_signatures: boolean;
+      custom_terms?: Array<{text: string, selected: boolean}>;
     } | null;
   }> {
     try {

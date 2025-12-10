@@ -42,9 +42,25 @@ import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import MaterialVendorSelectionModal from '@/roles/buyer/components/MaterialVendorSelectionModal';
+import TDLPOEditorModal from '../components/TDLPOEditorModal';
 import { useAuthStore } from '@/store/authStore';
 import { permissions } from '@/utils/rolePermissions';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
+
+// Helper function to calculate total cost from POChild materials
+const calculatePOChildTotal = (poChild: POChild): number => {
+  if (poChild.materials_total_cost && poChild.materials_total_cost > 0) {
+    return poChild.materials_total_cost;
+  }
+  // Calculate from materials if total is 0
+  const materials = poChild.materials || [];
+  return materials.reduce((sum, m) => {
+    const unitPrice = m.unit_price || m.boq_unit_price || 0;
+    const quantity = m.quantity || 0;
+    const totalPrice = m.total_price || m.boq_total_price || (unitPrice * quantity) || 0;
+    return sum + totalPrice;
+  }, 0);
+};
 
 const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
@@ -73,6 +89,12 @@ const ChangeRequestsPage: React.FC = () => {
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
   const [rejectingPOChildId, setRejectingPOChildId] = useState<number | null>(null);
+
+  // LPO Editor state
+  const [showLpoEditorModal, setShowLpoEditorModal] = useState(false);
+  const [selectedPOChildForLpo, setSelectedPOChildForLpo] = useState<POChild | null>(null);
+  const [selectedCrIdForLpo, setSelectedCrIdForLpo] = useState<number | null>(null);
+  const [lpoEditorReadOnly, setLpoEditorReadOnly] = useState(false);
 
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
@@ -361,6 +383,14 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
+  // Handle opening LPO editor for a PO child
+  const handleOpenLpoEditor = (poChild: POChild, readOnly: boolean = false) => {
+    setSelectedPOChildForLpo(poChild);
+    setSelectedCrIdForLpo(poChild.parent_cr_id);
+    setLpoEditorReadOnly(readOnly);
+    setShowLpoEditorModal(true);
+  };
+
   // Handle viewing PO child details (shows only PO child's materials, not parent CR)
   const handleViewPOChildDetails = (poChild: POChild) => {
     // Convert POChild to ChangeRequestItem format for the details modal
@@ -374,16 +404,29 @@ const ChangeRequestsPage: React.FC = () => {
           : 'pending';
 
     // Map materials to match ChangeRequestItem format
-    const mappedMaterials = (poChild.materials || []).map(m => ({
-      material_name: m.material_name,
-      quantity: m.quantity,
-      unit: m.unit,
-      unit_price: m.unit_price,
-      total_price: m.total_price,
-      master_material_id: m.master_material_id || undefined,
-    }));
+    // Ensure prices are calculated even if missing from backend
+    const mappedMaterials = (poChild.materials || []).map(m => {
+      const unitPrice = m.unit_price || m.boq_unit_price || 0;
+      const quantity = m.quantity || 0;
+      const totalPrice = m.total_price || m.boq_total_price || (unitPrice * quantity) || 0;
 
-    const poChildAsChangeRequest: ChangeRequestItem = {
+      return {
+        material_name: m.material_name,
+        quantity: quantity,
+        unit: m.unit,
+        unit_price: unitPrice,
+        total_price: totalPrice,
+        boq_unit_price: m.boq_unit_price,
+        boq_total_price: m.boq_total_price,
+        master_material_id: m.master_material_id || undefined,
+        justification: m.justification || m.reason || '',
+      };
+    });
+
+    // Calculate total from mapped materials (in case backend total is 0)
+    const calculatedTotal = mappedMaterials.reduce((sum, m) => sum + (m.total_price || 0), 0);
+
+    const poChildAsChangeRequest: ChangeRequestItem & { po_child_id?: number } = {
       cr_id: poChild.parent_cr_id,
       formatted_cr_id: poChild.formatted_id,
       project_id: poChild.project_id || 0,
@@ -400,11 +443,15 @@ const ChangeRequestsPage: React.FC = () => {
       created_at: poChild.created_at || '',
       // Use PO child's materials only
       materials_data: mappedMaterials,
-      materials_total_cost: poChild.materials_total_cost || 0,
+      materials_total_cost: poChild.materials_total_cost || calculatedTotal || 0,
       // Vendor info
       selected_vendor_id: poChild.vendor_id,
       selected_vendor_name: poChild.vendor_name,
       vendor_selection_status: poChild.vendor_selection_status,
+      vendor_selected_by_buyer_name: poChild.vendor_selected_by_buyer_name,
+      vendor_selection_date: poChild.vendor_selection_date,
+      // PO Child ID for LPO preview
+      po_child_id: poChild.id,
     };
 
     setSelectedChangeRequest(poChildAsChangeRequest);
@@ -1239,7 +1286,10 @@ const ChangeRequestsPage: React.FC = () => {
                               <div className="divide-y divide-gray-100">
                                 {poChild.materials.map((material: any, idx: number) => {
                                   const boqPrice = material.boq_unit_price || 0;
-                                  const vendorPrice = material.unit_price || 0;
+                                  // Use vendor price, fallback to BOQ price if vendor price is 0
+                                  const vendorPrice = material.unit_price || material.boq_unit_price || 0;
+                                  const quantity = material.quantity || 0;
+                                  const materialTotal = material.total_price || material.boq_total_price || (vendorPrice * quantity) || 0;
                                   const priceDiff = vendorPrice - boqPrice;
                                   const isOverBudget = priceDiff > 0;
 
@@ -1248,9 +1298,15 @@ const ChangeRequestsPage: React.FC = () => {
                                       <div className="flex justify-between items-start gap-1">
                                         <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
                                         <div className="text-right whitespace-nowrap">
-                                          <span className="text-blue-700 font-bold">
-                                            AED {vendorPrice.toLocaleString()}
-                                          </span>
+                                          {vendorPrice > 0 ? (
+                                            <span className="text-blue-700 font-bold">
+                                              AED {vendorPrice.toLocaleString()}
+                                            </span>
+                                          ) : (
+                                            <span className="text-amber-600 italic text-[8px]">
+                                              Price not set
+                                            </span>
+                                          )}
                                           {boqPrice > 0 && boqPrice !== vendorPrice && (
                                             <span className="text-gray-400 text-[8px] ml-0.5">
                                               (BOQ:{boqPrice})
@@ -1259,14 +1315,18 @@ const ChangeRequestsPage: React.FC = () => {
                                         </div>
                                       </div>
                                       <div className="flex justify-between text-gray-500 mt-0.5">
-                                        <span>{material.quantity} {material.unit}</span>
+                                        <span>{quantity} {material.unit}</span>
                                         <div className="text-right">
-                                          <span className="font-semibold text-gray-700">
-                                            = AED {(material.total_price || 0).toLocaleString()}
-                                          </span>
+                                          {materialTotal > 0 ? (
+                                            <span className="font-semibold text-gray-700">
+                                              = AED {materialTotal.toLocaleString()}
+                                            </span>
+                                          ) : (
+                                            <span className="text-amber-600 italic text-[8px]">-</span>
+                                          )}
                                           {boqPrice > 0 && priceDiff !== 0 && (
                                             <span className={`ml-0.5 text-[8px] font-bold ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
-                                              {isOverBudget ? '+' : ''}{Math.round(priceDiff * material.quantity)}
+                                              {isOverBudget ? '+' : ''}{Math.round(priceDiff * quantity)}
                                             </span>
                                           )}
                                         </div>
@@ -1283,23 +1343,36 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                           <div className="flex justify-between mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
                             <span className="text-gray-600 font-semibold">Total Cost:</span>
-                            <span className="font-bold text-blue-700">AED {(poChild.materials_total_cost || 0).toLocaleString()}</span>
+                            {calculatePOChildTotal(poChild) > 0 ? (
+                              <span className="font-bold text-blue-700">AED {calculatePOChildTotal(poChild).toLocaleString()}</span>
+                            ) : (
+                              <span className="text-amber-600 italic text-[9px]">Prices not set</span>
+                            )}
                           </div>
                         </div>
 
                         {/* Status and Actions */}
                         <div className="border-t border-green-200 p-1.5 flex flex-col gap-1 bg-green-50/50">
-                          <button
-                            onClick={() => handleViewPOChildDetails(poChild)}
-                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
-                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                          >
-                            <Eye className="h-3 w-3" />
-                            <span>Details</span>
-                          </button>
+                          <div className="grid grid-cols-2 gap-1">
+                            <button
+                              onClick={() => handleViewPOChildDetails(poChild)}
+                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                            >
+                              <Eye className="h-3 w-3" />
+                              <span>Details</span>
+                            </button>
+                            <button
+                              onClick={() => handleOpenLpoEditor(poChild, true)}
+                              className="bg-gray-500 hover:bg-gray-600 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
+                            >
+                              <FileText className="h-3 w-3" />
+                              <span>View LPO</span>
+                            </button>
+                          </div>
                           <div className="bg-green-100 border border-green-300 rounded px-2 py-1 text-[9px] text-green-800 font-bold text-center">
                             <CheckCircle className="h-3 w-3 inline mr-1" />
-                            ✓ NEW PO Child - Awaiting Buyer
+                            Approved - Awaiting Buyer
                           </div>
                         </div>
                       </motion.div>
@@ -1349,7 +1422,10 @@ const ChangeRequestsPage: React.FC = () => {
                               <div className="divide-y divide-gray-100">
                                 {poChild.materials.map((material: any, idx: number) => {
                                   const boqPrice = material.boq_unit_price || 0;
-                                  const vendorPrice = material.unit_price || 0;
+                                  // Use vendor price, fallback to BOQ price if vendor price is 0
+                                  const vendorPrice = material.unit_price || material.boq_unit_price || 0;
+                                  const quantity = material.quantity || 0;
+                                  const materialTotal = material.total_price || material.boq_total_price || (vendorPrice * quantity) || 0;
                                   const priceDiff = vendorPrice - boqPrice;
                                   const isOverBudget = priceDiff > 0;
 
@@ -1358,9 +1434,15 @@ const ChangeRequestsPage: React.FC = () => {
                                       <div className="flex justify-between items-start gap-1">
                                         <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
                                         <div className="text-right whitespace-nowrap">
-                                          <span className="text-blue-700 font-bold">
-                                            AED {vendorPrice.toLocaleString()}
-                                          </span>
+                                          {vendorPrice > 0 ? (
+                                            <span className="text-blue-700 font-bold">
+                                              AED {vendorPrice.toLocaleString()}
+                                            </span>
+                                          ) : (
+                                            <span className="text-amber-600 italic text-[8px]">
+                                              Price not set
+                                            </span>
+                                          )}
                                           {boqPrice > 0 && boqPrice !== vendorPrice && (
                                             <span className="text-gray-400 text-[8px] ml-0.5">
                                               (BOQ:{boqPrice})
@@ -1369,14 +1451,18 @@ const ChangeRequestsPage: React.FC = () => {
                                         </div>
                                       </div>
                                       <div className="flex justify-between text-gray-500 mt-0.5">
-                                        <span>{material.quantity} {material.unit}</span>
+                                        <span>{quantity} {material.unit}</span>
                                         <div className="text-right">
-                                          <span className="font-semibold text-gray-700">
-                                            = AED {(material.total_price || 0).toLocaleString()}
-                                          </span>
+                                          {materialTotal > 0 ? (
+                                            <span className="font-semibold text-gray-700">
+                                              = AED {materialTotal.toLocaleString()}
+                                            </span>
+                                          ) : (
+                                            <span className="text-amber-600 italic text-[8px]">-</span>
+                                          )}
                                           {boqPrice > 0 && priceDiff !== 0 && (
                                             <span className={`ml-0.5 text-[8px] font-bold ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
-                                              {isOverBudget ? '+' : ''}{Math.round(priceDiff * material.quantity)}
+                                              {isOverBudget ? '+' : ''}{Math.round(priceDiff * quantity)}
                                             </span>
                                           )}
                                         </div>
@@ -1393,22 +1479,35 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                           <div className="flex justify-between mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
                             <span className="text-gray-600 font-semibold">Total Cost:</span>
-                            <span className="font-bold text-blue-700">AED {(poChild.materials_total_cost || 0).toLocaleString()}</span>
+                            {calculatePOChildTotal(poChild) > 0 ? (
+                              <span className="font-bold text-blue-700">AED {calculatePOChildTotal(poChild).toLocaleString()}</span>
+                            ) : (
+                              <span className="text-amber-600 italic text-[9px]">Prices not set</span>
+                            )}
                           </div>
                         </div>
 
                         {/* Actions */}
                         <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
-                          {/* View Details */}
-                          <button
-                            onClick={() => handleViewPOChildDetails(poChild)}
-                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
-                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                          >
-                            <Eye className="h-3 w-3" />
-                            <span>Details</span>
-                          </button>
-                          {/* Second Row: Approve/Reject */}
+                          {/* Row 1: Details + Edit LPO */}
+                          <div className="grid grid-cols-2 gap-1">
+                            <button
+                              onClick={() => handleViewPOChildDetails(poChild)}
+                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                            >
+                              <Eye className="h-3 w-3" />
+                              <span>Details</span>
+                            </button>
+                            <button
+                              onClick={() => handleOpenLpoEditor(poChild, false)}
+                              className="bg-blue-500 hover:bg-blue-600 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
+                            >
+                              <FileText className="h-3 w-3" />
+                              <span>Edit LPO</span>
+                            </button>
+                          </div>
+                          {/* Row 2: Approve/Reject */}
                           <div className="grid grid-cols-2 gap-1">
                             <button
                               onClick={() => handleApprovePOChild(poChild.id)}
@@ -1507,7 +1606,11 @@ const ChangeRequestsPage: React.FC = () => {
                         <div className="px-2 pb-2">
                           <div className="flex items-center justify-between text-[10px] font-bold border-t border-gray-200 pt-1.5">
                             <span className="text-gray-600">Total Cost:</span>
-                            <span className="text-red-700">AED {(poChild.materials_total_cost || 0).toLocaleString()}</span>
+                            {calculatePOChildTotal(poChild) > 0 ? (
+                              <span className="text-red-700">AED {calculatePOChildTotal(poChild).toLocaleString()}</span>
+                            ) : (
+                              <span className="text-amber-600 italic text-[9px]">Prices not set</span>
+                            )}
                           </div>
                         </div>
 
@@ -1570,7 +1673,10 @@ const ChangeRequestsPage: React.FC = () => {
                               <div className="divide-y divide-gray-100">
                                 {purchase.materials.map((material: any, idx: number) => {
                                   const boqPrice = material.boq_unit_price || 0;
-                                  const vendorPrice = material.unit_price || 0;
+                                  // Use vendor price, fallback to BOQ price if vendor price is 0
+                                  const vendorPrice = material.unit_price || material.boq_unit_price || 0;
+                                  const quantity = material.quantity || 0;
+                                  const materialTotal = material.total_price || material.boq_total_price || (vendorPrice * quantity) || 0;
                                   const priceDiff = vendorPrice - boqPrice;
                                   const isOverBudget = priceDiff > 0;
 
@@ -1590,9 +1696,9 @@ const ChangeRequestsPage: React.FC = () => {
                                         </div>
                                       </div>
                                       <div className="flex justify-between text-gray-500 mt-0.5">
-                                        <span>{material.quantity} {material.unit}</span>
+                                        <span>{quantity} {material.unit}</span>
                                         <span className="font-semibold text-gray-700">
-                                          = AED {(material.total_price || 0).toLocaleString()}
+                                          = AED {materialTotal.toLocaleString()}
                                         </span>
                                       </div>
                                     </div>
@@ -1628,17 +1734,17 @@ const ChangeRequestsPage: React.FC = () => {
 
                         {/* Actions - Compact */}
                         <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
-                          {/* View Details */}
+                          {/* Row 1: View Details */}
                           <button
                             onClick={() => handleReviewVendorApproval(purchase.cr_id)}
-                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
+                            className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold w-full"
                             style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                           >
                             <Eye className="h-3 w-3" />
                             <span>Details</span>
                           </button>
 
-                          {/* Second Row: Status badge for approved/rejected, or Approve/Reject buttons */}
+                          {/* Row 2: Status badge for approved/rejected, or Approve/Reject buttons */}
                           {purchase.vendor_selection_status === 'approved' ? (
                             <div className="bg-green-50 border border-green-200 rounded px-2 py-1 text-[9px] text-green-700 font-semibold text-center">
                               <CheckCircle className="h-3 w-3 inline mr-1" />
@@ -2081,6 +2187,20 @@ const ChangeRequestsPage: React.FC = () => {
         onSubmit={handleRejectionSubmit}
         title={rejectingPOChildId ? "Reject Vendor Selection" : rejectingCrId && vendorApprovals.some(p => p.cr_id === rejectingCrId) ? "Reject Vendor Selection" : "Reject PO"}
       />
+
+      {/* TD LPO Editor Modal */}
+      <TDLPOEditorModal
+        poChild={selectedPOChildForLpo}
+        crId={selectedCrIdForLpo || 0}
+        isOpen={showLpoEditorModal}
+        onClose={() => {
+          setShowLpoEditorModal(false);
+          setSelectedPOChildForLpo(null);
+          setSelectedCrIdForLpo(null);
+        }}
+        isReadOnly={lpoEditorReadOnly}
+      />
+
     </div>
   );
 };

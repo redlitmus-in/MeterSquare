@@ -115,6 +115,11 @@ export interface DispatchedByProject {
     category_code: string;
     category_name: string;
     quantity_dispatched: number;
+    dispatched_at?: string;
+    dispatched_by?: string;
+    received_at?: string;
+    received_by?: string;
+    is_received?: boolean;
   }[];
 }
 

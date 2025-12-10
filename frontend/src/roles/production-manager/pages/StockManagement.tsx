@@ -22,6 +22,7 @@ import {
   InventoryConfig,
   DispatchedMaterial
 } from '../services/inventoryService';
+import { showSuccess, showError, showWarning } from '@/utils/toastHelper';
 
 type MainTabType = 'materials' | 'stock-in' | 'stock-out';
 type StockInSubTab = 'grn' | 'returns';
@@ -217,7 +218,7 @@ const StockManagement: React.FC = () => {
 
   const handleCreateStockReceipt = async () => {
     if (!formData.material_name || !formData.unit || formData.quantity <= 0 || formData.unit_price <= 0) {
-      alert('Please fill all required fields (Material Name, Unit, Quantity, Unit Price)');
+      showWarning('Please fill all required fields (Material Name, Unit, Quantity, Unit Price)');
       return;
     }
 
@@ -262,7 +263,7 @@ const StockManagement: React.FC = () => {
       fetchData();
     } catch (error: any) {
       console.error('Error creating stock receipt:', error);
-      alert(error.message || 'Failed to record purchase');
+      showError(error.message || 'Failed to record purchase');
     } finally {
       setSaving(false);
     }
@@ -270,7 +271,7 @@ const StockManagement: React.FC = () => {
 
   const handleCreateReturn = async () => {
     if (!returnFormData.inventory_material_id || !returnFormData.project_id || returnFormData.quantity <= 0) {
-      alert('Please fill all required fields');
+      showWarning('Please fill all required fields');
       return;
     }
 
@@ -290,9 +291,10 @@ const StockManagement: React.FC = () => {
       });
       setDispatchedMaterials([]);  // Reset dispatched materials
       fetchData();
+      showSuccess('Material return recorded successfully');
     } catch (error) {
       console.error('Error creating return:', error);
-      alert('Failed to create return');
+      showError('Failed to create return');
     } finally {
       setSaving(false);
     }
@@ -345,9 +347,10 @@ const StockManagement: React.FC = () => {
     try {
       await inventoryService.approveInternalRequest(requestId);
       fetchData();
+      showSuccess('Request approved successfully');
     } catch (error) {
       console.error('Error approving request:', error);
-      alert('Failed to approve request');
+      showError('Failed to approve request');
     }
   };
 
@@ -358,9 +361,10 @@ const StockManagement: React.FC = () => {
     try {
       await inventoryService.rejectInternalRequest(requestId, reason);
       fetchData();
+      showSuccess('Request rejected');
     } catch (error) {
       console.error('Error rejecting request:', error);
-      alert('Failed to reject request');
+      showError('Failed to reject request');
     }
   };
 
@@ -368,9 +372,10 @@ const StockManagement: React.FC = () => {
     try {
       await inventoryService.dispatchMaterial(requestId);
       fetchData();
+      showSuccess('Material dispatched successfully');
     } catch (error) {
       console.error('Error dispatching:', error);
-      alert('Failed to dispatch material');
+      showError('Failed to dispatch material');
     }
   };
 
@@ -412,12 +417,12 @@ const StockManagement: React.FC = () => {
 
   const handleCreateDeliveryNote = async () => {
     if (!dnFormData.project_id || !dnFormData.delivery_date) {
-      alert('Please select a project and delivery date');
+      showWarning('Please select a project and delivery date');
       return;
     }
 
     if (dnItems.length === 0) {
-      alert('Please add at least one item to the delivery note');
+      showWarning('Please add at least one item to the delivery note');
       return;
     }
 
@@ -439,10 +444,10 @@ const StockManagement: React.FC = () => {
       setShowDeliveryNoteModal(false);
       resetDeliveryNoteForm();
       fetchData();
-      alert('Delivery note created successfully');
+      showSuccess('Delivery note created successfully');
     } catch (error: any) {
       console.error('Error creating delivery note:', error);
-      alert(error.message || 'Failed to create delivery note');
+      showError(error.message || 'Failed to create delivery note');
     } finally {
       setSaving(false);
     }
@@ -516,9 +521,10 @@ const StockManagement: React.FC = () => {
         try {
           await inventoryService.issueDeliveryNote(noteId);
           fetchData();
+          showSuccess('Delivery note issued successfully');
         } catch (error: any) {
           console.error('Error issuing delivery note:', error);
-          alert(error.message || 'Failed to issue delivery note');
+          showError(error.message || 'Failed to issue delivery note');
         }
       },
       'Issue',
@@ -539,9 +545,10 @@ const StockManagement: React.FC = () => {
         try {
           await inventoryService.dispatchDeliveryNote(noteId);
           fetchData();
+          showSuccess('Delivery note dispatched successfully');
         } catch (error: any) {
           console.error('Error dispatching delivery note:', error);
-          alert(error.message || 'Failed to dispatch delivery note');
+          showError(error.message || 'Failed to dispatch delivery note');
         }
       },
       'Dispatch',
@@ -558,9 +565,10 @@ const StockManagement: React.FC = () => {
         try {
           await inventoryService.cancelDeliveryNote(noteId);
           fetchData();
+          showSuccess('Delivery note cancelled');
         } catch (error: any) {
           console.error('Error cancelling delivery note:', error);
-          alert(error.message || 'Failed to cancel delivery note');
+          showError(error.message || 'Failed to cancel delivery note');
         }
       },
       'Cancel',
@@ -1013,9 +1021,10 @@ const StockManagement: React.FC = () => {
       setShowEditMaterialModal(false);
       resetMaterialForm();
       fetchData();
+      showSuccess('Material updated successfully');
     } catch (error: any) {
       console.error('Error updating material:', error);
-      alert(error.message || 'Failed to update material');
+      showError(error.message || 'Failed to update material');
     } finally {
       setSaving(false);
     }
@@ -1032,9 +1041,10 @@ const StockManagement: React.FC = () => {
         try {
           await inventoryService.deleteInventoryItem(material.inventory_material_id!);
           fetchData();
+          showSuccess('Material deleted successfully');
         } catch (error: any) {
           console.error('Error deleting material:', error);
-          alert(error.message || 'Failed to delete material');
+          showError(error.message || 'Failed to delete material');
         }
       },
       'Delete',
@@ -2021,6 +2031,7 @@ const StockManagement: React.FC = () => {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Vehicle</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">SE Received</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dispatch Date</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -2031,7 +2042,7 @@ const StockManagement: React.FC = () => {
                       .filter(dn => dnStatusFilter === 'all' || dn.status === dnStatusFilter)
                       .length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                           No delivery notes found
                         </td>
                       </tr>
@@ -2066,6 +2077,33 @@ const StockManagement: React.FC = () => {
                                 {dn.status?.replace('_', ' ')}
                               </span>
                             </td>
+                            <td className="px-6 py-4">
+                              {dn.received_at ? (
+                                <div className="text-center">
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                    Received
+                                  </span>
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    {new Date(dn.received_at).toLocaleDateString()}
+                                  </div>
+                                  <div className="text-xs text-gray-400 truncate max-w-[120px]" title={dn.received_by}>
+                                    by {dn.received_by?.split('@')[0] || 'SE'}
+                                  </div>
+                                </div>
+                              ) : dn.status === 'IN_TRANSIT' || dn.status === 'ISSUED' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                                  <svg className="w-3 h-3 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                                  </svg>
+                                  Pending
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 text-xs">-</span>
+                              )}
+                            </td>
                             <td className="px-6 py-4 text-sm text-gray-500">
                               {new Date(dn.delivery_date || '').toLocaleDateString()}
                             </td>
@@ -2079,26 +2117,26 @@ const StockManagement: React.FC = () => {
                                 '-'
                               )}
                             </td>
-                            <td className="px-6 py-4">
-                              <div className="flex gap-1 flex-wrap">
+                            <td className="px-4 py-4">
+                              <div className="flex items-center gap-1">
                                 {/* Print Preview Button - always visible */}
                                 <button
                                   onClick={() => { setSelectedDeliveryNote(dn); setShowPrintPreview(true); }}
-                                  className="p-1.5 text-gray-600 hover:bg-gray-100 rounded"
+                                  className="p-1 text-gray-600 hover:bg-gray-100 rounded"
                                   title="Print Preview"
                                 >
                                   <Eye className="w-4 h-4" />
                                 </button>
                                 <button
                                   onClick={() => handlePrintDeliveryNote(dn)}
-                                  className="p-1.5 text-blue-600 hover:bg-blue-100 rounded"
+                                  className="p-1 text-blue-600 hover:bg-blue-100 rounded"
                                   title="Print"
                                 >
                                   <Printer className="w-4 h-4" />
                                 </button>
                                 <button
                                   onClick={() => handleDownloadDeliveryNote(dn)}
-                                  className="p-1.5 text-green-600 hover:bg-green-100 rounded"
+                                  className="p-1 text-green-600 hover:bg-green-100 rounded"
                                   title="Download PDF"
                                 >
                                   <Download className="w-4 h-4" />

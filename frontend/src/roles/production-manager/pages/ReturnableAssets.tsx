@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Plus, Search, Package, Truck, RotateCcw, Wrench, Eye,
   Edit2, Trash2, Check, X, AlertTriangle, CheckCircle,
-  Building2, RefreshCw, Hash, FileText, ChevronDown, ChevronUp,
-  ArrowRight, MapPin
+  RefreshCw, Hash, FileText, ChevronDown, ChevronUp,
+  ArrowRight, MapPin, Clock, User, Calendar, History
 } from 'lucide-react';
+import { apiClient } from '@/api/config';
 import {
   assetService,
   AssetCategory,
@@ -17,13 +18,95 @@ import {
 } from '../services/assetService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 
+// ==================== CONSTANTS ====================
+
+const CONDITION_COLORS: Record<string, string> = {
+  good: 'bg-green-100 text-green-700',
+  fair: 'bg-yellow-100 text-yellow-700',
+  poor: 'bg-orange-100 text-orange-700',
+  damaged: 'bg-red-100 text-red-700',
+  default: 'bg-gray-100 text-gray-700'
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  available: 'bg-green-100 text-green-700',
+  dispatched: 'bg-blue-100 text-blue-700',
+  maintenance: 'bg-orange-100 text-orange-700',
+  retired: 'bg-gray-100 text-gray-700',
+  default: 'bg-gray-100 text-gray-700'
+};
+
+const VALID_CONDITIONS: AssetCondition[] = ['good', 'fair', 'poor', 'damaged'];
+const MAX_PENDING_REPAIRS_DISPLAY = 3;
+
+// ==================== INTERFACES ====================
+
 interface Project {
   project_id: number;
   project_name: string;
   project_code: string;
 }
 
-type ActionMode = 'none' | 'dispatch' | 'return';
+interface AssetMovement {
+  movement_id: number;
+  category_id: number;
+  category_name: string;
+  category_code: string;
+  item_id?: number;
+  item_code?: string;
+  movement_type: 'DISPATCH' | 'RETURN';
+  project_id: number;
+  quantity: number;
+  condition_before?: string;
+  condition_after?: string;
+  dispatched_by?: string;
+  dispatched_at?: string;
+  returned_by?: string;
+  returned_at?: string;
+  notes?: string;
+  created_at: string;
+  project_name?: string;
+  project_code?: string;
+}
+
+interface ReturnRequest {
+  request_id: number;
+  tracking_code: string;
+  category_id: number;
+  category_name: string;
+  category_code: string;
+  project_id: number;
+  quantity: number;
+  se_condition_assessment: string;
+  se_notes?: string;
+  se_damage_description?: string;
+  status: string;
+  requested_by: string;
+  requested_by_id: number;
+  requested_at: string;
+  project_details?: {
+    project_name: string;
+    project_code: string;
+  };
+  dispatch_history?: Array<{
+    dispatched_at: string;
+    dispatched_by: string;
+    quantity: number;
+  }>;
+}
+
+type ActionMode = 'none' | 'dispatch';
+
+// ==================== HELPER FUNCTIONS ====================
+
+const getConditionColor = (condition: string): string => {
+  return CONDITION_COLORS[condition] || CONDITION_COLORS.default;
+};
+
+const getStatusColor = (status: string): string => {
+  return STATUS_COLORS[status] || STATUS_COLORS.default;
+};
+
 
 const ReturnableAssets: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -36,68 +119,165 @@ const ReturnableAssets: React.FC = () => {
   const [dispatchedAssets, setDispatchedAssets] = useState<DispatchedByProject[]>([]);
   const [maintenanceRecords, setMaintenanceRecords] = useState<AssetMaintenance[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [pendingReturnRequests, setPendingReturnRequests] = useState<ReturnRequest[]>([]);
+  const [processingRequest, setProcessingRequest] = useState<number | null>(null);
+  const [showProcessModal, setShowProcessModal] = useState(false);
+  const [selectedReturnRequest, setSelectedReturnRequest] = useState<ReturnRequest | null>(null);
+  const [processForm, setProcessForm] = useState({
+    pm_condition_assessment: 'good',
+    pm_action: 'return_to_stock',
+    pm_notes: ''
+  });
 
   // UI state
   const [expandedCategory, setExpandedCategory] = useState<number | null>(null);
   const [actionMode, setActionMode] = useState<ActionMode>('none');
   const [selectedCategoryForAction, setSelectedCategoryForAction] = useState<AssetCategory | null>(null);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
-  const [showItemModal, setShowItemModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<AssetCategory | null>(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [selectedCategoryForHistory, setSelectedCategoryForHistory] = useState<AssetCategory | null>(null);
+  const [movements, setMovements] = useState<AssetMovement[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Forms
   const [categoryForm, setCategoryForm] = useState({
     category_name: '', category_code: '', description: '',
     tracking_mode: 'quantity' as TrackingMode, total_quantity: 0
   });
-  const [itemForm, setItemForm] = useState({
-    category_id: 0, serial_number: '', purchase_date: '',
-    purchase_price: 0, current_condition: 'good' as AssetCondition, notes: ''
-  });
   const [dispatchForm, setDispatchForm] = useState({
     project_id: 0, quantity: 1, item_ids: [] as number[], notes: ''
   });
-  const [returnForm, setReturnForm] = useState({
-    project_id: 0, quantity: 1, item_ids: [] as number[],
-    condition: 'good' as AssetCondition, damaged_quantity: 0, damage_description: '', notes: ''
-  });
+
+  const fetchProjects = async () => {
+    try {
+      // Fetch projects with SE assigned - use all_project and filter by site_supervisors
+      const response = await fetch('/api/all_project?per_page=100', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const projectsData = data.projects || [];
+
+        // Filter only projects with Site Engineer/Supervisor assigned
+        // Check site_supervisors array (enriched field from API)
+        const uniqueProjects: Project[] = projectsData
+          .filter((proj: { project_id?: number; site_supervisors?: Array<{ user_id: number }> }) =>
+            proj?.project_id && proj?.site_supervisors && proj.site_supervisors.length > 0
+          )
+          .map((proj: { project_id: number; project_name?: string; project_code?: string }) => ({
+            project_id: proj.project_id,
+            project_name: proj.project_name || '',
+            project_code: proj.project_code || ''
+          }));
+
+        setProjects(uniqueProjects);
+      } else {
+        console.error('API Error:', response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error('Fetch Error:', error);
+      showError('Failed to fetch projects');
+    }
+  };
+
+  const fetchPendingReturnRequests = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/assets/return-requests?status=pending');
+      setPendingReturnRequests(response.data.return_requests || []);
+    } catch (error) {
+      console.error('Error fetching return requests:', error);
+    }
+  }, []);
+
+  const fetchMovements = async (categoryId: number) => {
+    setLoadingHistory(true);
+    try {
+      const response = await apiClient.get(`/assets/movements?category_id=${categoryId}&limit=50`);
+      const movementsData = response.data.movements || [];
+
+      // Fetch all projects for lookup
+      const projectMap: Record<number, { project_name: string; project_code: string }> = {};
+
+      try {
+        const allProjectsResponse = await fetch('/api/all_project?per_page=500', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+        });
+        if (allProjectsResponse.ok) {
+          const allProjectsData = await allProjectsResponse.json();
+          const allProjects = allProjectsData.projects || [];
+          allProjects.forEach((p: { project_id: number; project_name: string; project_code: string }) => {
+            projectMap[p.project_id] = { project_name: p.project_name, project_code: p.project_code };
+          });
+        }
+      } catch (err) {
+        console.error('Error fetching all projects:', err);
+      }
+
+      // Enrich movements with project names
+      const enrichedMovements = movementsData.map((m: AssetMovement) => ({
+        ...m,
+        project_name: projectMap[m.project_id]?.project_name || `Project #${m.project_id}`,
+        project_code: projectMap[m.project_id]?.project_code || ''
+      }));
+
+      setMovements(enrichedMovements);
+    } catch (error) {
+      console.error('Error fetching movements:', error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const openHistoryModal = (cat: AssetCategory) => {
+    setSelectedCategoryForHistory(cat);
+    setShowHistoryModal(true);
+    fetchMovements(cat.category_id!);
+  };
 
   useEffect(() => {
     fetchProjects();
     loadAllData();
-  }, []);
+    fetchPendingReturnRequests();
+  }, [fetchPendingReturnRequests]);
 
-  const fetchProjects = async () => {
+  const handleProcessReturnRequest = async () => {
+    if (!selectedReturnRequest) return;
+
     try {
-      // Fetch projects assigned to the current SE user
-      const response = await fetch('/api/projects/assigned-to-me', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      setProcessingRequest(selectedReturnRequest.request_id);
+      await apiClient.put(`/assets/return-requests/${selectedReturnRequest.request_id}/process`, {
+        pm_condition_assessment: processForm.pm_condition_assessment,
+        pm_action: processForm.pm_action,
+        pm_notes: processForm.pm_notes
       });
-      if (response.ok) {
-        const data = await response.json();
-        // Extract unique projects from the assigned items
-        const projectsData = data.projects || data || [];
-        const uniqueProjects: Project[] = [];
-        const seenIds = new Set<number>();
 
-        projectsData.forEach((item: any) => {
-          const proj = item.project || item;
-          if (proj?.project_id && !seenIds.has(proj.project_id)) {
-            seenIds.add(proj.project_id);
-            uniqueProjects.push({
-              project_id: proj.project_id,
-              project_name: proj.project_name,
-              project_code: proj.project_code
-            });
-          }
-        });
+      showSuccess(`Return processed successfully! Action: ${processForm.pm_action.replace(/_/g, ' ')}`);
+      setShowProcessModal(false);
+      setSelectedReturnRequest(null);
+      setProcessForm({ pm_condition_assessment: 'good', pm_action: 'return_to_stock', pm_notes: '' });
 
-        setProjects(uniqueProjects);
-      }
-    } catch (error) {
-      console.error('Error fetching projects:', error);
+      // Refresh data
+      fetchPendingReturnRequests();
+      loadAllData();
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      showError(err.response?.data?.error || 'Failed to process return request');
+    } finally {
+      setProcessingRequest(null);
     }
+  };
+
+  const openProcessModal = (req: ReturnRequest) => {
+    setSelectedReturnRequest(req);
+    setProcessForm({
+      pm_condition_assessment: req.se_condition_assessment,
+      pm_action: req.se_condition_assessment === 'good' ? 'return_to_stock' :
+                 req.se_condition_assessment === 'damaged' ? 'send_to_maintenance' : 'return_to_stock',
+      pm_notes: ''
+    });
+    setShowProcessModal(true);
   };
 
   const loadAllData = async () => {
@@ -169,20 +349,6 @@ const ReturnableAssets: React.FC = () => {
     setIsEditing(false);
   };
 
-  // Item handlers
-  const handleItemSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await assetService.createItem(itemForm);
-      showSuccess('Item added');
-      setShowItemModal(false);
-      setItemForm({ category_id: 0, serial_number: '', purchase_date: '', purchase_price: 0, current_condition: 'good', notes: '' });
-      loadAllData();
-    } catch (error: any) {
-      showError(error.message);
-    }
-  };
-
   // Start dispatch action
   const startDispatch = (cat: AssetCategory) => {
     setSelectedCategoryForAction(cat);
@@ -190,12 +356,6 @@ const ReturnableAssets: React.FC = () => {
     setActionMode('dispatch');
   };
 
-  // Start return action
-  const startReturn = (cat: AssetCategory, projectId?: number) => {
-    setSelectedCategoryForAction(cat);
-    setReturnForm({ project_id: projectId || 0, quantity: 1, item_ids: [], condition: 'good', damaged_quantity: 0, damage_description: '', notes: '' });
-    setActionMode('return');
-  };
 
   // Dispatch handler
   const handleDispatch = async (e: React.FormEvent) => {
@@ -223,36 +383,6 @@ const ReturnableAssets: React.FC = () => {
     }
   };
 
-  // Return handler
-  const handleReturn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedCategoryForAction) return;
-    try {
-      const payload: any = {
-        category_id: selectedCategoryForAction.category_id,
-        project_id: returnForm.project_id,
-        condition: returnForm.condition,
-        notes: returnForm.notes
-      };
-      if (selectedCategoryForAction.tracking_mode === 'individual') {
-        payload.item_ids = returnForm.item_ids;
-      } else {
-        payload.quantity = returnForm.quantity;
-        if (returnForm.damaged_quantity > 0) {
-          payload.damaged_quantity = returnForm.damaged_quantity;
-          payload.damage_description = returnForm.damage_description;
-        }
-      }
-
-      await assetService.returnAsset(payload);
-      showSuccess('Returned successfully!');
-      setActionMode('none');
-      setSelectedCategoryForAction(null);
-      loadAllData();
-    } catch (error: any) {
-      showError(error.message);
-    }
-  };
 
   // Maintenance handler
   const handleMaintenanceAction = async (maint: AssetMaintenance, action: 'repair' | 'write_off') => {
@@ -266,23 +396,27 @@ const ReturnableAssets: React.FC = () => {
   };
 
   // Helper functions
-  const getAvailableItems = (catId: number) => items.filter(i => i.category_id === catId && i.current_status === 'available');
-  const getDispatchedItemsForProject = (catId: number, projId: number) => items.filter(i => i.category_id === catId && i.current_status === 'dispatched' && i.current_project_id === projId);
-  const getCategoryItems = (catId: number) => items.filter(i => i.category_id === catId);
+  const getAvailableItems = useCallback((catId: number) =>
+    items.filter(i => i.category_id === catId && i.current_status === 'available'), [items]);
 
-  const getConditionColor = (condition: string) => {
-    const colors: Record<string, string> = { good: 'bg-green-100 text-green-700', fair: 'bg-yellow-100 text-yellow-700', poor: 'bg-orange-100 text-orange-700', damaged: 'bg-red-100 text-red-700' };
-    return colors[condition] || 'bg-gray-100 text-gray-700';
-  };
 
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = { available: 'bg-green-100 text-green-700', dispatched: 'bg-blue-100 text-blue-700', maintenance: 'bg-orange-100 text-orange-700', retired: 'bg-gray-100 text-gray-700' };
-    return colors[status] || 'bg-gray-100 text-gray-700';
-  };
+  const getCategoryItems = useCallback((catId: number) =>
+    items.filter(i => i.category_id === catId), [items]);
 
   // Get dispatched info for a category
   const getDispatchedInfoForCategory = (catId: number) => {
-    const result: { projectId: number; projectName: string; projectCode: string; quantity: number; items: AssetItem[] }[] = [];
+    const result: {
+      projectId: number;
+      projectName: string;
+      projectCode: string;
+      quantity: number;
+      items: AssetItem[];
+      dispatched_at?: string;
+      dispatched_by?: string;
+      received_at?: string;
+      received_by?: string;
+      is_received?: boolean;
+    }[] = [];
 
     dispatchedAssets.forEach(proj => {
       const matchingItems = proj.items.filter(item => item.category_id === catId);
@@ -294,7 +428,12 @@ const ReturnableAssets: React.FC = () => {
           projectName: proj.project?.project_name || '',
           projectCode: proj.project?.project_code || '',
           quantity: quantityAsset?.quantity_dispatched || matchingItems.length,
-          items: matchingItems
+          items: matchingItems,
+          dispatched_at: quantityAsset?.dispatched_at,
+          dispatched_by: quantityAsset?.dispatched_by,
+          received_at: quantityAsset?.received_at,
+          received_by: quantityAsset?.received_by,
+          is_received: quantityAsset?.is_received
         });
       }
     });
@@ -307,24 +446,23 @@ const ReturnableAssets: React.FC = () => {
     setSelectedCategoryForAction(null);
   };
 
-  // ==================== RENDER ACTION PANEL ====================
-  const renderActionPanel = () => {
-    if (actionMode === 'none' || !selectedCategoryForAction) return null;
+  // ==================== RENDER DISPATCH PANEL ====================
+  const renderDispatchPanel = () => {
+    if (actionMode !== 'dispatch' || !selectedCategoryForAction) return null;
 
     const cat = selectedCategoryForAction;
     const availableItems = getAvailableItems(cat.category_id!);
-    const dispatchedInfo = getDispatchedInfoForCategory(cat.category_id!);
 
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden">
           {/* Header */}
-          <div className={`p-4 text-white ${actionMode === 'dispatch' ? 'bg-gradient-to-r from-orange-500 to-orange-600' : 'bg-gradient-to-r from-green-500 to-green-600'}`}>
+          <div className="p-4 text-white bg-gradient-to-r from-orange-500 to-orange-600">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                {actionMode === 'dispatch' ? <Truck className="w-6 h-6" /> : <RotateCcw className="w-6 h-6" />}
+                <Truck className="w-6 h-6" />
                 <div>
-                  <h2 className="text-lg font-bold">{actionMode === 'dispatch' ? 'Dispatch' : 'Return'} {cat.category_name}</h2>
+                  <h2 className="text-lg font-bold">Dispatch {cat.category_name}</h2>
                   <p className="text-sm opacity-80">{cat.category_code} • {cat.tracking_mode === 'individual' ? 'Individual Tracking' : 'Quantity Tracking'}</p>
                 </div>
               </div>
@@ -335,137 +473,54 @@ const ReturnableAssets: React.FC = () => {
           </div>
 
           {/* Form */}
-          <form onSubmit={actionMode === 'dispatch' ? handleDispatch : handleReturn} className="p-4 space-y-4 overflow-y-auto max-h-[60vh]">
-            {actionMode === 'dispatch' ? (
-              <>
-                {/* Dispatch Form */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Send to Project</label>
-                  <select value={dispatchForm.project_id} onChange={e => setDispatchForm({ ...dispatchForm, project_id: parseInt(e.target.value) })}
-                    className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-orange-500" required>
-                    <option value={0}>Select project...</option>
-                    {projects.map(p => (
-                      <option key={p.project_id} value={p.project_id}>{p.project_name} ({p.project_code})</option>
-                    ))}
-                  </select>
-                </div>
+          <form onSubmit={handleDispatch} className="p-4 space-y-4 overflow-y-auto max-h-[60vh]">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Send to Project</label>
+              <select value={dispatchForm.project_id} onChange={e => setDispatchForm({ ...dispatchForm, project_id: parseInt(e.target.value) })}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-orange-500" required>
+                <option value={0}>Select project...</option>
+                {projects.map(p => (
+                  <option key={p.project_id} value={p.project_id}>{p.project_name} ({p.project_code})</option>
+                ))}
+              </select>
+            </div>
 
-                {cat.tracking_mode === 'individual' ? (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Items ({dispatchForm.item_ids.length} selected)</label>
-                    <div className="border rounded-lg max-h-40 overflow-y-auto">
-                      {availableItems.length === 0 ? (
-                        <p className="p-3 text-gray-500 text-center text-sm">No available items</p>
-                      ) : (
-                        availableItems.map(item => (
-                          <label key={item.item_id} className="flex items-center p-2 hover:bg-gray-50 cursor-pointer border-b last:border-b-0">
-                            <input type="checkbox" checked={dispatchForm.item_ids.includes(item.item_id!)}
-                              onChange={e => {
-                                if (e.target.checked) setDispatchForm({ ...dispatchForm, item_ids: [...dispatchForm.item_ids, item.item_id!] });
-                                else setDispatchForm({ ...dispatchForm, item_ids: dispatchForm.item_ids.filter(id => id !== item.item_id) });
-                              }}
-                              className="w-4 h-4 text-orange-600 rounded mr-2" />
-                            <span className="font-medium text-sm">{item.item_code}</span>
-                            <span className={`ml-auto px-2 py-0.5 rounded text-xs ${getConditionColor(item.current_condition)}`}>{item.current_condition}</span>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (max: {cat.available_quantity})</label>
-                    <input type="number" min={1} max={cat.available_quantity} value={dispatchForm.quantity}
-                      onChange={e => setDispatchForm({ ...dispatchForm, quantity: parseInt(e.target.value) || 1 })}
-                      className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-orange-500" required />
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
-                  <textarea value={dispatchForm.notes} onChange={e => setDispatchForm({ ...dispatchForm, notes: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2" rows={2} placeholder="Any special notes..." />
+            {cat.tracking_mode === 'individual' ? (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Items ({dispatchForm.item_ids.length} selected)</label>
+                <div className="border rounded-lg max-h-40 overflow-y-auto">
+                  {availableItems.length === 0 ? (
+                    <p className="p-3 text-gray-500 text-center text-sm">No available items</p>
+                  ) : (
+                    availableItems.map(item => (
+                      <label key={item.item_id} className="flex items-center p-2 hover:bg-gray-50 cursor-pointer border-b last:border-b-0">
+                        <input type="checkbox" checked={dispatchForm.item_ids.includes(item.item_id!)}
+                          onChange={e => {
+                            if (e.target.checked) setDispatchForm({ ...dispatchForm, item_ids: [...dispatchForm.item_ids, item.item_id!] });
+                            else setDispatchForm({ ...dispatchForm, item_ids: dispatchForm.item_ids.filter(id => id !== item.item_id) });
+                          }}
+                          className="w-4 h-4 text-orange-600 rounded mr-2" />
+                        <span className="font-medium text-sm">{item.item_code}</span>
+                        <span className={`ml-auto px-2 py-0.5 rounded text-xs ${getConditionColor(item.current_condition)}`}>{item.current_condition}</span>
+                      </label>
+                    ))
+                  )}
                 </div>
-              </>
+              </div>
             ) : (
-              <>
-                {/* Return Form */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Return from Project</label>
-                  <select value={returnForm.project_id} onChange={e => setReturnForm({ ...returnForm, project_id: parseInt(e.target.value), item_ids: [] })}
-                    className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500" required>
-                    <option value={0}>Select project...</option>
-                    {dispatchedInfo.map(info => (
-                      <option key={info.projectId} value={info.projectId}>{info.projectName} ({info.quantity} units)</option>
-                    ))}
-                  </select>
-                </div>
-
-                {cat.tracking_mode === 'individual' && returnForm.project_id > 0 ? (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Items to Return</label>
-                    <div className="border rounded-lg max-h-40 overflow-y-auto">
-                      {getDispatchedItemsForProject(cat.category_id!, returnForm.project_id).map(item => (
-                        <label key={item.item_id} className="flex items-center p-2 hover:bg-gray-50 cursor-pointer border-b last:border-b-0">
-                          <input type="checkbox" checked={returnForm.item_ids.includes(item.item_id!)}
-                            onChange={e => {
-                              if (e.target.checked) setReturnForm({ ...returnForm, item_ids: [...returnForm.item_ids, item.item_id!] });
-                              else setReturnForm({ ...returnForm, item_ids: returnForm.item_ids.filter(id => id !== item.item_id) });
-                            }}
-                            className="w-4 h-4 text-green-600 rounded mr-2" />
-                          <span className="font-medium text-sm">{item.item_code}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ) : cat.tracking_mode === 'quantity' && returnForm.project_id > 0 ? (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Quantity to Return</label>
-                    <input type="number" min={1} value={returnForm.quantity}
-                      onChange={e => setReturnForm({ ...returnForm, quantity: parseInt(e.target.value) || 1 })}
-                      className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500" required />
-                  </div>
-                ) : null}
-
-                {returnForm.project_id > 0 && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Condition on Return</label>
-                      <div className="grid grid-cols-4 gap-2">
-                        {(['good', 'fair', 'poor', 'damaged'] as AssetCondition[]).map(cond => (
-                          <button key={cond} type="button" onClick={() => setReturnForm({ ...returnForm, condition: cond })}
-                            className={`py-2 px-2 rounded-lg border-2 text-xs font-medium capitalize transition-colors ${returnForm.condition === cond ? getConditionColor(cond) + ' border-current' : 'border-gray-200 hover:border-gray-300'}`}>
-                            {cond}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {(returnForm.condition === 'damaged' || returnForm.condition === 'poor') && (
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
-                        <p className="text-sm font-medium text-red-800 flex items-center gap-1">
-                          <AlertTriangle className="w-4 h-4" /> Damage Report
-                        </p>
-                        {cat.tracking_mode === 'quantity' && (
-                          <div>
-                            <label className="text-xs text-gray-700">How many damaged?</label>
-                            <input type="number" min={0} max={returnForm.quantity} value={returnForm.damaged_quantity}
-                              onChange={e => setReturnForm({ ...returnForm, damaged_quantity: parseInt(e.target.value) || 0 })}
-                              className="w-full border rounded px-2 py-1 text-sm mt-1" />
-                          </div>
-                        )}
-                        <div>
-                          <label className="text-xs text-gray-700">Describe damage</label>
-                          <textarea value={returnForm.damage_description}
-                            onChange={e => setReturnForm({ ...returnForm, damage_description: e.target.value })}
-                            className="w-full border rounded px-2 py-1 text-sm mt-1" rows={2} />
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (max: {cat.available_quantity})</label>
+                <input type="number" min={1} max={cat.available_quantity} value={dispatchForm.quantity}
+                  onChange={e => setDispatchForm({ ...dispatchForm, quantity: parseInt(e.target.value) || 1 })}
+                  className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-orange-500" required />
+              </div>
             )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+              <textarea value={dispatchForm.notes} onChange={e => setDispatchForm({ ...dispatchForm, notes: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2" rows={2} placeholder="Any special notes..." />
+            </div>
 
             {/* Submit */}
             <div className="flex gap-2 pt-2">
@@ -473,9 +528,9 @@ const ReturnableAssets: React.FC = () => {
                 Cancel
               </button>
               <button type="submit"
-                disabled={actionMode === 'dispatch' ? (!dispatchForm.project_id || (cat.tracking_mode === 'individual' && dispatchForm.item_ids.length === 0)) : !returnForm.project_id}
-                className={`flex-1 px-4 py-2.5 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${actionMode === 'dispatch' ? 'bg-orange-600 hover:bg-orange-700' : 'bg-green-600 hover:bg-green-700'}`}>
-                {actionMode === 'dispatch' ? <><Truck className="w-4 h-4" /> Dispatch</> : <><RotateCcw className="w-4 h-4" /> Return</>}
+                disabled={!dispatchForm.project_id || (cat.tracking_mode === 'individual' && dispatchForm.item_ids.length === 0)}
+                className="flex-1 px-4 py-2.5 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700">
+                <Truck className="w-4 h-4" /> Dispatch
               </button>
             </div>
           </form>
@@ -541,60 +596,6 @@ const ReturnableAssets: React.FC = () => {
     </div>
   );
 
-  // ==================== RENDER ITEM MODAL ====================
-  const renderItemModal = () => (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-        <div className="p-4 border-b flex justify-between items-center">
-          <h3 className="text-lg font-semibold">Add Individual Item</h3>
-          <button onClick={() => setShowItemModal(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
-        </div>
-        <form onSubmit={handleItemSubmit} className="p-4 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Asset Type *</label>
-            <select value={itemForm.category_id} onChange={e => setItemForm({ ...itemForm, category_id: parseInt(e.target.value) })}
-              className="w-full border rounded-lg px-3 py-2" required>
-              <option value={0}>Select type...</option>
-              {categories.filter(c => c.tracking_mode === 'individual').map(c => (
-                <option key={c.category_id} value={c.category_id}>{c.category_name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
-            <input type="text" value={itemForm.serial_number} onChange={e => setItemForm({ ...itemForm, serial_number: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2" placeholder="Manufacturer serial" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
-              <input type="date" value={itemForm.purchase_date} onChange={e => setItemForm({ ...itemForm, purchase_date: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Price</label>
-              <input type="number" min={0} value={itemForm.purchase_price} onChange={e => setItemForm({ ...itemForm, purchase_price: parseFloat(e.target.value) || 0 })}
-                className="w-full border rounded-lg px-3 py-2" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
-            <select value={itemForm.current_condition} onChange={e => setItemForm({ ...itemForm, current_condition: e.target.value as AssetCondition })}
-              className="w-full border rounded-lg px-3 py-2">
-              <option value="good">Good</option>
-              <option value="fair">Fair</option>
-              <option value="poor">Poor</option>
-            </select>
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button type="button" onClick={() => setShowItemModal(false)} className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
-            <button type="submit" className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Add Item</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-
   // ==================== MAIN RENDER ====================
   if (loading) {
     return (
@@ -623,12 +624,6 @@ const ReturnableAssets: React.FC = () => {
               className="flex items-center gap-1 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
               <Plus className="w-4 h-4" /> Add Type
             </button>
-            {categories.some(c => c.tracking_mode === 'individual') && (
-              <button onClick={() => setShowItemModal(true)}
-                className="flex items-center gap-1 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium">
-                <Plus className="w-4 h-4" /> Add Item
-              </button>
-            )}
             <button onClick={loadAllData} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
               <RefreshCw className="w-4 h-4" />
             </button>
@@ -638,7 +633,7 @@ const ReturnableAssets: React.FC = () => {
 
       <div className="p-4 space-y-4">
         {/* Quick Summary Stats */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           <div className="bg-white rounded-xl p-3 border shadow-sm">
             <div className="flex items-center gap-2">
               <div className="bg-blue-100 p-2 rounded-lg"><Package className="w-4 h-4 text-blue-600" /></div>
@@ -675,7 +670,92 @@ const ReturnableAssets: React.FC = () => {
               </div>
             </div>
           </div>
+          <div className="bg-white rounded-xl p-3 border shadow-sm">
+            <div className="flex items-center gap-2">
+              <div className="bg-yellow-100 p-2 rounded-lg"><Clock className="w-4 h-4 text-yellow-600" /></div>
+              <div>
+                <p className="text-lg font-bold text-yellow-600">{pendingReturnRequests.length}</p>
+                <p className="text-xs text-gray-500">Pending Returns</p>
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* Pending Return Requests from SE */}
+        {pendingReturnRequests.length > 0 && (
+          <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b bg-yellow-50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Clock className="w-5 h-5 text-yellow-600" />
+                <h3 className="font-semibold text-gray-900">Pending Return Requests</h3>
+                <span className="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full text-xs font-medium">
+                  {pendingReturnRequests.length} pending
+                </span>
+              </div>
+              <button onClick={fetchPendingReturnRequests} className="p-1.5 hover:bg-yellow-100 rounded-lg">
+                <RefreshCw className="w-4 h-4 text-yellow-600" />
+              </button>
+            </div>
+            <div className="divide-y">
+              {pendingReturnRequests.map(req => (
+                <div key={req.request_id} className="p-4 hover:bg-gray-50">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-mono text-sm bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
+                          {req.tracking_code}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${getConditionColor(req.se_condition_assessment)}`}>
+                          {req.se_condition_assessment}
+                        </span>
+                      </div>
+                      <h4 className="font-medium text-gray-900">{req.category_name}</h4>
+                      <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          {req.project_details?.project_name || `Project #${req.project_id}`}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Package className="w-3 h-3" />
+                          {req.quantity} unit(s)
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <User className="w-3 h-3" />
+                          {req.requested_by}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {new Date(req.requested_at).toLocaleDateString()} {new Date(req.requested_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </span>
+                      </div>
+                      {req.se_damage_description && (
+                        <p className="text-sm text-orange-600 mt-1 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" />
+                          {req.se_damage_description}
+                        </p>
+                      )}
+                      {req.se_notes && (
+                        <p className="text-sm text-gray-500 mt-1 italic">Note: {req.se_notes}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => openProcessModal(req)}
+                      disabled={processingRequest === req.request_id}
+                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium flex items-center gap-1 disabled:opacity-50"
+                    >
+                      {processingRequest === req.request_id ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Check className="w-4 h-4" />
+                      )}
+                      Process
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Asset Categories - Flow View */}
         <div className="space-y-3">
@@ -738,18 +818,15 @@ const ReturnableAssets: React.FC = () => {
 
                   {/* Quick Actions */}
                   <div className="flex items-center gap-2 mt-3">
-                    {cat.available_quantity > 0 && (
-                      <button onClick={() => startDispatch(cat)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-200 transition-colors">
-                        <Truck className="w-4 h-4" /> Dispatch
-                      </button>
-                    )}
-                    {(cat.dispatched_quantity || 0) > 0 && (
-                      <button onClick={() => startReturn(cat)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200 transition-colors">
-                        <RotateCcw className="w-4 h-4" /> Return
-                      </button>
-                    )}
+                    <button onClick={() => startDispatch(cat)}
+                      disabled={cat.available_quantity === 0}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${cat.available_quantity > 0 ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+                      <Truck className="w-4 h-4" /> Dispatch
+                    </button>
+                    <button onClick={() => openHistoryModal(cat)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-indigo-100 text-indigo-700 hover:bg-indigo-200">
+                      <History className="w-4 h-4" /> History
+                    </button>
                     <button onClick={() => setExpandedCategory(isExpanded ? null : cat.category_id!)}
                       className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors ml-auto">
                       <Eye className="w-4 h-4" /> {isExpanded ? 'Hide' : 'Details'}
@@ -795,15 +872,31 @@ const ReturnableAssets: React.FC = () => {
                         </h4>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {dispatchedInfo.map((info, idx) => (
-                            <div key={idx} className="bg-white rounded-lg p-3 border flex items-center justify-between">
-                              <div>
+                            <div key={idx} className="bg-white rounded-lg p-3 border">
+                              <div className="mb-2">
                                 <p className="font-medium text-sm">{info.projectName}</p>
                                 <p className="text-xs text-gray-500">{info.projectCode} • {info.quantity} units</p>
                               </div>
-                              <button onClick={() => startReturn(cat, info.projectId)}
-                                className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium hover:bg-green-200">
-                                Return
-                              </button>
+                              {/* Status timestamps */}
+                              <div className="text-xs space-y-0.5 pt-2 border-t border-gray-100">
+                                {info.dispatched_at && (
+                                  <p className="text-gray-500 flex items-center gap-1">
+                                    <Truck className="w-3 h-3" />
+                                    Dispatched: {new Date(info.dispatched_at).toLocaleDateString()} {new Date(info.dispatched_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                  </p>
+                                )}
+                                {info.is_received ? (
+                                  <p className="text-green-600 flex items-center gap-1">
+                                    <CheckCircle className="w-3 h-3" />
+                                    Received: {info.received_at ? `${new Date(info.received_at).toLocaleDateString()} ${new Date(info.received_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` : ''} {info.received_by && `by ${info.received_by}`}
+                                  </p>
+                                ) : (
+                                  <p className="text-yellow-600 flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    Pending SE receipt
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -861,7 +954,7 @@ const ReturnableAssets: React.FC = () => {
               <Wrench className="w-5 h-5" /> Pending Repairs ({maintenanceRecords.length})
             </h3>
             <div className="grid gap-2">
-              {maintenanceRecords.slice(0, 3).map(maint => (
+              {maintenanceRecords.slice(0, MAX_PENDING_REPAIRS_DISPLAY).map(maint => (
                 <div key={maint.maintenance_id} className="bg-white rounded-lg p-3 flex items-center justify-between">
                   <div>
                     <p className="font-medium text-sm">{maint.category_name} {maint.item_code && `(${maint.item_code})`}</p>
@@ -882,12 +975,249 @@ const ReturnableAssets: React.FC = () => {
             </div>
           </div>
         )}
+
       </div>
 
       {/* Modals */}
-      {renderActionPanel()}
+      {renderDispatchPanel()}
       {showCategoryModal && renderCategoryModal()}
-      {showItemModal && renderItemModal()}
+
+      {/* Process Return Request Modal */}
+      {showProcessModal && selectedReturnRequest && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="p-4 border-b bg-green-50">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <RotateCcw className="w-5 h-5 text-green-600" />
+                  <h3 className="text-lg font-semibold text-gray-900">Process Return Request</h3>
+                </div>
+                <button onClick={() => setShowProcessModal(false)} className="p-1 hover:bg-green-100 rounded">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {/* Request Info */}
+              <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                <div className="flex justify-between items-start">
+                  <span className="font-mono text-sm bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
+                    {selectedReturnRequest.tracking_code}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${getConditionColor(selectedReturnRequest.se_condition_assessment)}`}>
+                    SE Assessment: {selectedReturnRequest.se_condition_assessment}
+                  </span>
+                </div>
+                <p className="font-medium text-gray-900">{selectedReturnRequest.category_name}</p>
+                <div className="text-sm text-gray-500 space-y-1">
+                  <p className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {selectedReturnRequest.project_details?.project_name}</p>
+                  <p className="flex items-center gap-1"><Package className="w-3 h-3" /> {selectedReturnRequest.quantity} unit(s)</p>
+                  <p className="flex items-center gap-1"><User className="w-3 h-3" /> Requested by: {selectedReturnRequest.requested_by}</p>
+                  <p className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {new Date(selectedReturnRequest.requested_at).toLocaleString()}</p>
+                </div>
+                {selectedReturnRequest.se_damage_description && (
+                  <p className="text-sm text-orange-600 flex items-start gap-1 pt-2 border-t">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    {selectedReturnRequest.se_damage_description}
+                  </p>
+                )}
+              </div>
+
+              {/* PM Assessment */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Your Condition Assessment</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {VALID_CONDITIONS.map(cond => (
+                    <button key={cond} type="button" onClick={() => setProcessForm({ ...processForm, pm_condition_assessment: cond })}
+                      className={`py-2 px-2 rounded-lg border-2 text-xs font-medium capitalize transition-colors ${processForm.pm_condition_assessment === cond ? getConditionColor(cond) + ' border-current' : 'border-gray-200 hover:border-gray-300'}`}>
+                      {cond}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Action Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Action</label>
+                <div className="grid grid-cols-1 gap-2">
+                  <button type="button" onClick={() => setProcessForm({ ...processForm, pm_action: 'return_to_stock' })}
+                    className={`p-3 rounded-lg border-2 text-left ${processForm.pm_action === 'return_to_stock' ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                      <div>
+                        <p className="font-medium text-sm">Return to Stock</p>
+                        <p className="text-xs text-gray-500">Item is in good condition, make it available</p>
+                      </div>
+                    </div>
+                  </button>
+                  <button type="button" onClick={() => setProcessForm({ ...processForm, pm_action: 'send_to_maintenance' })}
+                    className={`p-3 rounded-lg border-2 text-left ${processForm.pm_action === 'send_to_maintenance' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                    <div className="flex items-center gap-2">
+                      <Wrench className="w-5 h-5 text-orange-600" />
+                      <div>
+                        <p className="font-medium text-sm">Send to Maintenance</p>
+                        <p className="text-xs text-gray-500">Item needs repair before next use</p>
+                      </div>
+                    </div>
+                  </button>
+                  <button type="button" onClick={() => setProcessForm({ ...processForm, pm_action: 'write_off' })}
+                    className={`p-3 rounded-lg border-2 text-left ${processForm.pm_action === 'write_off' ? 'border-red-500 bg-red-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                    <div className="flex items-center gap-2">
+                      <X className="w-5 h-5 text-red-600" />
+                      <div>
+                        <p className="font-medium text-sm">Write Off</p>
+                        <p className="text-xs text-gray-500">Item is beyond repair, remove from inventory</p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes (Optional)</label>
+                <textarea value={processForm.pm_notes} onChange={e => setProcessForm({ ...processForm, pm_notes: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} placeholder="Any notes about this return..." />
+              </div>
+            </div>
+
+            <div className="p-4 border-t flex gap-2">
+              <button onClick={() => setShowProcessModal(false)} className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50 font-medium">
+                Cancel
+              </button>
+              <button onClick={handleProcessReturnRequest}
+                disabled={processingRequest === selectedReturnRequest.request_id}
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2 disabled:opacity-50">
+                {processingRequest === selectedReturnRequest.request_id ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Processing...</>
+                ) : (
+                  <><Check className="w-4 h-4" /> Process Return</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* History Modal */}
+      {showHistoryModal && selectedCategoryForHistory && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden">
+            <div className="p-4 border-b bg-indigo-50">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <History className="w-5 h-5 text-indigo-600" />
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">{selectedCategoryForHistory.category_name} History</h3>
+                    <p className="text-xs text-gray-500">{selectedCategoryForHistory.category_code} - Complete movement records</p>
+                  </div>
+                </div>
+                <button onClick={() => { setShowHistoryModal(false); setSelectedCategoryForHistory(null); }} className="p-1 hover:bg-indigo-100 rounded">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto max-h-[65vh]">
+              {loadingHistory ? (
+                <div className="p-8 text-center">
+                  <RefreshCw className="w-6 h-6 animate-spin text-indigo-600 mx-auto" />
+                  <p className="text-sm text-gray-500 mt-2">Loading history...</p>
+                </div>
+              ) : movements.length === 0 ? (
+                <div className="p-8 text-center text-gray-500">
+                  <History className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                  <p className="text-sm">No movement history for this asset</p>
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {movements.map(mov => (
+                    <div key={mov.movement_id} className="p-4 hover:bg-gray-50">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          {/* Header row with action and date */}
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${
+                              mov.movement_type === 'DISPATCH' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                            }`}>
+                              {mov.movement_type === 'DISPATCH' ? <Truck className="w-4 h-4" /> : <RotateCcw className="w-4 h-4" />}
+                              {mov.movement_type === 'DISPATCH' ? 'Dispatched' : 'Returned'}
+                            </span>
+                            <span className="text-sm text-gray-500">
+                              {new Date(mov.dispatched_at || mov.returned_at || mov.created_at).toLocaleDateString('en-IN', {
+                                day: '2-digit', month: 'short', year: 'numeric'
+                              })}
+                              {' '}
+                              {new Date(mov.dispatched_at || mov.returned_at || mov.created_at).toLocaleTimeString('en-IN', {
+                                hour: '2-digit', minute: '2-digit', hour12: true
+                              })}
+                            </span>
+                          </div>
+
+                          {/* Details grid */}
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                            <div>
+                              <p className="text-xs text-gray-400 uppercase">Quantity</p>
+                              <p className="font-semibold text-gray-900">{mov.quantity} unit(s)</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-400 uppercase">Project</p>
+                              <p className="font-medium text-gray-900">{mov.project_name}</p>
+                              {mov.project_code && <p className="text-xs text-gray-500">{mov.project_code}</p>}
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-400 uppercase">{mov.movement_type === 'DISPATCH' ? 'Dispatched By' : 'Returned By'}</p>
+                              <p className="font-medium text-gray-900">{mov.movement_type === 'DISPATCH' ? mov.dispatched_by : mov.returned_by || '-'}</p>
+                            </div>
+                            {mov.item_code && (
+                              <div>
+                                <p className="text-xs text-gray-400 uppercase">Item Code</p>
+                                <p className="font-medium text-gray-900">{mov.item_code}</p>
+                              </div>
+                            )}
+                            {mov.condition_before && mov.movement_type === 'DISPATCH' && (
+                              <div>
+                                <p className="text-xs text-gray-400 uppercase">Condition (Before)</p>
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getConditionColor(mov.condition_before)}`}>
+                                  {mov.condition_before}
+                                </span>
+                              </div>
+                            )}
+                            {mov.condition_after && mov.movement_type === 'RETURN' && (
+                              <div>
+                                <p className="text-xs text-gray-400 uppercase">Condition (After)</p>
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getConditionColor(mov.condition_after)}`}>
+                                  {mov.condition_after}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Notes if any */}
+                          {mov.notes && (
+                            <div className="mt-2 p-2 bg-gray-100 rounded text-sm text-gray-600">
+                              <span className="text-xs text-gray-400">Notes: </span>{mov.notes}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 border-t bg-gray-50 flex items-center justify-between">
+              <span className="text-xs text-gray-500">{movements.length} record(s)</span>
+              <button onClick={() => { setShowHistoryModal(false); setSelectedCategoryForHistory(null); }}
+                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

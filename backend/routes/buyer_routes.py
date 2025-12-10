@@ -38,7 +38,7 @@ def check_td_or_admin_access():
         return jsonify({"error": "Access denied. Technical Director or Admin role required."}), 403
     return None
 
-# Helper function to check if user is Buyer, TD, or Admin (for vendor selection)
+# Helper function to check if user is Buyer, TD, or Admin (for vendor selection and LPO operations)
 def check_buyer_td_or_admin_access():
     """Check if current user is a Buyer, Technical Director, or Admin"""
     current_user = g.user
@@ -347,8 +347,8 @@ def send_vendor_email_route(cr_id):
 @buyer_routes.route('/purchase/<int:cr_id>/generate-lpo-pdf', methods=['POST'])
 @jwt_required
 def generate_lpo_pdf_route(cr_id):
-    """Generate LPO PDF for purchase order (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
+    """Generate LPO PDF for purchase order (Buyer, TD, or Admin)"""
+    access_check = check_buyer_td_or_admin_access()
     if access_check:
         return access_check
     return generate_lpo_pdf(cr_id)
@@ -357,8 +357,8 @@ def generate_lpo_pdf_route(cr_id):
 @buyer_routes.route('/purchase/<int:cr_id>/preview-lpo-pdf', methods=['POST'])
 @jwt_required
 def preview_lpo_pdf_route(cr_id):
-    """Preview LPO PDF data before generation (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
+    """Preview LPO PDF data before generation (Buyer, TD, or Admin)"""
+    access_check = check_buyer_td_or_admin_access()
     if access_check:
         return access_check
     return preview_lpo_pdf(cr_id)
@@ -367,8 +367,8 @@ def preview_lpo_pdf_route(cr_id):
 @buyer_routes.route('/purchase/<int:cr_id>/save-lpo-customization', methods=['POST'])
 @jwt_required
 def save_lpo_customization_route(cr_id):
-    """Save LPO customizations to database (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
+    """Save LPO customizations to database (Buyer, TD, or Admin)"""
+    access_check = check_buyer_td_or_admin_access()
     if access_check:
         return access_check
     return save_lpo_customization(cr_id)
@@ -377,8 +377,8 @@ def save_lpo_customization_route(cr_id):
 @buyer_routes.route('/lpo-default-template', methods=['POST'])
 @jwt_required
 def save_lpo_default_template_route():
-    """Save current LPO customizations as default template (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
+    """Save current LPO customizations as default template (Buyer, TD, or Admin)"""
+    access_check = check_buyer_td_or_admin_access()
     if access_check:
         return access_check
     return save_lpo_default_template()

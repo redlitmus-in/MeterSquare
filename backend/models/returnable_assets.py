@@ -108,6 +108,9 @@ class AssetMovement(db.Model):
     condition_after = db.Column(db.String(20), nullable=True)  # Condition when returned
     dispatched_by = db.Column(db.String(255), nullable=True)
     dispatched_at = db.Column(db.DateTime, nullable=True)
+    received_by = db.Column(db.String(255), nullable=True)
+    received_by_id = db.Column(db.Integer, nullable=True)
+    received_at = db.Column(db.DateTime, nullable=True)
     returned_by = db.Column(db.String(255), nullable=True)
     returned_at = db.Column(db.DateTime, nullable=True)
     reference_number = db.Column(db.String(100), nullable=True)
@@ -127,10 +130,82 @@ class AssetMovement(db.Model):
             'condition_after': self.condition_after,
             'dispatched_by': self.dispatched_by,
             'dispatched_at': self.dispatched_at.isoformat() if self.dispatched_at else None,
+            'received_by': self.received_by,
+            'received_by_id': self.received_by_id,
+            'received_at': self.received_at.isoformat() if self.received_at else None,
             'returned_by': self.returned_by,
             'returned_at': self.returned_at.isoformat() if self.returned_at else None,
             'reference_number': self.reference_number,
             'notes': self.notes,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'created_by': self.created_by,
+            # Include category/item details
+            'category_code': self.category.category_code if self.category else None,
+            'category_name': self.category.category_name if self.category else None,
+            'item_code': self.item.item_code if self.item else None
+        }
+
+
+class AssetReturnRequest(db.Model):
+    """Asset Return Requests - SE requests return, PM processes"""
+    __tablename__ = "asset_return_requests"
+
+    request_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    category_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_categories.category_id'), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_items.item_id'), nullable=True)  # NULL for quantity mode
+    project_id = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Integer, default=1)  # For quantity mode
+
+    # SE provides condition assessment
+    se_condition_assessment = db.Column(db.String(20), default='good')  # good, fair, poor, damaged
+    se_notes = db.Column(db.Text, nullable=True)  # SE's notes about the item
+    se_damage_description = db.Column(db.Text, nullable=True)  # If damaged, description
+
+    # Request status
+    status = db.Column(db.String(30), default='pending')  # pending, approved, rejected, completed
+
+    # PM reviews and confirms
+    pm_condition_assessment = db.Column(db.String(20), nullable=True)  # PM's actual condition check
+    pm_notes = db.Column(db.Text, nullable=True)
+    pm_action = db.Column(db.String(30), nullable=True)  # return_to_stock, send_to_maintenance, write_off
+
+    # Tracking
+    tracking_code = db.Column(db.String(50), nullable=True)  # Unique code for tracking: RR-2025-001
+    requested_by = db.Column(db.String(255), nullable=True)
+    requested_by_id = db.Column(db.Integer, nullable=True)
+    requested_at = db.Column(db.DateTime, default=datetime.utcnow)
+    processed_by = db.Column(db.String(255), nullable=True)
+    processed_by_id = db.Column(db.Integer, nullable=True)
+    processed_at = db.Column(db.DateTime, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=True)
+
+    # Relationships
+    category = db.relationship('ReturnableAssetCategory', backref='return_requests')
+    item = db.relationship('ReturnableAssetItem', backref='return_requests')
+
+    def to_dict(self):
+        return {
+            'request_id': self.request_id,
+            'category_id': self.category_id,
+            'item_id': self.item_id,
+            'project_id': self.project_id,
+            'quantity': self.quantity,
+            'se_condition_assessment': self.se_condition_assessment,
+            'se_notes': self.se_notes,
+            'se_damage_description': self.se_damage_description,
+            'status': self.status,
+            'pm_condition_assessment': self.pm_condition_assessment,
+            'pm_notes': self.pm_notes,
+            'pm_action': self.pm_action,
+            'tracking_code': self.tracking_code,
+            'requested_by': self.requested_by,
+            'requested_by_id': self.requested_by_id,
+            'requested_at': self.requested_at.isoformat() if self.requested_at else None,
+            'processed_by': self.processed_by,
+            'processed_by_id': self.processed_by_id,
+            'processed_at': self.processed_at.isoformat() if self.processed_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by,
             # Include category/item details

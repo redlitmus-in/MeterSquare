@@ -44,6 +44,7 @@ import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsM
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
+import PreliminaryPurchaseForm from '@/components/change-requests/PreliminaryPurchaseForm';
 import { useChangeRequestsAutoSync } from '@/hooks/useAutoSync';
 import { permissions } from '@/utils/rolePermissions';
 
@@ -52,6 +53,92 @@ interface Buyer {
   full_name: string;
   username: string;
 }
+
+// Purchase Request Modal Component with Materials and Preliminaries tabs
+interface PurchaseRequestModalProps {
+  onClose: () => void;
+}
+
+const PurchaseRequestModal: React.FC<PurchaseRequestModalProps> = ({ onClose }) => {
+  const [purchaseTab, setPurchaseTab] = useState<'materials' | 'preliminaries'>('materials');
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal Header */}
+        <div className="sticky top-0 bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-white bg-opacity-20 rounded-lg">
+              <Box className="w-6 h-6 text-white" />
+            </div>
+            <h2 className="text-xl font-bold text-white">Request Purchase</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-white hover:bg-white hover:bg-opacity-20 rounded-lg p-2 transition-colors"
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Tab Navigation */}
+        <div className="border-b border-gray-200 bg-gray-50">
+          <div className="flex">
+            <button
+              onClick={() => setPurchaseTab('materials')}
+              className={`flex-1 px-6 py-3 text-sm font-medium transition-colors relative ${
+                purchaseTab === 'materials'
+                  ? 'text-[#243d8a] bg-white'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <Package className="w-4 h-4" />
+                <span>Materials</span>
+              </div>
+              {purchaseTab === 'materials' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#243d8a]" />
+              )}
+            </button>
+            <button
+              onClick={() => setPurchaseTab('preliminaries')}
+              className={`flex-1 px-6 py-3 text-sm font-medium transition-colors relative ${
+                purchaseTab === 'preliminaries'
+                  ? 'text-[#243d8a] bg-white'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <FileText className="w-4 h-4" />
+                <span>Preliminaries</span>
+              </div>
+              {purchaseTab === 'preliminaries' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#243d8a]" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)] custom-scrollbar" style={{ scrollBehavior: 'smooth' }}>
+          {purchaseTab === 'materials' ? (
+            <ExtraMaterialForm onClose={onClose} />
+          ) : (
+            <PreliminaryPurchaseForm onClose={onClose} />
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+};
 
 const ChangeRequestsPage: React.FC = () => {
   const location = useLocation();
@@ -1278,19 +1365,6 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
 
-                          <div className="px-4 pb-3 space-y-1.5 text-xs">
-                            <div className="flex justify-between">
-                              <span className="text-gray-500">Additional Cost:</span>
-                              <span className="font-bold text-blue-600">{formatCurrency(request.materials_total_cost)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-500">% of Item Overhead:</span>
-                              <span className={`font-semibold ${getPercentageColor(request.percentage_of_item_overhead || 0)}`}>
-                                {(request.percentage_of_item_overhead || 0).toFixed(1)}%
-                              </span>
-                            </div>
-                          </div>
-
                           <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
                             <div className="grid grid-cols-2 gap-2">
                               <button
@@ -2017,47 +2091,14 @@ const ChangeRequestsPage: React.FC = () => {
         title="Reject Change Request"
       />
 
-      {/* Extra Material Form Modal */}
+      {/* Purchase Request Modal - with Materials and Preliminaries tabs */}
       {showExtraForm && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="sticky top-0 bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] px-6 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-white bg-opacity-20 rounded-lg">
-                  <Box className="w-6 h-6 text-white" />
-                </div>
-                <h2 className="text-xl font-bold text-white">Request Material Purchase</h2>
-              </div>
-              <button
-                onClick={() => setShowExtraForm(false)}
-                className="text-white hover:bg-white hover:bg-opacity-20 rounded-lg p-2 transition-colors"
-              >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)] custom-scrollbar" style={{ scrollBehavior: 'smooth' }}>
-              <ExtraMaterialForm
-                onClose={() => {
-                  setShowExtraForm(false);
-                  refetch();
-                }}
-              />
-            </div>
-          </motion.div>
-        </div>
+        <PurchaseRequestModal
+          onClose={() => {
+            setShowExtraForm(false);
+            refetch();
+          }}
+        />
       )}
 
       {/* Buyer Selection Modal */}

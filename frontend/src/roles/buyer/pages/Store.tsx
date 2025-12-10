@@ -47,6 +47,7 @@ interface Project {
 
 const Store: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'store' | 'requests'>('store');
+  const [requestFilter, setRequestFilter] = useState<'ongoing' | 'completed'>('ongoing');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
@@ -218,12 +219,19 @@ const Store: React.FC = () => {
     const upperStatus = status?.toUpperCase() || '';
     switch (upperStatus) {
       case 'APPROVED':
+        return <Badge className="bg-blue-500 hover:bg-blue-600">APPROVED</Badge>;
       case 'DISPATCHED':
-        return <Badge className="bg-green-500 hover:bg-green-600">{upperStatus}</Badge>;
+      case 'DN_CREATED':
+      case 'IN_TRANSIT':
+        return <Badge className="bg-orange-500 hover:bg-orange-600">{upperStatus === 'DN_CREATED' ? 'DN CREATED' : upperStatus === 'IN_TRANSIT' ? 'IN TRANSIT' : 'DISPATCHED'}</Badge>;
+      case 'FULFILLED':
+      case 'DELIVERED':
+        return <Badge className="bg-green-500 hover:bg-green-600">COMPLETED</Badge>;
       case 'REJECTED':
-        return <Badge variant="destructive">{upperStatus}</Badge>;
+        return <Badge variant="destructive">REJECTED</Badge>;
       case 'PENDING':
-        return <Badge className="bg-yellow-500 hover:bg-yellow-600">{upperStatus}</Badge>;
+      case 'SEND_REQUEST':
+        return <Badge className="bg-yellow-500 hover:bg-yellow-600">PENDING</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -399,17 +407,42 @@ const Store: React.FC = () => {
       {/* My Requests Tab Content */}
       {activeTab === 'requests' && (
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-          <div className="flex justify-between items-center p-4 border-b">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-4 border-b">
             <h2 className="text-lg font-semibold text-gray-900">My Material Requests</h2>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={fetchMyRequests}
-              disabled={isLoadingRequests}
-            >
-              <RefreshCw className={`h-4 w-4 mr-1 ${isLoadingRequests ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* Filter buttons */}
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => setRequestFilter('ongoing')}
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                    requestFilter === 'ongoing'
+                      ? 'bg-orange-500 text-white'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Ongoing ({myRequests.filter(r => !['FULFILLED', 'DELIVERED', 'REJECTED'].includes(r.status?.toUpperCase() || '')).length})
+                </button>
+                <button
+                  onClick={() => setRequestFilter('completed')}
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                    requestFilter === 'completed'
+                      ? 'bg-green-500 text-white'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Completed ({myRequests.filter(r => ['FULFILLED', 'DELIVERED'].includes(r.status?.toUpperCase() || '')).length})
+                </button>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchMyRequests}
+                disabled={isLoadingRequests}
+              >
+                <RefreshCw className={`h-4 w-4 mr-1 ${isLoadingRequests ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
           </div>
 
           {isLoadingRequests ? (
@@ -432,7 +465,16 @@ const Store: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {Array.isArray(myRequests) && myRequests.map((request, index) => (
+                  {Array.isArray(myRequests) && myRequests
+                    .filter(r => {
+                      const status = r.status?.toUpperCase() || '';
+                      if (requestFilter === 'completed') {
+                        return ['FULFILLED', 'DELIVERED'].includes(status);
+                      } else {
+                        return !['FULFILLED', 'DELIVERED', 'REJECTED'].includes(status);
+                      }
+                    })
+                    .map((request, index) => (
                     <tr
                       key={request.request_id}
                       className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}
@@ -474,17 +516,32 @@ const Store: React.FC = () => {
                 </tbody>
               </table>
 
-              {(!Array.isArray(myRequests) || myRequests.length === 0) && (
+              {(!Array.isArray(myRequests) || myRequests.filter(r => {
+                const status = r.status?.toUpperCase() || '';
+                if (requestFilter === 'completed') {
+                  return ['FULFILLED', 'DELIVERED'].includes(status);
+                } else {
+                  return !['FULFILLED', 'DELIVERED', 'REJECTED'].includes(status);
+                }
+              }).length === 0) && (
                 <div className="text-center py-12">
                   <ClipboardList className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No requests yet</h3>
-                  <p className="text-gray-600">Submit a material request from the Store tab</p>
-                  <Button
-                    className="mt-4 bg-[#243d8a] hover:bg-[#1a2d66]"
-                    onClick={() => setActiveTab('store')}
-                  >
-                    Browse Store
-                  </Button>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    {requestFilter === 'completed' ? 'No completed requests' : 'No ongoing requests'}
+                  </h3>
+                  <p className="text-gray-600">
+                    {requestFilter === 'completed'
+                      ? 'Completed requests will appear here when materials are delivered'
+                      : 'Submit a material request from the Store tab'}
+                  </p>
+                  {requestFilter === 'ongoing' && (
+                    <Button
+                      className="mt-4 bg-[#243d8a] hover:bg-[#1a2d66]"
+                      onClick={() => setActiveTab('store')}
+                    >
+                      Browse Store
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -493,8 +550,10 @@ const Store: React.FC = () => {
           {!isLoadingRequests && Array.isArray(myRequests) && myRequests.length > 0 && (
             <div className="p-4 border-t text-sm text-gray-600">
               Total {myRequests.length} request(s) •
-              <span className="text-yellow-600 ml-2">{myRequests.filter(r => r.status?.toUpperCase() === 'PENDING').length} Pending</span> •
-              <span className="text-green-600 ml-2">{myRequests.filter(r => ['APPROVED', 'DISPATCHED'].includes(r.status?.toUpperCase())).length} Approved</span> •
+              <span className="text-yellow-600 ml-2">{myRequests.filter(r => ['PENDING', 'SEND_REQUEST'].includes(r.status?.toUpperCase() || '')).length} Pending</span> •
+              <span className="text-blue-600 ml-2">{myRequests.filter(r => r.status?.toUpperCase() === 'APPROVED').length} Approved</span> •
+              <span className="text-orange-600 ml-2">{myRequests.filter(r => ['DISPATCHED', 'DN_CREATED', 'IN_TRANSIT'].includes(r.status?.toUpperCase() || '')).length} In Transit</span> •
+              <span className="text-green-600 ml-2">{myRequests.filter(r => ['FULFILLED', 'DELIVERED'].includes(r.status?.toUpperCase() || '')).length} Completed</span> •
               <span className="text-red-600 ml-2">{myRequests.filter(r => r.status?.toUpperCase() === 'REJECTED').length} Rejected</span>
             </div>
           )}

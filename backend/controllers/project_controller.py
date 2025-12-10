@@ -147,6 +147,9 @@ def get_all_projects():
         user_id = current_user.get('user_id') if current_user else None
         user_role = current_user.get('role', '').lower() if current_user else ''
         user_name = current_user.get('full_name') or current_user.get('username') or 'Unknown' if current_user else 'Unknown'
+
+        log.info(f"get_all_projects - user_id: {user_id}, user_role: '{user_role}'")
+
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 10, type=int), 100)
@@ -160,8 +163,11 @@ def get_all_projects():
 
         # Apply role-based filtering
         # Admin, Production Manager, and Inventory roles can see all projects
-        roles_with_full_access = ['admin', 'production_manager', 'inventory', 'productionmanager']
-        if user_role not in roles_with_full_access:
+        roles_with_full_access = ['admin', 'productionmanager', 'inventory']
+        # Normalize role for comparison (lowercase, remove all spaces/underscores)
+        normalized_role = user_role.lower().replace('_', '').replace(' ', '').replace('-', '')
+        log.info(f"get_all_projects - normalized_role: '{normalized_role}', has_access: {normalized_role in roles_with_full_access}")
+        if normalized_role not in roles_with_full_access:
             # Non-admin users only see projects assigned to them OR projects with no estimator
             query = query.filter(
                 or_(

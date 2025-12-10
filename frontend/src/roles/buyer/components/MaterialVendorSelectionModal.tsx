@@ -16,12 +16,19 @@ import {
   Mail,
   Phone,
   MapPin,
-  User
+  User,
+  FileText,
+  Download,
+  Edit3,
+  Loader2,
+  Save,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Purchase, buyerService, MaterialVendorSelection } from '../services/buyerService';
+import { Purchase, buyerService, MaterialVendorSelection, LPOData } from '../services/buyerService';
 import { buyerVendorService, Vendor, VendorProduct } from '../services/buyerVendorService';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
@@ -92,6 +99,19 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     vendor_name: string;
     materials: Array<{ material_name: string; quantity: number; unit: string }>;
   } | null>(null);
+
+  // LPO PDF state
+  const [includeLpoPdf, setIncludeLpoPdf] = useState(true);
+  const [lpoData, setLpoData] = useState<LPOData | null>(null);
+  const [isLoadingLpo, setIsLoadingLpo] = useState(false);
+  const [showLpoEditor, setShowLpoEditor] = useState(false);
+  const [includeSignatures, setIncludeSignatures] = useState(true);
+  const [newCustomTerm, setNewCustomTerm] = useState('');
+  const [editingTermIndex, setEditingTermIndex] = useState<number | null>(null);
+  const [editingTermText, setEditingTermText] = useState('');
+  const [isSavingLpo, setIsSavingLpo] = useState(false);
+  const [lpoLastSaved, setLpoLastSaved] = useState<Date | null>(null);
+  const [isSavingDefault, setIsSavingDefault] = useState(false);
 
   // Check if current user is Technical Director
   const isTechnicalDirector = user?.role?.toLowerCase().includes('technical') ||
@@ -192,6 +212,128 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       setSentVendorIds(existingSentVendorIds);
     }
   }, [isOpen, purchase.po_children]);
+
+  // Load LPO data when modal opens (for buyer mode only)
+  useEffect(() => {
+    if (isOpen && includeLpoPdf && !lpoData && viewMode === 'buyer') {
+      loadLpoData();
+    }
+  }, [isOpen, includeLpoPdf, viewMode]);
+
+  // Load LPO data function
+  const loadLpoData = async () => {
+    try {
+      setIsLoadingLpo(true);
+      const response = await buyerService.previewLPOPdf(purchase.cr_id);
+      let enrichedLpoData = response.lpo_data;
+
+      // Try to load default template if no custom terms exist
+      const hasCustomTerms = ((response.lpo_data.terms?.custom_terms?.length || 0) > 0) ||
+        (response.lpo_data.lpo_info?.custom_message);
+
+      if (!hasCustomTerms) {
+        try {
+          const defaultTemplate = await buyerService.getLPODefaultTemplate();
+          if (defaultTemplate.template) {
+            enrichedLpoData = {
+              ...enrichedLpoData,
+              lpo_info: {
+                ...enrichedLpoData.lpo_info,
+                quotation_ref: defaultTemplate.template.quotation_ref || enrichedLpoData.lpo_info.quotation_ref,
+                custom_message: defaultTemplate.template.custom_message || enrichedLpoData.lpo_info.custom_message,
+              },
+              vendor: {
+                ...enrichedLpoData.vendor,
+                subject: defaultTemplate.template.subject || enrichedLpoData.vendor.subject,
+              },
+              terms: {
+                ...enrichedLpoData.terms,
+                completion_terms: defaultTemplate.template.completion_terms || enrichedLpoData.terms.completion_terms,
+                custom_terms: (defaultTemplate.template.custom_terms?.length || 0) > 0
+                  ? defaultTemplate.template.custom_terms
+                  : enrichedLpoData.terms.custom_terms,
+              }
+            };
+            setIncludeSignatures(defaultTemplate.template.include_signatures);
+            toast.info('Loaded default LPO template');
+          }
+        } catch {
+          console.log('No default template found');
+        }
+      }
+
+      setLpoData(enrichedLpoData);
+    } catch (error: any) {
+      console.error('Error loading LPO data:', error);
+      toast.error(error.message || 'Failed to load LPO data');
+      setIncludeLpoPdf(false);
+    } finally {
+      setIsLoadingLpo(false);
+    }
+  };
+
+  // Auto-save LPO customization
+  const saveLpoCustomization = async () => {
+    if (!lpoData) return;
+    setIsSavingLpo(true);
+    try {
+      await buyerService.saveLPOCustomization(purchase.cr_id, lpoData, includeSignatures);
+      setLpoLastSaved(new Date());
+    } catch (error) {
+      console.error('LPO auto-save failed:', error);
+    } finally {
+      setIsSavingLpo(false);
+    }
+  };
+
+  // Save as default template
+  const handleSaveAsDefault = async () => {
+    if (!lpoData) return;
+    setIsSavingDefault(true);
+    try {
+      await buyerService.saveLPODefaultTemplate(lpoData, includeSignatures);
+      toast.success('Default template saved!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to save default template');
+    } finally {
+      setIsSavingDefault(false);
+    }
+  };
+
+  // Download LPO PDF preview
+  const handleDownloadLpoPdf = async () => {
+    if (!lpoData) {
+      toast.error('LPO data not loaded');
+      return;
+    }
+    try {
+      const finalLpoData = !includeSignatures ? {
+        ...lpoData,
+        signatures: { ...lpoData.signatures, md_signature: null, td_signature: null, stamp_image: null }
+      } : lpoData;
+
+      const blob = await buyerService.generateLPOPdf(purchase.cr_id, finalLpoData);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `LPO-${purchase.cr_id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      toast.success('LPO PDF downloaded');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to download LPO PDF');
+    }
+  };
+
+  // Handle LPO checkbox toggle
+  const handleLpoToggle = (checked: boolean) => {
+    setIncludeLpoPdf(checked);
+    if (checked && !lpoData) {
+      loadLpoData();
+    }
+  };
 
   // Helper function to check if a product matches a material
   const isProductMatchingMaterial = (
@@ -613,6 +755,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     const unselectedMaterials = materialVendors.filter(m => m.selected_vendors.length === 0);
     if (unselectedMaterials.length > 0) {
       toast.warning(`${unselectedMaterials.length} material(s) without vendors will be skipped: ${unselectedMaterials.map(m => m.material_name).join(', ')}`);
+    }
+
+    // Save LPO customization before sending to TD (for buyer mode only)
+    if (viewMode === 'buyer' && includeLpoPdf && lpoData) {
+      try {
+        await buyerService.saveLPOCustomization(purchase.cr_id, lpoData, includeSignatures);
+      } catch (error) {
+        console.error('Failed to save LPO customization:', error);
+        // Don't block the submission, just log the error
+      }
     }
 
     // Check if this is a re-selection for a rejected PO Child
@@ -2076,6 +2228,383 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   </div>
                 )}
               </div>
+
+              {/* LPO PDF Section - Only for Buyer mode */}
+              {viewMode === 'buyer' && (
+                <div className="px-6 py-4 border-t border-gray-200">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          id="include-lpo-pdf-vendor"
+                          checked={includeLpoPdf}
+                          onChange={(e) => handleLpoToggle(e.target.checked)}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        <label htmlFor="include-lpo-pdf-vendor" className="flex items-center gap-2">
+                          <FileText className="w-5 h-5 text-blue-600" />
+                          <div>
+                            <span className="text-sm font-medium text-gray-900">Attach LPO PDF</span>
+                            <p className="text-xs text-gray-500">Generate and attach Local Purchase Order PDF</p>
+                          </div>
+                        </label>
+                      </div>
+                      {includeLpoPdf && lpoData && (
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowLpoEditor(!showLpoEditor)}
+                            className="text-xs"
+                          >
+                            <Edit3 className="w-3 h-3 mr-1" />
+                            {showLpoEditor ? 'Hide' : 'Edit'}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleDownloadLpoPdf}
+                            className="text-xs"
+                          >
+                            <Download className="w-3 h-3 mr-1" />
+                            Preview
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    {isLoadingLpo && (
+                      <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading LPO data...
+                      </div>
+                    )}
+
+                    {/* LPO Editor Section */}
+                    {includeLpoPdf && lpoData && showLpoEditor && (
+                      <div className="mt-4 space-y-4 border-t border-blue-200 pt-4">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm font-medium text-gray-700">Edit LPO Details</div>
+                          <div className="flex items-center gap-3">
+                            <div className="text-xs text-gray-500 flex items-center gap-1">
+                              {isSavingLpo ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  <span>Saving...</span>
+                                </>
+                              ) : lpoLastSaved ? (
+                                <>
+                                  <CheckCircle className="w-3 h-3 text-green-500" />
+                                  <span>Saved</span>
+                                </>
+                              ) : null}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={handleSaveAsDefault}
+                              disabled={isSavingDefault}
+                              className="text-xs bg-purple-50 border-purple-200 hover:bg-purple-100 text-purple-700"
+                            >
+                              {isSavingDefault ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  Saving...
+                                </>
+                              ) : (
+                                <>
+                                  <Save className="w-3 h-3 mr-1" />
+                                  Save as Default
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Quotation Ref and Subject */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-xs font-medium text-gray-600">Quotation Ref#</label>
+                            <Input
+                              value={lpoData.lpo_info.quotation_ref || ''}
+                              onChange={(e) => setLpoData({
+                                ...lpoData,
+                                lpo_info: { ...lpoData.lpo_info, quotation_ref: e.target.value }
+                              })}
+                              className="mt-1 text-sm"
+                              placeholder="Vendor quotation reference"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-gray-600">Subject</label>
+                            <Input
+                              value={lpoData.vendor.subject || ''}
+                              onChange={(e) => setLpoData({
+                                ...lpoData,
+                                vendor: { ...lpoData.vendor, subject: e.target.value }
+                              })}
+                              className="mt-1 text-sm"
+                              placeholder="LPO subject"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Custom Message for PDF */}
+                        <div>
+                          <label className="text-xs font-medium text-gray-600">LPO Message (shown in PDF)</label>
+                          <textarea
+                            value={lpoData.lpo_info.custom_message || ''}
+                            onChange={(e) => setLpoData({
+                              ...lpoData,
+                              lpo_info: { ...lpoData.lpo_info, custom_message: e.target.value }
+                            })}
+                            className="mt-1 w-full p-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Edit the message that appears in the LPO PDF</p>
+                        </div>
+
+                        {/* Terms Section */}
+                        <div className="border-t border-blue-200 pt-4">
+                          <div className="text-sm font-medium text-gray-700 mb-3">Terms & Conditions</div>
+
+                          {/* Delivery Terms */}
+                          <div className="mb-4">
+                            <label className="text-xs font-medium text-gray-600">Delivery Terms</label>
+                            <Input
+                              value={lpoData.terms.completion_terms || lpoData.terms.delivery_terms || ''}
+                              onChange={(e) => setLpoData({
+                                ...lpoData,
+                                terms: { ...lpoData.terms, completion_terms: e.target.value, delivery_terms: e.target.value }
+                              })}
+                              className="mt-1 text-sm"
+                              placeholder="e.g., 04.12.25"
+                            />
+                          </div>
+
+                          {/* Payment Terms with Checkboxes */}
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <div className="text-xs font-medium text-gray-600 mb-2">Payment Terms (select to include in PDF)</div>
+
+                            {/* Payment terms list */}
+                            <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
+                              {(lpoData.terms.custom_terms || []).map((term: {text: string, selected: boolean}, index: number) => (
+                                <div key={index} className="flex items-center gap-2 bg-white p-2 rounded border border-gray-200">
+                                  <input
+                                    type="checkbox"
+                                    checked={term.selected}
+                                    onChange={(e) => {
+                                      const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                      updatedTerms[index] = { ...term, selected: e.target.checked };
+                                      setLpoData({
+                                        ...lpoData,
+                                        terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                      });
+                                    }}
+                                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                  />
+                                  {editingTermIndex === index ? (
+                                    <div className="flex-1 flex gap-2">
+                                      <Input
+                                        value={editingTermText}
+                                        onChange={(e) => setEditingTermText(e.target.value)}
+                                        className="flex-1 text-xs"
+                                        autoFocus
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            if (editingTermText.trim()) {
+                                              const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                              updatedTerms[index] = { ...term, text: editingTermText.trim() };
+                                              setLpoData({
+                                                ...lpoData,
+                                                terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                              });
+                                            }
+                                            setEditingTermIndex(null);
+                                            setEditingTermText('');
+                                          } else if (e.key === 'Escape') {
+                                            setEditingTermIndex(null);
+                                            setEditingTermText('');
+                                          }
+                                        }}
+                                      />
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                          if (editingTermText.trim()) {
+                                            const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                            updatedTerms[index] = { ...term, text: editingTermText.trim() };
+                                            setLpoData({
+                                              ...lpoData,
+                                              terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                            });
+                                          }
+                                          setEditingTermIndex(null);
+                                          setEditingTermText('');
+                                        }}
+                                      >
+                                        <Save className="w-3 h-3" />
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <span className="flex-1 text-xs text-gray-700">{term.text}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingTermIndex(index);
+                                          setEditingTermText(term.text);
+                                        }}
+                                        className="text-blue-500 hover:text-blue-700 p-1"
+                                      >
+                                        <Edit3 className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const updatedTerms = (lpoData.terms.custom_terms || []).filter((_: any, i: number) => i !== index);
+                                          setLpoData({
+                                            ...lpoData,
+                                            terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                          });
+                                        }}
+                                        className="text-red-500 hover:text-red-700 p-1"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              ))}
+                              {(!lpoData.terms.custom_terms || lpoData.terms.custom_terms.length === 0) && (
+                                <div className="text-xs text-gray-400 italic py-2">No payment terms added yet.</div>
+                              )}
+                            </div>
+
+                            {/* Add new payment term */}
+                            <div className="flex gap-2">
+                              <Input
+                                value={newCustomTerm}
+                                onChange={(e) => setNewCustomTerm(e.target.value)}
+                                placeholder="e.g., 50% Advance, 100% CDC after delivery..."
+                                className="flex-1 text-sm"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (newCustomTerm.trim()) {
+                                      const currentTerms = lpoData.terms.custom_terms || [];
+                                      setLpoData({
+                                        ...lpoData,
+                                        terms: {
+                                          ...lpoData.terms,
+                                          custom_terms: [...currentTerms, { text: newCustomTerm.trim(), selected: true }]
+                                        }
+                                      });
+                                      setNewCustomTerm('');
+                                    }
+                                  }
+                                }}
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  if (newCustomTerm.trim()) {
+                                    const currentTerms = lpoData.terms.custom_terms || [];
+                                    setLpoData({
+                                      ...lpoData,
+                                      terms: {
+                                        ...lpoData.terms,
+                                        custom_terms: [...currentTerms, { text: newCustomTerm.trim(), selected: true }]
+                                      }
+                                    });
+                                    setNewCustomTerm('');
+                                  }
+                                }}
+                              >
+                                <Plus className="w-3 h-3 mr-1" /> Add
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Signature Selection */}
+                        <div className="border-t border-blue-200 pt-4">
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              id="include-signatures-vendor"
+                              checked={includeSignatures}
+                              onChange={(e) => setIncludeSignatures(e.target.checked)}
+                              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                            />
+                            <label htmlFor="include-signatures-vendor" className="text-sm font-medium text-gray-700">
+                              Include Signatures in LPO PDF
+                            </label>
+                          </div>
+
+                          {includeSignatures && (
+                            <div className="mt-3 bg-gray-50 p-3 rounded border border-gray-200">
+                              <div className="text-xs text-gray-500 mb-2">Signatures from Admin Settings:</div>
+                              <div className="grid grid-cols-3 gap-4">
+                                <div className="text-center">
+                                  <div className="text-xs text-gray-500 mb-1">MD Signature</div>
+                                  {lpoData.signatures.md_signature ? (
+                                    <img src={lpoData.signatures.md_signature} alt="MD" className="h-10 mx-auto object-contain" />
+                                  ) : (
+                                    <div className="text-xs text-orange-500">Not uploaded</div>
+                                  )}
+                                </div>
+                                <div className="text-center">
+                                  <div className="text-xs text-gray-500 mb-1">Stamp</div>
+                                  {lpoData.signatures.stamp_image ? (
+                                    <img src={lpoData.signatures.stamp_image} alt="Stamp" className="h-10 mx-auto object-contain" />
+                                  ) : (
+                                    <div className="text-xs text-orange-500">Not uploaded</div>
+                                  )}
+                                </div>
+                                <div className="text-center">
+                                  <div className="text-xs text-gray-500 mb-1">TD Signature</div>
+                                  {lpoData.signatures.td_signature ? (
+                                    <img src={lpoData.signatures.td_signature} alt="TD" className="h-10 mx-auto object-contain" />
+                                  ) : (
+                                    <div className="text-xs text-orange-500">Not uploaded</div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Summary */}
+                        <div className="bg-white p-3 rounded border border-gray-200">
+                          <div className="text-xs font-medium text-gray-600 mb-2">LPO Summary</div>
+                          <div className="grid grid-cols-3 gap-2 text-sm">
+                            <div>
+                              <span className="text-gray-500">Subtotal:</span>
+                              <span className="ml-2 font-medium">AED {lpoData.totals.subtotal.toLocaleString()}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">VAT ({lpoData.totals.vat_percent}%):</span>
+                              <span className="ml-2 font-medium">AED {lpoData.totals.vat_amount.toLocaleString()}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Total:</span>
+                              <span className="ml-2 font-bold text-blue-600">AED {lpoData.totals.grand_total.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Footer */}
               <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between gap-4">

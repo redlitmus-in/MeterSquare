@@ -59,7 +59,9 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
     material_vendor_selections = cr.material_vendor_selections or {}
 
     # Build BOQ material price lookup for enrichment
+    # Two lookups: by material_id and by material_name (for when IDs don't match)
     boq_material_prices = {}
+    boq_material_prices_by_name = {}
     if boq_details is None and cr.boq_id:
         boq_details = BOQDetails.query.filter_by(boq_id=cr.boq_id, is_deleted=False).first()
 
@@ -67,9 +69,18 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
         boq_items = boq_details.boq_details.get('items', [])
         for item_idx, item in enumerate(boq_items):
             for sub_item_idx, sub_item in enumerate(item.get('sub_items', [])):
+                sub_item_name = sub_item.get('sub_item_name', '')
                 for mat_idx, boq_material in enumerate(sub_item.get('materials', [])):
                     material_id = f"mat_{cr.boq_id}_{item_idx+1}_{sub_item_idx+1}_{mat_idx+1}"
-                    boq_material_prices[material_id] = boq_material.get('unit_price', 0)
+                    unit_price = boq_material.get('unit_price', 0)
+                    material_name = boq_material.get('material_name', '')
+                    boq_material_prices[material_id] = unit_price
+                    # Also store by material_name + sub_item_name for fallback matching
+                    if material_name:
+                        name_key = f"{material_name}_{sub_item_name}"
+                        boq_material_prices_by_name[name_key] = unit_price
+                        # Also store just by material_name (less specific fallback)
+                        boq_material_prices_by_name[material_name] = unit_price
 
     if cr.sub_items_data:
         for sub_item in sub_items_data:
@@ -78,6 +89,7 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                 if sub_materials:
                     for material in sub_materials:
                         material_name = material.get('material_name', '')
+                        sub_item_name_for_material = material.get('sub_item_name', '') or sub_item.get('sub_item_name', '')
                         quantity = material.get('quantity') or 0
                         original_unit_price = material.get('unit_price') or 0
 
@@ -85,6 +97,13 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         master_material_id = material.get('master_material_id')
                         if (original_unit_price == 0 or not original_unit_price) and master_material_id:
                             original_unit_price = boq_material_prices.get(master_material_id, 0)
+                        # Fallback: try matching by material_name + sub_item_name
+                        if (original_unit_price == 0 or not original_unit_price) and material_name:
+                            name_key = f"{material_name}_{sub_item_name_for_material}"
+                            original_unit_price = boq_material_prices_by_name.get(name_key, 0)
+                        # Final fallback: try matching by just material_name
+                        if (original_unit_price == 0 or not original_unit_price) and material_name:
+                            original_unit_price = boq_material_prices_by_name.get(material_name, 0)
 
                         # Check if there's a negotiated price for this material
                         vendor_selection = material_vendor_selections.get(material_name, {})
@@ -106,6 +125,7 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         })
                 else:
                     material_name = sub_item.get('material_name', '')
+                    sub_item_name_for_lookup = sub_item.get('sub_item_name', '')
                     quantity = sub_item.get('quantity') or 0
                     original_unit_price = sub_item.get('unit_price') or 0
 
@@ -113,6 +133,13 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                     master_material_id = sub_item.get('master_material_id')
                     if (original_unit_price == 0 or not original_unit_price) and master_material_id:
                         original_unit_price = boq_material_prices.get(master_material_id, 0)
+                    # Fallback: try matching by material_name + sub_item_name
+                    if (original_unit_price == 0 or not original_unit_price) and material_name:
+                        name_key = f"{material_name}_{sub_item_name_for_lookup}"
+                        original_unit_price = boq_material_prices_by_name.get(name_key, 0)
+                    # Final fallback: try matching by just material_name
+                    if (original_unit_price == 0 or not original_unit_price) and material_name:
+                        original_unit_price = boq_material_prices_by_name.get(material_name, 0)
 
                     # Check if there's a negotiated price for this material
                     vendor_selection = material_vendor_selections.get(material_name, {})
@@ -139,6 +166,7 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
     else:
         for material in sub_items_data:
             material_name = material.get('material_name', '')
+            sub_item_name_for_lookup = material.get('sub_item_name', '')
             quantity = material.get('quantity', 0)
             original_unit_price = material.get('unit_price', 0)
 
@@ -146,6 +174,13 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
             master_material_id = material.get('master_material_id')
             if (original_unit_price == 0 or not original_unit_price) and master_material_id:
                 original_unit_price = boq_material_prices.get(master_material_id, 0)
+            # Fallback: try matching by material_name + sub_item_name
+            if (original_unit_price == 0 or not original_unit_price) and material_name:
+                name_key = f"{material_name}_{sub_item_name_for_lookup}"
+                original_unit_price = boq_material_prices_by_name.get(name_key, 0)
+            # Final fallback: try matching by just material_name
+            if (original_unit_price == 0 or not original_unit_price) and material_name:
+                original_unit_price = boq_material_prices_by_name.get(material_name, 0)
 
             # Check if there's a negotiated price for this material
             vendor_selection = material_vendor_selections.get(material_name, {})
@@ -1036,11 +1071,11 @@ def get_buyer_pending_purchases():
             store_requests_pending = False
 
             if has_store_requests:
-                approved_count = sum(1 for r in store_requests if r.status == 'approved')
-                rejected_count = sum(1 for r in store_requests if r.status == 'rejected')
-                pending_count = sum(1 for r in store_requests if r.status in ['PENDING', 'send_request'])
+                approved_count = sum(1 for r in store_requests if r.status and r.status.lower() in ['approved', 'dispatched', 'fulfilled'])
+                rejected_count = sum(1 for r in store_requests if r.status and r.status.lower() == 'rejected')
+                pending_count = sum(1 for r in store_requests if r.status and r.status.lower() in ['pending', 'send_request'])
 
-                all_store_requests_approved = approved_count == len(store_requests)
+                all_store_requests_approved = approved_count == len(store_requests) and len(store_requests) > 0
                 any_store_request_rejected = rejected_count > 0
                 store_requests_pending = pending_count > 0
 
@@ -4437,6 +4472,11 @@ def get_pending_po_children():
             enriched_materials = []
             po_materials = po_child.materials_data or []
 
+            # Get material vendor selections from parent CR for negotiated prices
+            material_vendor_selections = {}
+            if parent_cr and parent_cr.material_vendor_selections:
+                material_vendor_selections = parent_cr.material_vendor_selections
+
             # Build BOQ price lookup - get REAL BOQ prices from BOQ details
             boq_price_lookup = {}
 
@@ -4453,34 +4493,72 @@ def get_pending_po_children():
                                 if mat_name:
                                     boq_price_lookup[mat_name] = boq_mat.get('unit_price', 0)
 
-            # Fallback to parent CR's sub_items_data
-            if not boq_price_lookup and parent_cr:
+            # Also check parent CR's sub_items_data and materials_data for prices
+            if parent_cr:
                 sub_items = parent_cr.sub_items_data or []
                 for sub in sub_items:
                     mat_name = sub.get('material_name', '').lower().strip()
-                    if mat_name and (sub.get('original_unit_price') or sub.get('unit_price')):
-                        boq_price_lookup[mat_name] = sub.get('original_unit_price') or sub.get('unit_price', 0)
+                    if mat_name and mat_name not in boq_price_lookup:
+                        price = sub.get('original_unit_price') or sub.get('unit_price', 0)
+                        if price:
+                            boq_price_lookup[mat_name] = price
 
                 # Also check materials_data
-                if not boq_price_lookup:
-                    materials = parent_cr.materials_data or []
-                    for mat in materials:
-                        mat_name = mat.get('material_name', '').lower().strip()
-                        if mat_name and (mat.get('original_unit_price') or mat.get('unit_price')):
-                            boq_price_lookup[mat_name] = mat.get('original_unit_price') or mat.get('unit_price', 0)
+                materials = parent_cr.materials_data or []
+                for mat in materials:
+                    mat_name = mat.get('material_name', '').lower().strip()
+                    if mat_name and mat_name not in boq_price_lookup:
+                        price = mat.get('original_unit_price') or mat.get('unit_price', 0)
+                        if price:
+                            boq_price_lookup[mat_name] = price
 
             for material in po_materials:
                 mat_copy = dict(material)
+                mat_name = material.get('material_name', '').lower().strip()
+                mat_name_original = material.get('material_name', '')
+                boq_price = boq_price_lookup.get(mat_name, 0)
+                quantity = material.get('quantity', 0)
+
+                # If BOQ price not found by exact name, try partial match
+                if not boq_price:
+                    for boq_name, price in boq_price_lookup.items():
+                        if mat_name in boq_name or boq_name in mat_name:
+                            boq_price = price
+                            break
+
+                # Check material_vendor_selections for negotiated price (set by buyer)
+                selection = material_vendor_selections.get(mat_name_original) or material_vendor_selections.get(mat_name, {})
+                negotiated_from_selection = selection.get('negotiated_price') if isinstance(selection, dict) else None
+
+                # Also check if material has negotiated_price or vendor_price
+                vendor_price = negotiated_from_selection or material.get('negotiated_price') or material.get('vendor_price') or material.get('unit_price') or 0
+
                 # Add BOQ price if not already present
                 if not mat_copy.get('boq_unit_price'):
-                    mat_name = material.get('material_name', '').lower().strip()
-                    boq_price = boq_price_lookup.get(mat_name, 0)
                     mat_copy['boq_unit_price'] = boq_price
-                    mat_copy['boq_total_price'] = boq_price * material.get('quantity', 0) if boq_price else 0
+                    mat_copy['boq_total_price'] = boq_price * quantity if boq_price else 0
+
+                # Use vendor/negotiated price if available, otherwise BOQ price
+                if vendor_price and vendor_price > 0:
+                    mat_copy['unit_price'] = vendor_price
+                    mat_copy['total_price'] = vendor_price * quantity
+                    mat_copy['negotiated_price'] = vendor_price
+                elif boq_price and boq_price > 0:
+                    mat_copy['unit_price'] = boq_price
+                    mat_copy['total_price'] = boq_price * quantity
+
+                # Ensure total_price is calculated if unit_price exists but total_price is missing
+                if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
+                    mat_copy['total_price'] = mat_copy['unit_price'] * quantity
+
                 enriched_materials.append(mat_copy)
+
+            # Recalculate total cost from enriched materials
+            enriched_total_cost = sum(m.get('total_price', 0) for m in enriched_materials)
 
             po_dict = po_child.to_dict()
             po_dict['materials'] = enriched_materials  # Override with enriched materials
+            po_dict['materials_total_cost'] = enriched_total_cost  # Override with recalculated total
 
             result.append({
                 **po_dict,
@@ -4550,8 +4628,50 @@ def get_rejected_po_children():
             elif parent_cr and parent_cr.boq_id:
                 boq = BOQ.query.get(parent_cr.boq_id)
 
+            # Enrich materials with prices from BOQ
+            enriched_materials = []
+            po_materials = po_child.materials_data or []
+
+            # Build BOQ price lookup
+            boq_price_lookup = {}
+            boq_id = po_child.boq_id or (parent_cr.boq_id if parent_cr else None)
+            if boq_id:
+                boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+                if boq_details and boq_details.boq_details:
+                    boq_items = boq_details.boq_details.get('items', [])
+                    for item in boq_items:
+                        for sub_item in item.get('sub_items', []):
+                            for boq_mat in sub_item.get('materials', []):
+                                mat_name = boq_mat.get('material_name', '').lower().strip()
+                                if mat_name:
+                                    boq_price_lookup[mat_name] = boq_mat.get('unit_price', 0)
+
+            for material in po_materials:
+                mat_copy = dict(material)
+                mat_name = material.get('material_name', '').lower().strip()
+                boq_price = boq_price_lookup.get(mat_name, 0)
+                quantity = material.get('quantity', 0)
+
+                # If unit_price is 0 or missing, use BOQ price as fallback
+                if not mat_copy.get('unit_price') or mat_copy.get('unit_price') == 0:
+                    mat_copy['unit_price'] = boq_price
+                    mat_copy['total_price'] = boq_price * quantity if boq_price else 0
+
+                # Ensure total_price is calculated
+                if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
+                    mat_copy['total_price'] = mat_copy['unit_price'] * quantity
+
+                enriched_materials.append(mat_copy)
+
+            # Recalculate total cost from enriched materials
+            enriched_total_cost = sum(m.get('total_price', 0) for m in enriched_materials)
+
+            po_dict = po_child.to_dict()
+            po_dict['materials'] = enriched_materials
+            po_dict['materials_total_cost'] = enriched_total_cost
+
             result.append({
-                **po_child.to_dict(),
+                **po_dict,
                 'project_name': project.project_name if project else 'Unknown',
                 'project_code': project.project_code if project else None,
                 'client': project.client if project else None,
@@ -4621,8 +4741,50 @@ def get_buyer_pending_po_children():
             elif parent_cr and parent_cr.boq_id:
                 boq = BOQ.query.get(parent_cr.boq_id)
 
+            # Enrich materials with prices from BOQ
+            enriched_materials = []
+            po_materials = po_child.materials_data or []
+
+            # Build BOQ price lookup
+            boq_price_lookup = {}
+            boq_id_for_lookup = po_child.boq_id or (parent_cr.boq_id if parent_cr else None)
+            if boq_id_for_lookup:
+                boq_details = BOQDetails.query.filter_by(boq_id=boq_id_for_lookup, is_deleted=False).first()
+                if boq_details and boq_details.boq_details:
+                    boq_items = boq_details.boq_details.get('items', [])
+                    for item in boq_items:
+                        for sub_item in item.get('sub_items', []):
+                            for boq_mat in sub_item.get('materials', []):
+                                mat_name = boq_mat.get('material_name', '').lower().strip()
+                                if mat_name:
+                                    boq_price_lookup[mat_name] = boq_mat.get('unit_price', 0)
+
+            for material in po_materials:
+                mat_copy = dict(material)
+                mat_name = material.get('material_name', '').lower().strip()
+                boq_price = boq_price_lookup.get(mat_name, 0)
+                quantity = material.get('quantity', 0)
+
+                # If unit_price is 0 or missing, use BOQ price as fallback
+                if not mat_copy.get('unit_price') or mat_copy.get('unit_price') == 0:
+                    mat_copy['unit_price'] = boq_price
+                    mat_copy['total_price'] = boq_price * quantity if boq_price else 0
+
+                # Ensure total_price is calculated
+                if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
+                    mat_copy['total_price'] = mat_copy['unit_price'] * quantity
+
+                enriched_materials.append(mat_copy)
+
+            # Recalculate total cost from enriched materials
+            enriched_total_cost = sum(m.get('total_price', 0) for m in enriched_materials)
+
+            po_dict = po_child.to_dict()
+            po_dict['materials'] = enriched_materials
+            po_dict['materials_total_cost'] = enriched_total_cost
+
             result.append({
-                **po_child.to_dict(),
+                **po_dict,
                 'project_name': project.project_name if project else 'Unknown',
                 'project_code': project.project_code if project else None,
                 'client': project.client if project else None,
@@ -4715,8 +4877,50 @@ def get_approved_po_children():
                     vendor_phone = vendor.phone
                     vendor_email = vendor.email
 
+            # Enrich materials with prices from BOQ
+            enriched_materials = []
+            po_materials = po_child.materials_data or []
+
+            # Build BOQ price lookup
+            boq_price_lookup = {}
+            boq_id_for_lookup = po_child.boq_id or (parent_cr.boq_id if parent_cr else None)
+            if boq_id_for_lookup:
+                boq_details = BOQDetails.query.filter_by(boq_id=boq_id_for_lookup, is_deleted=False).first()
+                if boq_details and boq_details.boq_details:
+                    boq_items = boq_details.boq_details.get('items', [])
+                    for item in boq_items:
+                        for sub_item in item.get('sub_items', []):
+                            for boq_mat in sub_item.get('materials', []):
+                                mat_name = boq_mat.get('material_name', '').lower().strip()
+                                if mat_name:
+                                    boq_price_lookup[mat_name] = boq_mat.get('unit_price', 0)
+
+            for material in po_materials:
+                mat_copy = dict(material)
+                mat_name = material.get('material_name', '').lower().strip()
+                boq_price = boq_price_lookup.get(mat_name, 0)
+                quantity = material.get('quantity', 0)
+
+                # If unit_price is 0 or missing, use BOQ price as fallback
+                if not mat_copy.get('unit_price') or mat_copy.get('unit_price') == 0:
+                    mat_copy['unit_price'] = boq_price
+                    mat_copy['total_price'] = boq_price * quantity if boq_price else 0
+
+                # Ensure total_price is calculated
+                if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
+                    mat_copy['total_price'] = mat_copy['unit_price'] * quantity
+
+                enriched_materials.append(mat_copy)
+
+            # Recalculate total cost from enriched materials
+            enriched_total_cost = sum(m.get('total_price', 0) for m in enriched_materials)
+
+            po_dict = po_child.to_dict()
+            po_dict['materials'] = enriched_materials
+            po_dict['materials_total_cost'] = enriched_total_cost
+
             result.append({
-                **po_child.to_dict(),
+                **po_dict,
                 'project_name': project.project_name if project else 'Unknown',
                 'project_code': project.project_code if project else None,
                 'client': project.client if project else None,
@@ -7354,22 +7558,45 @@ def preview_lpo_pdf(cr_id):
 
         # Process materials - use POChild materials if available
         if po_child and po_child.materials_data:
-            # Use POChild's materials
+            # Use POChild's materials with price enrichment from parent CR
             materials_list = []
             cr_total = 0
+
+            # Get negotiated prices from parent CR's material_vendor_selections
+            parent_vendor_selections = cr.material_vendor_selections or {} if cr else {}
+
             for material in po_child.materials_data:
-                mat_total = float(material.get('total_price', 0) or 0)
+                mat_name = material.get('material_name', '')
+                quantity = material.get('quantity', 0)
+
+                # Get price from multiple sources (priority order)
+                stored_unit_price = float(material.get('unit_price', 0) or 0)
+                negotiated_price = float(material.get('negotiated_price', 0) or 0)
+
+                # Check parent CR's vendor selections for negotiated price
+                selection = parent_vendor_selections.get(mat_name, {})
+                selection_price = float(selection.get('negotiated_price', 0) or 0) if isinstance(selection, dict) else 0
+
+                # Use best available price: negotiated > selection > stored
+                final_price = negotiated_price or selection_price or stored_unit_price
+                mat_total = quantity * final_price if final_price else float(material.get('total_price', 0) or 0)
+
+                # Preserve BOQ/original prices for comparison display
+                boq_unit_price = material.get('boq_unit_price') or material.get('original_unit_price') or 0
+
                 materials_list.append({
-                    'material_name': material.get('material_name', ''),
+                    'material_name': mat_name,
                     'sub_item_name': material.get('sub_item_name', ''),
-                    'quantity': material.get('quantity', 0),
+                    'quantity': quantity,
                     'unit': material.get('unit', ''),
-                    'unit_price': float(material.get('unit_price', 0) or 0),
+                    'unit_price': final_price,
                     'total_price': mat_total,
-                    'negotiated_price': float(material.get('negotiated_price', 0) or material.get('unit_price', 0) or 0)
+                    'negotiated_price': final_price,
+                    'boq_unit_price': float(boq_unit_price) if boq_unit_price else 0,
+                    'original_unit_price': float(boq_unit_price) if boq_unit_price else 0
                 })
                 cr_total += mat_total
-            cr_total = po_child.materials_total_cost or cr_total
+            cr_total = po_child.materials_total_cost or cr_total or sum(m.get('total_price', 0) for m in materials_list)
             print(f">>> preview_lpo_pdf: Using POChild materials: {len(materials_list)} items, total: {cr_total}")
         else:
             # Use parent CR's materials
@@ -7386,13 +7613,17 @@ def preview_lpo_pdf(cr_id):
             amount = float(qty) * float(rate)
             subtotal += amount
 
+            # Get BOQ rate for comparison display
+            boq_rate = material.get('boq_unit_price') or material.get('original_unit_price') or 0
+
             items.append({
                 "sl_no": i,
                 "description": material.get('material_name', '') or material.get('sub_item_name', ''),
                 "qty": qty,
                 "unit": material.get('unit', 'Nos'),
                 "rate": round(rate, 2),
-                "amount": round(amount, 2)
+                "amount": round(amount, 2),
+                "boq_rate": round(float(boq_rate), 2) if boq_rate else 0
             })
 
         vat_percent = 5

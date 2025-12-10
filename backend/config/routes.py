@@ -11,6 +11,7 @@ from routes.change_request_routes import change_request_routes
 from routes.boq_tracking_routes import boq_tracking_routes
 from routes.buyer_routes import buyer_routes
 from routes.preliminary_master_routes import preliminary_master_routes
+from routes.preliminary_purchase_routes import preliminary_purchase_bp
 from routes.vendor_routes import vendor_routes
 from routes.terms_conditions_routes import terms_conditions_routes
 from routes.upload_image_route import image_routes
@@ -33,6 +34,7 @@ def initialize_routes(app):
     app.register_blueprint(boq_tracking_routes)
     app.register_blueprint(buyer_routes)
     app.register_blueprint(preliminary_master_routes)
+    app.register_blueprint(preliminary_purchase_bp)
     app.register_blueprint(vendor_routes)
     app.register_blueprint(terms_conditions_routes)
     app.register_blueprint(image_routes)

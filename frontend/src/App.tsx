@@ -66,6 +66,8 @@ const RoleBasedChangeRequests = lazy(() => import('@/components/routing/RoleBase
 
 // Site Engineer Pages
 const SiteEngineerProjects = lazy(() => import('@/roles/site-engineer/pages/MyProjects'));
+const SiteAssets = lazy(() => import('@/roles/site-engineer/pages/SiteAssets'));
+const MaterialReceipts = lazy(() => import('@/roles/site-engineer/pages/MaterialReceipts'));
 
 // Buyer Pages
 const BuyerDashboard = lazy(() => import('@/roles/buyer/pages/Dashboard'));
@@ -979,6 +981,18 @@ function App() {
             {/* Role-based Change Requests and Extra Material - Single route for all roles */}
             <Route path="change-requests" element={<RoleBasedChangeRequests />} />
             <Route path="extra-material" element={<RoleBasedChangeRequests />} />
+
+            {/* Site Engineer Routes */}
+            <Route path="site-assets" element={
+              <SiteEngineerRoute>
+                <SiteAssets />
+              </SiteEngineerRoute>
+            } />
+            <Route path="material-receipts" element={
+              <SiteEngineerRoute>
+                <MaterialReceipts />
+              </SiteEngineerRoute>
+            } />
 
             {/* Buyer materials, purchase-orders, and vendor routes moved to general routes above (lines 826-832) */}
             {/* <Route path="materials" element={

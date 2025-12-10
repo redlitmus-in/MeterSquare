@@ -96,6 +96,27 @@ def get_project_assets_route(project_id):
     return get_assets_at_project(project_id)
 
 
+@asset_routes.route('/my-site-assets', methods=['GET'])
+@jwt_required
+def get_my_site_assets_route():
+    """Get all assets at projects assigned to the current Site Engineer"""
+    return get_my_site_assets()
+
+
+@asset_routes.route('/my-dispatched-movements', methods=['GET'])
+@jwt_required
+def get_my_dispatched_movements_route():
+    """Get all dispatch movements for SE's projects with received status"""
+    return get_dispatched_movements_for_se()
+
+
+@asset_routes.route('/mark-received', methods=['POST'])
+@jwt_required
+def mark_received_route():
+    """SE marks dispatched asset as received"""
+    return mark_asset_received()
+
+
 # ==================== RETURN ROUTES ====================
 
 @asset_routes.route('/return', methods=['POST'])
@@ -135,3 +156,40 @@ def get_dashboard_route():
 def get_movements_route():
     """Get all asset movements with filters"""
     return get_asset_movements()
+
+
+# ==================== RETURN REQUEST ROUTES (SE -> PM Flow) ====================
+
+@asset_routes.route('/return-requests', methods=['POST'])
+@jwt_required
+def create_return_request_route():
+    """SE creates a return request for assets at their site"""
+    return create_return_request()
+
+
+@asset_routes.route('/return-requests', methods=['GET'])
+@jwt_required
+def get_return_requests_route():
+    """PM gets all pending return requests"""
+    return get_pending_return_requests()
+
+
+@asset_routes.route('/return-requests/my', methods=['GET'])
+@jwt_required
+def get_my_return_requests_route():
+    """SE gets their own return requests"""
+    return get_my_return_requests()
+
+
+@asset_routes.route('/return-requests/<int:request_id>/process', methods=['PUT'])
+@jwt_required
+def process_return_request_route(request_id):
+    """PM processes a return request with quality check"""
+    return process_return_request(request_id)
+
+
+@asset_routes.route('/tracking/<tracking_code>', methods=['GET'])
+@jwt_required
+def get_tracking_history_route(tracking_code):
+    """Get full history for an asset by tracking code"""
+    return get_asset_tracking_history(tracking_code)

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send } from 'lucide-react';
+import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send, FileText, Download, Loader2 } from 'lucide-react';
 import { ChangeRequestItem } from '@/services/changeRequestService';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
 import { isEstimator, isTechnicalDirector, isSiteEngineer, isProjectManager } from '@/utils/roleHelpers';
 import EditChangeRequestModal from './EditChangeRequestModal';
+import { buyerService } from '@/roles/buyer/services/buyerService';
 
 interface ChangeRequestDetailsModalProps {
   isOpen: boolean;
@@ -27,6 +28,10 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const { user } = useAuthStore();
   const [showEditModal, setShowEditModal] = useState(false);
   const [expandedJustifications, setExpandedJustifications] = useState<Set<number>>(new Set());
+  const [showLPOPreview, setShowLPOPreview] = useState(false);
+  const [lpoData, setLpoData] = useState<any>(null);
+  const [loadingLPO, setLoadingLPO] = useState(false);
+  const [downloadingLPO, setDownloadingLPO] = useState(false);
 
   // State to track edited materials with updated prices
   const [editedMaterials, setEditedMaterials] = useState<any[]>([]);
@@ -50,8 +55,36 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     if (isOpen && changeRequest) {
       const materials = changeRequest.sub_items_data || changeRequest.materials_data || [];
       setEditedMaterials(JSON.parse(JSON.stringify(materials))); // Deep copy
+      // Reset LPO data when modal opens with new request
+      setLpoData(null);
+      setShowLPOPreview(false);
     }
   }, [isOpen, changeRequest]);
+
+  // Auto-fetch LPO data to get prices when materials have 0 prices and vendor is selected
+  React.useEffect(() => {
+    const fetchLPOForPrices = async () => {
+      if (!isOpen || !changeRequest || lpoData) return;
+
+      // Check if we need prices (materials have 0 prices)
+      const materials = changeRequest.sub_items_data || changeRequest.materials_data || [];
+      const needsPrices = materials.some((m: any) => !m.unit_price || m.unit_price === 0);
+
+      // Only fetch if vendor is selected and we need prices
+      if (needsPrices && changeRequest.selected_vendor_name) {
+        try {
+          const poChildId = (changeRequest as any).po_child_id;
+          const response = await buyerService.previewLPOPdf(changeRequest.cr_id, poChildId);
+          const lpoDataFromResponse = response.lpo_data || response;
+          setLpoData(lpoDataFromResponse);
+        } catch (error) {
+          console.log('Could not fetch LPO prices:', error);
+        }
+      }
+    };
+
+    fetchLPOForPrices();
+  }, [isOpen, changeRequest, lpoData]);
 
   if (!isOpen || !changeRequest) return null;
 
@@ -103,7 +136,52 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   };
 
   // Calculate costs: Use editedMaterials for real-time calculations
-  const materialsData = editedMaterials.length > 0 ? editedMaterials : (changeRequest.sub_items_data || changeRequest.materials_data || []);
+  // Also enrich with LPO prices if available (when material prices are 0)
+  const rawMaterialsData = editedMaterials.length > 0 ? editedMaterials : (changeRequest.sub_items_data || changeRequest.materials_data || []);
+
+  // Enrich materials with LPO prices if we have them and material prices are 0
+  // Also preserve BOQ prices for comparison display
+  const materialsData = rawMaterialsData.map((mat: any) => {
+    // Try to find matching item from LPO data for price enrichment
+    let lpoItem = null;
+    if (lpoData?.items) {
+      lpoItem = lpoData.items.find((item: any) =>
+        item.description?.toLowerCase() === mat.material_name?.toLowerCase() ||
+        item.description?.toLowerCase() === mat.sub_item_name?.toLowerCase()
+      );
+    }
+
+    // Get BOQ price from material or LPO item
+    const boqUnitPrice = mat.boq_unit_price || mat.original_unit_price || lpoItem?.boq_rate || 0;
+    const boqTotalPrice = mat.boq_total_price || mat.original_total_price || (mat.quantity * boqUnitPrice) || 0;
+
+    // If material already has vendor price, keep it but add BOQ for comparison
+    if (mat.unit_price && mat.unit_price > 0) {
+      return {
+        ...mat,
+        boq_unit_price: boqUnitPrice,
+        boq_total_price: boqTotalPrice
+      };
+    }
+
+    // Enrich with LPO vendor prices if available
+    if (lpoItem && lpoItem.rate > 0) {
+      return {
+        ...mat,
+        unit_price: lpoItem.rate,
+        total_price: lpoItem.amount || (mat.quantity * lpoItem.rate),
+        boq_unit_price: boqUnitPrice,
+        boq_total_price: boqTotalPrice
+      };
+    }
+
+    // No enrichment possible, just add BOQ prices if available
+    return {
+      ...mat,
+      boq_unit_price: boqUnitPrice,
+      boq_total_price: boqTotalPrice
+    };
+  });
 
   // Total cost of ALL materials (for display) - uses editedMaterials
   const totalMaterialsCost = materialsData.reduce((sum: number, mat: any) =>
@@ -173,6 +251,52 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       // Store edited materials in changeRequest for parent to access
       (changeRequest as any)._editedMaterials = editedMaterials;
       onApprove();
+    }
+  };
+
+  // Load LPO preview data
+  const handleViewLPO = async () => {
+    if (!changeRequest) return;
+    setLoadingLPO(true);
+    try {
+      // Get po_child_id from changeRequest if available (for POChild records)
+      const poChildId = (changeRequest as any).po_child_id;
+      const response = await buyerService.previewLPOPdf(changeRequest.cr_id, poChildId);
+      // Extract lpo_data from response
+      const lpoDataFromResponse = response.lpo_data || response;
+      setLpoData(lpoDataFromResponse);
+      setShowLPOPreview(true);
+    } catch (error) {
+      console.error('Error loading LPO:', error);
+      alert('Failed to load LPO data');
+    } finally {
+      setLoadingLPO(false);
+    }
+  };
+
+  // Download LPO PDF
+  const handleDownloadLPO = async () => {
+    if (!changeRequest || !lpoData) return;
+    setDownloadingLPO(true);
+    try {
+      const poChildId = (changeRequest as any).po_child_id;
+      const response = await buyerService.generateLPOPdf(changeRequest.cr_id, lpoData, poChildId);
+
+      // Create blob and download
+      const blob = new Blob([response], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `LPO-${changeRequest.formatted_cr_id || changeRequest.cr_id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading LPO:', error);
+      alert('Failed to download LPO PDF');
+    } finally {
+      setDownloadingLPO(false);
     }
   };
 
@@ -413,6 +537,19 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                     )}
                   </div>
 
+                  {/* Warning when prices are missing */}
+                  {shouldShowPricing && totalMaterialsCost === 0 && materialsData.length > 0 && (
+                    <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+                      <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-amber-800">Prices not set for materials</p>
+                        <p className="text-xs text-amber-600 mt-1">
+                          Material prices should be set in the BOQ or by the Estimator/Buyer during the approval process.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Desktop: Table Layout */}
                   <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full table-fixed">
@@ -515,30 +652,72 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                                 <span className="text-gray-400 italic">No justification</span>
                               )}
                             </td>
-                            {shouldShowPricing && (
+                            {shouldShowPricing && (() => {
+                              // Get vendor price and BOQ price
+                              const vendorUnitPrice = material.unit_price || 0;
+                              const boqUnitPrice = material.original_unit_price || material.boq_unit_price || 0;
+                              const vendorTotal = material.total_price || (material.quantity * vendorUnitPrice) || 0;
+                              const boqTotal = material.original_total_price || material.boq_total_price || (material.quantity * boqUnitPrice) || 0;
+                              const unitPriceDiff = vendorUnitPrice - boqUnitPrice;
+                              const totalDiff = vendorTotal - boqTotal;
+
+                              return (
                               <>
                                 {/* Unit Price */}
-                                <td className="px-4 py-3 text-sm text-gray-600 text-right whitespace-nowrap">
+                                <td className="px-4 py-3 text-sm text-right whitespace-nowrap">
                                   {canEditPrices && isNewMaterial ? (
                                     <input
                                       type="number"
                                       step="0.01"
                                       min="0"
-                                      value={material.unit_price || 0}
+                                      value={vendorUnitPrice}
                                       onChange={(e) => handlePriceChange(idx, e.target.value)}
                                       className="w-24 px-2 py-1 text-sm text-right border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50 text-gray-900 font-medium"
                                       placeholder="0.00"
                                     />
                                   ) : (
-                                    formatCurrency(material.unit_price || 0)
+                                    <div className="flex flex-col items-end">
+                                      {vendorUnitPrice > 0 ? (
+                                        <span className="font-semibold text-gray-900">{formatCurrency(vendorUnitPrice)}</span>
+                                      ) : (
+                                        <span className="text-amber-600 text-xs italic">Price not set</span>
+                                      )}
+                                      {boqUnitPrice > 0 && boqUnitPrice !== vendorUnitPrice && (
+                                        <div className="flex items-center gap-1 mt-0.5">
+                                          <span className="text-[10px] text-gray-400">BOQ: {formatCurrency(boqUnitPrice)}</span>
+                                          {unitPriceDiff !== 0 && (
+                                            <span className={`text-[10px] font-bold ${unitPriceDiff > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                              ({unitPriceDiff > 0 ? '+' : ''}{formatCurrency(unitPriceDiff)})
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
                                   )}
                                 </td>
                                 {/* Total */}
-                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
-                                  {formatCurrency(material.total_price || (material.quantity * material.unit_price) || 0)}
+                                <td className="px-4 py-3 text-sm text-right whitespace-nowrap">
+                                  <div className="flex flex-col items-end">
+                                    {vendorTotal > 0 ? (
+                                      <span className="font-bold text-gray-900">{formatCurrency(vendorTotal)}</span>
+                                    ) : (
+                                      <span className="text-amber-600 text-xs italic">-</span>
+                                    )}
+                                    {boqTotal > 0 && boqTotal !== vendorTotal && (
+                                      <div className="flex items-center gap-1 mt-0.5">
+                                        <span className="text-[10px] text-gray-400">BOQ: {formatCurrency(boqTotal)}</span>
+                                        {totalDiff !== 0 && (
+                                          <span className={`text-[10px] font-bold ${totalDiff > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                            ({totalDiff > 0 ? '+' : ''}{formatCurrency(totalDiff)})
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                               </>
-                            )}
+                            );
+                            })()}
                           </tr>
                         );
                       })}
@@ -731,6 +910,34 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <p className="text-xs sm:text-sm font-medium text-red-900">{changeRequest.vendor_rejection_reason}</p>
                         </div>
                       )}
+
+                      {/* View LPO Button - Show for TD, Buyer, or Admin when vendor is selected */}
+                      {changeRequest.selected_vendor_name && (() => {
+                        const role = (user?.role || user?.role_name || '').toLowerCase().replace(/[_\s]/g, '');
+                        const canViewLPO = userIsTechnicalDirector || userIsBuyer ||
+                          role.includes('technical') || role.includes('admin') || role.includes('buyer');
+                        return canViewLPO;
+                      })() && (
+                        <div className="pt-3 mt-3 border-t border-gray-200">
+                          <button
+                            onClick={handleViewLPO}
+                            disabled={loadingLPO}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {loadingLPO ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Loading LPO...
+                              </>
+                            ) : (
+                              <>
+                                <FileText className="w-4 h-4" />
+                                View LPO Details
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -794,6 +1001,219 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
               window.location.reload();
             }}
           />
+        )}
+
+        {/* LPO Preview Modal */}
+        {showLPOPreview && lpoData && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
+            onClick={() => setShowLPOPreview(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-purple-50">
+                <div className="flex items-center gap-3">
+                  <FileText className="w-6 h-6 text-purple-600" />
+                  <h3 className="text-lg font-semibold text-gray-900">LPO Details</h3>
+                </div>
+                <button
+                  onClick={() => setShowLPOPreview(false)}
+                  className="p-2 hover:bg-gray-200 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-6">
+                {/* Company Info */}
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                  <h4 className="font-semibold text-gray-800 mb-3">Company Information</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-500">Company:</span>
+                      <span className="ml-2 font-medium">{lpoData.company?.name || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Contact:</span>
+                      <span className="ml-2 font-medium">{lpoData.company?.contact_person || 'N/A'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* LPO Info */}
+                <div className="mb-6 p-4 bg-blue-50 rounded-lg">
+                  <h4 className="font-semibold text-gray-800 mb-3">LPO Information</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-500">LPO Number:</span>
+                      <span className="ml-2 font-medium text-blue-700">{lpoData.lpo_info?.lpo_number || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">LPO Date:</span>
+                      <span className="ml-2 font-medium">{lpoData.lpo_info?.lpo_date || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Quotation Ref:</span>
+                      <span className="ml-2 font-medium">{lpoData.lpo_info?.quotation_ref || 'N/A'}</span>
+                    </div>
+                  </div>
+                  {lpoData.lpo_info?.custom_message && (
+                    <div className="mt-3 pt-3 border-t border-blue-200">
+                      <span className="text-gray-500 text-sm">Message:</span>
+                      <p className="mt-1 text-sm text-gray-700">{lpoData.lpo_info.custom_message}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Vendor Info */}
+                <div className="mb-6 p-4 bg-green-50 rounded-lg">
+                  <h4 className="font-semibold text-gray-800 mb-3">Vendor Information</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-500">Vendor:</span>
+                      <span className="ml-2 font-medium">{lpoData.vendor?.company_name || lpoData.vendor?.name || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Contact:</span>
+                      <span className="ml-2 font-medium">{lpoData.vendor?.contact_person || lpoData.vendor?.address || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Phone:</span>
+                      <span className="ml-2 font-medium">{lpoData.vendor?.phone || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Email:</span>
+                      <span className="ml-2 font-medium">{lpoData.vendor?.email || 'N/A'}</span>
+                    </div>
+                  </div>
+                  {lpoData.vendor?.project && (
+                    <div className="mt-2 pt-2 border-t border-green-200">
+                      <span className="text-gray-500 text-sm">Project:</span>
+                      <span className="ml-2 font-medium">{lpoData.vendor.project}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Items */}
+                <div className="mb-6">
+                  <h4 className="font-semibold text-gray-800 mb-3">Items</h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr className="bg-gray-100">
+                          <th className="px-3 py-2 text-left border">#</th>
+                          <th className="px-3 py-2 text-left border">Description</th>
+                          <th className="px-3 py-2 text-right border">Qty</th>
+                          <th className="px-3 py-2 text-center border">Unit</th>
+                          <th className="px-3 py-2 text-right border">Rate</th>
+                          <th className="px-3 py-2 text-right border">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lpoData.items?.map((item: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 border">{item.sl_no}</td>
+                            <td className="px-3 py-2 border">{item.description}</td>
+                            <td className="px-3 py-2 text-right border">{item.qty}</td>
+                            <td className="px-3 py-2 text-center border">{item.unit}</td>
+                            <td className="px-3 py-2 text-right border">{formatCurrency(item.rate)}</td>
+                            <td className="px-3 py-2 text-right border font-medium">{formatCurrency(item.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Totals */}
+                <div className="mb-6 p-4 bg-purple-50 rounded-lg">
+                  <h4 className="font-semibold text-gray-800 mb-3">Totals</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Subtotal:</span>
+                      <span className="font-medium">{formatCurrency(lpoData.totals?.subtotal || 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">VAT ({lpoData.totals?.vat_percent || 5}%):</span>
+                      <span className="font-medium">{formatCurrency(lpoData.totals?.vat_amount || 0)}</span>
+                    </div>
+                    <div className="flex justify-between pt-2 border-t border-purple-200">
+                      <span className="font-semibold text-gray-800">Grand Total:</span>
+                      <span className="font-bold text-purple-700 text-lg">{formatCurrency(lpoData.totals?.grand_total || 0)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Terms */}
+                {lpoData.terms && (
+                  <div className="p-4 bg-amber-50 rounded-lg">
+                    <h4 className="font-semibold text-gray-800 mb-3">Terms & Conditions</h4>
+                    <div className="space-y-2 text-sm">
+                      {lpoData.terms.payment_terms && (
+                        <div>
+                          <span className="text-gray-600">Payment Terms:</span>
+                          <span className="ml-2">{lpoData.terms.payment_terms}</span>
+                        </div>
+                      )}
+                      {lpoData.terms.completion_terms && (
+                        <div>
+                          <span className="text-gray-600">Delivery/Completion:</span>
+                          <span className="ml-2">{lpoData.terms.completion_terms}</span>
+                        </div>
+                      )}
+                      {lpoData.terms.custom_terms && lpoData.terms.custom_terms.length > 0 && (
+                        <div className="mt-2">
+                          <span className="text-gray-600">Additional Terms:</span>
+                          <ul className="list-disc list-inside mt-1 text-gray-700">
+                            {lpoData.terms.custom_terms.filter((t: any) => t.selected).map((term: any, idx: number) => (
+                              <li key={idx}>{term.text}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer with Download Button */}
+              <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
+                <button
+                  onClick={() => setShowLPOPreview(false)}
+                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={handleDownloadLPO}
+                  disabled={downloadingLPO}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  {downloadingLPO ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Downloading...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      Download PDF
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </>
     </AnimatePresence>

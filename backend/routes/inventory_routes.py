@@ -328,3 +328,24 @@ def confirm_delivery_route(delivery_note_id):
 def cancel_delivery_note_route(delivery_note_id):
     """Cancel a delivery note"""
     return cancel_delivery_note(delivery_note_id)
+
+
+@inventory_routes.route('/my-delivery-notes', methods=['GET'])
+@jwt_required
+def get_my_delivery_notes_route():
+    """Get delivery notes for SE's assigned projects"""
+    return get_delivery_notes_for_se()
+
+
+@inventory_routes.route('/my-returnable-materials', methods=['GET'])
+@jwt_required
+def get_my_returnable_materials_route():
+    """Get returnable materials for SE's assigned projects"""
+    return get_returnable_materials_for_se()
+
+
+@inventory_routes.route('/my-material-returns', methods=['GET'])
+@jwt_required
+def get_my_material_returns_route():
+    """Get material returns for SE's assigned projects"""
+    return get_material_returns_for_se()

@@ -278,6 +278,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const [materials, setMaterials] = useState<MaterialItem[]>([]);
   const [remarks, setRemarks] = useState('');
 
+  // Common justification for existing materials (not new)
+  const [commonJustification, setCommonJustification] = useState('');
+
   // Overhead calculations
   const [itemOverhead, setItemOverhead] = useState<{
     allocated: number;
@@ -702,9 +705,22 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         return false;
       }
 
-      // Validate per-material justification
-      if (!material.justification || material.justification.trim().length < 10) {
-        showError(`Please provide justification for "${material.materialName}" (minimum 10 characters)`);
+      // Validate per-material justification only for NEW materials
+      if (material.isNew) {
+        if (!material.justification || material.justification.trim().length < 10) {
+          showError(`Please provide justification for new material "${material.materialName}" (minimum 10 characters)`);
+          return false;
+        }
+      }
+    }
+
+    // Check if there are any existing (non-new) materials
+    const hasExistingMaterials = materials.some(m => !m.isNew);
+
+    // Validate common justification for existing materials
+    if (hasExistingMaterials) {
+      if (!commonJustification || commonJustification.trim().length < 10) {
+        showError('Please provide a common justification for existing materials (minimum 10 characters)');
         return false;
       }
     }
@@ -731,10 +747,30 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       is_new: m.master_material_id === null
     })));
 
-    // Combine all per-material justifications for the request-level justification
-    const combinedJustification = materials
-      .map(m => `${m.materialName}: ${m.justification}`)
-      .join('; ');
+    // Build justification based on material types
+    // Existing materials use common justification, new materials use per-material justification
+    const existingMaterials = materials.filter(m => !m.isNew);
+    const newMaterials = materials.filter(m => m.isNew);
+
+    let combinedJustification = '';
+
+    // Add common justification for existing materials
+    if (existingMaterials.length > 0 && commonJustification) {
+      const existingNames = existingMaterials.map(m => m.materialName).join(', ');
+      combinedJustification = `Existing materials (${existingNames}): ${commonJustification}`;
+    }
+
+    // Add per-material justification for new materials
+    if (newMaterials.length > 0) {
+      const newJustifications = newMaterials
+        .map(m => `${m.materialName}: ${m.justification}`)
+        .join('; ');
+      if (combinedJustification) {
+        combinedJustification += '; ' + newJustifications;
+      } else {
+        combinedJustification = newJustifications;
+      }
+    }
 
     return {
       project_id: selectedProject!.project_id,
@@ -750,10 +786,29 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
   // Helper function to handle update (edit mode)
   const handleUpdateChangeRequest = async (crId: number) => {
-    // Combine all per-material justifications for the request-level justification
-    const combinedJustification = materials
-      .map(m => `${m.materialName}: ${m.justification}`)
-      .join('; ');
+    // Build justification based on material types
+    const existingMaterials = materials.filter(m => !m.isNew);
+    const newMaterials = materials.filter(m => m.isNew);
+
+    let combinedJustification = '';
+
+    // Add common justification for existing materials
+    if (existingMaterials.length > 0 && commonJustification) {
+      const existingNames = existingMaterials.map(m => m.materialName).join(', ');
+      combinedJustification = `Existing materials (${existingNames}): ${commonJustification}`;
+    }
+
+    // Add per-material justification for new materials
+    if (newMaterials.length > 0) {
+      const newJustifications = newMaterials
+        .map(m => `${m.materialName}: ${m.justification}`)
+        .join('; ');
+      if (combinedJustification) {
+        combinedJustification += '; ' + newJustifications;
+      } else {
+        combinedJustification = newJustifications;
+      }
+    }
 
     const updatePayload = {
       boq_id: selectedBoq!.boq_id,
@@ -779,10 +834,29 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
   // Helper function to handle new change request creation
   const handleCreateChangeRequest = async () => {
-    // Combine all per-material justifications for the request-level justification
-    const combinedJustification = materials
-      .map(m => `${m.materialName}: ${m.justification}`)
-      .join('; ');
+    // Build justification based on material types
+    const existingMaterials = materials.filter(m => !m.isNew);
+    const newMaterials = materials.filter(m => m.isNew);
+
+    let combinedJustification = '';
+
+    // Add common justification for existing materials
+    if (existingMaterials.length > 0 && commonJustification) {
+      const existingNames = existingMaterials.map(m => m.materialName).join(', ');
+      combinedJustification = `Existing materials (${existingNames}): ${commonJustification}`;
+    }
+
+    // Add per-material justification for new materials
+    if (newMaterials.length > 0) {
+      const newJustifications = newMaterials
+        .map(m => `${m.materialName}: ${m.justification}`)
+        .join('; ');
+      if (combinedJustification) {
+        combinedJustification += '; ' + newJustifications;
+      } else {
+        combinedJustification = newJustifications;
+      }
+    }
 
     const changeRequestPayload = {
       boq_id: selectedBoq!.boq_id,
@@ -2030,29 +2104,31 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         </div>
                       </div>
 
-                      {/* Per-Material Justification */}
-                      <div className="mt-3">
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
-                          Justification for {material.materialName || 'this material'} <span className="text-red-500">*</span>
-                        </label>
-                        <textarea
-                          value={material.justification || ''}
-                          onChange={(e) => updateMaterial(material.id, { justification: e.target.value })}
-                          className={`w-full px-2 py-1.5 text-xs border rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
-                            material.justification && material.justification.trim().length > 0 && material.justification.trim().length < 10
-                              ? 'border-red-500'
-                              : 'border-gray-300'
-                          }`}
-                          rows={2}
-                          placeholder="Provide justification for requesting this material (minimum 10 characters)"
-                          required
-                        />
-                        {material.justification && material.justification.trim().length > 0 && material.justification.trim().length < 10 && (
-                          <p className="text-[10px] text-red-600 mt-0.5">
-                            Minimum 10 characters required ({10 - material.justification.trim().length} more needed)
-                          </p>
-                        )}
-                      </div>
+                      {/* Per-Material Justification - Only for NEW materials */}
+                      {material.isNew && (
+                        <div className="mt-3">
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Justification for {material.materialName || 'this new material'} <span className="text-red-500">*</span>
+                          </label>
+                          <textarea
+                            value={material.justification || ''}
+                            onChange={(e) => updateMaterial(material.id, { justification: e.target.value })}
+                            className={`w-full px-2 py-1.5 text-xs border rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
+                              material.justification && material.justification.trim().length > 0 && material.justification.trim().length < 10
+                                ? 'border-red-500'
+                                : 'border-gray-300'
+                            }`}
+                            rows={2}
+                            placeholder="Provide justification for requesting this new material (minimum 10 characters)"
+                            required
+                          />
+                          {material.justification && material.justification.trim().length > 0 && material.justification.trim().length < 10 && (
+                            <p className="text-[10px] text-red-600 mt-0.5">
+                              Minimum 10 characters required ({10 - material.justification.trim().length} more needed)
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -2060,6 +2136,39 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             </div>
           ))}
 
+        </motion.div>
+      )}
+
+      {/* Common Justification for Existing Materials */}
+      {materials.length > 0 && materials.some(m => !m.isNew) && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-amber-50 p-4 rounded-lg border border-amber-200"
+        >
+          <label className="block text-sm font-medium text-amber-900 mb-2">
+            Common Justification for Existing Materials <span className="text-red-500">*</span>
+          </label>
+          <p className="text-xs text-amber-700 mb-2">
+            This justification applies to all existing materials: {materials.filter(m => !m.isNew).map(m => m.materialName).join(', ')}
+          </p>
+          <textarea
+            value={commonJustification}
+            onChange={(e) => setCommonJustification(e.target.value)}
+            className={`w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 ${
+              commonJustification && commonJustification.trim().length > 0 && commonJustification.trim().length < 10
+                ? 'border-red-500'
+                : 'border-amber-300'
+            }`}
+            rows={3}
+            placeholder="Provide justification for requesting these existing materials (minimum 10 characters)"
+            required
+          />
+          {commonJustification && commonJustification.trim().length > 0 && commonJustification.trim().length < 10 && (
+            <p className="text-xs text-red-600 mt-1">
+              Minimum 10 characters required ({10 - commonJustification.trim().length} more needed)
+            </p>
+          )}
         </motion.div>
       )}
 

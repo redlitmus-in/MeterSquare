@@ -38,5 +38,11 @@ export const siteEngineerService = {
   requestProjectCompletion: async (projectId: number) => {
     const response = await apiClient.post(`/request_completion/${projectId}`, {});
     return response.data;
+  },
+
+  // Get all assets at my assigned projects
+  getMySiteAssets: async () => {
+    const response = await apiClient.get('/assets/my-site-assets');
+    return response.data;
   }
 };

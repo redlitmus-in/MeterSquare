@@ -44,7 +44,8 @@ import { STALE_TIMES, REALTIME_TABLES } from '@/lib/constants';
 
 const PurchaseOrders: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'ongoing' | 'pending_approval' | 'completed' | 'rejected'>('ongoing');
-  const [ongoingSubTab, setOngoingSubTab] = useState<'pending_purchase' | 'vendor_approved'>('pending_purchase');
+  const [ongoingSubTab, setOngoingSubTab] = useState<'pending_purchase' | 'store_approved' | 'vendor_approved'>('pending_purchase');
+  const [pendingApprovalSubTab, setPendingApprovalSubTab] = useState<'store_requests' | 'vendor_approval'>('store_requests');
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
@@ -150,10 +151,27 @@ const PurchaseOrders: React.FC = () => {
 
   // Separate ongoing purchases by vendor approval status
   const pendingPurchaseItems = useMemo(() => {
-    // No vendor selected yet AND not pending TD approval AND not rejected
+    // No vendor selected yet AND not pending TD approval AND not rejected AND not sent to store (pending or approved)
     // POs with vendor_selection_pending_td_approval should be in Pending Approval tab, not here
+    // POs with store_requests_pending should be in Pending Approval tab
+    // POs with all_store_requests_approved should be in Ongoing > Store Approved tab
     // Rejected items should only show in Rejected tab
-    return pendingPurchases.filter(p => !p.vendor_id && !p.vendor_selection_pending_td_approval && !p.rejection_type);
+    return pendingPurchases.filter(p =>
+      !p.vendor_id &&
+      !p.vendor_selection_pending_td_approval &&
+      !p.rejection_type &&
+      !p.store_requests_pending &&  // Items sent to store pending should be in Pending Approval
+      !p.all_store_requests_approved  // Items with approved store requests go to Store Approved
+    );
+  }, [pendingPurchases]);
+
+  // Store approved items - PM approved, waiting for dispatch/fulfillment
+  const storeApprovedItems = useMemo(() => {
+    return pendingPurchases.filter(p =>
+      p.all_store_requests_approved &&
+      !p.vendor_id &&
+      !p.rejection_type
+    );
   }, [pendingPurchases]);
 
   const vendorApprovedItems = useMemo(() => {
@@ -173,24 +191,40 @@ const PurchaseOrders: React.FC = () => {
   }, [pendingPOChildrenData]);
 
   // Pending Approval tab: Show sub-POs as SEPARATE cards (not grouped under parent)
+  // Also includes items sent to store pending PM approval
   const pendingApprovalPurchases = useMemo(() => {
     // Filter from RAW data (not grouped) to show sub-POs as individual cards
+    // Include: vendor_selection_pending_td_approval OR store_requests_pending
     // Exclude rejected items
+    return rawPendingPurchases.filter(p =>
+      (p.vendor_selection_pending_td_approval || p.store_requests_pending) && !p.rejection_type
+    );
+  }, [rawPendingPurchases]);
+
+  // Separate store requests from vendor pending approval for sub-tabs
+  const storeRequestsPending = useMemo(() => {
+    return rawPendingPurchases.filter(p => p.store_requests_pending && !p.rejection_type);
+  }, [rawPendingPurchases]);
+
+  const vendorPendingApproval = useMemo(() => {
     return rawPendingPurchases.filter(p => p.vendor_selection_pending_td_approval && !p.rejection_type);
   }, [rawPendingPurchases]);
 
   // Determine which purchases to show based on active tab and sub-tab
   const currentPurchases = useMemo(() => {
     if (activeTab === 'ongoing') {
-      return ongoingSubTab === 'pending_purchase' ? pendingPurchaseItems : vendorApprovedItems;
+      if (ongoingSubTab === 'pending_purchase') return pendingPurchaseItems;
+      if (ongoingSubTab === 'store_approved') return storeApprovedItems;
+      return vendorApprovedItems;
     } else if (activeTab === 'pending_approval') {
-      return pendingApprovalPurchases;
+      // Sub-tabs for pending approval
+      return pendingApprovalSubTab === 'store_requests' ? storeRequestsPending : vendorPendingApproval;
     } else if (activeTab === 'rejected') {
       return rejectedPurchases;
     } else {
       return completedPurchases;
     }
-  }, [activeTab, ongoingSubTab, pendingPurchaseItems, vendorApprovedItems, pendingApprovalPurchases, completedPurchases, rejectedPurchases]);
+  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, storeRequestsPending, vendorPendingApproval, completedPurchases, rejectedPurchases]);
 
   const filteredPurchases = useMemo(() => {
     return currentPurchases
@@ -212,14 +246,17 @@ const PurchaseOrders: React.FC = () => {
 
   const stats = useMemo(() => {
     return {
-      ongoing: pendingPurchaseItems.length + vendorApprovedItems.length + approvedPOChildren.length,
+      ongoing: pendingPurchaseItems.length + storeApprovedItems.length + vendorApprovedItems.length + approvedPOChildren.length,
       pendingPurchase: pendingPurchaseItems.length,
+      storeApproved: storeApprovedItems.length,
       vendorApproved: vendorApprovedItems.length + approvedPOChildren.length,
       pendingApproval: pendingApprovalPurchases.length + pendingPOChildren.length,
+      storeRequestsPending: storeRequestsPending.length,
+      vendorPendingApproval: vendorPendingApproval.length + pendingPOChildren.length,
       completed: completedPurchases.length + completedPOChildren.length,
       rejected: rejectedPurchases.length + tdRejectedPOChildren.length
     };
-  }, [pendingPurchaseItems, vendorApprovedItems, approvedPOChildren, pendingApprovalPurchases, pendingPOChildren, completedPurchases, completedPOChildren, rejectedPurchases, tdRejectedPOChildren]);
+  }, [pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, approvedPOChildren, pendingApprovalPurchases, pendingPOChildren, completedPurchases, completedPOChildren, rejectedPurchases, tdRejectedPOChildren, storeRequestsPending, vendorPendingApproval]);
 
   const handleViewDetails = (purchase: Purchase) => {
     setSelectedPurchase(purchase);
@@ -556,6 +593,24 @@ const PurchaseOrders: React.FC = () => {
                 </span>
               </button>
               <button
+                onClick={() => setOngoingSubTab('store_approved')}
+                className={`flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${
+                  ongoingSubTab === 'store_approved'
+                    ? 'bg-purple-600 text-white shadow-md'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-white'
+                }`}
+              >
+                <Store className="w-4 h-4" />
+                <span>Store Approved</span>
+                <span className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                  ongoingSubTab === 'store_approved'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-gray-200 text-gray-600'
+                }`}>
+                  {stats.storeApproved}
+                </span>
+              </button>
+              <button
                 onClick={() => setOngoingSubTab('vendor_approved')}
                 className={`flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${
                   ongoingSubTab === 'vendor_approved'
@@ -577,16 +632,60 @@ const PurchaseOrders: React.FC = () => {
           </div>
         )}
 
+        {/* Sub-tabs for Pending Approval - Only show when Pending Approval tab is active */}
+        {activeTab === 'pending_approval' && (
+          <div className="bg-gradient-to-r from-gray-50 to-white rounded-lg border border-gray-200 shadow-sm mb-6 p-1">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <button
+                onClick={() => setPendingApprovalSubTab('store_requests')}
+                className={`flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${
+                  pendingApprovalSubTab === 'store_requests'
+                    ? 'bg-purple-600 text-white shadow-md'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-white'
+                }`}
+              >
+                <Store className="w-4 h-4" />
+                <span>Sent to Store</span>
+                <span className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                  pendingApprovalSubTab === 'store_requests'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-gray-200 text-gray-600'
+                }`}>
+                  {stats.storeRequestsPending}
+                </span>
+              </button>
+              <button
+                onClick={() => setPendingApprovalSubTab('vendor_approval')}
+                className={`flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${
+                  pendingApprovalSubTab === 'vendor_approval'
+                    ? 'bg-amber-500 text-white shadow-md'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-white'
+                }`}
+              >
+                <Clock className="w-4 h-4" />
+                <span>Vendor Pending TD</span>
+                <span className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                  pendingApprovalSubTab === 'vendor_approval'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-gray-200 text-gray-600'
+                }`}>
+                  {stats.vendorPendingApproval}
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Content */}
         <div className="space-y-4">
-          {filteredPurchases.length === 0 && !(activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved' && approvedPOChildren.length > 0) && !(activeTab === 'completed' && completedPOChildren.length > 0) && !(activeTab === 'pending_approval' && pendingPOChildren.length > 0) && !(activeTab === 'rejected' && tdRejectedPOChildren.length > 0) ? (
+          {filteredPurchases.length === 0 && !(activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved' && approvedPOChildren.length > 0) && !(activeTab === 'completed' && completedPOChildren.length > 0) && !(activeTab === 'pending_approval' && pendingApprovalSubTab === 'vendor_approval' && pendingPOChildren.length > 0) && !(activeTab === 'rejected' && tdRejectedPOChildren.length > 0) ? (
             <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-12 text-center">
               <ShoppingCart className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 text-lg">
                 {activeTab === 'ongoing'
-                  ? `No ${ongoingSubTab === 'pending_purchase' ? 'pending purchase' : 'vendor approved'} items found`
+                  ? `No ${ongoingSubTab === 'pending_purchase' ? 'pending purchase' : ongoingSubTab === 'store_approved' ? 'store approved' : 'vendor approved'} items found`
                   : activeTab === 'pending_approval'
-                    ? 'No pending approval purchases found'
+                    ? `No ${pendingApprovalSubTab === 'store_requests' ? 'store requests pending' : 'vendor pending TD approval'} items found`
                     : activeTab === 'rejected'
                       ? 'No rejected purchases found'
                       : 'No completed purchases found'
@@ -605,9 +704,11 @@ const PurchaseOrders: React.FC = () => {
                       ? 'border-green-200'
                       : purchase.status === 'rejected'
                         ? 'border-red-300'
-                        : purchase.vendor_selection_pending_td_approval
-                          ? 'border-amber-200'
-                          : 'border-blue-200'
+                        : purchase.store_requests_pending || purchase.all_store_requests_approved
+                          ? 'border-purple-200'
+                          : purchase.vendor_selection_pending_td_approval
+                            ? 'border-amber-200'
+                            : 'border-blue-200'
                   }`}
                 >
                   {/* Card Header */}
@@ -616,18 +717,22 @@ const PurchaseOrders: React.FC = () => {
                       ? 'bg-gradient-to-r from-green-50 to-green-100 border-green-200'
                       : purchase.status === 'rejected'
                         ? 'bg-gradient-to-r from-red-50 to-red-100 border-red-200'
-                        : purchase.vendor_selection_pending_td_approval
-                          ? 'bg-gradient-to-r from-amber-50 to-amber-100 border-amber-200'
-                          : 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200'
+                        : purchase.store_requests_pending || purchase.all_store_requests_approved
+                          ? 'bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200'
+                          : purchase.vendor_selection_pending_td_approval
+                            ? 'bg-gradient-to-r from-amber-50 to-amber-100 border-amber-200'
+                            : 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200'
                   }`}>
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <h3 className="text-base font-bold text-gray-900 line-clamp-1">{purchase.project_name}</h3>
                       <Badge className={`${
                         purchase.status === 'completed'
                           ? 'bg-green-100 text-green-800'
-                          : purchase.vendor_selection_pending_td_approval
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-blue-100 text-blue-800'
+                          : purchase.store_requests_pending || purchase.all_store_requests_approved
+                            ? 'bg-purple-100 text-purple-800'
+                            : purchase.vendor_selection_pending_td_approval
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-blue-100 text-blue-800'
                       } text-xs whitespace-nowrap`}>
                         {purchase.formatted_cr_id || `PO-${purchase.cr_id}`}
                       </Badge>
@@ -785,12 +890,12 @@ const PurchaseOrders: React.FC = () => {
 
                       {/* Store Request Status - Pending Approval */}
                       {purchase.status === 'pending' && purchase.has_store_requests && !purchase.any_store_request_rejected && !purchase.vendor_id && purchase.store_requests_pending && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-1">
+                        <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 mb-1">
                           <div className="flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-amber-600" />
+                            <Store className="w-4 h-4 text-purple-600" />
                             <div>
-                              <div className="text-xs font-semibold text-amber-900">Requested from M2 Store</div>
-                              <div className="text-xs text-amber-700">Waiting for approval ({purchase.store_request_count} request(s))</div>
+                              <div className="text-xs font-semibold text-purple-900">Sent to M2 Store</div>
+                              <div className="text-xs text-purple-700">Awaiting PM approval ({purchase.store_request_count} request(s))</div>
                             </div>
                           </div>
                         </div>

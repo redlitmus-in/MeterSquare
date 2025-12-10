@@ -2311,3 +2311,210 @@ def delete_delivery_note(delivery_note_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+def get_delivery_notes_for_se():
+    """Get delivery notes for Site Engineer's assigned projects"""
+    try:
+        current_user_id = g.user.get('user_id')
+
+        # Get projects where user is site supervisor (site_supervisor_id is an integer column)
+        from models.project import Project
+        assigned_projects = Project.query.filter(
+            Project.site_supervisor_id == current_user_id,
+            Project.is_deleted == False
+        ).all()
+
+        project_ids = [p.project_id for p in assigned_projects]
+
+        if not project_ids:
+            return jsonify({
+                'delivery_notes': [],
+                'message': 'No assigned projects found'
+            }), 200
+
+        # Get delivery notes for these projects that have been dispatched or in transit
+        status_filter = request.args.get('status')
+        query = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.project_id.in_(project_ids)
+        )
+
+        if status_filter:
+            query = query.filter_by(status=status_filter.upper())
+        else:
+            # By default, show issued/dispatched and in-transit notes (not draft or cancelled)
+            query = query.filter(MaterialDeliveryNote.status.in_(['ISSUED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'PARTIAL']))
+
+        notes = query.order_by(MaterialDeliveryNote.created_at.desc()).all()
+
+        # Enrich with project details
+        project_map = {p.project_id: {'project_name': p.project_name, 'project_code': p.project_code} for p in assigned_projects}
+
+        result = []
+        for note in notes:
+            note_dict = note.to_dict()
+            note_dict['project_name'] = project_map.get(note.project_id, {}).get('project_name', f'Project #{note.project_id}')
+            note_dict['project_code'] = project_map.get(note.project_id, {}).get('project_code', '')
+            result.append(note_dict)
+
+        return jsonify({
+            'delivery_notes': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_returnable_materials_for_se():
+    """Get all returnable materials for Site Engineer's assigned projects.
+
+    Returns materials from delivered delivery notes that can still be returned,
+    grouped by project.
+    """
+    try:
+        current_user_id = g.user.get('user_id')
+
+        # Get projects where user is site supervisor
+        from models.project import Project
+        assigned_projects = Project.query.filter(
+            Project.site_supervisor_id == current_user_id,
+            Project.is_deleted == False
+        ).all()
+
+        project_ids = [p.project_id for p in assigned_projects]
+
+        if not project_ids:
+            return jsonify({
+                'projects': [],
+                'message': 'No assigned projects found'
+            }), 200
+
+        result = []
+
+        for project in assigned_projects:
+            # Get delivery notes for this project that are delivered
+            delivery_notes = MaterialDeliveryNote.query.filter(
+                MaterialDeliveryNote.project_id == project.project_id,
+                MaterialDeliveryNote.status == 'DELIVERED'
+            ).all()
+
+            if not delivery_notes:
+                continue
+
+            # Aggregate materials dispatched
+            dispatched_materials = {}
+
+            for dn in delivery_notes:
+                for item in dn.items:
+                    material_id = item.inventory_material_id
+                    if material_id not in dispatched_materials:
+                        material = InventoryMaterial.query.get(material_id)
+                        if material:
+                            dispatched_materials[material_id] = {
+                                'inventory_material_id': material_id,
+                                'material_code': material.material_code,
+                                'material_name': material.material_name,
+                                'brand': material.brand,
+                                'unit': material.unit,
+                                'is_returnable': material.is_returnable,
+                                'dispatched_quantity': 0,
+                                'returned_quantity': 0,
+                                'returnable_quantity': 0
+                            }
+
+                    if material_id in dispatched_materials:
+                        dispatched_materials[material_id]['dispatched_quantity'] += item.quantity
+
+            # Get already returned quantities for each material from this project
+            for material_id in dispatched_materials.keys():
+                returns = MaterialReturn.query.filter_by(
+                    inventory_material_id=material_id,
+                    project_id=project.project_id
+                ).all()
+
+                total_returned = sum(r.quantity for r in returns)
+                dispatched_materials[material_id]['returned_quantity'] = total_returned
+                dispatched_materials[material_id]['returnable_quantity'] = max(
+                    0,
+                    dispatched_materials[material_id]['dispatched_quantity'] - total_returned
+                )
+
+            # Filter out materials with no returnable quantity
+            materials = [m for m in dispatched_materials.values() if m['returnable_quantity'] > 0]
+
+            if materials:
+                # Sort by material name
+                materials.sort(key=lambda x: x['material_name'])
+
+                result.append({
+                    'project_id': project.project_id,
+                    'project_name': project.project_name,
+                    'project_code': project.project_code,
+                    'location': project.location,
+                    'materials': materials,
+                    'total_materials': len(materials)
+                })
+
+        return jsonify({
+            'projects': result,
+            'total_projects': len(result)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_material_returns_for_se():
+    """Get all material returns submitted by or for Site Engineer's assigned projects."""
+    try:
+        current_user_id = g.user.get('user_id')
+
+        # Get projects where user is site supervisor
+        from models.project import Project
+        assigned_projects = Project.query.filter(
+            Project.site_supervisor_id == current_user_id,
+            Project.is_deleted == False
+        ).all()
+
+        project_ids = [p.project_id for p in assigned_projects]
+
+        if not project_ids:
+            return jsonify({
+                'returns': [],
+                'message': 'No assigned projects found'
+            }), 200
+
+        # Get all returns for these projects
+        returns = MaterialReturn.query.filter(
+            MaterialReturn.project_id.in_(project_ids)
+        ).order_by(MaterialReturn.created_at.desc()).all()
+
+        # Enrich with project details
+        project_map = {p.project_id: {
+            'project_name': p.project_name,
+            'project_code': p.project_code,
+            'location': p.location
+        } for p in assigned_projects}
+
+        result = []
+        for ret in returns:
+            ret_data = ret.to_dict()
+            ret_data['project_name'] = project_map.get(ret.project_id, {}).get('project_name', f'Project #{ret.project_id}')
+            ret_data['project_code'] = project_map.get(ret.project_id, {}).get('project_code', '')
+            ret_data['project_location'] = project_map.get(ret.project_id, {}).get('location', '')
+            result.append(ret_data)
+
+        return jsonify({
+            'returns': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
