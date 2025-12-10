@@ -185,50 +185,50 @@ const ChangeRequestsPage: React.FC = () => {
         console.log('✅ Filtered vendor approvals:', pendingVendorApprovals.length);
 
         // Map to Purchase format for compatibility
-        const mappedApprovals: Purchase[] = pendingVendorApprovals.map((cr: ChangeRequestItem) => ({
-          cr_id: cr.cr_id,
-          formatted_cr_id: cr.formatted_cr_id || `PO-${cr.cr_id}`,
-          project_id: cr.project_id,
-          project_name: cr.project_name || cr.boq_name || 'Unknown Project',
-          client: cr.project_client || '',
-          item_name: cr.item_name || '',
-          materials_count: cr.materials_data?.length || 0,
-          total_cost: cr.materials_total_cost || 0,
-          vendor_name: cr.selected_vendor_name || 'No Vendor',
-          vendor_id: cr.selected_vendor_id || 0,
-          created_at: cr.created_at,
-          status: cr.status,
-          vendor_selection_pending_td_approval: true,
-          vendor_selection_status: cr.vendor_selection_status,
-          // Map materials_data to materials array format expected by VendorSelectionModal
-          // Include BOQ price from sub_items_data for comparison
-          materials: (cr.materials_data || []).map(mat => {
-            // Find matching material in sub_items_data to get BOQ price
-            const subItemMatch = (cr.sub_items_data || []).find(
-              (sub: any) => sub.material_name?.toLowerCase().trim() === mat.material_name?.toLowerCase().trim()
-            );
-            const boqPrice = subItemMatch?.unit_price || subItemMatch?.original_unit_price || 0;
+        const mappedApprovals: Purchase[] = pendingVendorApprovals.map((cr: ChangeRequestItem) => {
+          // Calculate materials with vendor prices
+          const mappedMaterials = (cr.materials_data || []).map(mat => {
+            // Get vendor's negotiated price from material_vendor_selections
+            const vendorSelection = cr.material_vendor_selections?.[mat.material_name];
+            const vendorUnitPrice = vendorSelection?.negotiated_price ?? mat.unit_price ?? 0;
+            const quantity = mat.quantity || 0;
+            // Get BOQ price directly from material (already available in materials_data)
+            const boqPrice = mat.boq_unit_price || mat.original_unit_price || 0;
 
             return {
               material_name: mat.material_name || '',
-              quantity: mat.quantity || 0,
+              quantity: quantity,
               unit: mat.unit || '',
-              unit_price: mat.unit_price || 0,
-              total_price: mat.total_price || 0,
+              unit_price: vendorUnitPrice,  // Vendor's negotiated price
+              total_price: vendorUnitPrice * quantity,  // Recalculate based on vendor price
               boq_unit_price: boqPrice,  // BOQ price for comparison
-              boq_total_price: boqPrice * (mat.quantity || 0)
+              boq_total_price: boqPrice * quantity
             };
-          }),
-          // Add missing required fields from Purchase interface
-          boq_id: cr.boq_id,
-          boq_name: cr.boq_name || '',
-          location: cr.project_location || '',
-          sub_item_name: '',
-          request_type: cr.request_type || '',
-          reason: cr.justification || '',
-          approved_by: 0,
-          approved_at: null
-        }));
+          });
+
+          // Calculate total cost based on vendor prices
+          const vendorTotalCost = mappedMaterials.reduce((sum, mat) => sum + mat.total_price, 0);
+
+          return {
+            cr_id: cr.cr_id,
+            formatted_cr_id: cr.formatted_cr_id || `PO-${cr.cr_id}`,
+            project_id: cr.project_id,
+            project_name: cr.project_name || cr.boq_name || 'Unknown Project',
+            client: cr.project_client || '',
+            item_name: cr.item_name || '',
+            materials_count: cr.materials_data?.length || 0,
+            total_cost: vendorTotalCost,  // Use calculated vendor total
+            vendor_name: cr.selected_vendor_name || 'No Vendor',
+            vendor_id: cr.selected_vendor_id || 0,
+            created_at: cr.created_at,
+            status: cr.status,
+            vendor_selection_pending_td_approval: true,
+            vendor_selection_status: cr.vendor_selection_status,
+            materials: mappedMaterials,
+            boq_id: cr.boq_id,
+            boq_name: cr.boq_name || ''
+          };
+        });
 
         setVendorApprovals(mappedApprovals);
       }
@@ -704,6 +704,17 @@ const ChangeRequestsPage: React.FC = () => {
     return matchesSearch;
   });
 
+  // Calculate vendor totals for change requests
+  const enrichedChangeRequests = filteredRequests.map(request => {
+    const vendorTotalCost = (request.materials_data || []).reduce((sum, mat) => {
+      const vendorSelection = request.material_vendor_selections?.[mat.material_name];
+      const vendorPrice = vendorSelection?.negotiated_price ?? mat.unit_price ?? 0;
+      return sum + (vendorPrice * (mat.quantity || 0));
+    }, 0);
+
+    return { ...request, vendorTotalCost };
+  });
+
   const handleApproveVendor = async (crId: number) => {
     setApprovingVendorId(crId);
     try {
@@ -835,30 +846,43 @@ const ChangeRequestsPage: React.FC = () => {
   }
 
   // Table View Component
-  const RequestsTable = ({ requests }: { requests: ChangeRequestItem[] }) => (
-    <div className="border rounded-lg overflow-hidden">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Project Name</TableHead>
-            <TableHead>Requested By</TableHead>
-            <TableHead>Date</TableHead>
-            <TableHead>New Items</TableHead>
-            <TableHead>Additional Cost</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {requests.map((request) => {
-            const isHighValue = request.approval_type === 'td';
-            return (
-              <TableRow key={request.cr_id}>
-                <TableCell className="font-semibold">{request.project_name}</TableCell>
-                <TableCell>{request.requested_by_name}</TableCell>
-                <TableCell>{new Date(request.created_at).toLocaleDateString()}</TableCell>
-                <TableCell>{(request.materials_data?.length || 0)}</TableCell>
-                <TableCell className="font-semibold">{formatCurrency(request.materials_total_cost)}</TableCell>
+  const RequestsTable = ({ requests }: { requests: ChangeRequestItem[] }) => {
+    // Calculate vendor totals for table view
+    const enrichedTableRequests = requests.map(request => {
+      const vendorTotalCost = (request.materials_data || []).reduce((sum, mat) => {
+        const vendorSelection = request.material_vendor_selections?.[mat.material_name];
+        const vendorPrice = vendorSelection?.negotiated_price ?? mat.unit_price ?? 0;
+        return sum + (vendorPrice * (mat.quantity || 0));
+      }, 0);
+      return { ...request, vendorTotalCost };
+    });
+
+    return (
+      <div className="border rounded-lg overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Project Name</TableHead>
+              <TableHead>Requested By</TableHead>
+              <TableHead>Date</TableHead>
+              <TableHead>New Items</TableHead>
+              <TableHead>Vendor Amount</TableHead>
+              <TableHead>BOQ Amount</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {enrichedTableRequests.map((request) => {
+              const isHighValue = request.approval_type === 'td';
+              return (
+                <TableRow key={request.cr_id}>
+                  <TableCell className="font-semibold">{request.project_name}</TableCell>
+                  <TableCell>{request.requested_by_name}</TableCell>
+                  <TableCell>{new Date(request.created_at).toLocaleDateString()}</TableCell>
+                  <TableCell>{(request.materials_data?.length || 0)}</TableCell>
+                  <TableCell className="font-semibold text-blue-700">{formatCurrency(request.vendorTotalCost || request.materials_total_cost)}</TableCell>
+                  <TableCell className="text-gray-500 text-sm">{formatCurrency(request.materials_total_cost)}</TableCell>
                 <TableCell>
                   <Badge className={getStatusColor(request.status)}>
                     {request.status.replace('_', ' ').toUpperCase()}
@@ -891,7 +915,8 @@ const ChangeRequestsPage: React.FC = () => {
         </TableBody>
       </Table>
     </div>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
@@ -1054,7 +1079,7 @@ const ChangeRequestsPage: React.FC = () => {
                   <RequestsTable requests={filteredRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                    {filteredRequests.map((request, index) => {
+                    {enrichedChangeRequests.map((request, index) => {
                       return (
                         <motion.div
                           key={request.cr_id}
@@ -1093,9 +1118,23 @@ const ChangeRequestsPage: React.FC = () => {
                           {/* Financial Impact - Compact */}
                           <div className="px-2 pb-2 space-y-0.5 text-[9px]">
                             <div className="flex justify-between">
-                              <span className="text-gray-500">Total Cost:</span>
-                              <span className="font-bold text-gray-900">{formatCurrency(request.materials_total_cost)}</span>
+                              <span className="text-gray-500">Vendor Amount:</span>
+                              <span className="font-bold text-blue-700">{formatCurrency(request.vendorTotalCost || request.materials_total_cost)}</span>
                             </div>
+                            {request.materials_total_cost > 0 && request.vendorTotalCost > 0 && request.materials_total_cost !== request.vendorTotalCost && (
+                              <>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400 text-[8px]">BOQ Amount:</span>
+                                  <span className="text-gray-400 text-[8px]">{formatCurrency(request.materials_total_cost)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400 text-[8px]">Difference:</span>
+                                  <span className={`text-[8px] font-bold ${request.vendorTotalCost > request.materials_total_cost ? 'text-red-600' : 'text-green-600'}`}>
+                                    {request.vendorTotalCost > request.materials_total_cost ? '+' : ''}{formatCurrency(Math.abs(request.vendorTotalCost - request.materials_total_cost))}
+                                  </span>
+                                </div>
+                              </>
+                            )}
                           </div>
 
                           {/* Actions - Compact */}
@@ -1161,7 +1200,7 @@ const ChangeRequestsPage: React.FC = () => {
                   <RequestsTable requests={filteredRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                    {filteredRequests.map((request, index) => (
+                    {enrichedChangeRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 10 }}
@@ -1203,9 +1242,23 @@ const ChangeRequestsPage: React.FC = () => {
                         {/* Financial Impact - Compact */}
                         <div className="px-2 pb-2 space-y-0.5 text-[9px]">
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Total Cost:</span>
-                            <span className="font-bold text-gray-900">{formatCurrency(request.materials_total_cost)}</span>
+                            <span className="text-gray-500">Vendor Amount:</span>
+                            <span className="font-bold text-blue-700">{formatCurrency(request.vendorTotalCost || request.materials_total_cost)}</span>
                           </div>
+                          {request.materials_total_cost > 0 && request.vendorTotalCost > 0 && request.materials_total_cost !== request.vendorTotalCost && (
+                            <>
+                              <div className="flex justify-between">
+                                <span className="text-gray-400 text-[8px]">BOQ Amount:</span>
+                                <span className="text-gray-400 text-[8px]">{formatCurrency(request.materials_total_cost)}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-400 text-[8px]">Difference:</span>
+                                <span className={`text-[8px] font-bold ${request.vendorTotalCost > request.materials_total_cost ? 'text-red-600' : 'text-green-600'}`}>
+                                  {request.vendorTotalCost > request.materials_total_cost ? '+' : ''}{formatCurrency(Math.abs(request.vendorTotalCost - request.materials_total_cost))}
+                                </span>
+                              </div>
+                            </>
+                          )}
                         </div>
 
                         {/* Actions - Compact */}
@@ -1489,24 +1542,15 @@ const ChangeRequestsPage: React.FC = () => {
 
                         {/* Actions */}
                         <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
-                          {/* Row 1: Details + Edit LPO */}
-                          <div className="grid grid-cols-2 gap-1">
-                            <button
-                              onClick={() => handleViewPOChildDetails(poChild)}
-                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-3 w-3" />
-                              <span>Details</span>
-                            </button>
-                            <button
-                              onClick={() => handleOpenLpoEditor(poChild, false)}
-                              className="bg-blue-500 hover:bg-blue-600 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
-                            >
-                              <FileText className="h-3 w-3" />
-                              <span>Edit LPO</span>
-                            </button>
-                          </div>
+                          {/* Row 1: Details button */}
+                          <button
+                            onClick={() => handleViewPOChildDetails(poChild)}
+                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
+                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                          >
+                            <Eye className="h-3 w-3" />
+                            <span>Details</span>
+                          </button>
                           {/* Row 2: Approve/Reject */}
                           <div className="grid grid-cols-2 gap-1">
                             <button
@@ -1672,9 +1716,9 @@ const ChangeRequestsPage: React.FC = () => {
                             {purchase.materials && purchase.materials.length > 0 ? (
                               <div className="divide-y divide-gray-100">
                                 {purchase.materials.map((material: any, idx: number) => {
-                                  const boqPrice = material.boq_unit_price || 0;
-                                  // Use vendor price, fallback to BOQ price if vendor price is 0
-                                  const vendorPrice = material.unit_price || material.boq_unit_price || 0;
+                                  const boqPrice = material.boq_unit_price || material.original_unit_price || 0;
+                                  // Use negotiated price first, then unit_price, then BOQ price
+                                  const vendorPrice = material.negotiated_price || material.unit_price || material.boq_unit_price || 0;
                                   const quantity = material.quantity || 0;
                                   const materialTotal = material.total_price || material.boq_total_price || (vendorPrice * quantity) || 0;
                                   const priceDiff = vendorPrice - boqPrice;
@@ -1685,9 +1729,15 @@ const ChangeRequestsPage: React.FC = () => {
                                       <div className="flex justify-between items-start gap-1">
                                         <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
                                         <div className="text-right whitespace-nowrap">
-                                          <span className="text-blue-700 font-bold">
-                                            AED {vendorPrice.toLocaleString()}
-                                          </span>
+                                          {vendorPrice > 0 ? (
+                                            <span className="text-blue-700 font-bold">
+                                              AED {vendorPrice.toLocaleString()}
+                                            </span>
+                                          ) : (
+                                            <span className="text-amber-600 italic text-[8px]">
+                                              Price not set
+                                            </span>
+                                          )}
                                           {boqPrice > 0 && boqPrice !== vendorPrice && (
                                             <span className="text-gray-400 text-[8px] ml-0.5">
                                               (BOQ:{boqPrice})
@@ -1697,9 +1747,13 @@ const ChangeRequestsPage: React.FC = () => {
                                       </div>
                                       <div className="flex justify-between text-gray-500 mt-0.5">
                                         <span>{quantity} {material.unit}</span>
-                                        <span className="font-semibold text-gray-700">
-                                          = AED {materialTotal.toLocaleString()}
-                                        </span>
+                                        {materialTotal > 0 ? (
+                                          <span className="font-semibold text-gray-700">
+                                            = AED {materialTotal.toLocaleString()}
+                                          </span>
+                                        ) : (
+                                          <span className="text-amber-600 italic text-[8px]">-</span>
+                                        )}
                                       </div>
                                     </div>
                                   );
@@ -1713,13 +1767,22 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                           {/* Total Cost with BOQ comparison */}
                           {(() => {
-                            const vendorTotal = purchase.total_cost || 0;
-                            const boqTotal = purchase.materials?.reduce((sum: number, m: any) => sum + (m.boq_total_price || 0), 0) || 0;
+                            // Calculate vendor total from materials with negotiated prices
+                            const calculatedTotal = purchase.materials?.reduce((sum: number, m: any) => {
+                              const price = m.negotiated_price || m.unit_price || m.boq_unit_price || 0;
+                              return sum + (price * (m.quantity || 0));
+                            }, 0) || 0;
+                            const vendorTotal = purchase.total_cost || calculatedTotal || 0;
+                            const boqTotal = purchase.materials?.reduce((sum: number, m: any) => sum + ((m.boq_unit_price || m.original_unit_price || 0) * (m.quantity || 0)), 0) || 0;
                             return (
                               <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
                                 <div className="flex justify-between">
                                   <span className="text-gray-600 font-semibold">Vendor Total:</span>
-                                  <span className="font-bold text-blue-700">AED {vendorTotal.toLocaleString()}</span>
+                                  {vendorTotal > 0 ? (
+                                    <span className="font-bold text-blue-700">AED {vendorTotal.toLocaleString()}</span>
+                                  ) : (
+                                    <span className="text-amber-600 italic text-[9px]">Prices not set</span>
+                                  )}
                                 </div>
                                 {boqTotal > 0 && (
                                   <div className="flex justify-between mt-0.5">
@@ -1804,7 +1867,7 @@ const ChangeRequestsPage: React.FC = () => {
                   <RequestsTable requests={filteredRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                    {filteredRequests.map((request, index) => (
+                    {enrichedChangeRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 10 }}
@@ -1839,13 +1902,23 @@ const ChangeRequestsPage: React.FC = () => {
 
                         <div className="px-2 pb-2 space-y-0.5 text-[9px]">
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Cost:</span>
-                            <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
+                            <span className="text-gray-500">Vendor Amount:</span>
+                            <span className="font-bold text-blue-700">{formatCurrency(request.vendorTotalCost || request.materials_total_cost)}</span>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Increase:</span>
-                            <span className="font-semibold text-green-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
-                          </div>
+                          {request.materials_total_cost > 0 && request.vendorTotalCost > 0 && request.materials_total_cost !== request.vendorTotalCost && (
+                            <>
+                              <div className="flex justify-between">
+                                <span className="text-gray-400 text-[8px]">BOQ Amount:</span>
+                                <span className="text-gray-400 text-[8px]">{formatCurrency(request.materials_total_cost)}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-400 text-[8px]">Difference:</span>
+                                <span className={`text-[8px] font-bold ${request.vendorTotalCost > request.materials_total_cost ? 'text-red-600' : 'text-green-600'}`}>
+                                  {request.vendorTotalCost > request.materials_total_cost ? '+' : ''}{formatCurrency(Math.abs(request.vendorTotalCost - request.materials_total_cost))}
+                                </span>
+                              </div>
+                            </>
+                          )}
                         </div>
 
                         <div className="border-t border-gray-200 p-1.5">
@@ -1880,6 +1953,19 @@ const ChangeRequestsPage: React.FC = () => {
         onApprove={handleApproveFromModal}
         onReject={handleRejectFromModal}
         canApprove={permissions.canApproveChangeRequest(user) && selectedChangeRequest?.status === 'pending'}
+        onEditLPO={() => {
+          if (selectedChangeRequest) {
+            // Convert back to POChild format if it has po_child_id
+            const poChildId = (selectedChangeRequest as any).po_child_id;
+            if (poChildId) {
+              // Find the POChild from the pending list
+              const poChild = pendingPOChildren.find(p => p.id === poChildId);
+              if (poChild) {
+                handleOpenLpoEditor(poChild, false);
+              }
+            }
+          }
+        }}
       />
 
       {/* Edit Change Request Modal */}

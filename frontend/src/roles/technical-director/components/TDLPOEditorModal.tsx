@@ -71,14 +71,46 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
 
     setIsSaving(true);
     try {
-      await buyerService.saveLPOCustomization(crId, lpoData, includeSignatures);
+      await buyerService.saveLPOCustomization(crId, lpoData, includeSignatures, poChild?.id);
       setLastSaved(new Date());
+
+      // Call onSave callback if provided (for parent to refresh data)
+      if (onSave) {
+        onSave();
+      }
     } catch (error) {
       console.error('Auto-save failed:', error);
     } finally {
       setIsSaving(false);
     }
-  }, [lpoData, includeSignatures, crId]);
+  }, [lpoData, includeSignatures, crId, poChild?.id, onSave]);
+
+  // Manual save and close function
+  const handleSaveAndClose = async () => {
+    if (!lpoData) return;
+
+    setIsSaving(true);
+    try {
+      await buyerService.saveLPOCustomization(crId, lpoData, includeSignatures, poChild?.id);
+      showSuccess('LPO saved successfully');
+
+      // Call onSave callback if provided
+      if (onSave) {
+        onSave();
+      }
+
+      // Close modal after short delay for user feedback
+      setTimeout(() => {
+        setLpoData(null);
+        setLastSaved(null);
+        onClose();
+      }, 300);
+    } catch (error: any) {
+      console.error('Save failed:', error);
+      showError(error.message || 'Failed to save LPO');
+      setIsSaving(false);
+    }
+  };
 
   // Debounced auto-save effect (skip if read-only)
   useEffect(() => {
@@ -203,6 +235,26 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  {!isReadOnly && (
+                    <Button
+                      onClick={handleSaveAndClose}
+                      disabled={isSaving}
+                      className="bg-green-600 hover:bg-green-700 text-white"
+                      size="sm"
+                    >
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4 mr-1" />
+                          Save & Close
+                        </>
+                      )}
+                    </Button>
+                  )}
                   <Button
                     onClick={handleDownloadLpoPdf}
                     variant="outline"

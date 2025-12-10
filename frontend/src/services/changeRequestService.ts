@@ -121,6 +121,14 @@ export interface ChangeRequestItem {
   vendor_approval_date?: string | null;
   vendor_rejection_reason?: string | null;
 
+  // Per-Material Vendor Selection (with vendor prices)
+  material_vendor_selections?: Record<string, {
+    vendor_id?: number;
+    vendor_name?: string;
+    negotiated_price?: number;
+    status?: string;
+  }>;
+
   // Buyer Assignment
   assigned_to_buyer_user_id?: number | null;
   assigned_to_buyer_name?: string | null;

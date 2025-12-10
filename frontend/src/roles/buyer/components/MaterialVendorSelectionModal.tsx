@@ -215,7 +215,9 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
   // Load LPO data when modal opens (for buyer mode only)
   useEffect(() => {
+    console.log('>>> LPO useEffect triggered:', { isOpen, includeLpoPdf, lpoData: !!lpoData, viewMode });
     if (isOpen && includeLpoPdf && !lpoData && viewMode === 'buyer') {
+      console.log('>>> Loading LPO data for cr_id:', purchase.cr_id);
       loadLpoData();
     }
   }, [isOpen, includeLpoPdf, viewMode]);
@@ -223,8 +225,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   // Load LPO data function
   const loadLpoData = async () => {
     try {
+      console.log('>>> loadLpoData: Starting for cr_id:', purchase.cr_id);
       setIsLoadingLpo(true);
       const response = await buyerService.previewLPOPdf(purchase.cr_id);
+      console.log('>>> loadLpoData: Response:', response);
       let enrichedLpoData = response.lpo_data;
 
       // Try to load default template if no custom terms exist
@@ -262,13 +266,15 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         }
       }
 
+      console.log('>>> loadLpoData: Setting lpoData:', enrichedLpoData);
       setLpoData(enrichedLpoData);
     } catch (error: any) {
-      console.error('Error loading LPO data:', error);
+      console.error('>>> loadLpoData: Error:', error);
       toast.error(error.message || 'Failed to load LPO data');
-      setIncludeLpoPdf(false);
+      // Don't uncheck the checkbox - let user retry
     } finally {
       setIsLoadingLpo(false);
+      console.log('>>> loadLpoData: Done');
     }
   };
 
@@ -2250,16 +2256,26 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                           </div>
                         </label>
                       </div>
-                      {includeLpoPdf && lpoData && (
+                      {includeLpoPdf && (
                         <div className="flex gap-2">
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() => setShowLpoEditor(!showLpoEditor)}
+                            onClick={() => {
+                              if (!lpoData && !isLoadingLpo) {
+                                loadLpoData();
+                              }
+                              setShowLpoEditor(!showLpoEditor);
+                            }}
                             className="text-xs"
+                            disabled={isLoadingLpo}
                           >
-                            <Edit3 className="w-3 h-3 mr-1" />
+                            {isLoadingLpo ? (
+                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            ) : (
+                              <Edit3 className="w-3 h-3 mr-1" />
+                            )}
                             {showLpoEditor ? 'Hide' : 'Edit'}
                           </Button>
                           <Button
@@ -2268,6 +2284,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             size="sm"
                             onClick={handleDownloadLpoPdf}
                             className="text-xs"
+                            disabled={!lpoData || isLoadingLpo}
                           >
                             <Download className="w-3 h-3 mr-1" />
                             Preview
@@ -2283,6 +2300,20 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     )}
 
                     {/* LPO Editor Section */}
+                    {includeLpoPdf && showLpoEditor && !lpoData && !isLoadingLpo && (
+                      <div className="mt-4 p-4 border-t border-blue-200 text-center">
+                        <p className="text-sm text-gray-500">Failed to load LPO data. Please try again.</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={loadLpoData}
+                          className="mt-2"
+                        >
+                          Retry
+                        </Button>
+                      </div>
+                    )}
                     {includeLpoPdf && lpoData && showLpoEditor && (
                       <div className="mt-4 space-y-4 border-t border-blue-200 pt-4">
                         <div className="flex items-center justify-between">

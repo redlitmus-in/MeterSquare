@@ -827,7 +827,7 @@ class BuyerService {
   }
 
   // Save LPO customizations to database for persistence
-  async saveLPOCustomization(crId: number, lpoData: LPOData, includeSignatures: boolean = true): Promise<{ success: boolean; message: string }> {
+  async saveLPOCustomization(crId: number, lpoData: LPOData, includeSignatures: boolean = true, poChildId?: number): Promise<{ success: boolean; message: string }> {
     try {
       const response = await apiClient.post(
         `/buyer/purchase/${crId}/save-lpo-customization`,
@@ -835,7 +835,8 @@ class BuyerService {
           lpo_info: lpoData.lpo_info,
           terms: lpoData.terms,
           vendor: lpoData.vendor,
-          include_signatures: includeSignatures
+          include_signatures: includeSignatures,
+          po_child_id: poChildId || null
         }
       );
 

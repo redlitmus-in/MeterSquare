@@ -623,7 +623,8 @@ const ChangeRequestsPage: React.FC = () => {
             <TableHead>Requested By</TableHead>
             <TableHead>Date</TableHead>
             <TableHead>New Items</TableHead>
-            <TableHead>Additional Cost</TableHead>
+            {/* Hidden for PM role */}
+            {/* <TableHead>Additional Cost</TableHead> */}
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -641,7 +642,8 @@ const ChangeRequestsPage: React.FC = () => {
                 <TableCell>{request.requested_by_name}</TableCell>
                 <TableCell>{new Date(request.created_at).toLocaleDateString()}</TableCell>
                 <TableCell>{request.materials_data?.length || 0}</TableCell>
-                <TableCell className="font-semibold">{formatCurrency(request.materials_total_cost)}</TableCell>
+                {/* Hidden for PM role */}
+                {/* <TableCell className="font-semibold">{formatCurrency(request.materials_total_cost)}</TableCell> */}
                 <TableCell>
                   <Badge className={getStatusColor(request.status)}>
                     {getStatusLabel(request.status, request.approval_required_from)}
@@ -925,8 +927,8 @@ const ChangeRequestsPage: React.FC = () => {
                           <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                         </div>
 
-                        {/* Budget Comparison - Always Visible */}
-                        <div className="px-4 pb-3">
+                        {/* Budget Comparison - Hidden for PM role */}
+                        {/* <div className="px-4 pb-3">
                           <div className="bg-gradient-to-r from-purple-50 to-purple-100 rounded-lg p-3 border border-purple-200">
                             <div className="space-y-2 text-xs">
                               <div className="flex justify-between">
@@ -957,7 +959,7 @@ const ChangeRequestsPage: React.FC = () => {
                               )}
                             </div>
                           </div>
-                        </div>
+                        </div> */}
 
                         {/* POChildren (Vendor Splits) Info */}
                         {renderPOChildrenInfo(request)}
@@ -1088,7 +1090,8 @@ const ChangeRequestsPage: React.FC = () => {
                           <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                         </div>
 
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                        {/* Hidden for PM role */}
+                        {/* <div className="px-4 pb-3 space-y-1.5 text-xs">
                           <div className="flex justify-between">
                             <span className="text-gray-500">Additional Cost:</span>
                             <span className="font-bold text-blue-600">{formatCurrency(request.materials_total_cost)}</span>
@@ -1097,7 +1100,7 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="text-gray-500">Cost Increase:</span>
                             <span className="font-semibold text-blue-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
                           </div>
-                        </div>
+                        </div> */}
 
                         {/* POChildren (Vendor Splits) Info */}
                         {renderPOChildrenInfo(request)}
@@ -1181,7 +1184,8 @@ const ChangeRequestsPage: React.FC = () => {
                           <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                         </div>
 
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                        {/* Hidden for PM role */}
+                        {/* <div className="px-4 pb-3 space-y-1.5 text-xs">
                           <div className="flex justify-between">
                             <span className="text-gray-500">Additional Cost:</span>
                             <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
@@ -1190,7 +1194,7 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="text-gray-500">Cost Increase:</span>
                             <span className="font-semibold text-green-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
                           </div>
-                        </div>
+                        </div> */}
 
                         {/* POChildren (Vendor Splits) Info */}
                         {renderPOChildrenInfo(request)}
@@ -1268,7 +1272,8 @@ const ChangeRequestsPage: React.FC = () => {
                           <span className="font-bold text-red-600 text-lg">{(request.materials_data?.length || 0)}</span>
                           <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                         </div>
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                        {/* Hidden for PM role */}
+                        {/* <div className="px-4 pb-3 space-y-1.5 text-xs">
                           <div className="flex justify-between">
                             <span className="text-gray-500">Additional Cost:</span>
                             <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
@@ -1277,7 +1282,7 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="text-gray-500">Cost Increase:</span>
                             <span className="font-semibold text-red-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
                           </div>
-                        </div>
+                        </div> */}
 
                         {/* POChildren (Vendor Splits) Info */}
                         {renderPOChildrenInfo(request)}
@@ -1543,7 +1548,8 @@ const ChangeRequestsPage: React.FC = () => {
                                 <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                               </div>
 
-                              <div className="px-4 pb-3 space-y-1.5 text-xs">
+                              {/* Hidden for PM role */}
+                              {/* <div className="px-4 pb-3 space-y-1.5 text-xs">
                                 <div className="flex justify-between">
                                   <span className="text-gray-500">Additional Cost:</span>
                                   <span className="font-bold text-gray-900">{formatCurrency(request.materials_total_cost)}</span>
@@ -1554,7 +1560,7 @@ const ChangeRequestsPage: React.FC = () => {
                                     {(request.percentage_of_item_overhead || 0).toFixed(1)}%
                                   </span>
                                 </div>
-                              </div>
+                              </div> */}
 
                               <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
                                 <div className="grid grid-cols-2 gap-2">
@@ -1660,7 +1666,8 @@ const ChangeRequestsPage: React.FC = () => {
                                 <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                               </div>
 
-                              <div className="px-4 pb-3 space-y-1.5 text-xs">
+                              {/* Hidden for PM role */}
+                              {/* <div className="px-4 pb-3 space-y-1.5 text-xs">
                                 <div className="flex justify-between">
                                   <span className="text-gray-500">Additional Cost:</span>
                                   <span className="font-bold text-yellow-600">{formatCurrency(request.materials_total_cost)}</span>
@@ -1671,7 +1678,7 @@ const ChangeRequestsPage: React.FC = () => {
                                     {(request.percentage_of_item_overhead || 0).toFixed(1)}%
                                   </span>
                                 </div>
-                              </div>
+                              </div> */}
 
                               {/* POChildren (Vendor Splits) Info */}
                               {renderPOChildrenInfo(request)}
@@ -1753,14 +1760,15 @@ const ChangeRequestsPage: React.FC = () => {
                                 <span className="text-gray-600 ml-1">Material{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                               </div>
 
-                              <div className="px-4 pb-3">
+                              {/* Hidden for PM role */}
+                              {/* <div className="px-4 pb-3">
                                 <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg p-3 border border-green-200">
                                   <div className="flex justify-between items-center">
                                     <span className="text-green-700 text-xs font-medium">Total Cost:</span>
                                     <span className="font-bold text-green-900">{formatCurrency(request.materials_total_cost)}</span>
                                   </div>
                                 </div>
-                              </div>
+                              </div> */}
 
                               {/* POChildren (Vendor Splits) Info */}
                               {renderPOChildrenInfo(request)}
@@ -1842,12 +1850,13 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="font-bold text-green-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
                             <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
-                          <div className="px-4 pb-3 space-y-1.5 text-xs">
+                          {/* Hidden for PM role */}
+                          {/* <div className="px-4 pb-3 space-y-1.5 text-xs">
                             <div className="flex justify-between">
                               <span className="text-gray-500">Additional Cost:</span>
                               <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
                             </div>
-                          </div>
+                          </div> */}
 
                           {/* POChildren (Vendor Splits) Info */}
                           {renderPOChildrenInfo(request)}
@@ -1927,12 +1936,13 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="font-bold text-purple-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
                             <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
-                          <div className="px-4 pb-3 space-y-1.5 text-xs">
+                          {/* Hidden for PM role */}
+                          {/* <div className="px-4 pb-3 space-y-1.5 text-xs">
                             <div className="flex justify-between">
                               <span className="text-gray-500">Additional Cost:</span>
                               <span className="font-bold text-purple-600">{formatCurrency(request.materials_total_cost)}</span>
                             </div>
-                          </div>
+                          </div> */}
 
                           {/* POChildren (Vendor Splits) Info */}
                           {renderPOChildrenInfo(request)}
@@ -2013,10 +2023,11 @@ const ChangeRequestsPage: React.FC = () => {
                             <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
                           <div className="px-4 pb-3 space-y-1.5 text-xs">
-                            <div className="flex justify-between">
+                            {/* Hidden for PM role */}
+                            {/* <div className="flex justify-between">
                               <span className="text-gray-500">Additional Cost:</span>
                               <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
-                            </div>
+                            </div> */}
                             {request.rejection_reason && (
                               <div className="pt-2 border-t border-red-200">
                                 <p className="text-xs font-medium text-red-900">Rejection Reason:</p>

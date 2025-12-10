@@ -28,19 +28,31 @@ PUBLIC_URL_BASE = f"{supabase_url}/storage/v1/object/public/{SUPABASE_BUCKET}/"
 supabase: Client = create_client(supabase_url, supabase_key) if supabase_url and supabase_key else None
 
 
-def _parse_custom_terms(saved_customization):
-    """Helper to safely parse custom_terms from saved customization"""
-    if not saved_customization:
-        return []
-    try:
-        # Try to get custom_terms attribute
-        custom_terms_str = getattr(saved_customization, 'custom_terms', None)
-        if custom_terms_str:
-            return json.loads(custom_terms_str)
-        return []
-    except Exception as e:
-        log.warning(f"Error parsing custom_terms: {e}")
-        return []
+def _parse_custom_terms(saved_customization, default_template=None):
+    """Helper to safely parse custom_terms from saved customization or default template"""
+    # Try saved_customization first
+    if saved_customization:
+        try:
+            custom_terms_str = getattr(saved_customization, 'custom_terms', None)
+            if custom_terms_str:
+                parsed = json.loads(custom_terms_str)
+                if parsed:  # Only return if not empty
+                    return parsed
+        except Exception as e:
+            log.warning(f"Error parsing custom_terms from customization: {e}")
+
+    # Fall back to default_template
+    if default_template:
+        try:
+            custom_terms_str = getattr(default_template, 'custom_terms', None)
+            if custom_terms_str:
+                parsed = json.loads(custom_terms_str)
+                if parsed:
+                    return parsed
+        except Exception as e:
+            log.warning(f"Error parsing custom_terms from default template: {e}")
+
+    return []
 
 
 def process_materials_with_negotiated_prices(cr, boq_details=None):
@@ -3552,6 +3564,17 @@ def create_po_children(cr_id):
             if vendor.status != 'active':
                 return jsonify({"error": f"Vendor '{vendor.company_name}' is not active"}), 400
 
+            # Get vendor's product prices as fallback
+            from models.vendor import VendorProduct
+            vendor_product_prices = {}
+            vendor_products = VendorProduct.query.filter_by(
+                vendor_id=vendor_id,
+                is_deleted=False
+            ).all()
+            for vp in vendor_products:
+                if vp.product_name:
+                    vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
+
             # Extract materials data for this vendor group
             po_materials = []
             total_cost = 0.0
@@ -3570,8 +3593,12 @@ def create_po_children(cr_id):
                             parent_material = pm
                             break
 
-                # Calculate price - vendor's negotiated price or parent material price
-                unit_price = negotiated_price if negotiated_price else (parent_material.get('unit_price', 0) if parent_material else 0)
+                # Lookup vendor product price as fallback
+                vendor_product_price = vendor_product_prices.get(material_name.lower().strip() if material_name else '', 0)
+
+                # Calculate price - priority: negotiated > parent material price > vendor product price
+                parent_price = parent_material.get('unit_price', 0) if parent_material else 0
+                unit_price = negotiated_price if negotiated_price else (parent_price if parent_price else vendor_product_price)
                 material_total = unit_price * quantity
                 total_cost += material_total
 
@@ -4476,6 +4503,25 @@ def get_pending_po_children():
             material_vendor_selections = {}
             if parent_cr and parent_cr.material_vendor_selections:
                 material_vendor_selections = parent_cr.material_vendor_selections
+                log.info(f"📦 POChild {po_child.id}: Parent CR {parent_cr.cr_id} has material_vendor_selections with {len(material_vendor_selections)} materials")
+                for key, val in material_vendor_selections.items():
+                    neg_price = val.get('negotiated_price') if isinstance(val, dict) else None
+                    log.info(f"  - Material: '{key}' → negotiated_price: {neg_price}")
+            else:
+                log.warning(f"⚠️ POChild {po_child.id}: No material_vendor_selections found for parent CR {parent_cr.cr_id if parent_cr else 'None'}")
+
+            # Get vendor product prices as fallback
+            vendor_product_prices = {}
+            if po_child.vendor_id:
+                from models.vendor import VendorProduct
+                vendor_products = VendorProduct.query.filter_by(
+                    vendor_id=po_child.vendor_id,
+                    is_deleted=False
+                ).all()
+                for vp in vendor_products:
+                    if vp.product_name:
+                        vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
+                log.info(f"📦 POChild {po_child.id}: Loaded {len(vendor_product_prices)} vendor products for vendor {po_child.vendor_id}")
 
             # Build BOQ price lookup - get REAL BOQ prices from BOQ details
             boq_price_lookup = {}
@@ -4494,10 +4540,19 @@ def get_pending_po_children():
                                     boq_price_lookup[mat_name] = boq_mat.get('unit_price', 0)
 
             # Also check parent CR's sub_items_data and materials_data for prices
+            # Build separate negotiated price lookup (vendor prices set by buyer)
+            negotiated_price_lookup = {}
+
             if parent_cr:
                 sub_items = parent_cr.sub_items_data or []
                 for sub in sub_items:
                     mat_name = sub.get('material_name', '').lower().strip()
+                    # Get negotiated price (buyer's vendor price) first
+                    neg_price = sub.get('negotiated_price') or 0
+                    if mat_name and neg_price:
+                        negotiated_price_lookup[mat_name] = neg_price
+
+                    # Fallback to BOQ/original price
                     if mat_name and mat_name not in boq_price_lookup:
                         price = sub.get('original_unit_price') or sub.get('unit_price', 0)
                         if price:
@@ -4507,6 +4562,12 @@ def get_pending_po_children():
                 materials = parent_cr.materials_data or []
                 for mat in materials:
                     mat_name = mat.get('material_name', '').lower().strip()
+                    # Get negotiated price first
+                    neg_price = mat.get('negotiated_price') or 0
+                    if mat_name and neg_price and mat_name not in negotiated_price_lookup:
+                        negotiated_price_lookup[mat_name] = neg_price
+
+                    # Fallback to BOQ/original price
                     if mat_name and mat_name not in boq_price_lookup:
                         price = mat.get('original_unit_price') or mat.get('unit_price', 0)
                         if price:
@@ -4527,25 +4588,82 @@ def get_pending_po_children():
                             break
 
                 # Check material_vendor_selections for negotiated price (set by buyer)
-                selection = material_vendor_selections.get(mat_name_original) or material_vendor_selections.get(mat_name, {})
+                log.info(f"🔍 Looking for material: '{mat_name_original}' (lowercase: '{mat_name}')")
+
+                # Try multiple name variations for robust matching
+                selection = (material_vendor_selections.get(mat_name_original) or
+                           material_vendor_selections.get(mat_name) or
+                           material_vendor_selections.get(mat_name.title()) or {})
+
+                # If still not found, try case-insensitive match
+                if not selection or not isinstance(selection, dict):
+                    for key, val in material_vendor_selections.items():
+                        if key.lower() == mat_name:
+                            selection = val
+                            log.info(f"✓ Found match via case-insensitive search: key='{key}'")
+                            break
+
                 negotiated_from_selection = selection.get('negotiated_price') if isinstance(selection, dict) else None
 
-                # Also check if material has negotiated_price or vendor_price
-                vendor_price = negotiated_from_selection or material.get('negotiated_price') or material.get('vendor_price') or material.get('unit_price') or 0
+                # Check negotiated_price_lookup from sub_items_data
+                negotiated_from_sub_items = negotiated_price_lookup.get(mat_name, 0)
 
-                # Add BOQ price if not already present
-                if not mat_copy.get('boq_unit_price'):
-                    mat_copy['boq_unit_price'] = boq_price
-                    mat_copy['boq_total_price'] = boq_price * quantity if boq_price else 0
+                # Check if material already has negotiated/vendor price directly
+                # POChild materials_data already has vendor price in unit_price field (set during creation)
+                material_unit_price = material.get('unit_price', 0)
+                material_negotiated_price = material.get('negotiated_price', 0)
+                material_vendor_price = material.get('vendor_price', 0)
+
+                # Check vendor product catalog
+                vendor_product_price = vendor_product_prices.get(mat_name, 0)
+
+                # Priority: selection > sub_items > material negotiated > material vendor > material unit_price > vendor product
+                vendor_price = (negotiated_from_selection or
+                              negotiated_from_sub_items or
+                              material_negotiated_price or
+                              material_vendor_price or
+                              material_unit_price or
+                              vendor_product_price or 0)
+
+                if negotiated_from_selection:
+                    log.info(f"✅ Found negotiated price {negotiated_from_selection} for '{mat_name_original}' from material_vendor_selections")
+                elif negotiated_from_sub_items:
+                    log.info(f"✅ Found negotiated price {negotiated_from_sub_items} for '{mat_name_original}' from sub_items_data")
+                elif material_negotiated_price:
+                    log.info(f"✅ Found negotiated price {material_negotiated_price} for '{mat_name_original}' from material.negotiated_price")
+                elif material_vendor_price:
+                    log.info(f"✅ Found vendor price {material_vendor_price} for '{mat_name_original}' from material.vendor_price")
+                elif material_unit_price:
+                    log.info(f"✅ Using unit_price {material_unit_price} for '{mat_name_original}' from material.unit_price (may be vendor or BOQ)")
+                elif vendor_product_price:
+                    log.info(f"✅ Found vendor product price {vendor_product_price} for '{mat_name_original}' from vendor catalog")
+                else:
+                    log.warning(f"❌ No vendor price found for '{mat_name_original}'")
+
+                # ALWAYS set BOQ price for reference (even if vendor price exists)
+                mat_copy['boq_unit_price'] = boq_price
+                mat_copy['boq_total_price'] = boq_price * quantity if boq_price else 0
 
                 # Use vendor/negotiated price if available, otherwise BOQ price
+                # CRITICAL: vendor_price may come from multiple sources (see priority above)
                 if vendor_price and vendor_price > 0:
+                    # Vendor negotiated price found - use it
                     mat_copy['unit_price'] = vendor_price
                     mat_copy['total_price'] = vendor_price * quantity
                     mat_copy['negotiated_price'] = vendor_price
+                    log.info(f"✓ Set vendor price {vendor_price} for '{mat_name_original}' (BOQ: {boq_price})")
                 elif boq_price and boq_price > 0:
+                    # No vendor price - fallback to BOQ price
                     mat_copy['unit_price'] = boq_price
                     mat_copy['total_price'] = boq_price * quantity
+                    mat_copy['negotiated_price'] = None  # No negotiation happened
+                    log.info(f"ℹ Set BOQ price {boq_price} for '{mat_name_original}' (no vendor price)")
+                else:
+                    # No prices found at all - this shouldn't happen
+                    mat_copy['unit_price'] = material.get('unit_price', 0)  # Keep original if any
+                    mat_copy['total_price'] = mat_copy['unit_price'] * quantity if mat_copy['unit_price'] else 0
+                    mat_copy['negotiated_price'] = None
+                    log.warning(f"⚠ No BOQ or vendor price found for '{mat_name_original}', using stored unit_price: {mat_copy['unit_price']}")
 
                 # Ensure total_price is calculated if unit_price exists but total_price is missing
                 if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
@@ -4628,9 +4746,26 @@ def get_rejected_po_children():
             elif parent_cr and parent_cr.boq_id:
                 boq = BOQ.query.get(parent_cr.boq_id)
 
-            # Enrich materials with prices from BOQ
+            # Enrich materials with prices from BOQ AND negotiated prices
             enriched_materials = []
             po_materials = po_child.materials_data or []
+
+            # Get material vendor selections from parent CR for negotiated prices
+            material_vendor_selections = {}
+            if parent_cr and parent_cr.material_vendor_selections:
+                material_vendor_selections = parent_cr.material_vendor_selections
+
+            # Get vendor product prices as fallback
+            vendor_product_prices = {}
+            if po_child.vendor_id:
+                from models.vendor import VendorProduct
+                vendor_products = VendorProduct.query.filter_by(
+                    vendor_id=po_child.vendor_id,
+                    is_deleted=False
+                ).all()
+                for vp in vendor_products:
+                    if vp.product_name:
+                        vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
 
             # Build BOQ price lookup
             boq_price_lookup = {}
@@ -4649,13 +4784,47 @@ def get_rejected_po_children():
             for material in po_materials:
                 mat_copy = dict(material)
                 mat_name = material.get('material_name', '').lower().strip()
+                mat_name_original = material.get('material_name', '')
                 boq_price = boq_price_lookup.get(mat_name, 0)
                 quantity = material.get('quantity', 0)
 
-                # If unit_price is 0 or missing, use BOQ price as fallback
-                if not mat_copy.get('unit_price') or mat_copy.get('unit_price') == 0:
+                # Check material_vendor_selections for negotiated price
+                selection = (material_vendor_selections.get(mat_name_original) or
+                           material_vendor_selections.get(mat_name) or {})
+                if not selection or not isinstance(selection, dict):
+                    for key, val in material_vendor_selections.items():
+                        if key.lower() == mat_name:
+                            selection = val
+                            break
+
+                negotiated_price = selection.get('negotiated_price') if isinstance(selection, dict) else None
+
+                # Check vendor product catalog
+                vendor_product_price = vendor_product_prices.get(mat_name, 0)
+
+                # Priority: negotiated > material fields > material unit_price > vendor product
+                vendor_price = (negotiated_price or
+                              material.get('negotiated_price') or
+                              material.get('vendor_price') or
+                              material.get('unit_price') or
+                              vendor_product_price or 0)
+
+                # ALWAYS set BOQ price for reference
+                mat_copy['boq_unit_price'] = boq_price
+                mat_copy['boq_total_price'] = boq_price * quantity if boq_price else 0
+
+                # Use vendor/negotiated price if available, otherwise BOQ price
+                if vendor_price and vendor_price > 0:
+                    mat_copy['unit_price'] = vendor_price
+                    mat_copy['total_price'] = vendor_price * quantity
+                    mat_copy['negotiated_price'] = vendor_price
+                elif boq_price and boq_price > 0:
                     mat_copy['unit_price'] = boq_price
-                    mat_copy['total_price'] = boq_price * quantity if boq_price else 0
+                    mat_copy['total_price'] = boq_price * quantity
+                    mat_copy['negotiated_price'] = None
+                else:
+                    mat_copy['unit_price'] = material.get('unit_price', 0)
+                    mat_copy['total_price'] = mat_copy['unit_price'] * quantity if mat_copy['unit_price'] else 0
 
                 # Ensure total_price is calculated
                 if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
@@ -4877,9 +5046,26 @@ def get_approved_po_children():
                     vendor_phone = vendor.phone
                     vendor_email = vendor.email
 
-            # Enrich materials with prices from BOQ
+            # Enrich materials with prices from BOQ AND negotiated prices
             enriched_materials = []
             po_materials = po_child.materials_data or []
+
+            # Get material vendor selections from parent CR for negotiated prices
+            material_vendor_selections = {}
+            if parent_cr and parent_cr.material_vendor_selections:
+                material_vendor_selections = parent_cr.material_vendor_selections
+
+            # Get vendor product prices as fallback
+            vendor_product_prices = {}
+            if po_child.vendor_id:
+                from models.vendor import VendorProduct
+                vendor_products = VendorProduct.query.filter_by(
+                    vendor_id=po_child.vendor_id,
+                    is_deleted=False
+                ).all()
+                for vp in vendor_products:
+                    if vp.product_name:
+                        vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
 
             # Build BOQ price lookup
             boq_price_lookup = {}
@@ -4898,13 +5084,47 @@ def get_approved_po_children():
             for material in po_materials:
                 mat_copy = dict(material)
                 mat_name = material.get('material_name', '').lower().strip()
+                mat_name_original = material.get('material_name', '')
                 boq_price = boq_price_lookup.get(mat_name, 0)
                 quantity = material.get('quantity', 0)
 
-                # If unit_price is 0 or missing, use BOQ price as fallback
-                if not mat_copy.get('unit_price') or mat_copy.get('unit_price') == 0:
+                # Check material_vendor_selections for negotiated price
+                selection = (material_vendor_selections.get(mat_name_original) or
+                           material_vendor_selections.get(mat_name) or {})
+                if not selection or not isinstance(selection, dict):
+                    for key, val in material_vendor_selections.items():
+                        if key.lower() == mat_name:
+                            selection = val
+                            break
+
+                negotiated_price = selection.get('negotiated_price') if isinstance(selection, dict) else None
+
+                # Check vendor product catalog
+                vendor_product_price = vendor_product_prices.get(mat_name, 0)
+
+                # Priority: negotiated > material fields > material unit_price > vendor product
+                vendor_price = (negotiated_price or
+                              material.get('negotiated_price') or
+                              material.get('vendor_price') or
+                              material.get('unit_price') or
+                              vendor_product_price or 0)
+
+                # ALWAYS set BOQ price for reference
+                mat_copy['boq_unit_price'] = boq_price
+                mat_copy['boq_total_price'] = boq_price * quantity if boq_price else 0
+
+                # Use vendor/negotiated price if available, otherwise BOQ price
+                if vendor_price and vendor_price > 0:
+                    mat_copy['unit_price'] = vendor_price
+                    mat_copy['total_price'] = vendor_price * quantity
+                    mat_copy['negotiated_price'] = vendor_price
+                elif boq_price and boq_price > 0:
                     mat_copy['unit_price'] = boq_price
-                    mat_copy['total_price'] = boq_price * quantity if boq_price else 0
+                    mat_copy['total_price'] = boq_price * quantity
+                    mat_copy['negotiated_price'] = None
+                else:
+                    mat_copy['unit_price'] = material.get('unit_price', 0)
+                    mat_copy['total_price'] = mat_copy['unit_price'] * quantity if mat_copy['unit_price'] else 0
 
                 # Ensure total_price is calculated
                 if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
@@ -5203,122 +5423,152 @@ def preview_po_child_vendor_email(po_child_id):
         return jsonify({"error": f"Failed to generate email preview: {str(e)}"}), 500
 
 
-def send_vendor_email(cr_id):
-    """Send purchase order email to vendor with optional LPO PDF attachment"""
+def send_vendor_email(cr_id, po_child_id=None):
+    """
+    Unified function to send purchase order email to vendor with optional LPO PDF attachment
+
+    Handles both:
+    - Parent CR (cr_id only)
+    - POChild (cr_id + po_child_id)
+
+    Args:
+        cr_id: Change Request ID (parent)
+        po_child_id: Optional POChild ID for vendor-split purchases
+    """
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
-        user_role = current_user.get('role', '').lower()
+        user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
 
+        # Get request data
         data = request.get_json()
         vendor_email = data.get('vendor_email')
-        custom_email_body = data.get('custom_email_body')  # Optional custom HTML body
-        vendor_company_name = data.get('vendor_company_name')  # Update company name
-        vendor_contact_person = data.get('vendor_contact_person')  # Update contact person
-        vendor_phone = data.get('vendor_phone')  # Update phone
-
-        # CC emails (list of {email, name})
+        custom_email_body = data.get('custom_email_body')
+        vendor_company_name = data.get('vendor_company_name')
+        vendor_contact_person = data.get('vendor_contact_person')
+        vendor_phone = data.get('vendor_phone')
         cc_emails = data.get('cc_emails', [])
 
         # LPO PDF options
-        include_lpo_pdf = data.get('include_lpo_pdf', False)  # Whether to attach LPO PDF
-        lpo_data = data.get('lpo_data')  # Editable LPO data from frontend
+        include_lpo_pdf = data.get('include_lpo_pdf', False)
+        lpo_data = data.get('lpo_data')
 
+        # ==================== EMAIL VALIDATION ====================
         if not vendor_email:
             return jsonify({"error": "Vendor email is required"}), 400
 
-        # Parse comma-separated emails
         import re
         email_list = [email.strip() for email in vendor_email.split(',') if email.strip()]
-
-        # Validate each email
         email_regex = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
         invalid_emails = [email for email in email_list if not email_regex.match(email)]
 
         if invalid_emails:
             return jsonify({"error": f"Invalid email address: {invalid_emails[0]}"}), 400
-
         if not email_list:
             return jsonify({"error": "At least one valid email address is required"}), 400
 
-        # Get the change request
-        cr = ChangeRequest.query.filter_by(
-            cr_id=cr_id,
-            is_deleted=False
-        ).first()
+        # ==================== DETERMINE IF PARENT CR OR POCHILD ====================
+        is_po_child = po_child_id is not None
 
-        if not cr:
-            return jsonify({"error": "Purchase not found"}), 404
+        if is_po_child:
+            # Get POChild record
+            from models.po_child import POChild
+            po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
+            if not po_child:
+                return jsonify({"error": "Purchase order child not found"}), 404
 
-        # Check if admin or admin viewing as buyer
+            # Get parent CR for project info
+            parent_cr = ChangeRequest.query.filter_by(cr_id=po_child.parent_cr_id, is_deleted=False).first()
+            if not parent_cr:
+                return jsonify({"error": "Parent purchase order not found"}), 404
+
+            # Set variables from POChild
+            vendor_id = po_child.vendor_id
+            vendor_selection_status = po_child.vendor_selection_status
+            materials_list = po_child.materials_data or []
+            total_cost = po_child.materials_total_cost or 0
+            formatted_id = po_child.get_formatted_id()
+            project_id = po_child.project_id or parent_cr.project_id
+            boq_id = po_child.boq_id or parent_cr.boq_id
+            file_path = parent_cr.file_path  # Use parent CR's attachments
+            email_record = po_child  # Will update POChild email status
+            parent_cr_id = parent_cr.cr_id  # For file storage path
+        else:
+            # Get parent CR
+            parent_cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+            if not parent_cr:
+                return jsonify({"error": "Purchase not found"}), 404
+
+            # Set variables from CR
+            vendor_id = parent_cr.selected_vendor_id
+            vendor_selection_status = parent_cr.vendor_selection_status
+            materials_list, total_cost = process_materials_with_negotiated_prices(parent_cr)
+            formatted_id = parent_cr.get_formatted_cr_id()
+            project_id = parent_cr.project_id
+            boq_id = parent_cr.boq_id
+            file_path = parent_cr.file_path
+            email_record = parent_cr  # Will update CR email status
+            parent_cr_id = parent_cr.cr_id  # For file storage path
+
+        # ==================== PERMISSION CHECKS ====================
         is_admin = user_role == 'admin'
         from utils.admin_viewing_context import get_effective_user_context
         user_context = get_effective_user_context()
         is_admin_viewing = user_context.get('is_admin_viewing', False)
 
-        # Verify it's assigned to this buyer (skip check for admin)
-        if not is_admin and not is_admin_viewing and cr.assigned_to_buyer_user_id != buyer_id:
+        if not is_admin and not is_admin_viewing and parent_cr.assigned_to_buyer_user_id != buyer_id:
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
-        # Verify vendor is selected and approved
-        if not cr.selected_vendor_id:
+        # ==================== VENDOR VALIDATION ====================
+        if not vendor_id:
             return jsonify({"error": "No vendor selected for this purchase"}), 400
-
-        if cr.vendor_selection_status != 'approved':
+        if vendor_selection_status != 'approved':
             return jsonify({"error": "Vendor selection must be approved by TD before sending email"}), 400
 
-        # Get vendor details
         from models.vendor import Vendor
-        vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
+        vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
         if not vendor:
             return jsonify({"error": "Vendor not found"}), 404
 
-        # Update vendor details in vendors table if provided
+        # Update vendor details if provided
         if vendor_company_name and vendor_company_name != vendor.company_name:
             vendor.company_name = vendor_company_name
         if vendor_contact_person and vendor_contact_person != vendor.contact_person_name:
             vendor.contact_person_name = vendor_contact_person
         if vendor_phone and vendor_phone != vendor.phone:
-            # Sanitize phone number: remove duplicate country codes and limit to 20 chars
             sanitized_phone = vendor_phone.strip()
-            # Remove duplicate +971 prefixes
             while sanitized_phone.count('+971') > 1:
                 sanitized_phone = sanitized_phone.replace('+971 ', '', 1)
-            # Limit to 20 characters to fit database constraint
-            sanitized_phone = sanitized_phone[:20]
-            vendor.phone = sanitized_phone
+            vendor.phone = sanitized_phone[:20]
         if vendor_email and vendor_email != vendor.email:
             vendor.email = vendor_email
 
-        # Get buyer details
+        # ==================== GET RELATED DATA ====================
         buyer = User.query.filter_by(user_id=buyer_id).first()
         if not buyer:
             return jsonify({"error": "Buyer not found"}), 404
 
-        # Get project details
-        project = Project.query.get(cr.project_id)
+        project = Project.query.get(project_id)
         if not project:
             return jsonify({"error": "Project not found"}), 404
 
-        # Get BOQ details
-        boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
+        boq = BOQ.query.filter_by(boq_id=boq_id).first()
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
 
-        # Process materials with negotiated prices
-        materials_list, cr_total = process_materials_with_negotiated_prices(cr)
-
-        # Prepare data for email template
+        # ==================== PREPARE EMAIL DATA ====================
         vendor_data = {
             'company_name': vendor.company_name,
             'contact_person_name': vendor.contact_person_name,
-            'email': email_list[0]  # Primary email for display
+            'email': email_list[0]
         }
 
         purchase_data = {
-            'cr_id': cr.cr_id,
+            'cr_id': cr_id,
+            'po_child_id': po_child_id if is_po_child else None,
+            'formatted_id': formatted_id,
             'materials': materials_list,
-            'total_cost': round(cr_total, 2)
+            'total_cost': round(total_cost, 2)
         }
 
         buyer_data = {
@@ -5333,20 +5583,16 @@ def send_vendor_email(cr_id):
             'location': project.location or 'N/A'
         }
 
-        # Fetch uploaded files from Supabase if available
+        # ==================== FETCH ATTACHMENTS ====================
         attachments = []
-        if cr.file_path:
+        if file_path:
             try:
-                # Parse file paths from database
-                filenames = [f.strip() for f in cr.file_path.split(",") if f.strip()]
-
+                filenames = [f.strip() for f in file_path.split(",") if f.strip()]
                 for filename in filenames:
                     try:
                         # Build the full path in Supabase storage
-                        file_path = f"buyer/cr_{cr_id}/{filename}"
-
-                        # Download file from Supabase
-                        file_response = supabase.storage.from_(SUPABASE_BUCKET).download(file_path)
+                        supabase_file_path = f"buyer/cr_{parent_cr_id}/{filename}"
+                        file_response = supabase.storage.from_(SUPABASE_BUCKET).download(supabase_file_path)
 
                         if file_response:
                             # Determine MIME type based on file extension
@@ -5415,58 +5661,53 @@ def send_vendor_email(cr_id):
             except Exception as e:
                 log.error(f"Error processing attachments for CR-{cr_id}: {str(e)}")
 
-        # Generate and attach LPO PDF if requested
+        # ==================== GENERATE LPO PDF ====================
         if include_lpo_pdf and lpo_data:
             try:
                 from utils.lpo_pdf_generator import LPOPDFGenerator
                 generator = LPOPDFGenerator()
                 pdf_bytes = generator.generate_lpo_pdf(lpo_data)
 
-                # Create filename for LPO PDF
+                # Create filename: LPO-400.pdf or LPO-400.1.pdf
                 project_name_clean = project.project_name.replace(' ', '_')[:20] if project else 'Project'
-                lpo_filename = f"LPO-{cr_id}-{project_name_clean}.pdf"
+                lpo_filename = f"LPO-{formatted_id.replace('PO-', '')}-{project_name_clean}.pdf"
 
                 # Add LPO PDF to attachments
                 attachments.append((lpo_filename, pdf_bytes, 'application/pdf'))
-                log.info(f"LPO PDF generated and attached: {lpo_filename}")
+                log.info(f"✅ LPO PDF generated and attached: {lpo_filename}")
             except Exception as e:
-                log.error(f"Error generating LPO PDF for CR-{cr_id}: {str(e)}")
+                log.error(f"❌ Error generating LPO PDF for {formatted_id}: {str(e)}")
                 # Continue sending email even if LPO PDF generation fails
 
-        # Continue sending email even if attachments fail
-        # Send email to vendor(s) (with optional custom body)
-        # ✅ PERFORMANCE FIX: Use async email sending (15s → 0.1s response time)
+        # ==================== SEND EMAIL ====================
         from utils.boq_email_service import BOQEmailService
         email_service = BOQEmailService()
-
-        # Extract CC email addresses
         cc_email_list = [cc.get('email') for cc in cc_emails if cc.get('email')]
 
         email_sent = email_service.send_vendor_purchase_order_async(
             email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments, cc_email_list
         )
 
+        # ==================== UPDATE EMAIL STATUS ====================
         if email_sent:
-            # Mark email as sent
-            cr.vendor_email_sent = True
-            cr.vendor_email_sent_date = datetime.utcnow()
-            cr.vendor_email_sent_by_user_id = buyer_id
-            cr.updated_at = datetime.utcnow()
+            # Mark email as sent (works for both CR and POChild)
+            email_record.vendor_email_sent = True
+            email_record.vendor_email_sent_date = datetime.utcnow()
+            email_record.updated_at = datetime.utcnow()
             db.session.commit()
 
-            recipients_str = ', '.join(email_list)
-            message = f"Purchase order email sent to {len(email_list)} recipient(s) successfully" if len(email_list) > 1 else "Purchase order email sent to vendor successfully"
-            # Count recipients for response message
-            if isinstance(vendor_email, str):
-                recipient_count = len([e.strip() for e in vendor_email.split(',') if e.strip()])
-            else:
-                recipient_count = len(vendor_email) if isinstance(vendor_email, list) else 1
+            recipient_count = len(email_list)
+            po_type = "POChild" if is_po_child else "Parent CR"
+            log.info(f"✅ Email sent for {formatted_id} ({po_type}) to {recipient_count} recipient(s)")
 
             return jsonify({
                 "success": True,
-                "message": f"Purchase order email sent to {recipient_count} recipient(s) successfully"
+                "message": f"Purchase order email sent to {recipient_count} recipient(s) successfully",
+                "formatted_id": formatted_id,
+                "is_po_child": is_po_child
             }), 200
         else:
+            log.error(f"❌ Failed to send email for {formatted_id}")
             return jsonify({
                 "success": False,
                 "message": "Failed to send email to vendor"
@@ -5480,208 +5721,26 @@ def send_vendor_email(cr_id):
 
 
 def send_po_child_vendor_email(po_child_id):
-    """Send purchase order email to vendor for POChild (vendor-split purchases)"""
+    """
+    DEPRECATED: Wrapper function for backward compatibility
+
+    This function redirects to the unified send_vendor_email function.
+    Use send_vendor_email(cr_id, po_child_id) directly instead.
+    """
     try:
-        from utils.boq_email_service import BOQEmailService
-        from datetime import datetime
         from models.po_child import POChild
-        from models.vendor import Vendor
-        import re
 
-        current_user = g.user
-        buyer_id = current_user['user_id']
-        user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
-
-        data = request.get_json()
-        vendor_email = data.get('vendor_email')
-        custom_email_body = data.get('custom_email_body')
-        vendor_company_name = data.get('vendor_company_name')
-        vendor_contact_person = data.get('vendor_contact_person')
-        vendor_phone = data.get('vendor_phone')
-
-        # CC emails (list of {email, name})
-        cc_emails = data.get('cc_emails', [])
-
-        if not vendor_email:
-            return jsonify({"error": "Vendor email is required"}), 400
-
-        # Parse comma-separated emails
-        email_list = [email.strip() for email in vendor_email.split(',') if email.strip()]
-
-        # Validate each email
-        email_regex = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
-        invalid_emails = [email for email in email_list if not email_regex.match(email)]
-
-        if invalid_emails:
-            return jsonify({"error": f"Invalid email address: {invalid_emails[0]}"}), 400
-
-        if not email_list:
-            return jsonify({"error": "At least one valid email address is required"}), 400
-
-        # Get the POChild record
+        # Get POChild to find parent CR ID
         po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
         if not po_child:
             return jsonify({"error": "Purchase order child not found"}), 404
 
-        # Check if admin or admin viewing as buyer
-        is_admin = user_role == 'admin'
-        from utils.admin_viewing_context import get_effective_user_context
-        user_context = get_effective_user_context()
-        is_admin_viewing = user_context.get('is_admin_viewing', False)
-
-        # Verify vendor is selected and approved
-        if not po_child.vendor_id:
-            return jsonify({"error": "No vendor selected for this purchase"}), 400
-
-        if po_child.vendor_selection_status != 'approved':
-            return jsonify({"error": "Vendor selection must be approved by TD before sending email"}), 400
-
-        # Get vendor details
-        vendor = Vendor.query.filter_by(vendor_id=po_child.vendor_id, is_deleted=False).first()
-        if not vendor:
-            return jsonify({"error": "Vendor not found"}), 404
-
-        # Update vendor details in vendors table if provided
-        if vendor_company_name and vendor_company_name != vendor.company_name:
-            vendor.company_name = vendor_company_name
-        if vendor_contact_person and vendor_contact_person != vendor.contact_person_name:
-            vendor.contact_person_name = vendor_contact_person
-        if vendor_phone and vendor_phone != vendor.phone:
-            sanitized_phone = vendor_phone.strip()
-            while sanitized_phone.count('+971') > 1:
-                sanitized_phone = sanitized_phone.replace('+971 ', '', 1)
-            sanitized_phone = sanitized_phone[:20]
-            vendor.phone = sanitized_phone
-        if vendor_email and vendor_email != vendor.email:
-            vendor.email = vendor_email
-
-        # Get buyer details
-        buyer = User.query.filter_by(user_id=buyer_id).first()
-        if not buyer:
-            return jsonify({"error": "Buyer not found"}), 404
-
-        # Get parent CR for project info
-        parent_cr = ChangeRequest.query.filter_by(cr_id=po_child.parent_cr_id).first()
-        if not parent_cr:
-            return jsonify({"error": "Parent purchase order not found"}), 404
-
-        # Get project details
-        project = Project.query.get(parent_cr.project_id)
-        if not project:
-            return jsonify({"error": "Project not found"}), 404
-
-        # Get BOQ details (optional for POChild)
-        boq = None
-        if po_child.boq_id:
-            boq = BOQ.query.filter_by(boq_id=po_child.boq_id).first()
-
-        # Process materials from POChild's materials_data
-        materials_list = []
-        total_cost = 0
-        if po_child.materials_data:
-            for material in po_child.materials_data:
-                mat_total = float(material.get('total_price', 0) or 0)
-                materials_list.append({
-                    'material_name': material.get('material_name', 'N/A'),
-                    'quantity': material.get('quantity', 0),
-                    'unit': material.get('unit', 'pcs'),
-                    'unit_price': material.get('unit_price', 0),
-                    'total_price': round(mat_total, 2)
-                })
-                total_cost += mat_total
-
-        # Prepare data for email template
-        vendor_data = {
-            'company_name': vendor.company_name,
-            'contact_person_name': vendor.contact_person_name,
-            'email': email_list[0]
-        }
-
-        purchase_data = {
-            'cr_id': po_child.parent_cr_id,
-            'po_child_id': po_child.id,
-            'formatted_id': po_child.get_formatted_id(),
-            'materials': materials_list,
-            'total_cost': round(total_cost, 2)
-        }
-
-        buyer_data = {
-            'buyer_name': (buyer.full_name if buyer and buyer.full_name else None) or 'Procurement Team',
-            'buyer_email': (buyer.email if buyer and buyer.email else None) or 'N/A',
-            'buyer_phone': (buyer.phone if buyer and buyer.phone else None) or 'N/A'
-        }
-
-        project_data = {
-            'project_name': project.project_name or 'N/A',
-            'client': project.client or 'N/A',
-            'location': project.location or 'N/A'
-        }
-
-        # Fetch uploaded files from Supabase if available (use parent CR's files)
-        attachments = []
-        if parent_cr.file_path:
-            try:
-                filenames = [f.strip() for f in parent_cr.file_path.split(",") if f.strip()]
-                for filename in filenames:
-                    try:
-                        file_path = f"buyer/cr_{parent_cr.cr_id}/{filename}"
-                        file_response = supabase.storage.from_(SUPABASE_BUCKET).download(file_path)
-                        if file_response:
-                            ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'bin'
-                            mime_types = {
-                                'pdf': 'application/pdf',
-                                'doc': 'application/msword',
-                                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                'xls': 'application/vnd.ms-excel',
-                                'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                                'png': 'image/png',
-                                'jpg': 'image/jpeg',
-                                'jpeg': 'image/jpeg',
-                                'zip': 'application/zip'
-                            }
-                            mime_type = mime_types.get(ext, 'application/octet-stream')
-                            attachments.append((filename, file_response, mime_type))
-                    except Exception as e:
-                        log.warning(f"Could not download file {filename}: {str(e)}")
-                        continue
-            except Exception as e:
-                log.error(f"Error processing attachments: {str(e)}")
-
-        # Send email
-        email_service = BOQEmailService()
-
-        # Extract CC email addresses
-        cc_email_list = [cc.get('email') for cc in cc_emails if cc.get('email')]
-
-        email_sent = email_service.send_vendor_purchase_order_async(
-            email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments, cc_email_list
-        )
-
-        if email_sent:
-            # Mark email as sent on POChild
-            po_child.vendor_email_sent = True
-            po_child.vendor_email_sent_date = datetime.utcnow()
-            po_child.updated_at = datetime.utcnow()
-            db.session.commit()
-
-            recipient_count = len(email_list)
-            cc_count = len(cc_email_list) if cc_email_list else 0
-            message = f"Purchase order email sent to {recipient_count} recipient(s)"
-            if cc_count > 0:
-                message += f" + {cc_count} CC recipient(s)"
-            message += " successfully"
-            return jsonify({
-                "success": True,
-                "message": message
-            }), 200
-        else:
-            return jsonify({
-                "success": False,
-                "message": "Failed to send email to vendor"
-            }), 500
+        # Redirect to unified function with LPO support
+        log.info(f"🔄 Redirecting POChild {po_child_id} to unified send_vendor_email")
+        return send_vendor_email(cr_id=po_child.parent_cr_id, po_child_id=po_child_id)
 
     except Exception as e:
-        log.error(f"Error sending POChild vendor email: {str(e)}")
+        log.error(f"Error in send_po_child_vendor_email wrapper: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to send vendor email: {str(e)}"}), 500
@@ -7518,9 +7577,29 @@ def preview_lpo_pdf(cr_id):
             print(f">>> preview_lpo_pdf: po_child_id={po_child_id}, po_child found={po_child is not None}")
 
         # Get saved customizations if any (handle case where table doesn't exist yet)
+        # Priority: 1) PO child specific, 2) CR-level, 3) Global default template
         saved_customization = None
+        default_template = None
         try:
-            saved_customization = LPOCustomization.query.filter_by(cr_id=cr_id).first()
+            if po_child_id:
+                # First try to find customization specific to this PO child
+                saved_customization = LPOCustomization.query.filter_by(cr_id=cr_id, po_child_id=po_child_id).first()
+            if not saved_customization:
+                # Fall back to CR-level customization (po_child_id is NULL)
+                saved_customization = LPOCustomization.query.filter_by(cr_id=cr_id, po_child_id=None).first()
+
+            # If still no customization, try to get from global default template
+            if not saved_customization:
+                from models.lpo_default_template import LPODefaultTemplate
+                # Get the most recently updated default template (any user's)
+                default_template = LPODefaultTemplate.query.order_by(LPODefaultTemplate.updated_at.desc()).first()
+                print(f">>> preview_lpo_pdf: Using default template: {default_template is not None}")
+                if default_template:
+                    print(f">>> preview_lpo_pdf: Default template custom_terms: {default_template.custom_terms}")
+
+            print(f">>> preview_lpo_pdf: Found customization for cr_id={cr_id}, po_child_id={po_child_id}: {saved_customization is not None}")
+            if saved_customization:
+                print(f">>> preview_lpo_pdf: Customization custom_terms: {saved_customization.custom_terms}")
         except Exception as e:
             db.session.rollback()  # Rollback failed transaction
             log.warning(f"LPO customization table may not exist, creating it: {str(e)}")
@@ -7558,6 +7637,18 @@ def preview_lpo_pdf(cr_id):
             # Get negotiated prices from parent CR's material_vendor_selections
             parent_vendor_selections = cr.material_vendor_selections or {} if cr else {}
 
+            # Get vendor's product prices as fallback (for when no negotiated price is set)
+            vendor_product_prices = {}
+            if po_child.vendor_id:
+                from models.vendor import VendorProduct
+                vendor_products = VendorProduct.query.filter_by(
+                    vendor_id=po_child.vendor_id,
+                    is_deleted=False
+                ).all()
+                for vp in vendor_products:
+                    if vp.product_name:
+                        vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
+
             for material in po_child.materials_data:
                 mat_name = material.get('material_name', '')
                 quantity = material.get('quantity', 0)
@@ -7570,8 +7661,15 @@ def preview_lpo_pdf(cr_id):
                 selection = parent_vendor_selections.get(mat_name, {})
                 selection_price = float(selection.get('negotiated_price', 0) or 0) if isinstance(selection, dict) else 0
 
-                # Use best available price: negotiated > selection > stored
-                final_price = negotiated_price or selection_price or stored_unit_price
+                # Lookup vendor product price as fallback
+                vendor_product_price = vendor_product_prices.get(mat_name.lower().strip(), 0)
+
+                # Debug logging
+                print(f">>> LPO Price Debug for '{mat_name}': stored={stored_unit_price}, negotiated={negotiated_price}, selection={selection_price}, vendor_product={vendor_product_price}, raw_material={material}")
+
+                # Use best available price: stored > negotiated > selection > vendor_product
+                # Priority: stored unit_price first (from POChild), then negotiated, then selection, then vendor product
+                final_price = stored_unit_price or negotiated_price or selection_price or vendor_product_price
                 mat_total = quantity * final_price if final_price else float(material.get('total_price', 0) or 0)
 
                 # Preserve BOQ/original prices for comparison display
@@ -7677,9 +7775,9 @@ def preview_lpo_pdf(cr_id):
                 "grand_total": round(grand_total, 2)
             },
             "terms": {
-                "payment_terms": saved_customization.payment_terms if saved_customization and saved_customization.payment_terms else (getattr(settings, 'default_payment_terms', '100% CDC after delivery') if settings else "100% CDC after delivery"),
-                "delivery_terms": saved_customization.completion_terms if saved_customization and saved_customization.completion_terms else "",
-                "custom_terms": _parse_custom_terms(saved_customization)
+                "payment_terms": saved_customization.payment_terms if saved_customization and saved_customization.payment_terms else (default_template.payment_terms if default_template and default_template.payment_terms else (getattr(settings, 'default_payment_terms', '100% CDC after delivery') if settings else "100% CDC after delivery")),
+                "delivery_terms": saved_customization.completion_terms if saved_customization and saved_customization.completion_terms else (default_template.completion_terms if default_template and default_template.completion_terms else ""),
+                "custom_terms": _parse_custom_terms(saved_customization, default_template)
             },
             "signatures": {
                 "md_name": getattr(settings, 'md_name', 'Managing Director') if settings else "Managing Director",
@@ -7722,9 +7820,16 @@ def save_lpo_customization(cr_id):
         if not data:
             return jsonify({"error": "No data provided"}), 400
 
-        # Get or create customization record
+        # Get po_child_id from request data (if saving for specific PO child)
+        po_child_id = data.get('po_child_id')
+        print(f">>> save_lpo_customization: cr_id={cr_id}, po_child_id={po_child_id}")
+
+        # Get or create customization record - now with po_child_id support
         try:
-            customization = LPOCustomization.query.filter_by(cr_id=cr_id).first()
+            if po_child_id:
+                customization = LPOCustomization.query.filter_by(cr_id=cr_id, po_child_id=po_child_id).first()
+            else:
+                customization = LPOCustomization.query.filter_by(cr_id=cr_id, po_child_id=None).first()
         except Exception as table_error:
             db.session.rollback()
             # Table might not exist, try to create it
@@ -7739,7 +7844,7 @@ def save_lpo_customization(cr_id):
                 log.error(f"Could not create table: {str(create_error)}")
                 return jsonify({"error": "Failed to create LPO customization table"}), 500
         if not customization:
-            customization = LPOCustomization(cr_id=cr_id, created_by=buyer_id)
+            customization = LPOCustomization(cr_id=cr_id, po_child_id=po_child_id, created_by=buyer_id)
             db.session.add(customization)
 
         # Update fields from request

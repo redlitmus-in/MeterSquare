@@ -10,7 +10,14 @@ class LPOCustomization(db.Model):
     __tablename__ = 'lpo_customizations'
 
     id = db.Column(db.Integer, primary_key=True)
-    cr_id = db.Column(db.Integer, db.ForeignKey('change_requests.cr_id'), unique=True, nullable=False)
+    cr_id = db.Column(db.Integer, db.ForeignKey('change_requests.cr_id'), nullable=False)
+    po_child_id = db.Column(db.Integer, db.ForeignKey('po_child.id'), nullable=True)
+
+    # Unique constraint: either (cr_id, po_child_id) pair is unique
+    # This allows one customization per CR (when po_child_id is NULL) or per PO child
+    __table_args__ = (
+        db.UniqueConstraint('cr_id', 'po_child_id', name='uq_lpo_customization_cr_po_child'),
+    )
 
     # LPO Info
     quotation_ref = db.Column(db.String(255), default='')
@@ -40,6 +47,7 @@ class LPOCustomization(db.Model):
         return {
             'id': self.id,
             'cr_id': self.cr_id,
+            'po_child_id': self.po_child_id,
             'quotation_ref': self.quotation_ref or '',
             'custom_message': self.custom_message or '',
             'subject': self.subject or '',
