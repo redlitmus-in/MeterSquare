@@ -293,13 +293,92 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const [showExistingRequests, setShowExistingRequests] = useState(false);
   const [loadingRequests, setLoadingRequests] = useState(false);
 
+  // Custom units support - same as BOQCreationForm
+  const [customUnits, setCustomUnits] = useState<{ value: string; label: string }[]>([]);
+  const [allUnitOptions, setAllUnitOptions] = useState<{ value: string; label: string }[]>(
+    COMMON_UNITS.filter(u => u !== 'Custom (Type below)').map(u => ({ value: u, label: u }))
+  );
+
   const token = localStorage.getItem('access_token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-  // Fetch assigned projects on mount
+  // Fetch assigned projects and custom units on mount
   useEffect(() => {
     fetchAssignedProjects();
+    loadCustomUnits();
   }, []);
+
+  // Load custom units from database
+  const loadCustomUnits = async () => {
+    try {
+      const response = await apiClient.get('/custom-units');
+      if (response.data && response.data.custom_units) {
+        const customUnitsFromDB = response.data.custom_units.map((unit: any) => ({
+          value: unit.value,
+          label: unit.label
+        }));
+        setCustomUnits(customUnitsFromDB);
+
+        // Merge predefined units with custom units
+        const predefinedOptions = COMMON_UNITS
+          .filter(u => u !== 'Custom (Type below)')
+          .map(u => ({ value: u, label: u }));
+        setAllUnitOptions([...predefinedOptions, ...customUnitsFromDB]);
+      }
+    } catch (error) {
+      console.error('Failed to load custom units:', error);
+      // Even if loading fails, set predefined options
+      const predefinedOptions = COMMON_UNITS
+        .filter(u => u !== 'Custom (Type below)')
+        .map(u => ({ value: u, label: u }));
+      setAllUnitOptions(predefinedOptions);
+    }
+  };
+
+  // Save custom unit to database (called when user types a custom unit)
+  const saveCustomUnit = async (unitValue: string) => {
+    try {
+      const normalizedValue = unitValue.trim().toLowerCase();
+
+      // Check if unit already exists in predefined or custom units
+      const existsInPredefined = COMMON_UNITS
+        .filter(u => u !== 'Custom (Type below)')
+        .some(u => u.toLowerCase() === normalizedValue);
+      const existsInCustom = customUnits.some(u => u.value.toLowerCase() === normalizedValue);
+
+      if (existsInPredefined || existsInCustom) {
+        return; // Unit already exists, no need to save
+      }
+
+      // Create label with first letter capitalized
+      const unitLabel = unitValue.trim().charAt(0).toUpperCase() + unitValue.trim().slice(1);
+
+      // Save to database
+      const response = await apiClient.post('/custom-units', {
+        unit_value: normalizedValue,
+        unit_label: unitLabel
+      });
+
+      if (response.data && response.data.unit) {
+        const newUnit = {
+          value: response.data.unit.value,
+          label: response.data.unit.label
+        };
+        const updatedCustomUnits = [...customUnits, newUnit];
+        setCustomUnits(updatedCustomUnits);
+
+        // Update all unit options
+        const predefinedOptions = COMMON_UNITS
+          .filter(u => u !== 'Custom (Type below)')
+          .map(u => ({ value: u, label: u }));
+        setAllUnitOptions([...predefinedOptions, ...updatedCustomUnits]);
+
+        console.log('✅ Custom unit saved:', newUnit);
+      }
+    } catch (error) {
+      console.error('Failed to save custom unit:', error);
+    }
+  };
 
   // Handle editing mode - pre-fill form with initialData
   useEffect(() => {
@@ -2058,39 +2137,65 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             </p>
                           )}
                         </div>
-                        <div>
+                        <div className="relative">
                           <label className="block text-xs font-medium text-gray-700 mb-1">
                             Unit <span className="text-red-500">*</span>
                           </label>
                           {material.isNew ? (
-                            <div className="flex gap-1">
-                              <select
-                                value={COMMON_UNITS.filter(u => u !== 'Custom (Type below)').includes(material.unit) ? material.unit : 'other'}
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={material.unit}
                                 onChange={(e) => {
-                                  if (e.target.value !== 'other') {
-                                    updateMaterial(material.id, { unit: e.target.value });
-                                  } else {
-                                    updateMaterial(material.id, { unit: '' });
+                                  updateMaterial(material.id, { unit: e.target.value });
+                                }}
+                                onFocus={() => {
+                                  // Show dropdown on focus
+                                  const dropdown = document.getElementById(`unit-dropdown-${material.id}`);
+                                  if (dropdown) dropdown.classList.remove('hidden');
+                                }}
+                                onBlur={(e) => {
+                                  // Hide dropdown after a small delay to allow click
+                                  setTimeout(() => {
+                                    const dropdown = document.getElementById(`unit-dropdown-${material.id}`);
+                                    if (dropdown) dropdown.classList.add('hidden');
+                                  }, 150);
+                                  const value = e.target.value.trim();
+                                  if (value) {
+                                    saveCustomUnit(value);
                                   }
                                 }}
-                                className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                                className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                                placeholder="Type or select unit"
+                                required
+                              />
+                              <div
+                                id={`unit-dropdown-${material.id}`}
+                                className="hidden absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-40 overflow-y-auto"
                               >
-                                <option value="">Select</option>
-                                {COMMON_UNITS.filter(u => u !== 'Custom (Type below)').map(unit => (
-                                  <option key={unit} value={unit}>{unit}</option>
-                                ))}
-                                <option value="other">Other...</option>
-                              </select>
-                              {(!COMMON_UNITS.filter(u => u !== 'Custom (Type below)').includes(material.unit) || material.unit === '') && (
-                                <input
-                                  type="text"
-                                  value={material.unit}
-                                  onChange={(e) => updateMaterial(material.id, { unit: e.target.value })}
-                                  className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
-                                  placeholder="Type unit"
-                                  required
-                                />
-                              )}
+                                {allUnitOptions
+                                  .filter(opt => opt.value.toLowerCase().includes(material.unit.toLowerCase()))
+                                  .slice(0, 50)
+                                  .map(opt => (
+                                    <div
+                                      key={opt.value}
+                                      className="px-3 py-1.5 text-xs cursor-pointer hover:bg-blue-50 hover:text-[#243d8a]"
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        updateMaterial(material.id, { unit: opt.value });
+                                        const dropdown = document.getElementById(`unit-dropdown-${material.id}`);
+                                        if (dropdown) dropdown.classList.add('hidden');
+                                      }}
+                                    >
+                                      {opt.label}
+                                    </div>
+                                  ))}
+                                {allUnitOptions.filter(opt => opt.value.toLowerCase().includes(material.unit.toLowerCase())).length === 0 && (
+                                  <div className="px-3 py-1.5 text-xs text-gray-500 italic">
+                                    Type to add custom unit
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           ) : (
                             <input

@@ -39,7 +39,8 @@
       "Bash(/home/development1/Desktop/MeterSquare/backend/venv/bin/python3:*)",
       "Bash(lsof:*)",
       "Bash(xargs:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(source venv/Scripts/activate)"
     ],
     "deny": [],
     "ask": []

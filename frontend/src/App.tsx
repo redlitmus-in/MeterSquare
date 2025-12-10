@@ -96,6 +96,10 @@ const AdminSettings = lazy(() => import('@/pages/admin/Settings'));
 const AdminSignatureUpload = lazy(() => import('@/pages/admin/SignatureUpload'));
 const AdminMyProjects = lazy(() => import('@/pages/admin/AdminMyProjects'));
 const AdminSEProjects = lazy(() => import('@/pages/admin/AdminSEProjects'));
+const AdminSupportManagement = lazy(() => import('@/pages/admin/SupportManagement'));
+
+// Common Pages
+const PublicSupportPage = lazy(() => import('@/pages/common/PublicSupportPage'));
 
 // Lazy load workflow pages
 const MaterialDispatchProductionPage = lazy(() => import('@/pages/workflows/MaterialDispatchProductionPage'));
@@ -851,7 +855,13 @@ function App() {
             </PublicRoute>
           }
         />
-        
+
+        {/* Public Support Page - Anyone can access without login */}
+        <Route path="/support-public" element={<PublicSupportPage />} />
+
+        {/* Support Management - For dev team to review tickets (outside client routes) */}
+        <Route path="/support-management" element={<AdminSupportManagement />} />
+
         {/* Direct demo page - no auth required */}
 
         {/* Root redirect to login or dashboard */}
@@ -917,6 +927,7 @@ function App() {
             <Route path="workflows/material-dispatch-site" element={<MaterialDispatchSitePage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="notifications" element={<NotificationsPage />} />
+            <Route path="support" element={<PublicSupportPage />} />
 
             {/* Technical Director Routes */}
             <Route path="project-approvals" element={
@@ -1107,6 +1118,11 @@ function App() {
             <Route path="signature-upload" element={
               <AdminRoute>
                 <AdminSignatureUpload />
+              </AdminRoute>
+            } />
+            <Route path="support-management" element={
+              <AdminRoute>
+                <AdminSupportManagement />
               </AdminRoute>
             } />
             {/* Site Engineer specific routes - Temporarily commented out */}
