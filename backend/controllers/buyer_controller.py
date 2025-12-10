@@ -7801,6 +7801,17 @@ def generate_lpo_pdf(cr_id):
         if not lpo_data:
             return jsonify({"error": "LPO data is required"}), 400
 
+        # Always fetch fresh signature names from database (don't rely on frontend cache)
+        from models.system_settings import SystemSettings
+        settings = SystemSettings.query.first()
+        if settings and 'signatures' in lpo_data:
+            lpo_data['signatures']['md_name'] = settings.md_name or 'Managing Director'
+            lpo_data['signatures']['td_name'] = settings.td_name or 'Technical Director'
+            lpo_data['signatures']['md_signature'] = getattr(settings, 'md_signature_image', None)
+            lpo_data['signatures']['td_signature'] = getattr(settings, 'td_signature_image', None)
+            lpo_data['signatures']['stamp_image'] = getattr(settings, 'company_stamp_image', None)
+            print(f">>> GENERATE PDF - Updated signatures: md={settings.md_name}, td={settings.td_name}")
+
         # Generate PDF
         generator = LPOPDFGenerator()
         pdf_bytes = generator.generate_lpo_pdf(lpo_data)
