@@ -157,6 +157,7 @@ class MaterialReturn(db.Model):
     inventory_material_id = db.Column(db.Integer, db.ForeignKey('inventory_materials.inventory_material_id'), nullable=False)
     project_id = db.Column(db.Integer, nullable=False)  # Required - project material is returned from
     delivery_note_item_id = db.Column(db.Integer, db.ForeignKey('delivery_note_items.item_id'), nullable=True)  # Link to specific delivery
+    return_delivery_note_id = db.Column(db.Integer, db.ForeignKey('return_delivery_notes.return_note_id'), nullable=True)  # Link to RDN if part of bulk return
     quantity = db.Column(db.Float, nullable=False)
     condition = db.Column(db.String(20), nullable=False)  # Good, Damaged, Defective
     add_to_stock = db.Column(db.Boolean, default=False)  # Only applicable for 'Good' condition
@@ -181,6 +182,7 @@ class MaterialReturn(db.Model):
     # Relationships
     inventory_material = db.relationship('InventoryMaterial', backref='returns', lazy=True)
     delivery_note_item = db.relationship('DeliveryNoteItem', backref='returns', lazy=True)
+    return_delivery_note = db.relationship('ReturnDeliveryNote', backref='material_returns', lazy=True)
 
     def to_dict(self):
         return {
@@ -314,6 +316,129 @@ class DeliveryNoteItem(db.Model):
             'notes': self.notes,
             'use_backup': self.use_backup,
             'quantity_received': self.quantity_received,
+            'inventory_transaction_id': self.inventory_transaction_id,
+            # Include material details
+            'material_code': self.inventory_material.material_code if self.inventory_material else None,
+            'material_name': self.inventory_material.material_name if self.inventory_material else None,
+            'brand': self.inventory_material.brand if self.inventory_material else None,
+            'unit': self.inventory_material.unit if self.inventory_material else None
+        }
+
+
+class ReturnDeliveryNote(db.Model):
+    """Return Delivery Notes - Track material returns from sites to store"""
+    __tablename__ = "return_delivery_notes"
+
+    return_note_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    return_note_number = db.Column(db.String(50), unique=True, nullable=False)  # RDN-2025-001
+    project_id = db.Column(db.Integer, db.ForeignKey('project.project_id', ondelete='RESTRICT'), nullable=False, index=True)
+    return_date = db.Column(db.DateTime, nullable=False)
+    returned_by = db.Column(db.String(255), nullable=False)  # Site engineer name
+    return_to = db.Column(db.String(255), default='M2 Store')  # Store location
+    original_delivery_note_id = db.Column(db.Integer, db.ForeignKey('material_delivery_notes.delivery_note_id'), nullable=True)
+    vehicle_number = db.Column(db.String(100), nullable=True)
+    driver_name = db.Column(db.String(255), nullable=False)  # Required for transport
+    driver_contact = db.Column(db.String(50), nullable=True)
+    prepared_by = db.Column(db.String(255), nullable=False)
+    checked_by = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(20), default='DRAFT', nullable=False)  # DRAFT, ISSUED, IN_TRANSIT, RECEIVED, PARTIAL, CANCELLED
+    notes = db.Column(db.Text, nullable=True)
+
+    # Store acceptance fields
+    accepted_by = db.Column(db.String(255), nullable=True)
+    accepted_at = db.Column(db.DateTime, nullable=True)
+    acceptance_notes = db.Column(db.Text, nullable=True)
+
+    # Audit fields
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_modified_by = db.Column(db.String(255), nullable=True)
+    issued_at = db.Column(db.DateTime, nullable=True)
+    issued_by = db.Column(db.String(255), nullable=True)
+    dispatched_at = db.Column(db.DateTime, nullable=True)
+    dispatched_by = db.Column(db.String(255), nullable=True)
+
+    # Relationships
+    project = db.relationship('Project', foreign_keys=[project_id], backref='return_delivery_notes', lazy=True)
+    items = db.relationship('ReturnDeliveryNoteItem', backref='return_delivery_note', lazy=True, cascade='all, delete-orphan')
+    original_delivery_note = db.relationship('MaterialDeliveryNote', backref='return_notes', lazy=True)
+
+    def _format_datetime(self, dt):
+        """Helper to format datetime consistently with UTC indicator"""
+        return (dt.isoformat() + 'Z') if dt else None
+
+    def to_dict(self):
+        return {
+            'return_note_id': self.return_note_id,
+            'return_note_number': self.return_note_number,
+            'project_id': self.project_id,
+            'return_date': self._format_datetime(self.return_date),
+            'returned_by': self.returned_by,
+            'return_to': self.return_to,
+            'original_delivery_note_id': self.original_delivery_note_id,
+            'vehicle_number': self.vehicle_number,
+            'driver_name': self.driver_name,
+            'driver_contact': self.driver_contact,
+            'prepared_by': self.prepared_by,
+            'checked_by': self.checked_by,
+            'status': self.status,
+            'notes': self.notes,
+            'accepted_by': self.accepted_by,
+            'accepted_at': self._format_datetime(self.accepted_at),
+            'acceptance_notes': self.acceptance_notes,
+            'created_at': self._format_datetime(self.created_at),
+            'created_by': self.created_by,
+            'last_modified_at': self._format_datetime(self.last_modified_at),
+            'last_modified_by': self.last_modified_by,
+            'issued_at': self._format_datetime(self.issued_at),
+            'issued_by': self.issued_by,
+            'dispatched_at': self._format_datetime(self.dispatched_at),
+            'dispatched_by': self.dispatched_by,
+            'items': [item.to_dict() for item in self.items] if self.items else [],
+            'total_items': len(self.items) if self.items else 0
+        }
+
+
+class ReturnDeliveryNoteItem(db.Model):
+    """Return Delivery Note Items - Individual materials in a return note"""
+    __tablename__ = "return_delivery_note_items"
+
+    return_item_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    return_note_id = db.Column(db.Integer, db.ForeignKey('return_delivery_notes.return_note_id'), nullable=False)
+    inventory_material_id = db.Column(db.Integer, db.ForeignKey('inventory_materials.inventory_material_id'), nullable=False)
+    original_delivery_note_item_id = db.Column(db.Integer, db.ForeignKey('delivery_note_items.item_id'), nullable=True)
+    material_return_id = db.Column(db.Integer, db.ForeignKey('material_returns.return_id'), nullable=True)
+    quantity = db.Column(db.Float, nullable=False)
+    condition = db.Column(db.String(20), nullable=False)  # Good, Damaged, Defective
+    return_reason = db.Column(db.Text, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    # Acceptance tracking
+    quantity_accepted = db.Column(db.Float, nullable=True)
+    acceptance_status = db.Column(db.String(20), nullable=True)  # PENDING, ACCEPTED, REJECTED, PARTIAL
+
+    # Link to transaction when stock is added back
+    inventory_transaction_id = db.Column(db.Integer, nullable=True)
+
+    # Relationships
+    inventory_material = db.relationship('InventoryMaterial', backref='return_note_items', lazy=True)
+    original_delivery_note_item = db.relationship('DeliveryNoteItem', backref='return_note_items', lazy=True)
+    material_return = db.relationship('MaterialReturn', backref='return_note_item', lazy=True)
+
+    def to_dict(self):
+        return {
+            'return_item_id': self.return_item_id,
+            'return_note_id': self.return_note_id,
+            'inventory_material_id': self.inventory_material_id,
+            'original_delivery_note_item_id': self.original_delivery_note_item_id,
+            'material_return_id': self.material_return_id,
+            'quantity': self.quantity,
+            'condition': self.condition,
+            'return_reason': self.return_reason,
+            'notes': self.notes,
+            'quantity_accepted': self.quantity_accepted,
+            'acceptance_status': self.acceptance_status,
             'inventory_transaction_id': self.inventory_transaction_id,
             # Include material details
             'material_code': self.inventory_material.material_code if self.inventory_material else None,

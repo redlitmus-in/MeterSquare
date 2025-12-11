@@ -132,7 +132,7 @@ const MaterialReceipts: React.FC = () => {
   const [loadingReturns, setLoadingReturns] = useState(false);
   const [expandedReturnProjects, setExpandedReturnProjects] = useState<Set<number>>(new Set());
 
-  // Return modal state
+  // Return modal state (OLD - keeping for backward compatibility)
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [selectedMaterial, setSelectedMaterial] = useState<ReturnableMaterial | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
@@ -144,6 +144,32 @@ const MaterialReceipts: React.FC = () => {
     add_to_stock: true
   });
   const [submittingReturn, setSubmittingReturn] = useState(false);
+
+  // RDN Creation Modal State
+  const [showRDNModal, setShowRDNModal] = useState(false);
+  const [rdnStep, setRdnStep] = useState<1 | 2 | 3>(1);
+  const [rdnForm, setRdnForm] = useState({
+    return_date: new Date().toISOString().split('T')[0],
+    vehicle_number: '',
+    driver_name: '',
+    driver_contact: '',
+    notes: '',
+    selected_materials: [] as Array<{
+      delivery_note_item_id: number;
+      inventory_material_id: number;
+      material_name: string;
+      material_code: string;
+      unit: string;
+      quantity: number;
+      max_quantity: number;
+      condition: 'Good' | 'Damaged' | 'Defective';
+      return_reason: string;
+      original_dn: string;
+    }>
+  });
+  const [creatingRDN, setCreatingRDN] = useState(false);
+  const [createdRDN, setCreatedRDN] = useState<any>(null);
+  const [showRDNSuccessModal, setShowRDNSuccessModal] = useState(false);
 
   const fetchDeliveryNotes = useCallback(async () => {
     try {
@@ -466,7 +492,27 @@ const MaterialReceipts: React.FC = () => {
               {/* Returnable Materials Section */}
               {returnableProjects.length > 0 && (
                 <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Materials Available for Return</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">Materials Available for Return</h3>
+                    <button
+                      onClick={() => setShowRDNModal(true)}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-purple-500 text-white rounded-lg hover:bg-purple-600 active:bg-purple-700 transition-colors shadow-sm font-medium"
+                    >
+                      <DocumentTextIcon className="w-5 h-5" />
+                      Create Return Delivery Note
+                    </button>
+                  </div>
+                  <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg">
+                    <div className="flex items-start gap-3">
+                      <TruckIcon className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-semibold text-blue-900">Return Delivery Note (RDN) Required</p>
+                        <p className="text-sm text-blue-700 mt-1">
+                          To return materials to the store, you must create a formal Return Delivery Note. This document will be given to the driver for transport and verification at the store.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                   {returnableProjects.map((project) => {
                     const isExpanded = expandedReturnProjects.has(project.project_id);
                     return (
@@ -513,27 +559,31 @@ const MaterialReceipts: React.FC = () => {
                                   <thead>
                                     <tr className="text-left text-gray-500 border-b">
                                       <th className="pb-2 font-medium">Material</th>
-                                      <th className="pb-2 font-medium">Delivery Note</th>
+                                      <th className="pb-2 font-medium">Original DN</th>
                                       <th className="pb-2 font-medium text-right">Dispatched</th>
                                       <th className="pb-2 font-medium text-right">Returned</th>
                                       <th className="pb-2 font-medium text-right">Returnable</th>
-                                      <th className="pb-2 font-medium text-right">Action</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-100">
                                     {project.materials.map((material) => (
-                                      <tr key={material.delivery_note_item_id}>
+                                      <tr key={material.delivery_note_item_id} className="hover:bg-purple-50">
                                         <td className="py-3">
                                           <p className="font-medium text-gray-900">{material.material_name}</p>
                                           <p className="text-xs text-gray-500">{material.material_code} {material.brand && `• ${material.brand}`}</p>
                                         </td>
                                         <td className="py-3">
-                                          <p className="font-medium text-gray-700">{material.delivery_note_number}</p>
-                                          {material.delivery_date && (
-                                            <p className="text-xs text-gray-500">
-                                              {new Date(material.delivery_date).toLocaleDateString()}
-                                            </p>
-                                          )}
+                                          <div className="flex items-center gap-2">
+                                            <DocumentTextIcon className="w-4 h-4 text-blue-600" />
+                                            <div>
+                                              <p className="font-medium text-blue-700">{material.delivery_note_number}</p>
+                                              {material.delivery_date && (
+                                                <p className="text-xs text-gray-500">
+                                                  {new Date(material.delivery_date).toLocaleDateString()}
+                                                </p>
+                                              )}
+                                            </div>
+                                          </div>
                                         </td>
                                         <td className="py-3 text-right text-gray-600">
                                           {material.dispatched_quantity} {material.unit}
@@ -542,17 +592,9 @@ const MaterialReceipts: React.FC = () => {
                                           {material.returned_quantity} {material.unit}
                                         </td>
                                         <td className="py-3 text-right">
-                                          <span className="font-medium text-purple-600">
+                                          <span className="font-semibold text-purple-600">
                                             {material.returnable_quantity} {material.unit}
                                           </span>
-                                        </td>
-                                        <td className="py-3 text-right">
-                                          <button
-                                            onClick={() => openReturnModal(material, project.project_id)}
-                                            className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors text-sm font-medium"
-                                          >
-                                            Return
-                                          </button>
                                         </td>
                                       </tr>
                                     ))}
@@ -1017,7 +1059,503 @@ const MaterialReceipts: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Return Material Modal */}
+      {/* Create RDN Modal */}
+      <AnimatePresence>
+        {showRDNModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowRDNModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-purple-500 to-indigo-500 px-6 py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white/20 rounded-lg">
+                      <DocumentTextIcon className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="text-white">
+                      <h3 className="text-lg font-semibold">Create Return Delivery Note</h3>
+                      <p className="text-sm text-white/80">Complete form and select materials to return</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowRDNModal(false)}
+                    className="p-1 hover:bg-white/20 rounded-lg transition-colors"
+                  >
+                    <XMarkIcon className="w-6 h-6 text-white" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
+                {rdnStep === 1 && (
+                  <div className="space-y-4">
+                    <h4 className="font-semibold text-gray-900 mb-4">Step 1: RDN Details</h4>
+
+                    {/* Return Date */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Return Date *</label>
+                      <input
+                        type="date"
+                        value={rdnForm.return_date}
+                        onChange={(e) => setRdnForm({ ...rdnForm, return_date: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+
+                    {/* Vehicle & Driver Details */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number</label>
+                        <input
+                          type="text"
+                          value={rdnForm.vehicle_number}
+                          onChange={(e) => setRdnForm({ ...rdnForm, vehicle_number: e.target.value })}
+                          placeholder="e.g., DXB-A-12345"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name *</label>
+                        <input
+                          type="text"
+                          value={rdnForm.driver_name}
+                          onChange={(e) => setRdnForm({ ...rdnForm, driver_name: e.target.value })}
+                          placeholder="Driver name"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Driver Contact</label>
+                        <input
+                          type="text"
+                          value={rdnForm.driver_contact}
+                          onChange={(e) => setRdnForm({ ...rdnForm, driver_contact: e.target.value })}
+                          placeholder="+971 50 123 4567"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Notes */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                      <textarea
+                        value={rdnForm.notes}
+                        onChange={(e) => setRdnForm({ ...rdnForm, notes: e.target.value })}
+                        placeholder="Additional notes or return reason..."
+                        rows={3}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {rdnStep === 2 && (
+                  <div className="space-y-4">
+                    <h4 className="font-semibold text-gray-900 mb-4">Step 2: Select Materials to Return</h4>
+                    <p className="text-sm text-gray-600 mb-4">Select materials and specify quantities to return</p>
+
+                    {returnableProjects.map((project) => (
+                      <div key={project.project_id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <BuildingOfficeIcon className="w-5 h-5 text-indigo-600" />
+                          <h5 className="font-semibold text-gray-900">{project.project_name}</h5>
+                          <span className="text-xs text-gray-500">({project.project_code})</span>
+                        </div>
+                        <div className="space-y-3">
+                          {project.materials.map((material) => {
+                            const isSelected = rdnForm.selected_materials.some(
+                              m => m.delivery_note_item_id === material.delivery_note_item_id
+                            );
+                            const selectedMaterial = rdnForm.selected_materials.find(
+                              m => m.delivery_note_item_id === material.delivery_note_item_id
+                            );
+
+                            const handleToggleSelect = () => {
+                              if (isSelected) {
+                                setRdnForm({
+                                  ...rdnForm,
+                                  selected_materials: rdnForm.selected_materials.filter(
+                                    m => m.delivery_note_item_id !== material.delivery_note_item_id
+                                  )
+                                });
+                              } else {
+                                setRdnForm({
+                                  ...rdnForm,
+                                  selected_materials: [...rdnForm.selected_materials, {
+                                    delivery_note_item_id: material.delivery_note_item_id,
+                                    inventory_material_id: material.inventory_material_id,
+                                    material_name: material.material_name,
+                                    material_code: material.material_code,
+                                    unit: material.unit,
+                                    quantity: material.returnable_quantity,
+                                    max_quantity: material.returnable_quantity,
+                                    condition: 'Good',
+                                    return_reason: '',
+                                    original_dn: material.delivery_note_number
+                                  }]
+                                });
+                              }
+                            };
+
+                            return (
+                              <div
+                                key={material.delivery_note_item_id}
+                                role="button"
+                                tabIndex={0}
+                                className={`bg-white p-3 rounded border-2 transition-all cursor-pointer ${
+                                  isSelected
+                                    ? 'border-purple-400 bg-purple-50'
+                                    : 'border-gray-200 hover:border-purple-200 hover:bg-purple-50/50'
+                                }`}
+                                onClick={handleToggleSelect}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    handleToggleSelect();
+                                  }
+                                }}
+                                aria-pressed={isSelected}
+                                aria-label={`Select ${material.material_name} for return. Maximum ${material.returnable_quantity} ${material.unit} available.`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleSelect();
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="mt-1 w-4 h-4 text-purple-600"
+                                  />
+                                  <div className="flex-1">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div>
+                                        <p className="font-medium text-gray-900">{material.material_name}</p>
+                                        <p className="text-xs text-gray-500">
+                                          {material.material_code} • DN: {material.delivery_note_number}
+                                        </p>
+                                      </div>
+                                      <span className="text-sm font-semibold text-purple-600">
+                                        Max: {material.returnable_quantity} {material.unit}
+                                      </span>
+                                    </div>
+
+                                    {isSelected && selectedMaterial && (
+                                      <div className="mt-3 space-y-2 pl-2 border-l-2 border-purple-200" onClick={(e) => e.stopPropagation()}>
+                                        <div className="grid grid-cols-2 gap-3">
+                                          <div>
+                                            <label className="block text-xs font-medium text-gray-700 mb-1">Quantity *</label>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              max={material.returnable_quantity}
+                                              step="0.001"
+                                              value={selectedMaterial.quantity}
+                                              onChange={(e) => {
+                                                const newQty = parseFloat(e.target.value);
+                                                setRdnForm({
+                                                  ...rdnForm,
+                                                  selected_materials: rdnForm.selected_materials.map(m =>
+                                                    m.delivery_note_item_id === material.delivery_note_item_id
+                                                      ? { ...m, quantity: newQty }
+                                                      : m
+                                                  )
+                                                });
+                                              }}
+                                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-purple-500"
+                                            />
+                                          </div>
+                                          <div>
+                                            <label className="block text-xs font-medium text-gray-700 mb-1">Condition *</label>
+                                            <select
+                                              value={selectedMaterial.condition}
+                                              onChange={(e) => {
+                                                setRdnForm({
+                                                  ...rdnForm,
+                                                  selected_materials: rdnForm.selected_materials.map(m =>
+                                                    m.delivery_note_item_id === material.delivery_note_item_id
+                                                      ? { ...m, condition: e.target.value as 'Good' | 'Damaged' | 'Defective' }
+                                                      : m
+                                                  )
+                                                });
+                                              }}
+                                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-purple-500"
+                                            >
+                                              <option value="Good">Good</option>
+                                              <option value="Damaged">Damaged</option>
+                                              <option value="Defective">Defective</option>
+                                            </select>
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-medium text-gray-700 mb-1">Return Reason</label>
+                                          <input
+                                            type="text"
+                                            value={selectedMaterial.return_reason}
+                                            onChange={(e) => {
+                                              setRdnForm({
+                                                ...rdnForm,
+                                                selected_materials: rdnForm.selected_materials.map(m =>
+                                                  m.delivery_note_item_id === material.delivery_note_item_id
+                                                    ? { ...m, return_reason: e.target.value }
+                                                    : m
+                                                )
+                                              });
+                                            }}
+                                            placeholder="Why is this being returned?"
+                                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-purple-500"
+                                          />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+
+                    {rdnForm.selected_materials.length === 0 && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
+                        <p className="text-sm text-amber-700">No materials selected. Please select at least one material to return.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {rdnStep === 3 && (
+                  <div className="space-y-4">
+                    <h4 className="font-semibold text-gray-900 mb-4">Step 3: Review & Submit</h4>
+
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+                      <h5 className="font-semibold text-blue-900">RDN Details</h5>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <p className="text-blue-600">Return Date</p>
+                          <p className="font-medium text-blue-900">{new Date(rdnForm.return_date).toLocaleDateString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-blue-600">Driver Name</p>
+                          <p className="font-medium text-blue-900">{rdnForm.driver_name || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-blue-600">Vehicle Number</p>
+                          <p className="font-medium text-blue-900">{rdnForm.vehicle_number || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-blue-600">Driver Contact</p>
+                          <p className="font-medium text-blue-900">{rdnForm.driver_contact || '-'}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 space-y-3">
+                      <h5 className="font-semibold text-purple-900">Materials ({rdnForm.selected_materials.length})</h5>
+                      <div className="space-y-2">
+                        {rdnForm.selected_materials.map((material, idx) => (
+                          <div key={idx} className="bg-white rounded p-3 text-sm">
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1">
+                                <p className="font-medium text-gray-900">{material.material_name}</p>
+                                <p className="text-xs text-gray-500">{material.material_code} • DN: {material.original_dn}</p>
+                                {material.return_reason && (
+                                  <p className="text-xs text-gray-600 mt-1">Reason: {material.return_reason}</p>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                <p className="font-semibold text-purple-600">{material.quantity} {material.unit}</p>
+                                <p className="text-xs text-gray-600">{material.condition}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center">
+                <div className="flex gap-2">
+                  {rdnStep > 1 && (
+                    <button
+                      onClick={() => setRdnStep((rdnStep - 1) as 1 | 2 | 3)}
+                      disabled={creatingRDN}
+                      className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors disabled:opacity-50"
+                    >
+                      Back
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setShowRDNModal(false);
+                      setRdnStep(1);
+                      setRdnForm({
+                        return_date: new Date().toISOString().split('T')[0],
+                        vehicle_number: '',
+                        driver_name: '',
+                        driver_contact: '',
+                        notes: '',
+                        selected_materials: []
+                      });
+                    }}
+                    disabled={creatingRDN}
+                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                {rdnStep < 3 && (
+                  <button
+                    onClick={() => {
+                      if (rdnStep === 1 && !rdnForm.driver_name) {
+                        showError('Driver name is required');
+                        return;
+                      }
+                      if (rdnStep === 2 && rdnForm.selected_materials.length === 0) {
+                        showError('Please select at least one material to return');
+                        return;
+                      }
+                      setRdnStep((rdnStep + 1) as 1 | 2 | 3);
+                    }}
+                    disabled={creatingRDN}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                )}
+
+                {rdnStep === 3 && (
+                  <button
+                    onClick={async () => {
+                      if (rdnForm.selected_materials.length === 0) {
+                        showError('No materials selected');
+                        return;
+                      }
+
+                      // Validate quantities
+                      const invalidMaterials = rdnForm.selected_materials.filter(
+                        m => !m.quantity || m.quantity <= 0 || m.quantity > m.max_quantity || isNaN(m.quantity)
+                      );
+
+                      if (invalidMaterials.length > 0) {
+                        showError('Please enter valid quantities for all selected materials');
+                        return;
+                      }
+
+                      setCreatingRDN(true);
+                      try {
+                        // Get first project ID from selected materials
+                        const firstMaterial = returnableProjects.find(p =>
+                          p.materials.some(m =>
+                            m.delivery_note_item_id === rdnForm.selected_materials[0].delivery_note_item_id
+                          )
+                        );
+
+                        if (!firstMaterial) {
+                          throw new Error('Could not determine project for RDN');
+                        }
+
+                        // Create RDN
+                        const response = await apiClient.post('/return_delivery_notes', {
+                          project_id: firstMaterial.project_id,
+                          return_date: rdnForm.return_date,
+                          vehicle_number: rdnForm.vehicle_number,
+                          driver_name: rdnForm.driver_name,
+                          driver_contact: rdnForm.driver_contact,
+                          notes: rdnForm.notes,
+                        });
+
+                        const rdnId = response.data.return_delivery_note.return_note_id;
+
+                        // Add items to RDN with error tracking
+                        const failedItems: string[] = [];
+                        for (const material of rdnForm.selected_materials) {
+                          try {
+                            await apiClient.post(`/return_delivery_note/${rdnId}/items`, {
+                              inventory_material_id: material.inventory_material_id,
+                              original_delivery_note_item_id: material.delivery_note_item_id,
+                              quantity: material.quantity,
+                              condition: material.condition,
+                              return_reason: material.return_reason,
+                            });
+                          } catch (itemError) {
+                            console.error(`Failed to add item ${material.material_name}:`, itemError);
+                            failedItems.push(material.material_name);
+                          }
+                        }
+
+                        // Check if any items failed
+                        if (failedItems.length > 0) {
+                          showError(`RDN created but failed to add: ${failedItems.join(', ')}. Please contact support.`);
+                        }
+
+                        // Store created RDN and show success modal with download option
+                        setCreatedRDN(response.data.return_delivery_note);
+                        setShowRDNModal(false);
+                        setShowRDNSuccessModal(true);
+
+                        // Reset form
+                        setRdnStep(1);
+                        setRdnForm({
+                          return_date: new Date().toISOString().split('T')[0],
+                          vehicle_number: '',
+                          driver_name: '',
+                          driver_contact: '',
+                          notes: '',
+                          selected_materials: []
+                        });
+
+                        // Refresh data
+                        fetchReturnableData();
+                      } catch (error: any) {
+                        console.error('Error creating RDN:', error);
+                        showError(error.response?.data?.error || 'Failed to create RDN');
+                      } finally {
+                        setCreatingRDN(false);
+                      }
+                    }}
+                    disabled={creatingRDN}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {creatingRDN ? (
+                      <>
+                        <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircleIcon className="w-4 h-4" />
+                        Create RDN
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Return Material Modal (OLD - Deprecated) */}
       <AnimatePresence>
         {showReturnModal && selectedMaterial && (
           <motion.div
@@ -1055,7 +1593,40 @@ const MaterialReceipts: React.FC = () => {
               </div>
 
               <div className="p-5 space-y-4">
-                <div className="bg-gray-50 rounded-lg p-3">
+                {/* Delivery Note Header - Security Reference */}
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <DocumentTextIcon className="w-5 h-5 text-blue-600" />
+                    <h4 className="font-semibold text-blue-900">Original Delivery Note (DN) Reference</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-blue-600 font-medium">DN Number</p>
+                      <p className="font-bold text-blue-900 text-lg">{selectedMaterial.delivery_note_number}</p>
+                    </div>
+                    <div>
+                      <p className="text-blue-600 font-medium">Delivery Date</p>
+                      <p className="font-semibold text-blue-900">
+                        {selectedMaterial.delivery_date
+                          ? new Date(selectedMaterial.delivery_date).toLocaleDateString('en-GB', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            })
+                          : '-'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-blue-200">
+                    <p className="text-xs text-blue-700">
+                      <span className="font-medium">Security Note:</span> This material is being returned against the above DN for store verification and audit trail.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Material Details */}
+                <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                  <h5 className="text-xs font-semibold text-gray-600 mb-2 uppercase">Material Information</h5>
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-gray-500">Material Code</p>
@@ -1066,24 +1637,20 @@ const MaterialReceipts: React.FC = () => {
                       <p className="font-medium text-gray-900">{selectedMaterial.unit}</p>
                     </div>
                     <div>
-                      <p className="text-gray-500">Delivery Note</p>
-                      <p className="font-medium text-gray-900">{selectedMaterial.delivery_note_number}</p>
+                      <p className="text-gray-500">Brand</p>
+                      <p className="font-medium text-gray-900">{selectedMaterial.brand || '-'}</p>
                     </div>
                     <div>
-                      <p className="text-gray-500">Delivery Date</p>
-                      <p className="font-medium text-gray-900">
-                        {selectedMaterial.delivery_date
-                          ? new Date(selectedMaterial.delivery_date).toLocaleDateString()
-                          : '-'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500">Dispatched</p>
+                      <p className="text-gray-500">Dispatched Qty</p>
                       <p className="font-medium text-gray-900">{selectedMaterial.dispatched_quantity} {selectedMaterial.unit}</p>
                     </div>
                     <div>
-                      <p className="text-gray-500">Returnable</p>
-                      <p className="font-medium text-purple-600">{selectedMaterial.returnable_quantity} {selectedMaterial.unit}</p>
+                      <p className="text-gray-500">Already Returned</p>
+                      <p className="font-medium text-gray-900">{selectedMaterial.returned_quantity} {selectedMaterial.unit}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Available to Return</p>
+                      <p className="font-semibold text-purple-600 text-base">{selectedMaterial.returnable_quantity} {selectedMaterial.unit}</p>
                     </div>
                   </div>
                 </div>
@@ -1201,6 +1768,61 @@ const MaterialReceipts: React.FC = () => {
                       Submit Return
                     </>
                   )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* RDN Success Modal with Download */}
+      <AnimatePresence>
+        {showRDNSuccessModal && createdRDN && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowRDNSuccessModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="text-center">
+                <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                  <CheckCircleIcon className="h-8 w-8 text-green-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">RDN Created Successfully!</h3>
+                <p className="text-sm text-gray-600 mb-1">Return Delivery Note</p>
+                <p className="text-2xl font-bold text-purple-600 mb-4">{createdRDN.return_note_number}</p>
+                <p className="text-sm text-gray-500 mb-6">
+                  The RDN has been created. You can now download the PDF document to give to the driver.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    showSuccess('PDF download feature will be available shortly');
+                    // TODO: Implement PDF download
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                >
+                  <DocumentTextIcon className="w-5 h-5" />
+                  Download PDF for Driver
+                </button>
+                <button
+                  onClick={() => {
+                    setShowRDNSuccessModal(false);
+                    setCreatedRDN(null);
+                  }}
+                  className="w-full px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                >
+                  Close
                 </button>
               </div>
             </motion.div>

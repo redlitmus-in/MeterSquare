@@ -363,3 +363,40 @@ def get_my_returnable_materials_route():
 def get_my_material_returns_route():
     """Get material returns for SE's assigned projects"""
     return get_material_returns_for_se()
+
+
+# ==================== RETURN DELIVERY NOTE (RDN) ROUTES ====================
+
+@inventory_routes.route('/return_delivery_notes', methods=['POST'])
+@jwt_required
+def create_return_delivery_note_route():
+    """Create a new return delivery note"""
+    return create_return_delivery_note()
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>/items', methods=['POST'])
+@jwt_required
+def add_return_delivery_note_item_route(return_note_id):
+    """Add an item to a return delivery note"""
+    return add_item_to_return_delivery_note(return_note_id)
+
+
+@inventory_routes.route('/my-return-delivery-notes', methods=['GET'])
+@jwt_required
+def get_my_return_delivery_notes_route():
+    """Get return delivery notes for SE's assigned projects"""
+    return get_return_delivery_notes_for_se()
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>', methods=['GET'])
+@jwt_required
+def get_return_delivery_note_by_id_route(return_note_id):
+    """Get a specific return delivery note by ID"""
+    return get_return_delivery_note_by_id(return_note_id)
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>/issue', methods=['POST'])
+@jwt_required
+def issue_return_delivery_note_route(return_note_id):
+    """Issue a return delivery note"""
+    return issue_return_delivery_note(return_note_id)

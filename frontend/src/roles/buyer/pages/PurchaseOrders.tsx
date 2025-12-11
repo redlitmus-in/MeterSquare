@@ -2177,9 +2177,22 @@ const PurchaseOrders: React.FC = () => {
             removeQueries(['change-requests']);
             // Small delay to ensure backend has processed the change
             await new Promise(resolve => setTimeout(resolve, 500));
-            await refetchPending();
+
+            // Refetch all data
+            const pendingResult = await refetchPending();
             await refetchCompleted();
             await refetchPendingPOChildren();
+
+            // Update selectedPurchase with fresh data so modal shows updated negotiated prices
+            if (selectedPurchase && pendingResult.data?.pending_purchases) {
+              const updatedPurchase = pendingResult.data.pending_purchases.find(
+                (p: Purchase) => p.cr_id === selectedPurchase.cr_id
+              );
+              if (updatedPurchase) {
+                setSelectedPurchase(updatedPurchase);
+              }
+            }
+
             // Switch to pending approval tab to see the submitted vendor selection
             setActiveTab('pending_approval');
           }}

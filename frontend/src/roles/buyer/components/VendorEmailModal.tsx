@@ -76,11 +76,22 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const [editedInstructions, setEditedInstructions] = useState('');
   const [editedDeliveryReq, setEditedDeliveryReq] = useState('');
 
-  // LPO PDF state - default to selected (user can uncheck if needed)
-  const [includeLpoPdf, setIncludeLpoPdf] = useState(true);
+  // LPO PDF state - Now mandatory (always enabled)
+  const includeLpoPdf = true; // LPO is mandatory
   const [lpoData, setLpoData] = useState<LPOData | null>(null);
   const [isLoadingLpo, setIsLoadingLpo] = useState(false);
   const [showLpoEditor, setShowLpoEditor] = useState(false);
+
+  // Check if vendor is approved (TD approval status)
+  const isVendorApproved =
+    purchase.vendor_selection_status === 'approved' ||
+    (purchase.po_children?.length > 0 &&
+      purchase.po_children.some(poChild =>
+        poChild?.vendor_selection_status === 'approved' ||
+        poChild?.status === 'vendor_approved' ||
+        poChild?.status === 'purchase_completed'
+      )) ||
+    false;
 
   // Signature selection state (buyer only selects checkbox, admin uploads)
   const [includeSignatures, setIncludeSignatures] = useState(true);
@@ -120,7 +131,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
   // Auto-save function with debounce
   const autoSaveLpoCustomization = useCallback(async () => {
-    if (!lpoData || !includeLpoPdf) return;
+    if (!lpoData) return; // includeLpoPdf is now always true
 
     setIsSaving(true);
     try {
@@ -131,11 +142,11 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     } finally {
       setIsSaving(false);
     }
-  }, [lpoData, includeLpoPdf, includeSignatures, purchase.cr_id]);
+  }, [lpoData, includeSignatures, purchase.cr_id]);
 
   // Debounced auto-save effect - triggers 2 seconds after user stops editing
   useEffect(() => {
-    if (!lpoData || !includeLpoPdf) return;
+    if (!lpoData) return; // includeLpoPdf is now always true
 
     // Clear previous timeout
     if (saveTimeoutRef.current) {
@@ -153,7 +164,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [lpoData, autoSaveLpoCustomization, includeLpoPdf]);
+  }, [lpoData, autoSaveLpoCustomization]);
 
   // Handle file selection
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -199,12 +210,19 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     }
   }, [isOpen, purchase.cr_id]);
 
-  // Load LPO data when modal opens (since checkbox is default true)
+  // Load LPO data when modal opens (LPO is now mandatory)
   useEffect(() => {
-    if (isOpen && includeLpoPdf && !lpoData) {
+    if (isOpen && !lpoData) {
       loadLpoData();
     }
-  }, [isOpen, includeLpoPdf]);
+  }, [isOpen]);
+
+  // Auto-close LPO editor if vendor becomes approved
+  useEffect(() => {
+    if (isVendorApproved && showLpoEditor) {
+      setShowLpoEditor(false);
+    }
+  }, [isVendorApproved]); // Only depend on isVendorApproved to avoid infinite loop
 
   const loadEmailPreview = async () => {
     try {
@@ -284,7 +302,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
           company_name: response.lpo_data.vendor.company_name || purchase.vendor_name || '',
           contact_person: response.lpo_data.vendor.contact_person || purchase.vendor_contact_person || '',
           phone: response.lpo_data.vendor.phone || purchase.vendor_phone || '',
-          trn: response.lpo_data.vendor.trn || purchase.vendor_trn || '',
+          trn: response.lpo_data.vendor.trn || '', // TRN from backend only
           email: response.lpo_data.vendor.email || purchase.vendor_email || '',
         }
       };
@@ -341,19 +359,13 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     } catch (error: any) {
       console.error('Error loading LPO data:', error);
       showError(error.message || 'Failed to load LPO data');
-      setIncludeLpoPdf(false);
+      // LPO is mandatory, so we don't disable it on error
     } finally {
       setIsLoadingLpo(false);
     }
   };
 
-  // Handle LPO checkbox toggle
-  const handleLpoToggle = (checked: boolean) => {
-    setIncludeLpoPdf(checked);
-    if (checked && !lpoData) {
-      loadLpoData();
-    }
-  };
+  // LPO is now mandatory, no toggle function needed
 
   // Get LPO data with signatures based on checkbox
   const getLpoDataWithSignatures = (): LPOData | null => {
@@ -981,26 +993,20 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                             </div>
                           )}
 
-                          {/* LPO PDF Option */}
+                          {/* LPO PDF Option - Now Mandatory */}
                           <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-3">
-                                <input
-                                  type="checkbox"
-                                  id="include-lpo-pdf"
-                                  checked={includeLpoPdf}
-                                  onChange={(e) => handleLpoToggle(e.target.checked)}
-                                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                                />
-                                <label htmlFor="include-lpo-pdf" className="flex items-center gap-2">
-                                  <FileText className="w-5 h-5 text-blue-600" />
-                                  <div>
-                                    <span className="text-sm font-medium text-gray-900">Attach LPO PDF</span>
-                                    <p className="text-xs text-gray-500">Generate and attach Local Purchase Order PDF</p>
-                                  </div>
-                                </label>
+                                <FileText className="w-5 h-5 text-blue-600" />
+                                <div>
+                                  <span className="text-sm font-medium text-gray-900">LPO PDF (Mandatory)</span>
+                                  <p className="text-xs text-gray-500">Local Purchase Order PDF will be automatically generated and attached</p>
+                                  {isVendorApproved && (
+                                    <p className="text-xs text-amber-600 mt-1 font-medium">⚠ Cannot edit - Vendor has been approved</p>
+                                  )}
+                                </div>
                               </div>
-                              {includeLpoPdf && lpoData && (
+                              {lpoData && (
                                 <div className="flex gap-2">
                                   <Button
                                     type="button"
@@ -1008,6 +1014,8 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                     size="sm"
                                     onClick={() => setShowLpoEditor(!showLpoEditor)}
                                     className="text-xs"
+                                    disabled={isVendorApproved}
+                                    title={isVendorApproved ? "Cannot edit - Vendor has been approved" : "Edit LPO details"}
                                   >
                                     <Edit3 className="w-3 h-3 mr-1" />
                                     {showLpoEditor ? 'Hide' : 'Edit'}
@@ -1031,7 +1039,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                 Loading LPO data...
                               </div>
                             )}
-                            {includeLpoPdf && lpoData && showLpoEditor && (
+                            {lpoData && showLpoEditor && (
                               <div className="mt-4 space-y-4 border-t border-blue-200 pt-4">
                                 <div className="flex items-center justify-between">
                                   <div className="text-sm font-medium text-gray-700">Edit LPO Details</div>

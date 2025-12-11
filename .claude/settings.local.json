@@ -45,7 +45,9 @@
       "Bash(DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" /home/development1/Desktop/MeterSquare/backend/venv/bin/python:*)",
       "Bash(DATABASE_URL=\"postgresql://postgres.wgddnoiakkoskbbkbygw:Rameshdev\\$08@aws-0-ap-south-1.pooler.supabase.com:6543/postgres\" /home/development1/Desktop/MeterSquare/backend/venv/bin/python:*)",
       "Bash(DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol\\$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" /home/development1/Desktop/MeterSquare/backend/venv/bin/python:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(grep:*)",
+      "Bash(kill:*)"
     ],
     "deny": [],
     "ask": []

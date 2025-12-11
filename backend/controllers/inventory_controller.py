@@ -2848,3 +2848,300 @@ def get_material_returns_for_se():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+# ==================== RETURN DELIVERY NOTE (RDN) FUNCTIONS ====================
+
+def generate_return_note_number():
+    """Auto-generate sequential return delivery note number (RDN-2025-001, RDN-2025-002, ...)"""
+    try:
+        current_year = datetime.now().year
+        prefix = f"RDN-{current_year}-"
+
+        # Get the last return note for current year
+        last_note = ReturnDeliveryNote.query.filter(
+            ReturnDeliveryNote.return_note_number.like(f'{prefix}%')
+        ).order_by(ReturnDeliveryNote.return_note_id.desc()).first()
+
+        if last_note and last_note.return_note_number:
+            last_number = int(last_note.return_note_number.split('-')[-1])
+            new_number = last_number + 1
+        else:
+            new_number = 1
+
+        return f"{prefix}{new_number:03d}"
+
+    except Exception:
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        return f"RDN-{timestamp}"
+
+
+def create_return_delivery_note():
+    """Create a new return delivery note (RDN)"""
+    try:
+        data = request.get_json()
+        current_user_email = g.user.get('email', 'system')
+        current_user_id = g.user.get('user_id')
+
+        # Get user's full name for prepared_by field
+        prepared_by_name = current_user_email
+        returned_by_name = current_user_email
+        if current_user_id:
+            user = User.query.get(current_user_id)
+            if user and user.full_name:
+                prepared_by_name = user.full_name
+                returned_by_name = user.full_name
+
+        # Validate required fields
+        required_fields = ['project_id', 'return_date']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'{field} is required'}), 400
+
+        # Validate project exists
+        project = Project.query.get(data['project_id'])
+        if not project:
+            return jsonify({'error': 'Project not found'}), 404
+
+        return_note_number = generate_return_note_number()
+
+        # Parse return date
+        return_date = datetime.fromisoformat(data['return_date'].replace('Z', '+00:00')) if isinstance(data['return_date'], str) else data['return_date']
+
+        new_rdn = ReturnDeliveryNote(
+            return_note_number=return_note_number,
+            project_id=data['project_id'],
+            return_date=return_date,
+            returned_by=data.get('returned_by', returned_by_name),
+            return_to=data.get('return_to', 'M2 Store'),
+            original_delivery_note_id=data.get('original_delivery_note_id'),
+            vehicle_number=data.get('vehicle_number'),
+            driver_name=data.get('driver_name'),
+            driver_contact=data.get('driver_contact'),
+            prepared_by=prepared_by_name,
+            checked_by=data.get('checked_by'),
+            status='DRAFT',
+            notes=data.get('notes'),
+            created_by=current_user_email
+        )
+
+        db.session.add(new_rdn)
+        db.session.commit()
+
+        project_info = {
+            'project_id': project.project_id,
+            'project_name': project.project_name,
+            'project_code': project.project_code,
+            'location': project.location
+        }
+
+        return jsonify({
+            'message': 'Return delivery note created successfully',
+            'return_delivery_note': new_rdn.to_dict(),
+            'project_details': project_info
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def add_item_to_return_delivery_note(return_note_id):
+    """Add an item to a return delivery note"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status != 'DRAFT':
+            return jsonify({'error': f'Cannot add items to return note with status {rdn.status}.'}), 400
+
+        data = request.get_json()
+
+        # Validate required fields
+        required_fields = ['inventory_material_id', 'quantity', 'condition']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'{field} is required'}), 400
+
+        # Validate material exists
+        material = InventoryMaterial.query.get(data['inventory_material_id'])
+        if not material:
+            return jsonify({'error': 'Material not found'}), 404
+
+        # Validate condition
+        if data['condition'] not in MATERIAL_CONDITIONS:
+            return jsonify({'error': f'Invalid condition. Must be one of: {", ".join(MATERIAL_CONDITIONS)}'}), 400
+
+        # Check if material already in this RDN
+        existing_item = ReturnDeliveryNoteItem.query.filter_by(
+            return_note_id=return_note_id,
+            inventory_material_id=data['inventory_material_id'],
+            original_delivery_note_item_id=data.get('original_delivery_note_item_id')
+        ).first()
+
+        if existing_item:
+            return jsonify({'error': 'This material is already in the return delivery note.'}), 400
+
+        # Validate quantity if original delivery note item is provided
+        if data.get('original_delivery_note_item_id'):
+            dn_item = DeliveryNoteItem.query.get(data['original_delivery_note_item_id'])
+            if dn_item:
+                # Calculate already returned quantity
+                existing_returns = MaterialReturn.query.filter_by(
+                    delivery_note_item_id=data['original_delivery_note_item_id']
+                ).all()
+                total_returned = sum(r.quantity for r in existing_returns)
+                returnable_qty = dn_item.quantity - total_returned
+
+                if data['quantity'] > returnable_qty:
+                    return jsonify({
+                        'error': f'Cannot return more than available. Returnable quantity: {returnable_qty} {material.unit}'
+                    }), 400
+
+        new_item = ReturnDeliveryNoteItem(
+            return_note_id=return_note_id,
+            inventory_material_id=data['inventory_material_id'],
+            original_delivery_note_item_id=data.get('original_delivery_note_item_id'),
+            material_return_id=data.get('material_return_id'),
+            quantity=data['quantity'],
+            condition=data['condition'],
+            return_reason=data.get('return_reason'),
+            notes=data.get('notes')
+        )
+
+        db.session.add(new_item)
+
+        # Update RDN last modified
+        rdn.last_modified_at = datetime.utcnow()
+        rdn.last_modified_by = g.user.get('email', 'system')
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Item added to return delivery note',
+            'item': new_item.to_dict(),
+            'return_delivery_note': rdn.to_dict()
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_return_delivery_notes_for_se():
+    """Get return delivery notes for the logged-in Site Engineer's projects"""
+    try:
+        current_user_id = g.user.get('user_id')
+
+        if not current_user_id:
+            return jsonify({'error': 'User not authenticated'}), 401
+
+        # Get projects assigned to this SE
+        assigned_projects = Project.query.filter(
+            Project.site_supervisor_id == current_user_id,
+            Project.is_deleted == False
+        ).all()
+
+        project_ids = [p.project_id for p in assigned_projects]
+
+        if not project_ids:
+            return jsonify({
+                'return_delivery_notes': [],
+                'message': 'No assigned projects found'
+            }), 200
+
+        # Get all RDNs for these projects
+        rdns = ReturnDeliveryNote.query.filter(
+            ReturnDeliveryNote.project_id.in_(project_ids)
+        ).order_by(ReturnDeliveryNote.created_at.desc()).all()
+
+        # Enrich with project details
+        project_map = {p.project_id: {
+            'project_name': p.project_name,
+            'project_code': p.project_code,
+            'location': p.location
+        } for p in assigned_projects}
+
+        result = []
+        for rdn in rdns:
+            rdn_data = rdn.to_dict()
+            rdn_data['project_name'] = project_map.get(rdn.project_id, {}).get('project_name', f'Project #{rdn.project_id}')
+            rdn_data['project_code'] = project_map.get(rdn.project_id, {}).get('project_code', '')
+            rdn_data['project_location'] = project_map.get(rdn.project_id, {}).get('location', '')
+            result.append(rdn_data)
+
+        return jsonify({
+            'return_delivery_notes': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_return_delivery_note_by_id(return_note_id):
+    """Get a specific return delivery note by ID with full details"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        rdn_data = rdn.to_dict()
+
+        # Enrich with project details
+        project = Project.query.get(rdn.project_id)
+        if project:
+            rdn_data['project_details'] = {
+                'project_id': project.project_id,
+                'project_name': project.project_name,
+                'project_code': project.project_code,
+                'location': project.location
+            }
+
+        return jsonify({'return_delivery_note': rdn_data}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def issue_return_delivery_note(return_note_id):
+    """Issue a return delivery note - finalizes it and marks as ISSUED"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status != 'DRAFT':
+            return jsonify({'error': f'Cannot issue return note with status {rdn.status}.'}), 400
+
+        if not rdn.items or len(rdn.items) == 0:
+            return jsonify({'error': 'Cannot issue return note with no items'}), 400
+
+        if not rdn.driver_name:
+            return jsonify({'error': 'Driver name is required to issue return delivery note'}), 400
+
+        current_user = g.user.get('email', 'system')
+
+        # Update RDN status
+        rdn.status = 'ISSUED'
+        rdn.issued_at = datetime.utcnow()
+        rdn.issued_by = current_user
+        rdn.last_modified_at = datetime.utcnow()
+        rdn.last_modified_by = current_user
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Return delivery note issued successfully',
+            'return_delivery_note': rdn.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500

@@ -110,8 +110,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     materials: Array<{ material_name: string; quantity: number; unit: string }>;
   } | null>(null);
 
-  // LPO PDF state
-  const [includeLpoPdf, setIncludeLpoPdf] = useState(true);
+  // LPO PDF state - Always enabled (mandatory)
+  const includeLpoPdf = true; // LPO is now mandatory
   const [lpoData, setLpoData] = useState<LPOData | null>(null);
   const [isLoadingLpo, setIsLoadingLpo] = useState(false);
   const [showLpoEditor, setShowLpoEditor] = useState(false);
@@ -127,6 +127,14 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const isTechnicalDirector = user?.role?.toLowerCase().includes('technical') ||
                                user?.role?.toLowerCase().includes('director') ||
                                user?.role_name?.toLowerCase().includes('technical');
+
+  // Check if TD has already approved any PO children
+  const hasTdApprovedAnyPO = purchase.po_children && purchase.po_children.length > 0 &&
+    purchase.po_children.some(poChild =>
+      poChild.vendor_selection_status === 'approved' ||
+      poChild.status === 'vendor_approved' ||
+      poChild.status === 'purchase_completed'
+    );
 
   // Helper function to check if a material is already in an approved POChild
   const isMaterialInApprovedPOChild = (materialName: string): boolean => {
@@ -389,13 +397,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     }
   };
 
-  // Handle LPO checkbox toggle
-  const handleLpoToggle = (checked: boolean) => {
-    setIncludeLpoPdf(checked);
-    if (checked && !lpoData) {
-      loadLpoData();
-    }
-  };
+  // LPO is now mandatory, so no toggle function needed
+  // Load LPO data automatically when modal opens
 
   // Helper function to check if a product matches a material
   const isProductMatchingMaterial = (
@@ -2244,8 +2247,25 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     {(() => {
                       let vendorGrandTotal = 0;
                       let boqGrandTotal = 0;
+                      let materialsWithPricesCount = 0; // Count materials that actually contribute to vendorGrandTotal
 
-                      materialVendors.filter(m => m.selected_vendors.length > 0).forEach(material => {
+                      // Filter to only include materials that are NOT already in approved/pending PO children
+                      materialVendors.filter(m => {
+                        // Must have a vendor selected
+                        if (m.selected_vendors.length === 0) return false;
+
+                        // Exclude materials that are already in pending PO children (locked)
+                        if (isMaterialActuallyLocked(m.material_name)) return false;
+
+                        // Exclude materials in approved PO children (already processed)
+                        const isMaterialInApprovedPO = purchase.po_children?.some(poChild =>
+                          (poChild.vendor_selection_status === 'approved' || poChild.status === 'vendor_approved' || poChild.status === 'purchase_completed') &&
+                          poChild.materials?.some(pm => pm.material_name === m.material_name)
+                        ) || false;
+                        if (isMaterialInApprovedPO) return false;
+
+                        return true;
+                      }).forEach(material => {
                         const selectedVendor = material.selected_vendors[0];
 
                         // Get BOQ total
@@ -2253,9 +2273,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         const boqUnitPrice = purchaseMaterial?.unit_price || 0;
                         boqGrandTotal += boqUnitPrice * material.quantity;
 
-                        // Get vendor total
-                        if (selectedVendor.negotiated_price) {
-                          vendorGrandTotal += selectedVendor.negotiated_price * material.quantity;
+                        // Get vendor total - ONLY add if we have a valid vendor price
+                        let vendorPrice = 0;
+                        if (selectedVendor.negotiated_price && selectedVendor.negotiated_price > 0) {
+                          vendorPrice = selectedVendor.negotiated_price;
                         } else {
                           const vendorProductsList = vendorProducts.get(selectedVendor.vendor_id) || [];
                           const vendorCategory = vendors.find(v => v.vendor_id === selectedVendor.vendor_id)?.category?.toLowerCase().trim() || '';
@@ -2268,16 +2289,24 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                           if (matchingProducts.length > 0) {
                             const lowestPrice = Math.min(...matchingProducts.map(p => p.unit_price || 0).filter(p => p > 0));
                             if (lowestPrice > 0) {
-                              vendorGrandTotal += lowestPrice * material.quantity;
+                              vendorPrice = lowestPrice;
                             }
                           }
+                        }
+
+                        // Only add to vendorGrandTotal if we found a valid vendor price
+                        // Don't fall back to BOQ price for grand total calculation
+                        if (vendorPrice > 0) {
+                          vendorGrandTotal += vendorPrice * material.quantity;
+                          materialsWithPricesCount++; // Increment count
                         }
                       });
 
                       const totalDiff = vendorGrandTotal - boqGrandTotal;
                       const isOverBudget = totalDiff > 0;
 
-                      if (vendorGrandTotal > 0) {
+                      // Only show Estimated Total if there are multiple materials with vendor prices
+                      if (vendorGrandTotal > 0 && materialsWithPricesCount > 1) {
                         return (
                           <div className="mt-3 pt-3 border-t border-green-300">
                             <div className="flex items-center justify-between mb-2">
@@ -2321,56 +2350,46 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          id="include-lpo-pdf-vendor"
-                          checked={includeLpoPdf}
-                          onChange={(e) => handleLpoToggle(e.target.checked)}
-                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                        />
-                        <label htmlFor="include-lpo-pdf-vendor" className="flex items-center gap-2">
-                          <FileText className="w-5 h-5 text-blue-600" />
-                          <div>
-                            <span className="text-sm font-medium text-gray-900">Attach LPO PDF</span>
-                            <p className="text-xs text-gray-500">Generate and attach Local Purchase Order PDF</p>
-                          </div>
-                        </label>
-                      </div>
-                      {includeLpoPdf && (
-                        <div className="flex gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              if (!lpoData && !isLoadingLpo) {
-                                loadLpoData();
-                              }
-                              setShowLpoEditor(!showLpoEditor);
-                            }}
-                            className="text-xs"
-                            disabled={isLoadingLpo}
-                          >
-                            {isLoadingLpo ? (
-                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                            ) : (
-                              <Edit3 className="w-3 h-3 mr-1" />
-                            )}
-                            {showLpoEditor ? 'Hide' : 'Edit'}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={handleDownloadLpoPdf}
-                            className="text-xs"
-                            disabled={!lpoData || isLoadingLpo}
-                          >
-                            <Download className="w-3 h-3 mr-1" />
-                            Preview
-                          </Button>
+                        <FileText className="w-5 h-5 text-blue-600" />
+                        <div>
+                          <span className="text-sm font-medium text-gray-900">LPO PDF (Mandatory)</span>
+                          <p className="text-xs text-gray-500">Local Purchase Order PDF will be automatically generated and attached</p>
                         </div>
-                      )}
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (!lpoData && !isLoadingLpo) {
+                              loadLpoData();
+                            }
+                            setShowLpoEditor(!showLpoEditor);
+                          }}
+                          className="text-xs"
+                          disabled={isLoadingLpo || hasTdApprovedAnyPO}
+                          title={hasTdApprovedAnyPO ? "Cannot edit - TD has already approved this purchase order" : "Edit LPO details"}
+                        >
+                          {isLoadingLpo ? (
+                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          ) : (
+                            <Edit3 className="w-3 h-3 mr-1" />
+                          )}
+                          {showLpoEditor ? 'Hide' : 'Edit'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDownloadLpoPdf}
+                          className="text-xs"
+                          disabled={!lpoData || isLoadingLpo}
+                        >
+                          <Download className="w-3 h-3 mr-1" />
+                          Preview
+                        </Button>
+                      </div>
                     </div>
                     {isLoadingLpo && (
                       <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
@@ -2380,7 +2399,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     )}
 
                     {/* LPO Editor Section */}
-                    {includeLpoPdf && showLpoEditor && !lpoData && !isLoadingLpo && (
+                    {showLpoEditor && !lpoData && !isLoadingLpo && (
                       <div className="mt-4 p-4 border-t border-blue-200 text-center">
                         <p className="text-sm text-gray-500">Failed to load LPO data. Please try again.</p>
                         <Button
@@ -2394,7 +2413,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         </Button>
                       </div>
                     )}
-                    {includeLpoPdf && lpoData && showLpoEditor && (
+                    {lpoData && showLpoEditor && (
                       <div className="mt-4 space-y-4 border-t border-blue-200 pt-4">
                         <div className="flex items-center justify-between">
                           <div className="text-sm font-medium text-gray-700">Edit LPO Details</div>
