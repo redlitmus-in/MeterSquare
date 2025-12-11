@@ -214,11 +214,11 @@ export const hasRouteAccess = (userRole: string | UserRole, routePath: string): 
   const roleAccess: Record<string, string[]> = {
     'admin': ['/'], // Admin has access to all routes
     'siteEngineer': ['/projects', '/materials', '/tasks', '/reports'],
-    'buyer': ['/materials', '/projects', '/purchase-orders', '/store'], // Buyer access
+    'buyer': ['/materials', '/projects', '/purchase-orders', '/store', '/vendors', '/change-requests', '/extra-material'], // Buyer access - includes vendor and CR pages
     [UserRole.SITE_SUPERVISOR]: ['/workflows/material-dispatch-site'],
     [UserRole.MEP_SUPERVISOR]: ['/workflows/material-dispatch-site'],
     [UserRole.MEP]: ['/procurement', '/workflows', '/projects', '/team', '/boq'],  // Same access as PM
-    [UserRole.PROCUREMENT]: ['/procurement', '/vendor'],
+    [UserRole.PROCUREMENT]: ['/procurement', '/vendor', '/purchase-orders', '/vendors', '/change-requests'],
     [UserRole.PROJECT_MANAGER]: ['/procurement', '/workflows', '/projects', '/team'],
     [UserRole.PRODUCTION_MANAGER]: ['/production', '/materials', '/projects', '/workflows', '/m2-store'],
     [UserRole.DESIGN]: ['/projects', '/workflows'],

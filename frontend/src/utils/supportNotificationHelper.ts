@@ -2,6 +2,7 @@
  * Desktop Notification Helper
  * Handles browser desktop notifications with click-to-navigate functionality
  * Also stores notifications for later viewing in notification panel
+ * Supports role-based notification filtering
  */
 
 // ============================================
@@ -18,6 +19,11 @@ export interface StoredNotification {
   timestamp: string;
   isRead: boolean;
   url?: string;
+  // Role-based targeting
+  targetRole?: string; // Only show to this role ('all' for everyone)
+  targetEmail?: string; // Only show to this specific email (ticket reporter)
+  reporterRole?: string; // The role of the ticket reporter
+  reporterEmail?: string; // The email of the ticket reporter
 }
 
 const NOTIFICATIONS_STORAGE_KEY = 'support_stored_notifications';
@@ -48,7 +54,9 @@ const saveStoredNotifications = (notifications: StoredNotification[]): void => {
 };
 
 // Add a new notification to storage
-export const addStoredNotification = (notification: Omit<StoredNotification, 'id' | 'timestamp' | 'isRead'>): StoredNotification => {
+export const addStoredNotification = (
+  notification: Omit<StoredNotification, 'id' | 'timestamp' | 'isRead'>
+): StoredNotification => {
   const newNotification: StoredNotification = {
     ...notification,
     id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -201,12 +209,43 @@ export const showDesktopNotification = (options: NotificationOptions): Notificat
   }
 };
 
-// Notification templates for different ticket events
+// ============================================
+// NOTIFICATION TEMPLATES WITH ROLE TARGETING
+// ============================================
+
+// Helper to build support page URL based on role
+const buildSupportPageUrl = (reporterRole: string): string => {
+  // Map role names to URL paths
+  const rolePathMap: Record<string, string> = {
+    'estimator': '/estimator/support',
+    'project-manager': '/project-manager/support',
+    'project_manager': '/project-manager/support',
+    'site-engineer': '/site-engineer/support',
+    'site_engineer': '/site-engineer/support',
+    'buyer': '/buyer/support',
+    'technical-director': '/technical-director/support',
+    'technical_director': '/technical-director/support',
+    'admin': '/admin/support',
+    'site-supervisor': '/site-supervisor/support',
+    'site_supervisor': '/site-supervisor/support',
+    'mep-supervisor': '/mep-supervisor/support',
+    'mep_supervisor': '/mep-supervisor/support',
+    'accounts': '/accounts/support',
+    'production-manager': '/production-manager/support',
+    'production_manager': '/production-manager/support',
+  };
+
+  const normalizedRole = reporterRole.toLowerCase().replace(/\s+/g, '-');
+  return rolePathMap[normalizedRole] || `/${normalizedRole}/support`;
+};
+
+// Notification for status changes - targets the ticket reporter only
 export const notifyTicketStatusChange = (
   ticketNumber: string,
   ticketTitle: string,
   newStatus: string,
-  targetPage: 'support' | 'admin' = 'support',
+  reporterRole: string,
+  reporterEmail: string,
   ticketId?: number
 ): Notification | null => {
   const statusMessages: Record<string, string> = {
@@ -221,13 +260,10 @@ export const notifyTicketStatusChange = (
 
   const message = statusMessages[newStatus] || `status changed to ${newStatus}`;
 
-  // Get proper URL based on current context
-  const currentPath = window.location.pathname;
-  const roleMatch = currentPath.match(/^\/([^/]+)\//);
-  const role = roleMatch ? roleMatch[1] : 'estimator';
-  const url = targetPage === 'admin' ? '/support-management' : `/${role}/support`;
+  // URL for the reporter's support page
+  const url = buildSupportPageUrl(reporterRole);
 
-  // Store notification for panel
+  // Store notification - targeted to the reporter only
   addStoredNotification({
     title: `Ticket ${ticketNumber}`,
     body: `"${ticketTitle}" ${message}`,
@@ -235,6 +271,10 @@ export const notifyTicketStatusChange = (
     ticketNumber,
     ticketId,
     url,
+    targetRole: reporterRole,
+    targetEmail: reporterEmail,
+    reporterRole,
+    reporterEmail,
   });
 
   return showDesktopNotification({
@@ -249,23 +289,28 @@ export const notifyTicketStatusChange = (
   });
 };
 
-// Notify when a new ticket is submitted (for admin page)
+// Notify when a new ticket is submitted (for admin/support-management page only)
 export const notifyNewTicket = (
   ticketNumber: string,
   ticketTitle: string,
   reporterName: string,
+  reporterRole: string,
+  reporterEmail: string,
   ticketId?: number
 ): Notification | null => {
   const url = '/support-management';
 
-  // Store notification for panel
+  // Store notification - targeted to admin/support-management only
   addStoredNotification({
     title: 'New Support Ticket',
-    body: `${reporterName} submitted: "${ticketTitle}"`,
+    body: `${reporterName} (${reporterRole}) submitted: "${ticketTitle}"`,
     type: 'new_ticket',
     ticketNumber,
     ticketId,
     url,
+    targetRole: 'admin', // Only for admin page
+    reporterRole,
+    reporterEmail,
   });
 
   return showDesktopNotification({
@@ -280,11 +325,13 @@ export const notifyNewTicket = (
   });
 };
 
-// Notify when admin responds to a ticket (for public page)
+// Notify when admin responds to a ticket (for the ticket reporter only)
 export const notifyAdminResponse = (
   ticketNumber: string,
   ticketTitle: string,
-  responseType: 'approved' | 'rejected' | 'resolved' | 'response',
+  responseType: 'approved' | 'rejected' | 'resolved' | 'response' | 'in_progress' | 'comment',
+  reporterRole: string,
+  reporterEmail: string,
   ticketId?: number
 ): Notification | null => {
   const messages: Record<string, string> = {
@@ -292,15 +339,14 @@ export const notifyAdminResponse = (
     rejected: 'Your ticket has been rejected',
     resolved: 'Your ticket has been resolved - please verify',
     response: 'Development team responded to your ticket',
+    in_progress: 'Your ticket is now in progress',
+    comment: 'Development team added a comment',
   };
 
-  // Get current path to determine the role for navigation
-  const currentPath = window.location.pathname;
-  const roleMatch = currentPath.match(/^\/([^/]+)\//);
-  const role = roleMatch ? roleMatch[1] : 'estimator';
-  const url = `/${role}/support`;
+  // URL for the reporter's support page
+  const url = buildSupportPageUrl(reporterRole);
 
-  // Store notification for panel
+  // Store notification - targeted to the reporter only
   addStoredNotification({
     title: `Ticket ${ticketNumber} Update`,
     body: messages[responseType] || `Update on "${ticketTitle}"`,
@@ -308,6 +354,10 @@ export const notifyAdminResponse = (
     ticketNumber,
     ticketId,
     url,
+    targetRole: reporterRole,
+    targetEmail: reporterEmail,
+    reporterRole,
+    reporterEmail,
   });
 
   return showDesktopNotification({
@@ -328,44 +378,80 @@ export const notifyNewComment = (
   ticketTitle: string,
   senderName: string,
   senderType: 'client' | 'dev_team',
-  targetPage: 'support' | 'admin' = 'support',
+  reporterRole: string,
+  reporterEmail: string,
   ticketId?: number
 ): Notification | null => {
-  // Get proper URL based on current context
-  const currentPath = window.location.pathname;
-  const roleMatch = currentPath.match(/^\/([^/]+)\//);
-  const role = roleMatch ? roleMatch[1] : 'estimator';
-  const url = targetPage === 'admin' ? '/support-management' : `/${role}/support`;
+  // If client sends comment, notify admin
+  // If dev_team sends comment, notify the ticket reporter
+  const isFromClient = senderType === 'client';
 
-  const title = senderType === 'client' ? 'New Comment from Client' : 'New Comment from Dev Team';
+  const title = isFromClient ? 'New Comment from Client' : 'New Comment from Dev Team';
   const body = `${senderName} commented on "${ticketTitle}"`;
 
-  // Store notification for panel
-  addStoredNotification({
-    title,
-    body,
-    type: 'new_comment',
-    ticketNumber,
-    ticketId,
-    url,
-  });
+  if (isFromClient) {
+    // Client sent comment - notify admin/support-management
+    const url = '/support-management';
 
-  return showDesktopNotification({
-    title,
-    body,
-    tag: `comment-${ticketNumber}-${Date.now()}`,
-    requireInteraction: false,
-    data: {
-      url,
+    addStoredNotification({
+      title,
+      body,
+      type: 'new_comment',
       ticketNumber,
-    },
-  });
+      ticketId,
+      url,
+      targetRole: 'admin', // Only for admin page
+      reporterRole,
+      reporterEmail,
+    });
+
+    return showDesktopNotification({
+      title,
+      body,
+      tag: `comment-${ticketNumber}-${Date.now()}`,
+      requireInteraction: false,
+      data: {
+        url,
+        ticketNumber,
+      },
+    });
+  } else {
+    // Dev team sent comment - notify the ticket reporter only
+    const url = buildSupportPageUrl(reporterRole);
+
+    addStoredNotification({
+      title,
+      body,
+      type: 'new_comment',
+      ticketNumber,
+      ticketId,
+      url,
+      targetRole: reporterRole,
+      targetEmail: reporterEmail,
+      reporterRole,
+      reporterEmail,
+    });
+
+    return showDesktopNotification({
+      title,
+      body,
+      tag: `comment-${ticketNumber}-${Date.now()}`,
+      requireInteraction: false,
+      data: {
+        url,
+        ticketNumber,
+      },
+    });
+  }
 };
 
-// Store for tracking ticket states (used for change detection)
-// Uses sessionStorage to persist across page refreshes within the same session
+// ============================================
+// TICKET STATE TRACKING (for change detection)
+// ============================================
+
 const STORAGE_KEY = 'support_ticket_states';
 const NOTIFIED_KEY = 'support_notified_changes';
+const COMMENT_COUNT_KEY = 'support_comment_counts';
 
 // Get ticket states from sessionStorage
 const getTicketStates = (): Map<number, string> => {
@@ -386,6 +472,28 @@ const saveTicketStates = (states: Map<number, string>): void => {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(states.entries())));
   } catch (e) {
     console.error('Error saving ticket states:', e);
+  }
+};
+
+// Get comment counts for tickets
+const getCommentCounts = (): Map<number, number> => {
+  try {
+    const stored = sessionStorage.getItem(COMMENT_COUNT_KEY);
+    if (stored) {
+      return new Map(JSON.parse(stored));
+    }
+  } catch (e) {
+    console.error('Error reading comment counts:', e);
+  }
+  return new Map();
+};
+
+// Save comment counts
+const saveCommentCounts = (counts: Map<number, number>): void => {
+  try {
+    sessionStorage.setItem(COMMENT_COUNT_KEY, JSON.stringify(Array.from(counts.entries())));
+  } catch (e) {
+    console.error('Error saving comment counts:', e);
   }
 };
 
@@ -462,22 +570,53 @@ export const hasTicketStatusChanged = (ticketId: number, currentStatus: string):
   return false;
 };
 
+// Check if ticket has new comments
+export const hasNewComments = (ticketId: number, currentCommentCount: number): boolean => {
+  const counts = getCommentCounts();
+  const previousCount = counts.get(ticketId);
+
+  if (previousCount === undefined) {
+    // First time seeing this ticket, save count but don't trigger notification
+    counts.set(ticketId, currentCommentCount);
+    saveCommentCounts(counts);
+    return false;
+  }
+
+  if (currentCommentCount > previousCount) {
+    // New comments added
+    counts.set(ticketId, currentCommentCount);
+    saveCommentCounts(counts);
+    return true;
+  }
+
+  return false;
+};
+
 // Clear ticket state store
 export const clearTicketStateStore = (): void => {
   sessionStorage.removeItem(STORAGE_KEY);
   sessionStorage.removeItem(NOTIFIED_KEY);
+  sessionStorage.removeItem(COMMENT_COUNT_KEY);
 };
 
 // Initialize stored tickets (call on page load)
-export const initializeTicketStates = (tickets: Array<{ ticket_id: number; status: string }>): void => {
+export const initializeTicketStates = (tickets: Array<{ ticket_id: number; status: string; comments?: any[] }>): void => {
   const states = getTicketStates();
+  const counts = getCommentCounts();
+
   tickets.forEach(ticket => {
     // Only set if not already tracked (preserve existing states)
     if (!states.has(ticket.ticket_id)) {
       states.set(ticket.ticket_id, ticket.status);
     }
+    // Track comment counts
+    if (!counts.has(ticket.ticket_id)) {
+      counts.set(ticket.ticket_id, ticket.comments?.length || 0);
+    }
   });
+
   saveTicketStates(states);
+  saveCommentCounts(counts);
 };
 
 // ============================================
@@ -486,6 +625,7 @@ export const initializeTicketStates = (tickets: Array<{ ticket_id: number; statu
 
 const ADMIN_KNOWN_TICKETS_KEY = 'support_admin_known_tickets';
 const ADMIN_NOTIFIED_KEY = 'support_admin_notified_tickets';
+const ADMIN_COMMENT_COUNTS_KEY = 'support_admin_comment_counts';
 
 // Get known ticket IDs from sessionStorage (for admin page)
 const getKnownTicketIds = (): Set<number> => {
@@ -506,6 +646,28 @@ const saveKnownTicketIds = (ids: Set<number>): void => {
     sessionStorage.setItem(ADMIN_KNOWN_TICKETS_KEY, JSON.stringify(Array.from(ids)));
   } catch (e) {
     console.error('Error saving known tickets:', e);
+  }
+};
+
+// Get admin comment counts
+const getAdminCommentCounts = (): Map<number, number> => {
+  try {
+    const stored = sessionStorage.getItem(ADMIN_COMMENT_COUNTS_KEY);
+    if (stored) {
+      return new Map(JSON.parse(stored));
+    }
+  } catch (e) {
+    console.error('Error reading admin comment counts:', e);
+  }
+  return new Map();
+};
+
+// Save admin comment counts
+const saveAdminCommentCounts = (counts: Map<number, number>): void => {
+  try {
+    sessionStorage.setItem(ADMIN_COMMENT_COUNTS_KEY, JSON.stringify(Array.from(counts.entries())));
+  } catch (e) {
+    console.error('Error saving admin comment counts:', e);
   }
 };
 
@@ -539,10 +701,19 @@ const saveAdminNotifiedTicket = (ticketId: number): void => {
 };
 
 // Initialize known tickets for admin page
-export const initializeKnownTickets = (ticketIds: number[]): void => {
+export const initializeKnownTickets = (tickets: Array<{ ticket_id: number; comments?: any[] }>): void => {
   const known = getKnownTicketIds();
-  ticketIds.forEach(id => known.add(id));
+  const counts = getAdminCommentCounts();
+
+  tickets.forEach(ticket => {
+    known.add(ticket.ticket_id);
+    if (!counts.has(ticket.ticket_id)) {
+      counts.set(ticket.ticket_id, ticket.comments?.length || 0);
+    }
+  });
+
   saveKnownTicketIds(known);
+  saveAdminCommentCounts(counts);
 };
 
 // Check if a ticket is new (not seen before) and should trigger notification
@@ -568,8 +739,31 @@ export const isNewTicketForAdmin = (ticketId: number): boolean => {
   return false;
 };
 
+// Check if ticket has new comments for admin
+export const hasNewCommentsForAdmin = (ticketId: number, currentCommentCount: number): boolean => {
+  const counts = getAdminCommentCounts();
+  const previousCount = counts.get(ticketId);
+
+  if (previousCount === undefined) {
+    // First time seeing this ticket, save count but don't trigger notification
+    counts.set(ticketId, currentCommentCount);
+    saveAdminCommentCounts(counts);
+    return false;
+  }
+
+  if (currentCommentCount > previousCount) {
+    // New comments added
+    counts.set(ticketId, currentCommentCount);
+    saveAdminCommentCounts(counts);
+    return true;
+  }
+
+  return false;
+};
+
 // Clear admin notification state
 export const clearAdminNotificationState = (): void => {
   sessionStorage.removeItem(ADMIN_KNOWN_TICKETS_KEY);
   sessionStorage.removeItem(ADMIN_NOTIFIED_KEY);
+  sessionStorage.removeItem(ADMIN_COMMENT_COUNTS_KEY);
 };

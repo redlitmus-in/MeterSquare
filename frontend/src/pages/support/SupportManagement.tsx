@@ -52,7 +52,8 @@ import {
   notifyNewTicket,
   initializeKnownTickets,
   isNewTicketForAdmin,
-  notifyNewComment
+  notifyNewComment,
+  notifyAdminResponse
 } from '@/utils/supportNotificationHelper';
 import NotificationPanel from '@/components/support/NotificationPanel';
 
@@ -251,11 +252,21 @@ const SupportManagement: React.FC = () => {
 
   const handleApprove = async () => {
     if (!actionModal.ticket) return;
+    const ticket = actionModal.ticket;
     try {
       setIsProcessing(true);
-      const response = await supportApi.approveTicket(actionModal.ticket.ticket_id, actionResponse);
+      const response = await supportApi.approveTicket(ticket.ticket_id, actionResponse);
       if (response.success) {
         showSuccess('Ticket approved successfully');
+        // Notify the ticket reporter
+        notifyAdminResponse(
+          ticket.ticket_number,
+          ticket.title,
+          'approved',
+          ticket.reporter_role || 'estimator',
+          ticket.reporter_email || '',
+          ticket.ticket_id
+        );
         clearModalState();
         loadTickets();
       }
@@ -271,15 +282,25 @@ const SupportManagement: React.FC = () => {
       showError('Please provide a rejection reason');
       return;
     }
+    const ticket = actionModal.ticket;
     try {
       setIsProcessing(true);
       const response = await supportApi.rejectTicket(
-        actionModal.ticket.ticket_id,
+        ticket.ticket_id,
         rejectionReason,
         actionResponse
       );
       if (response.success) {
         showSuccess('Ticket rejected');
+        // Notify the ticket reporter
+        notifyAdminResponse(
+          ticket.ticket_number,
+          ticket.title,
+          'rejected',
+          ticket.reporter_role || 'estimator',
+          ticket.reporter_email || '',
+          ticket.ticket_id
+        );
         clearModalState();
         loadTickets();
       }
@@ -292,6 +313,7 @@ const SupportManagement: React.FC = () => {
 
   const handleResolve = async () => {
     if (!actionModal.ticket) return;
+    const ticket = actionModal.ticket;
 
     // Validate resolution notes (mandatory)
     if (!resolutionNotes.trim()) {
@@ -301,9 +323,18 @@ const SupportManagement: React.FC = () => {
 
     try {
       setIsProcessing(true);
-      const response = await supportApi.resolveTicket(actionModal.ticket.ticket_id, 'Dev Team', resolutionNotes, selectedFiles);
+      const response = await supportApi.resolveTicket(ticket.ticket_id, 'Dev Team', resolutionNotes, selectedFiles);
       if (response.success) {
         showSuccess('Ticket marked as resolved');
+        // Notify the ticket reporter
+        notifyAdminResponse(
+          ticket.ticket_number,
+          ticket.title,
+          'resolved',
+          ticket.reporter_role || 'estimator',
+          ticket.reporter_email || '',
+          ticket.ticket_id
+        );
         clearModalState();
         loadTickets();
       }
@@ -316,15 +347,26 @@ const SupportManagement: React.FC = () => {
 
   const handleStatusChange = async () => {
     if (!actionModal.ticket || !newStatus) return;
+    const ticket = actionModal.ticket;
     try {
       setIsProcessing(true);
       const response = await supportApi.updateTicketStatus(
-        actionModal.ticket.ticket_id,
+        ticket.ticket_id,
         newStatus,
         actionResponse
       );
       if (response.success) {
         showSuccess('Ticket status updated');
+        // Notify the ticket reporter about status change
+        const responseType = newStatus === 'in_progress' ? 'in_progress' : 'response';
+        notifyAdminResponse(
+          ticket.ticket_number,
+          ticket.title,
+          responseType,
+          ticket.reporter_role || 'estimator',
+          ticket.reporter_email || '',
+          ticket.ticket_id
+        );
         clearModalState();
         loadTickets();
       }
@@ -343,6 +385,9 @@ const SupportManagement: React.FC = () => {
       return;
     }
 
+    // Find the ticket to get reporter info for notification
+    const ticket = tickets.find(t => t.ticket_id === ticketId);
+
     try {
       setIsSendingComment(prev => ({ ...prev, [ticketId]: true }));
       const response = await supportApi.addComment(ticketId, {
@@ -354,6 +399,20 @@ const SupportManagement: React.FC = () => {
       if (response.success) {
         showSuccess('Comment sent successfully');
         setCommentText(prev => ({ ...prev, [ticketId]: '' }));
+
+        // Send notification to the ticket reporter (dev team sent comment)
+        if (ticket) {
+          notifyNewComment(
+            ticket.ticket_number,
+            ticket.title,
+            'Dev Team',
+            'dev_team',
+            ticket.reporter_role || 'estimator',
+            ticket.reporter_email || '',
+            ticketId
+          );
+        }
+
         loadTickets(false); // Reload to get updated comments
       }
     } catch (error: any) {
@@ -366,16 +425,26 @@ const SupportManagement: React.FC = () => {
   // Close ticket directly (if client forgets)
   const handleCloseTicket = async () => {
     if (!closeTicketModal.ticket) return;
+    const ticket = closeTicketModal.ticket;
 
     try {
       setIsProcessing(true);
       const response = await supportApi.adminCloseTicket(
-        closeTicketModal.ticket.ticket_id,
+        ticket.ticket_id,
         'Dev Team',
         closeTicketNotes
       );
       if (response.success) {
         showSuccess('Ticket closed successfully');
+        // Notify the ticket reporter that ticket was closed
+        notifyAdminResponse(
+          ticket.ticket_number,
+          ticket.title,
+          'response', // Use 'response' for closed status notification
+          ticket.reporter_role || 'estimator',
+          ticket.reporter_email || '',
+          ticket.ticket_id
+        );
         setCloseTicketModal({ ticket: null });
         setCloseTicketNotes('');
         loadTickets();
@@ -434,36 +503,8 @@ const SupportManagement: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Notification Permission Button */}
-            {notificationPermission !== 'unsupported' && (
-              <button
-                onClick={handleRequestNotificationPermission}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                  notificationPermission === 'granted'
-                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-                title={
-                  notificationPermission === 'granted'
-                    ? 'Desktop notifications enabled'
-                    : 'Enable desktop notifications'
-                }
-              >
-                {notificationPermission === 'granted' ? (
-                  <Bell className="w-5 h-5" />
-                ) : (
-                  <BellOff className="w-5 h-5" />
-                )}
-                <span className="hidden sm:inline text-sm">
-                  {notificationPermission === 'granted' ? 'Notifications On' : 'Enable Notifications'}
-                </span>
-              </button>
-            )}
-
-            {/* Notification Panel */}
-            <NotificationPanel />
-          </div>
+          {/* Notification Panel - includes desktop notification toggle */}
+          <NotificationPanel currentUserRole="admin" />
         </div>
       </div>
 
@@ -736,8 +777,8 @@ const SupportManagement: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Comments/Communication Section - Show for active tickets */}
-                        {['approved', 'in_progress', 'resolved'].includes(ticket.status) && (
+                        {/* Comments/Communication Section - Show for active and closed tickets */}
+                        {['approved', 'in_progress', 'resolved', 'closed'].includes(ticket.status) && (
                           <div className="mb-6">
                             <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
                               <MessageCircle className="w-4 h-4" />
@@ -779,31 +820,37 @@ const SupportManagement: React.FC = () => {
                               </div>
                             )}
 
-                            {/* Add New Comment */}
-                            <div className="flex gap-2">
-                              <textarea
-                                value={commentText[ticket.ticket_id] || ''}
-                                onChange={(e) => setCommentText(prev => ({ ...prev, [ticket.ticket_id]: e.target.value }))}
-                                placeholder="Add a comment or update for the client..."
-                                rows={2}
-                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none text-sm"
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSendComment(ticket.ticket_id);
-                                }}
-                                disabled={isSendingComment[ticket.ticket_id] || !commentText[ticket.ticket_id]?.trim()}
-                                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end"
-                              >
-                                {isSendingComment[ticket.ticket_id] ? (
-                                  <RefreshCw className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Send className="w-4 h-4" />
-                                )}
-                              </button>
-                            </div>
+                            {/* Add New Comment - only for non-closed tickets */}
+                            {ticket.status !== 'closed' ? (
+                              <div className="flex gap-2">
+                                <textarea
+                                  value={commentText[ticket.ticket_id] || ''}
+                                  onChange={(e) => setCommentText(prev => ({ ...prev, [ticket.ticket_id]: e.target.value }))}
+                                  placeholder="Add a comment or update for the client..."
+                                  rows={2}
+                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none text-sm"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSendComment(ticket.ticket_id);
+                                  }}
+                                  disabled={isSendingComment[ticket.ticket_id] || !commentText[ticket.ticket_id]?.trim()}
+                                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end"
+                                >
+                                  {isSendingComment[ticket.ticket_id] ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Send className="w-4 h-4" />
+                                  )}
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="text-sm text-gray-500 italic">
+                                This ticket is closed. Comments are read-only.
+                              </p>
+                            )}
                           </div>
                         )}
 

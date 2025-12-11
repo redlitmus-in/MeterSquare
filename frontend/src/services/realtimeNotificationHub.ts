@@ -200,7 +200,10 @@ class RealtimeNotificationHub {
       const roleMatches = targetRole === currentRole ||
         (targetRole === 'technicaldirector' && (currentRole === 'technicaldirector' || currentRole === 'td')) ||
         (targetRole === 'projectmanager' && (currentRole === 'projectmanager' || currentRole === 'pm')) ||
-        (targetRole === 'siteengineer' && (currentRole === 'siteengineer' || currentRole === 'se'));
+        (targetRole === 'siteengineer' && (currentRole === 'siteengineer' || currentRole === 'se')) ||
+        (targetRole === 'buyer' && (currentRole === 'buyer' || currentRole === 'procurement')) ||
+        (targetRole === 'procurement' && (currentRole === 'buyer' || currentRole === 'procurement')) ||
+        (targetRole === 'estimator' && (currentRole === 'estimator' || currentRole === 'estimation'));
 
       if (!roleMatches) {
         return;

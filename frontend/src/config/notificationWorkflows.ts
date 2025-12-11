@@ -260,17 +260,69 @@ export const NOTIFICATION_WORKFLOWS: NotificationWorkflow[] = [
     metadata: { priority: 'medium', category: 'vendor' }
   },
 
+  // 18b. TD rejects vendor selection for CR
+  {
+    id: 'td_reject_vendor_cr',
+    name: 'Vendor Selection Rejected',
+    triggerEvent: 'vendor.cr_rejected',
+    senderRole: 'technical-director',
+    recipientRole: 'buyer',
+    notificationType: 'error',
+    redirectPath: '/purchase-orders',
+    redirectTab: 'rejected',
+    metadata: { priority: 'high', category: 'vendor' }
+  },
+
+  // 18c. TD approves vendor selection for CR
+  {
+    id: 'td_approve_vendor_cr',
+    name: 'Vendor Selection Approved',
+    triggerEvent: 'vendor.cr_approved',
+    senderRole: 'technical-director',
+    recipientRole: 'buyer',
+    notificationType: 'success',
+    redirectPath: '/purchase-orders',
+    redirectTab: 'approved',
+    metadata: { priority: 'high', category: 'vendor' }
+  },
+
   // 19. Buyer selects vendor for CR
   {
     id: 'buyer_select_vendor',
     name: 'Vendor Selected for CR',
     triggerEvent: 'vendor.selected',
     senderRole: 'buyer',
-    recipientRole: 'project-manager',
-    notificationType: 'info',
-    redirectPath: '/change-requests',
-    redirectTab: 'vendor_selected',
-    metadata: { priority: 'medium', category: 'vendor' }
+    recipientRole: 'technical-director',
+    notificationType: 'approval',
+    redirectPath: '/vendor-approval',
+    redirectTab: 'pending',
+    metadata: { priority: 'urgent', category: 'vendor' }
+  },
+
+  // 19b. Purchase Request Assigned to Buyer
+  {
+    id: 'cr_assigned_to_buyer',
+    name: 'New Purchase Request Assigned',
+    triggerEvent: 'cr.assigned_to_buyer',
+    senderRole: 'project-manager',
+    recipientRole: 'buyer',
+    notificationType: 'approval',
+    redirectPath: '/purchase-orders',
+    redirectTab: 'pending',
+    metadata: { priority: 'high', category: 'change_request' }
+  },
+
+  // 19c. Purchase Request Assigned to Buyer from Estimator
+  {
+    id: 'cr_assigned_to_buyer_from_estimator',
+    name: 'New Purchase Request Assigned',
+    triggerEvent: 'cr.assigned_to_buyer_estimator',
+    senderRole: 'estimator',
+    recipientRole: 'buyer',
+    notificationType: 'approval',
+    redirectPath: '/purchase-orders',
+    redirectTab: 'pending',
+    metadata: { priority: 'high', category: 'change_request' }
   },
 
   // 20. Purchase order created
@@ -488,15 +540,27 @@ export function mapNotificationToWorkflow(
 
   // Check for Vendor workflows
   if (titleLower.includes('vendor')) {
+    // Vendor selection approved/rejected for CR (buyer receives these)
+    if (titleLower.includes('selection') && titleLower.includes('approved')) {
+      return NOTIFICATION_WORKFLOWS.find(w => w.id === 'td_approve_vendor_cr');
+    }
+    if (titleLower.includes('selection') && titleLower.includes('rejected')) {
+      return NOTIFICATION_WORKFLOWS.find(w => w.id === 'td_reject_vendor_cr');
+    }
     if (titleLower.includes('approved')) {
       return NOTIFICATION_WORKFLOWS.find(w => w.id === 'td_approve_vendor');
     }
-    if (titleLower.includes('selected')) {
+    if (titleLower.includes('selected') || titleLower.includes('requires approval')) {
       return NOTIFICATION_WORKFLOWS.find(w => w.id === 'buyer_select_vendor');
     }
     if (titleLower.includes('registration') || titleLower.includes('new vendor')) {
       return NOTIFICATION_WORKFLOWS.find(w => w.id === 'buyer_create_vendor');
     }
+  }
+
+  // Check for Purchase Request/Order workflows (buyer receives these from PM/Estimator)
+  if (titleLower.includes('purchase request') || titleLower.includes('new purchase request assigned')) {
+    return NOTIFICATION_WORKFLOWS.find(w => w.id === 'cr_assigned_to_buyer');
   }
 
   // Check for Purchase Order workflows
@@ -512,8 +576,12 @@ export function mapNotificationToWorkflow(
     }
   }
 
-  // Check for Project Assignment
+  // Check for Project/CR Assignment
   if (titleLower.includes('assigned') || messageLower.includes('assigned')) {
+    // Buyer assignment for vendor selection
+    if (messageLower.includes('vendor selection') || messageLower.includes('buyer')) {
+      return NOTIFICATION_WORKFLOWS.find(w => w.id === 'cr_assigned_to_buyer');
+    }
     if (messageLower.includes('project manager') || messageLower.includes('pm')) {
       return NOTIFICATION_WORKFLOWS.find(w => w.id === 'td_assign_pm');
     }

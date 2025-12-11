@@ -574,8 +574,16 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
-            # Determine correct route based on request_type
-            route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
+            # Determine correct route based on next_role and request_type
+            # Buyer uses 'purchase-orders' page for all CR/PO work
+            next_role_lower = (next_role or '').lower().replace(' ', '-').replace('_', '-')
+
+            if next_role_lower == 'buyer':
+                # Buyer views purchase requests on purchase-orders page
+                route = 'purchase-orders'
+            else:
+                # Other roles use extra-material or change-requests
+                route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
 
             for user_id in next_user_ids:
                 # Check for duplicate notification
@@ -583,26 +591,33 @@ class ComprehensiveNotificationService:
                     log.info(f"Skipping duplicate CR approved notification for CR {cr_id}")
                     continue
 
+                action_url = f'/{next_role_lower}/{route}?cr_id={cr_id}'
+                log.info(f"[notify_cr_approved] Creating notification for user {user_id}, action_url: {action_url}")
+
                 notification = NotificationManager.create_notification(
                     user_id=user_id,
                     type='approval',
-                    title='Materials Purchase Approved - Your Review Required',
-                    message=f'Materials purchase request for {project_name} was approved by {approver_name} ({approver_role}) and requires your review',
+                    title='New Purchase Request Assigned',
+                    message=f'Materials purchase request for {project_name} was approved by {approver_name} ({approver_role}) and assigned to you for vendor selection',
                     priority='high',
                     category='change_request',
                     action_required=True,
-                    action_url=f'/{next_role.lower().replace(" ", "-")}/{route}?cr_id={cr_id}',
-                    action_label='Review Request',
-                    metadata={'cr_id': cr_id, 'request_type': request_type},
+                    action_url=action_url,
+                    action_label='Select Vendor',
+                    metadata={'cr_id': cr_id, 'request_type': request_type, 'target_role': next_role_lower},
                     sender_id=approver_id,
-                    sender_name=approver_name
+                    sender_name=approver_name,
+                    target_role=next_role_lower
                 )
 
                 send_notification_to_user(user_id, notification.to_dict())
+                log.info(f"[notify_cr_approved] Notification sent to user {user_id}")
 
             log.info(f"Sent CR approved notification for CR {cr_id}")
         except Exception as e:
             log.error(f"Error sending CR approved notification: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
 
     @staticmethod
     def notify_cr_rejected(cr_id, project_name, rejector_id, rejector_name, rejector_role, creator_user_id, rejection_reason, request_type=None, creator_role=None):
@@ -841,11 +856,12 @@ class ComprehensiveNotificationService:
                 message=f'{td_name} approved vendor "{vendor_name}"',
                 priority='medium',
                 category='vendor',
-                action_url=f'/buyer/vendors/{vendor_id}',
+                action_url=f'/buyer/vendors?vendor_id={vendor_id}',
                 action_label='View Vendor',
                 metadata={'vendor_id': vendor_id},
                 sender_id=td_id,
-                sender_name=td_name
+                sender_name=td_name,
+                target_role='buyer'
             )
 
             send_notification_to_user(buyer_user_id, notification.to_dict())
