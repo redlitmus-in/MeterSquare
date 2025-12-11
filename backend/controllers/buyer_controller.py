@@ -4038,7 +4038,7 @@ def td_approve_vendor(cr_id):
                     message=f'TD approved vendor "{cr.selected_vendor_name}" for materials purchase: {cr.item_name or "Materials Request"}',
                     priority='high',
                     category='vendor',
-                    action_url=f'/buyer/change-requests?cr_id={cr_id}',
+                    action_url=f'/buyer/purchase-orders?cr_id={cr_id}',
                     action_label='Proceed with Purchase',
                     metadata={
                         'cr_id': str(cr_id),
@@ -4047,7 +4047,8 @@ def td_approve_vendor(cr_id):
                         'item_name': cr.item_name
                     },
                     sender_id=td_id,
-                    sender_name=td_name
+                    sender_name=td_name,
+                    target_role='buyer'
                 )
                 send_notification_to_user(cr.created_by, notification.to_dict())
         except Exception as notif_error:
@@ -4131,7 +4132,7 @@ def td_reject_vendor(cr_id):
                     priority='high',
                     category='vendor',
                     action_required=True,
-                    action_url=f'/buyer/change-requests?cr_id={cr_id}',
+                    action_url=f'/buyer/purchase-orders?cr_id={cr_id}',
                     action_label='Select New Vendor',
                     metadata={
                         'cr_id': str(cr_id),
@@ -4139,7 +4140,8 @@ def td_reject_vendor(cr_id):
                         'item_name': cr.item_name
                     },
                     sender_id=td_id,
-                    sender_name=td_name
+                    sender_name=td_name,
+                    target_role='buyer'
                 )
                 send_notification_to_user(cr.created_by, notification.to_dict())
         except Exception as notif_error:
@@ -4206,7 +4208,7 @@ def td_approve_po_child(po_child_id):
                     message=f'TD approved vendor "{po_child.vendor_name}" for {po_child.get_formatted_id()}',
                     priority='high',
                     category='vendor',
-                    action_url=f'/buyer/purchases',
+                    action_url=f'/buyer/purchase-orders?po_child_id={po_child_id}',
                     action_label='Proceed with Purchase',
                     metadata={
                         'po_child_id': str(po_child_id),
@@ -4214,7 +4216,8 @@ def td_approve_po_child(po_child_id):
                         'vendor_id': str(po_child.vendor_id) if po_child.vendor_id else None
                     },
                     sender_id=td_id,
-                    sender_name=td_name
+                    sender_name=td_name,
+                    target_role='buyer'
                 )
                 send_notification_to_user(po_child.vendor_selected_by_buyer_id, notification.to_dict())
         except Exception as notif_error:
@@ -4298,14 +4301,15 @@ def td_reject_po_child(po_child_id):
                     priority='high',
                     category='vendor',
                     action_required=True,
-                    action_url=f'/buyer/purchases',
+                    action_url=f'/buyer/purchase-orders?po_child_id={po_child_id}',
                     action_label='Select New Vendor',
                     metadata={
                         'po_child_id': str(po_child_id),
                         'rejection_reason': reason
                     },
                     sender_id=td_id,
-                    sender_name=td_name
+                    sender_name=td_name,
+                    target_role='buyer'
                 )
                 send_notification_to_user(original_buyer_id, notification.to_dict())
         except Exception as notif_error:
@@ -6524,7 +6528,7 @@ def td_approve_vendor_for_se_boq(assignment_id):
                     message=f'TD approved vendor "{assignment.selected_vendor_name}" for SE BOQ materials',
                     priority='high',
                     category='vendor',
-                    action_url=f'/buyer/se-boq-assignments/{assignment_id}',
+                    action_url=f'/buyer/purchase-orders?assignment_id={assignment_id}',
                     action_label='Proceed with Purchase',
                     metadata={
                         'assignment_id': str(assignment_id),
@@ -6532,7 +6536,8 @@ def td_approve_vendor_for_se_boq(assignment_id):
                         'boq_id': str(assignment.boq_id) if assignment.boq_id else None
                     },
                     sender_id=td_id,
-                    sender_name=td_name
+                    sender_name=td_name,
+                    target_role='buyer'
                 )
                 send_notification_to_user(assignment.assigned_to_buyer_id, buyer_notification.to_dict())
 
@@ -6687,7 +6692,7 @@ def td_reject_vendor_for_se_boq(assignment_id):
                     priority='high',
                     category='vendor',
                     action_required=True,
-                    action_url=f'/buyer/se-boq-assignments/{assignment_id}',
+                    action_url=f'/buyer/purchase-orders?assignment_id={assignment_id}',
                     action_label='Select New Vendor',
                     metadata={
                         'assignment_id': str(assignment_id),
@@ -6696,7 +6701,8 @@ def td_reject_vendor_for_se_boq(assignment_id):
                         'boq_id': str(assignment.boq_id) if assignment.boq_id else None
                     },
                     sender_id=td_id,
-                    sender_name=td_name
+                    sender_name=td_name,
+                    target_role='buyer'
                 )
                 send_notification_to_user(assignment.assigned_to_buyer_id, buyer_notification.to_dict())
 

@@ -33,8 +33,6 @@ import {
   User,
   Mail,
   Search,
-  Bell,
-  BellOff,
   MessageCircle
 } from 'lucide-react';
 import { supportApi, SupportTicket } from '@/api/support';
@@ -43,9 +41,6 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { API_BASE_URL } from '@/api/config';
 import { useAuthStore } from '@/store/authStore';
 import {
-  requestNotificationPermission,
-  getNotificationPermission,
-  isNotificationSupported,
   notifyAdminResponse,
   initializeTicketStates,
   hasTicketStatusChanged,
@@ -116,8 +111,7 @@ const PublicSupportPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const ticketsPerPage = 5;
 
-  // Notification state
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>('default');
+  // Polling state
   const [isPolling] = useState(true); // Polling is always on, could add toggle later
 
   // Comment state
@@ -143,22 +137,38 @@ const PublicSupportPage: React.FC = () => {
   // Check for ticket status changes and send notifications
   const checkForStatusChanges = useCallback((newTickets: SupportTicket[]) => {
     // Initialize ticket states (uses sessionStorage, preserves existing states)
-    initializeTicketStates(newTickets.map(t => ({ ticket_id: t.ticket_id, status: t.status })));
+    initializeTicketStates(newTickets.map(t => ({
+      ticket_id: t.ticket_id,
+      status: t.status,
+      comments: t.comments
+    })));
+
+    // Get current user info for filtering
+    const currentRole = formData.reporter_role || user?.role || user?.role_name || '';
+    const currentEmail = formData.reporter_email || user?.email || '';
 
     // Check each ticket for status changes (deduplication handled in helper via sessionStorage)
     newTickets.forEach(ticket => {
-      if (hasTicketStatusChanged(ticket.ticket_id, ticket.status)) {
+      // Only notify if this is the ticket reporter
+      const isMyTicket = ticket.reporter_email === currentEmail ||
+        ticket.reporter_role === currentRole;
+
+      if (isMyTicket && hasTicketStatusChanged(ticket.ticket_id, ticket.status)) {
         // Determine notification type based on status
-        let responseType: 'approved' | 'rejected' | 'resolved' | 'response' = 'response';
+        let responseType: 'approved' | 'rejected' | 'resolved' | 'response' | 'in_progress' | 'comment' = 'response';
         if (ticket.status === 'approved') responseType = 'approved';
         else if (ticket.status === 'rejected') responseType = 'rejected';
         else if (ticket.status === 'resolved') responseType = 'resolved';
+        else if (ticket.status === 'in_progress') responseType = 'in_progress';
 
-        // Send desktop notification
+        // Send desktop notification with role targeting
         notifyAdminResponse(
           ticket.ticket_number,
           ticket.title,
-          responseType
+          responseType,
+          ticket.reporter_role || currentRole,
+          ticket.reporter_email || currentEmail,
+          ticket.ticket_id
         );
 
         // Also show toast notification
@@ -179,7 +189,7 @@ const PublicSupportPage: React.FC = () => {
         }
       }
     });
-  }, []);
+  }, [formData.reporter_role, formData.reporter_email, user]);
 
   const loadTickets = useCallback(async (showLoader = true) => {
     try {
@@ -199,19 +209,6 @@ const PublicSupportPage: React.FC = () => {
       if (showLoader) setIsLoading(false);
     }
   }, [checkForStatusChanges]);
-
-  // Initialize notification permission on mount
-  useEffect(() => {
-    const initNotifications = async () => {
-      if (isNotificationSupported()) {
-        const permission = getNotificationPermission();
-        setNotificationPermission(permission);
-      } else {
-        setNotificationPermission('unsupported');
-      }
-    };
-    initNotifications();
-  }, []);
 
   // Auto-fill user info when logged in (but keep page public)
   useEffect(() => {
@@ -242,17 +239,6 @@ const PublicSupportPage: React.FC = () => {
       }
     };
   }, [loadTickets, isPolling]);
-
-  // Handle notification permission request
-  const handleRequestNotificationPermission = async () => {
-    const permission = await requestNotificationPermission();
-    setNotificationPermission(permission);
-    if (permission === 'granted') {
-      showSuccess('Desktop notifications enabled! You will be notified of ticket updates.');
-    } else if (permission === 'denied') {
-      showWarning('Notification permission denied. You can enable it in browser settings.');
-    }
-  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -449,6 +435,10 @@ const PublicSupportPage: React.FC = () => {
     // Get sender info from form or localStorage
     const senderName = formData.reporter_name || localStorage.getItem('support_user_name') || 'Anonymous';
     const senderEmail = formData.reporter_email || localStorage.getItem('support_user_email') || '';
+    const senderRole = formData.reporter_role || user?.role || user?.role_name || '';
+
+    // Find the ticket to get reporter info
+    const ticket = tickets.find(t => t.ticket_id === ticketId);
 
     try {
       setIsSendingComment(prev => ({ ...prev, [ticketId]: true }));
@@ -462,6 +452,20 @@ const PublicSupportPage: React.FC = () => {
       if (response.success) {
         showSuccess('Comment sent successfully');
         setCommentText(prev => ({ ...prev, [ticketId]: '' }));
+
+        // Send notification to admin (client sent comment)
+        if (ticket) {
+          notifyNewComment(
+            ticket.ticket_number,
+            ticket.title,
+            senderName,
+            'client',
+            ticket.reporter_role || senderRole,
+            ticket.reporter_email || senderEmail,
+            ticketId
+          );
+        }
+
         loadTickets(false); // Reload to get updated comments
       }
     } catch (error: any) {
@@ -575,34 +579,11 @@ const PublicSupportPage: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {/* Notification Permission Button */}
-              {notificationPermission !== 'unsupported' && (
-                <button
-                  onClick={handleRequestNotificationPermission}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                    notificationPermission === 'granted'
-                      ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                  title={
-                    notificationPermission === 'granted'
-                      ? 'Desktop notifications enabled'
-                      : 'Enable desktop notifications'
-                  }
-                >
-                  {notificationPermission === 'granted' ? (
-                    <Bell className="w-5 h-5" />
-                  ) : (
-                    <BellOff className="w-5 h-5" />
-                  )}
-                  <span className="hidden sm:inline text-sm">
-                    {notificationPermission === 'granted' ? 'Notifications On' : 'Enable Notifications'}
-                  </span>
-                </button>
-              )}
-
-              {/* Notification Panel */}
-              <NotificationPanel className="ml-2" />
+              {/* Notification Panel - includes desktop notification toggle */}
+              <NotificationPanel
+                currentUserRole={formData.reporter_role || user?.role || user?.role_name}
+                currentUserEmail={formData.reporter_email || user?.email}
+              />
 
               <button
                 onClick={() => {
@@ -1178,8 +1159,8 @@ const PublicSupportPage: React.FC = () => {
                             </div>
                           )}
 
-                          {/* Comments/Communication Section - Show for active tickets */}
-                          {['approved', 'in_progress', 'resolved'].includes(ticket.status) && (
+                          {/* Comments/Communication Section - Show for active and closed tickets */}
+                          {['approved', 'in_progress', 'resolved', 'closed'].includes(ticket.status) && (
                             <div className="mb-6">
                               <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
                                 <MessageCircle className="w-4 h-4" />
@@ -1221,31 +1202,37 @@ const PublicSupportPage: React.FC = () => {
                                 </div>
                               )}
 
-                              {/* Add New Comment */}
-                              <div className="flex gap-2">
-                                <textarea
-                                  value={commentText[ticket.ticket_id] || ''}
-                                  onChange={(e) => setCommentText(prev => ({ ...prev, [ticket.ticket_id]: e.target.value }))}
-                                  placeholder="Add a comment or follow-up question..."
-                                  rows={2}
-                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 resize-none text-sm"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleSendComment(ticket.ticket_id);
-                                  }}
-                                  disabled={isSendingComment[ticket.ticket_id] || !commentText[ticket.ticket_id]?.trim()}
-                                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end"
-                                >
-                                  {isSendingComment[ticket.ticket_id] ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <Send className="w-4 h-4" />
-                                  )}
-                                </button>
-                              </div>
+                              {/* Add New Comment - only for non-closed tickets */}
+                              {ticket.status !== 'closed' ? (
+                                <div className="flex gap-2">
+                                  <textarea
+                                    value={commentText[ticket.ticket_id] || ''}
+                                    onChange={(e) => setCommentText(prev => ({ ...prev, [ticket.ticket_id]: e.target.value }))}
+                                    placeholder="Add a comment or follow-up question..."
+                                    rows={2}
+                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 resize-none text-sm"
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSendComment(ticket.ticket_id);
+                                    }}
+                                    disabled={isSendingComment[ticket.ticket_id] || !commentText[ticket.ticket_id]?.trim()}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end"
+                                  >
+                                    {isSendingComment[ticket.ticket_id] ? (
+                                      <RefreshCw className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Send className="w-4 h-4" />
+                                    )}
+                                  </button>
+                                </div>
+                              ) : (
+                                <p className="text-sm text-gray-500 italic">
+                                  This ticket is closed. Comments are read-only.
+                                </p>
+                              )}
                             </div>
                           )}
 

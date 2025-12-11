@@ -197,27 +197,67 @@ export const getNotificationRedirectPath = (
     }
   }
 
-  // Handle Vendor notifications
+  // Handle Vendor notifications (including vendor selection for CR)
   if (titleLower.includes('vendor') || messageLower.includes('vendor') || category === 'vendor') {
 
-    // Vendor Approved
-    if (titleLower.includes('approved')) {
+    // Check if user is buyer
+    const isBuyer = userRole && (
+      userRole.toString().toLowerCase().includes('buyer') ||
+      userRole.toString().toLowerCase().includes('procurement') ||
+      userRole === '8' || userRole === 8
+    );
+
+    // Vendor Selection Approved/Rejected for CR (buyer receives these)
+    if (titleLower.includes('selection') && titleLower.includes('approved')) {
       return {
-        path: buildPath('/vendors'),
+        path: buildPath('/purchase-orders'),
         queryParams: {
           tab: 'approved',
-          vendor_id: metadata?.vendor_id
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }),
+          ...(metadata?.po_child_id && { po_child_id: String(metadata.po_child_id) })
         },
       };
     }
 
-    // Vendor Selected
+    if (titleLower.includes('selection') && titleLower.includes('rejected')) {
+      return {
+        path: buildPath('/purchase-orders'),
+        queryParams: {
+          tab: 'rejected',
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }),
+          ...(metadata?.po_child_id && { po_child_id: String(metadata.po_child_id) })
+        },
+      };
+    }
+
+    // Vendor Selection Requires Approval (TD receives this)
+    if (titleLower.includes('requires approval') || messageLower.includes('requires approval')) {
+      return {
+        path: buildPath('/vendor-approval'),
+        queryParams: {
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+        },
+      };
+    }
+
+    // Vendor Approved (general vendor approval)
+    if (titleLower.includes('approved')) {
+      return {
+        path: buildPath(isBuyer ? '/vendors' : '/vendors'),
+        queryParams: {
+          tab: 'approved',
+          ...(metadata?.vendor_id && { vendor_id: metadata.vendor_id })
+        },
+      };
+    }
+
+    // Vendor Selected (goes to TD for approval)
     if (titleLower.includes('selected')) {
       return {
-        path: buildPath('/vendors'),
+        path: buildPath('/vendor-approval'),
         queryParams: {
-          vendor_id: metadata?.vendor_id,
-          action: 'view_selection'
+          ...(metadata?.vendor_id && { vendor_id: metadata.vendor_id }),
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
         },
       };
     }
@@ -229,10 +269,32 @@ export const getNotificationRedirectPath = (
         queryParams: { tab: 'pending' },
       };
     }
+
+    // SE BOQ Vendor notifications
+    if (titleLower.includes('se boq') || messageLower.includes('se boq')) {
+      return {
+        path: buildPath('/purchase-orders'),
+        queryParams: {
+          ...(metadata?.assignment_id && { assignment_id: String(metadata.assignment_id) }),
+          ...(metadata?.boq_id && { boq_id: String(metadata.boq_id) })
+        },
+      };
+    }
+  }
+
+  // Handle Purchase Request notifications (buyer receives these from PM/Estimator)
+  if (titleLower.includes('purchase request') || titleLower.includes('new purchase request assigned')) {
+    return {
+      path: buildPath('/purchase-orders'),
+      queryParams: {
+        tab: 'pending',
+        ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+      },
+    };
   }
 
   // Handle Purchase Order notifications
-  if (titleLower.includes('purchase order') || titleLower.includes('po ') || category === 'purchase') {
+  if (titleLower.includes('purchase order') || titleLower.includes('po ') || category === 'purchase' || category === 'procurement') {
 
     // PO Approved
     if (titleLower.includes('approved')) {
@@ -240,7 +302,20 @@ export const getNotificationRedirectPath = (
         path: buildPath('/purchase-orders'),
         queryParams: {
           tab: 'approved',
-          po_id: metadata?.po_id
+          ...(metadata?.po_id && { po_id: metadata.po_id }),
+          ...(metadata?.po_child_id && { po_child_id: String(metadata.po_child_id) })
+        },
+      };
+    }
+
+    // PO Rejected
+    if (titleLower.includes('rejected')) {
+      return {
+        path: buildPath('/purchase-orders'),
+        queryParams: {
+          tab: 'rejected',
+          ...(metadata?.po_id && { po_id: metadata.po_id }),
+          ...(metadata?.po_child_id && { po_child_id: String(metadata.po_child_id) })
         },
       };
     }
@@ -251,10 +326,19 @@ export const getNotificationRedirectPath = (
         path: buildPath('/purchase-orders'),
         queryParams: {
           tab: 'pending',
-          po_id: metadata?.po_id
+          ...(metadata?.po_id && { po_id: metadata.po_id })
         },
       };
     }
+
+    // Default PO redirect
+    return {
+      path: buildPath('/purchase-orders'),
+      queryParams: {
+        ...(metadata?.po_id && { po_id: metadata.po_id }),
+        ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+      },
+    };
   }
 
   // Handle Material/Inventory notifications

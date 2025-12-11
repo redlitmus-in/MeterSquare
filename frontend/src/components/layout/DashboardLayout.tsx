@@ -48,6 +48,12 @@ const DashboardLayout: React.FC = React.memo(() => {
     return path === '/dashboard' || path.endsWith('/dashboard') || path.includes('/dashboard/');
   }, [location.pathname]);
 
+  // Check if current page is a support page (has its own notification system)
+  const isSupportPage = useMemo(() => {
+    const path = location.pathname;
+    return path.includes('/support') || path.includes('/support-management');
+  }, [location.pathname]);
+
   // Memoize time and date formatting
   const formattedTime = useMemo(() => currentTime.toLocaleTimeString('en-US', {
     hour: '2-digit',
@@ -168,7 +174,8 @@ const DashboardLayout: React.FC = React.memo(() => {
       </div>
 
       {/* Floating Notifications - Now available globally for toast notifications */}
-      {isLayoutReady && (
+      {/* Hide on support pages since they have their own notification panel */}
+      {isLayoutReady && !isSupportPage && (
         <div className={`fixed top-16 right-4 z-[100] transition-all duration-300`}>
           <NotificationSystem />
         </div>

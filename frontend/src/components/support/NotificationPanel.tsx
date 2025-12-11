@@ -1,12 +1,14 @@
 /**
  * Notification Panel Component
  * Shows stored notifications with bell icon and dropdown panel
+ * Includes desktop notification permission toggle
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bell,
+  BellOff,
   X,
   Check,
   CheckCheck,
@@ -14,7 +16,8 @@ import {
   MessageCircle,
   AlertCircle,
   CheckCircle,
-  Clock
+  Clock,
+  Settings
 } from 'lucide-react';
 import {
   StoredNotification,
@@ -23,32 +26,108 @@ import {
   markAllNotificationsAsRead,
   clearAllNotifications,
   deleteNotification,
-  getUnreadNotificationCount
+  getUnreadNotificationCount,
+  requestNotificationPermission,
+  getNotificationPermission,
+  isNotificationSupported
 } from '@/utils/supportNotificationHelper';
 
 interface NotificationPanelProps {
   onNavigate?: (url: string) => void;
   className?: string;
+  currentUserRole?: string;
+  currentUserEmail?: string;
 }
 
-const NotificationPanel: React.FC<NotificationPanelProps> = ({ onNavigate, className = '' }) => {
+const NotificationPanel: React.FC<NotificationPanelProps> = ({
+  onNavigate,
+  className = '',
+  currentUserRole,
+  currentUserEmail
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<StoredNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [desktopPermission, setDesktopPermission] = useState<NotificationPermission | 'unsupported'>('default');
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Load notifications
+  // Load notifications - filter by role if provided
   const loadNotifications = () => {
-    setNotifications(getStoredNotifications());
-    setUnreadCount(getUnreadNotificationCount());
+    let allNotifications = getStoredNotifications();
+
+    // Filter notifications by current user role/email if provided
+    if (currentUserRole || currentUserEmail) {
+      allNotifications = allNotifications.filter(n => {
+        // Normalize roles for comparison (case-insensitive, handle underscores/hyphens)
+        const normalizeRole = (role: string) => role?.toLowerCase().replace(/[_\s]/g, '-') || '';
+        const normalizedTargetRole = normalizeRole(n.targetRole || '');
+        const normalizedCurrentRole = normalizeRole(currentUserRole || '');
+        const normalizedReporterRole = normalizeRole(n.reporterRole || '');
+
+        // Check if notification is targeted to this user
+        // 1. Check by email first (most specific)
+        if (n.targetEmail && currentUserEmail) {
+          if (n.targetEmail.toLowerCase() === currentUserEmail.toLowerCase()) {
+            return true;
+          }
+        }
+
+        // 2. Check by targetRole
+        if (n.targetRole) {
+          // 'admin' role notifications go to support-management page
+          if (normalizedTargetRole === 'admin' && normalizedCurrentRole === 'admin') {
+            return true;
+          }
+          // 'all' means everyone can see it
+          if (normalizedTargetRole === 'all') {
+            return true;
+          }
+          // Match by role
+          if (normalizedTargetRole === normalizedCurrentRole) {
+            return true;
+          }
+        }
+
+        // 3. Check if current user is the reporter (by email or role)
+        if (n.reporterEmail && currentUserEmail) {
+          if (n.reporterEmail.toLowerCase() === currentUserEmail.toLowerCase()) {
+            return true;
+          }
+        }
+        if (normalizedReporterRole && normalizedCurrentRole) {
+          if (normalizedReporterRole === normalizedCurrentRole) {
+            return true;
+          }
+        }
+
+        // 4. If no targeting specified, show to all
+        if (!n.targetRole && !n.targetEmail) {
+          return true;
+        }
+
+        return false;
+      });
+    }
+
+    setNotifications(allNotifications);
+    setUnreadCount(allNotifications.filter(n => !n.isRead).length);
   };
 
-  // Initial load and refresh every 5 seconds
+  // Check desktop notification permission
+  useEffect(() => {
+    if (isNotificationSupported()) {
+      setDesktopPermission(getNotificationPermission());
+    } else {
+      setDesktopPermission('unsupported');
+    }
+  }, []);
+
+  // Initial load and refresh every 3 seconds for faster updates
   useEffect(() => {
     loadNotifications();
-    const interval = setInterval(loadNotifications, 5000);
+    const interval = setInterval(loadNotifications, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentUserRole, currentUserEmail]);
 
   // Close panel when clicking outside
   useEffect(() => {
@@ -93,6 +172,13 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ onNavigate, class
     loadNotifications();
   };
 
+  const handleToggleDesktopNotifications = async () => {
+    if (desktopPermission === 'unsupported') return;
+
+    const permission = await requestNotificationPermission();
+    setDesktopPermission(permission);
+  };
+
   const getNotificationIcon = (type: StoredNotification['type']) => {
     switch (type) {
       case 'new_ticket':
@@ -128,12 +214,20 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ onNavigate, class
       {/* Bell Icon Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors"
-        title="Notifications"
+        className={`relative p-2 rounded-lg transition-colors ${
+          desktopPermission === 'granted'
+            ? 'hover:bg-green-50'
+            : 'hover:bg-gray-100'
+        }`}
+        title={desktopPermission === 'granted' ? 'Notifications enabled' : 'Click to view notifications'}
       >
-        <Bell className={`w-5 h-5 ${unreadCount > 0 ? 'text-blue-600' : 'text-gray-600'}`} />
+        {desktopPermission === 'granted' ? (
+          <Bell className={`w-5 h-5 ${unreadCount > 0 ? 'text-green-600' : 'text-green-500'}`} />
+        ) : (
+          <Bell className={`w-5 h-5 ${unreadCount > 0 ? 'text-blue-600' : 'text-gray-600'}`} />
+        )}
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
@@ -182,12 +276,45 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ onNavigate, class
               </div>
             </div>
 
+            {/* Desktop Notification Toggle */}
+            {desktopPermission !== 'unsupported' && (
+              <div className="px-4 py-2 border-b border-gray-100 bg-gray-50/50">
+                <button
+                  onClick={handleToggleDesktopNotifications}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors ${
+                    desktopPermission === 'granted'
+                      ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 text-sm">
+                    {desktopPermission === 'granted' ? (
+                      <Bell className="w-4 h-4" />
+                    ) : (
+                      <BellOff className="w-4 h-4" />
+                    )}
+                    Desktop Notifications
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded ${
+                    desktopPermission === 'granted'
+                      ? 'bg-green-200 text-green-800'
+                      : 'bg-gray-200 text-gray-600'
+                  }`}>
+                    {desktopPermission === 'granted' ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+              </div>
+            )}
+
             {/* Notifications List */}
-            <div className="max-h-96 overflow-y-auto">
+            <div className="max-h-80 overflow-y-auto">
               {notifications.length === 0 ? (
                 <div className="py-8 text-center text-gray-500">
                   <Bell className="w-10 h-10 mx-auto mb-2 text-gray-300" />
                   <p className="text-sm">No notifications yet</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    You'll see updates here when they happen
+                  </p>
                 </div>
               ) : (
                 notifications.map((notification) => (
