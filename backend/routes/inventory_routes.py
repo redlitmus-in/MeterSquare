@@ -244,6 +244,20 @@ def add_repaired_to_stock_route(return_id):
     return add_repaired_to_stock(return_id)
 
 
+@inventory_routes.route('/material_return/<int:return_id>/approve', methods=['POST'])
+@jwt_required
+def approve_return_to_stock_route(return_id):
+    """PM approves a Good condition return and adds it to stock"""
+    return approve_return_to_stock(return_id)
+
+
+@inventory_routes.route('/material_return/<int:return_id>/reject', methods=['POST'])
+@jwt_required
+def reject_return_route(return_id):
+    """PM rejects a return"""
+    return reject_return(return_id)
+
+
 # ==================== MATERIAL DELIVERY NOTE ROUTES ====================
 
 @inventory_routes.route('/delivery_notes', methods=['POST'])

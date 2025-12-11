@@ -87,3 +87,37 @@ export const truncateText = (text: string, maxLength: number): string => {
   if (text.length <= maxLength) return text;
   return `${text.substring(0, maxLength)}...`;
 };
+
+/**
+ * Material interface for price calculations
+ */
+export interface MaterialWithPrice {
+  boq_unit_price?: number;
+  original_unit_price?: number;
+  unit_price?: number;
+  quantity?: number;
+}
+
+/**
+ * Calculate total BOQ amount from materials
+ * @param materials - Array of materials with price info
+ * @returns Total BOQ amount
+ */
+export const calculateBOQTotal = (materials: MaterialWithPrice[]): number => {
+  return (materials || []).reduce((sum, m) => {
+    const boqPrice = m.boq_unit_price || m.original_unit_price || 0;
+    return sum + (boqPrice * (m.quantity || 0));
+  }, 0);
+};
+
+/**
+ * Calculate total vendor amount from materials
+ * @param materials - Array of materials with price info
+ * @returns Total vendor amount
+ */
+export const calculateVendorTotal = (materials: MaterialWithPrice[]): number => {
+  return (materials || []).reduce((sum, m) => {
+    const vendorPrice = m.unit_price || m.boq_unit_price || 0;
+    return sum + (vendorPrice * (m.quantity || 0));
+  }, 0);
+};

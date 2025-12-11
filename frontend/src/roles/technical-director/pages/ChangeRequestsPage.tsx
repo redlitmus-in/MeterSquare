@@ -35,6 +35,7 @@ import { changeRequestService, ChangeRequestItem } from '@/services/changeReques
 import { buyerService, Purchase, POChild } from '@/roles/buyer/services/buyerService';
 import { buyerVendorService, Vendor, VendorProduct } from '@/roles/buyer/services/buyerVendorService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { formatCurrency } from '@/utils/formatters';
 import { API_BASE_URL } from '@/api/config';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
@@ -431,8 +432,11 @@ const ChangeRequestsPage: React.FC = () => {
       formatted_cr_id: poChild.formatted_id,
       project_id: poChild.project_id || 0,
       project_name: poChild.project_name || 'Unknown Project',
+      project_code: poChild.project_code || '',
+      project_client: poChild.client || '',
+      project_location: poChild.location || '',
       boq_id: poChild.boq_id || 0,
-      boq_name: '',
+      boq_name: poChild.boq_name || '',
       item_name: poChild.item_name || '',
       request_type: 'EXTRA_MATERIALS',
       justification: '',
@@ -584,46 +588,28 @@ const ChangeRequestsPage: React.FC = () => {
     setShowRejectionModal(true);
   };
 
-  // Mock data for backwards compatibility - will be replaced with real data
-  const mockRequests: ChangeRequestItem[] = [
-    {
-      cr_id: 1,
-      project_name: 'Smart City Project',
-      requested_by_name: 'PM John',
-      request_date: '2025-10-07',
-      status: 'pending',
-      additional_cost: 150000,
-      cost_increase_percentage: 25.5,
-      new_items_count: 3,
-      approval_type: 'td'
-    },
-    {
-      cr_id: 2,
-      project_name: 'Office Renovation',
-      requested_by_name: 'PM Sarah',
-      request_date: '2025-10-06',
-      status: 'pending',
-      additional_cost: 75000,
-      cost_increase_percentage: 18.2,
-      new_items_count: 2,
-      approval_type: 'td'
-    },
-    {
-      cr_id: 3,
-      project_name: 'Retail Store Setup',
-      requested_by_name: 'PM Mike',
-      request_date: '2025-10-05',
-      status: 'approved_estimator',
-      additional_cost: 35000,
-      cost_increase_percentage: 8.5,
-      new_items_count: 1,
-      approval_type: 'estimator'
+  // Handle vendor approval from modal (for PO children with pending_td_approval)
+  const handleApproveVendorFromModal = async () => {
+    if (!selectedChangeRequest) return;
+    const poChildId = (selectedChangeRequest as any).po_child_id;
+    if (poChildId) {
+      setShowDetailsModal(false);
+      await handleApprovePOChild(poChildId);
     }
-  ];
-
-  const formatCurrency = (value: number) => {
-    return `AED ${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
   };
+
+  // Handle vendor rejection from modal (for PO children with pending_td_approval)
+  const handleRejectVendorFromModal = () => {
+    if (!selectedChangeRequest) return;
+    const poChildId = (selectedChangeRequest as any).po_child_id;
+    if (poChildId) {
+      setShowDetailsModal(false);
+      setRejectingPOChildId(poChildId);
+      setShowRejectionModal(true);
+    }
+  };
+
+  // formatCurrency imported from @/utils/formatters
 
   const getStatusColor = (status: string) => {
     const colors = {
@@ -915,6 +901,82 @@ const ChangeRequestsPage: React.FC = () => {
         </TableBody>
       </Table>
     </div>
+    );
+  };
+
+  // Vendor Approvals Table View Component
+  const VendorApprovalsTable = ({ poChildren }: { poChildren: POChild[] }) => {
+    return (
+      <div className="border rounded-lg overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>PO ID</TableHead>
+              <TableHead>Project/Item</TableHead>
+              <TableHead>Vendor</TableHead>
+              <TableHead>Date</TableHead>
+              <TableHead>Materials</TableHead>
+              <TableHead>Total Cost</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {poChildren.map((poChild) => {
+              const totalCost = calculatePOChildTotal(poChild);
+              const isPending = poChild.vendor_selection_status === 'pending_td_approval';
+              const isApproved = poChild.vendor_selection_status === 'approved';
+              const isRejected = poChild.vendor_selection_status === 'rejected';
+
+              return (
+                <TableRow key={poChild.id}>
+                  <TableCell className="font-semibold text-blue-600">{poChild.formatted_id}</TableCell>
+                  <TableCell>
+                    <div className="font-medium">{poChild.project_name || poChild.item_name || 'N/A'}</div>
+                    {poChild.item_name && poChild.project_name && (
+                      <div className="text-xs text-gray-500">{poChild.item_name}</div>
+                    )}
+                  </TableCell>
+                  <TableCell className="font-medium text-gray-900">{poChild.vendor_name || 'N/A'}</TableCell>
+                  <TableCell>{poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}</TableCell>
+                  <TableCell>{poChild.materials?.length || 0}</TableCell>
+                  <TableCell className="font-semibold text-blue-700">AED {totalCost.toLocaleString()}</TableCell>
+                  <TableCell>
+                    <Badge className={
+                      isPending ? 'bg-yellow-100 text-yellow-800' :
+                      isApproved ? 'bg-green-100 text-green-800' :
+                      isRejected ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
+                    }>
+                      {isPending ? 'PENDING' : isApproved ? 'APPROVED' : isRejected ? 'REJECTED' : 'UNKNOWN'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button size="sm" variant="outline" onClick={() => handleOpenLpoEditor(poChild, true)}>
+                        <Eye className="h-3.5 w-3.5 mr-1" />
+                        Details
+                      </Button>
+                      {isPending && (
+                        <>
+                          <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprovePOChild(poChild.id)}>
+                            <Check className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button size="sm" variant="destructive" onClick={() => {
+                            setRejectingPOChildId(poChild.id);
+                            setShowRejectionModal(true);
+                          }}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
     );
   };
 
@@ -1293,6 +1355,12 @@ const ChangeRequestsPage: React.FC = () => {
                           : 'No rejected vendor selections'}
                     </p>
                   </div>
+                ) : viewMode === 'table' ? (
+                  <VendorApprovalsTable poChildren={
+                    vendorApprovalsSubTab === 'pending' ? filteredPOChildren :
+                    vendorApprovalsSubTab === 'approved' ? filteredApprovedPOChildren :
+                    filteredRejectedPOChildren
+                  } />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                     {/* Approved PO Children FIRST (for Approved sub-tab) - Show at TOP */}
@@ -1394,13 +1462,31 @@ const ChangeRequestsPage: React.FC = () => {
                               </div>
                             )}
                           </div>
-                          <div className="flex justify-between mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
-                            <span className="text-gray-600 font-semibold">Total Cost:</span>
-                            {calculatePOChildTotal(poChild) > 0 ? (
-                              <span className="font-bold text-blue-700">AED {calculatePOChildTotal(poChild).toLocaleString()}</span>
-                            ) : (
-                              <span className="text-amber-600 italic text-[9px]">Prices not set</span>
-                            )}
+                          <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
+                            <div className="flex justify-between">
+                              <span className="text-gray-600 font-semibold">Total Cost:</span>
+                              {calculatePOChildTotal(poChild) > 0 ? (
+                                <span className="font-bold text-blue-700">AED {calculatePOChildTotal(poChild).toLocaleString()}</span>
+                              ) : (
+                                <span className="text-amber-600 italic text-[9px]">Prices not set</span>
+                              )}
+                            </div>
+                            {/* BOQ Total as secondary - always show */}
+                            {(() => {
+                              const boqTotal = (poChild.materials || []).reduce((sum: number, m: any) => {
+                                const boqPrice = m.boq_unit_price || 0;
+                                return sum + (boqPrice * (m.quantity || 0));
+                              }, 0);
+                              if (boqTotal > 0) {
+                                return (
+                                  <div className="flex justify-between text-[8px] text-gray-400 mt-0.5">
+                                    <span>BOQ:</span>
+                                    <span>AED {boqTotal.toLocaleString()}</span>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
                         </div>
 
@@ -1530,13 +1616,31 @@ const ChangeRequestsPage: React.FC = () => {
                               </div>
                             )}
                           </div>
-                          <div className="flex justify-between mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
-                            <span className="text-gray-600 font-semibold">Total Cost:</span>
-                            {calculatePOChildTotal(poChild) > 0 ? (
-                              <span className="font-bold text-blue-700">AED {calculatePOChildTotal(poChild).toLocaleString()}</span>
-                            ) : (
-                              <span className="text-amber-600 italic text-[9px]">Prices not set</span>
-                            )}
+                          <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
+                            <div className="flex justify-between">
+                              <span className="text-gray-600 font-semibold">Total Cost:</span>
+                              {calculatePOChildTotal(poChild) > 0 ? (
+                                <span className="font-bold text-blue-700">AED {calculatePOChildTotal(poChild).toLocaleString()}</span>
+                              ) : (
+                                <span className="text-amber-600 italic text-[9px]">Prices not set</span>
+                              )}
+                            </div>
+                            {/* BOQ Total as secondary - always show */}
+                            {(() => {
+                              const boqTotal = (poChild.materials || []).reduce((sum: number, m: any) => {
+                                const boqPrice = m.boq_unit_price || 0;
+                                return sum + (boqPrice * (m.quantity || 0));
+                              }, 0);
+                              if (boqTotal > 0) {
+                                return (
+                                  <div className="flex justify-between text-[8px] text-gray-400 mt-0.5">
+                                    <span>BOQ:</span>
+                                    <span>AED {boqTotal.toLocaleString()}</span>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
                         </div>
 
@@ -1648,13 +1752,31 @@ const ChangeRequestsPage: React.FC = () => {
 
                         {/* Total Cost */}
                         <div className="px-2 pb-2">
-                          <div className="flex items-center justify-between text-[10px] font-bold border-t border-gray-200 pt-1.5">
-                            <span className="text-gray-600">Total Cost:</span>
-                            {calculatePOChildTotal(poChild) > 0 ? (
-                              <span className="text-red-700">AED {calculatePOChildTotal(poChild).toLocaleString()}</span>
-                            ) : (
-                              <span className="text-amber-600 italic text-[9px]">Prices not set</span>
-                            )}
+                          <div className="border-t border-gray-200 pt-1.5 text-[10px]">
+                            <div className="flex items-center justify-between font-bold">
+                              <span className="text-gray-600">Total Cost:</span>
+                              {calculatePOChildTotal(poChild) > 0 ? (
+                                <span className="text-red-700">AED {calculatePOChildTotal(poChild).toLocaleString()}</span>
+                              ) : (
+                                <span className="text-amber-600 italic text-[9px]">Prices not set</span>
+                              )}
+                            </div>
+                            {/* BOQ Total as secondary - always show */}
+                            {(() => {
+                              const boqTotal = (poChild.materials || []).reduce((sum: number, m: any) => {
+                                const boqPrice = m.boq_unit_price || 0;
+                                return sum + (boqPrice * (m.quantity || 0));
+                              }, 0);
+                              if (boqTotal > 0) {
+                                return (
+                                  <div className="flex justify-between text-[8px] text-gray-400 mt-0.5">
+                                    <span>BOQ:</span>
+                                    <span>AED {boqTotal.toLocaleString()}</span>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
                         </div>
 
@@ -1785,9 +1907,9 @@ const ChangeRequestsPage: React.FC = () => {
                                   )}
                                 </div>
                                 {boqTotal > 0 && (
-                                  <div className="flex justify-between mt-0.5">
-                                    <span className="text-gray-500">BOQ Total:</span>
-                                    <span className="font-semibold text-gray-600">AED {boqTotal.toLocaleString()}</span>
+                                  <div className="flex justify-between mt-0.5 text-[8px] text-gray-400">
+                                    <span>BOQ:</span>
+                                    <span>AED {boqTotal.toLocaleString()}</span>
                                   </div>
                                 )}
                               </div>
@@ -1950,9 +2072,23 @@ const ChangeRequestsPage: React.FC = () => {
           setSelectedChangeRequest(null);
         }}
         changeRequest={selectedChangeRequest}
-        onApprove={handleApproveFromModal}
-        onReject={handleRejectFromModal}
-        canApprove={permissions.canApproveChangeRequest(user) && selectedChangeRequest?.status === 'pending'}
+        onApprove={
+          // If this is a PO child with pending vendor approval, use vendor approval handler
+          selectedChangeRequest?.vendor_selection_status === 'pending_td_approval' && (selectedChangeRequest as any).po_child_id
+            ? handleApproveVendorFromModal
+            : handleApproveFromModal
+        }
+        onReject={
+          // If this is a PO child with pending vendor approval, use vendor rejection handler
+          selectedChangeRequest?.vendor_selection_status === 'pending_td_approval' && (selectedChangeRequest as any).po_child_id
+            ? handleRejectVendorFromModal
+            : handleRejectFromModal
+        }
+        canApprove={
+          // Allow approval for regular pending CRs OR for PO children pending TD vendor approval
+          (permissions.canApproveChangeRequest(user) && selectedChangeRequest?.status === 'pending') ||
+          (permissions.canApproveChangeRequest(user) && selectedChangeRequest?.vendor_selection_status === 'pending_td_approval')
+        }
         onEditLPO={() => {
           if (selectedChangeRequest) {
             // Convert back to POChild format if it has po_child_id

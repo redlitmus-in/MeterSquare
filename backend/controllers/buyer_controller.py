@@ -18,6 +18,39 @@ from utils.comprehensive_notification_service import notification_service
 
 log = get_logger()
 
+
+# ============================================================================
+# ROLE CHECK HELPER FUNCTIONS
+# Centralized role checks to avoid duplication throughout the file
+# ============================================================================
+
+def is_technical_director(user_role: str) -> bool:
+    """Check if user role is Technical Director"""
+    if not user_role:
+        return False
+    role_lower = user_role.lower()
+    return role_lower in ['technical_director', 'technicaldirector', 'technical director', 'td']
+
+
+def is_buyer_role(user_role: str) -> bool:
+    """Check if user role is Buyer"""
+    if not user_role:
+        return False
+    return user_role.lower() == 'buyer'
+
+
+def is_admin_role(user_role: str) -> bool:
+    """Check if user role is Admin"""
+    if not user_role:
+        return False
+    return user_role.lower() == 'admin'
+
+
+def has_buyer_permissions(user_role: str) -> bool:
+    """Check if user has buyer-level permissions (buyer, TD, or admin)"""
+    return is_buyer_role(user_role) or is_technical_director(user_role) or is_admin_role(user_role)
+
+
 # Configuration constants
 supabase_url = os.environ.get('SUPABASE_URL')
 supabase_key = os.environ.get('SUPABASE_KEY')
@@ -2312,116 +2345,6 @@ def select_vendor_for_purchase(cr_id):
         return jsonify({"error": f"Failed to select vendor: {str(e)}"}), 500
 
 
-def update_vendor_price(vendor_id):
-    """Update vendor product price for a specific material"""
-    try:
-        data = request.get_json()
-        material_name = data.get('material_name')
-        new_price = data.get('new_price')
-        save_for_future = data.get('save_for_future', False)
-
-        if not material_name:
-            return jsonify({"error": "material_name is required"}), 400
-
-        if new_price is None or new_price <= 0:
-            return jsonify({"error": "valid new_price is required"}), 400
-
-        # Get the vendor
-        from models.vendor import Vendor, VendorProduct
-        vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
-        if not vendor:
-            return jsonify({"error": "Vendor not found"}), 404
-
-        if vendor.status != 'active':
-            return jsonify({"error": f"Vendor '{vendor.company_name}' is not active"}), 400
-
-        # Only update vendor product if save_for_future is True
-        if save_for_future:
-            # Find matching product(s) for this vendor and material
-            material_lower = material_name.lower().strip()
-            products = VendorProduct.query.filter_by(
-                vendor_id=vendor_id,
-                is_deleted=False
-            ).all()
-
-            matching_products = []
-            for product in products:
-                product_name = (product.product_name or '').lower().strip()
-                # Exact match or contains match
-                if product_name == material_lower or material_lower in product_name or product_name in material_lower:
-                    matching_products.append(product)
-
-            # Update unit_price for all matching products
-            if matching_products:
-                for product in matching_products:
-                    old_price = product.unit_price
-                    product.unit_price = float(new_price)
-
-                db.session.commit()
-
-                return jsonify({
-                    "success": True,
-                    "message": f"Price updated for {len(matching_products)} product(s) for future purchases"
-                }), 200
-            else:
-                return jsonify({"error": f"No matching products found for material '{material_name}'"}), 404
-        else:
-            # For "This BOQ" option, save negotiated price to change request
-            # Get cr_id from request (optional - if provided, save to that CR)
-            cr_id = data.get('cr_id')
-
-            if cr_id:
-                # Find the change request and update the material_vendor_selections
-                cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
-
-                if cr:
-                    # Get or create material_vendor_selections
-                    material_vendor_selections = cr.material_vendor_selections or {}
-
-                    # Update negotiated price for this material
-                    if material_name in material_vendor_selections:
-                        # Material already has vendor selection - update negotiated price
-                        material_vendor_selections[material_name]['negotiated_price'] = float(new_price)
-                        material_vendor_selections[material_name]['save_price_for_future'] = False
-                    else:
-                        # Material not yet selected - create entry with negotiated price for vendor_id
-                        # Store with vendor_id so we can retrieve it later
-                        material_vendor_selections[material_name] = {
-                            'vendor_id': vendor_id,
-                            'vendor_name': None,  # Will be set when vendor is selected
-                            'negotiated_price': float(new_price),
-                            'save_price_for_future': False,
-                            'selection_status': 'pending'
-                        }
-
-                    # Update the JSONB field
-                    from sqlalchemy.orm.attributes import flag_modified
-                    cr.material_vendor_selections = material_vendor_selections
-                    flag_modified(cr, 'material_vendor_selections')
-
-                    db.session.commit()
-
-                    return jsonify({
-                        "success": True,
-                        "message": f"Negotiated price saved for this purchase: AED {new_price}"
-                    }), 200
-                else:
-                    log.warning(f"Change request {cr_id} not found")
-
-            # If no cr_id provided, just return success (price will be sent on submit)
-            return jsonify({
-                "success": True,
-                "message": "Price will be applied to this purchase only"
-            }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        log.error(f"Error updating vendor price: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"error": f"Failed to update vendor price: {str(e)}"}), 500
-
-
 def update_po_child_prices(po_child_id):
     """
     Update negotiated prices for POChild materials
@@ -3541,20 +3464,74 @@ def create_po_children(cr_id):
         # Create POChild records for each vendor group
         created_po_children = []
 
-        # Count existing POChild records to determine next suffix
-        existing_po_child_count = POChild.query.filter_by(
+        # Get existing POChild records for this parent CR (to consolidate same vendors)
+        existing_po_children = POChild.query.filter_by(
             parent_cr_id=cr_id,
             is_deleted=False
-        ).count()
-        next_suffix_number = existing_po_child_count + 1
+        ).all()
 
-        for idx, vendor_group in enumerate(vendor_groups, start=next_suffix_number):
+        # Build a map of vendor_id -> existing POChild for consolidation
+        existing_vendor_po_children = {}
+        for existing_po in existing_po_children:
+            if existing_po.vendor_id:
+                existing_vendor_po_children[existing_po.vendor_id] = existing_po
+
+        # CRITICAL FIX: Build a set of ALL materials already in approved/completed POChildren
+        # These materials should be REJECTED as duplicates to prevent double-ordering
+        materials_already_approved = set()
+        for existing_po in existing_po_children:
+            if existing_po.status in ['vendor_approved', 'purchase_completed', 'approved']:
+                if existing_po.materials_data:
+                    for mat in existing_po.materials_data:
+                        mat_name = mat.get('material_name')
+                        if mat_name:
+                            materials_already_approved.add(mat_name.lower().strip())
+
+        if materials_already_approved:
+            log.info(f"Materials already approved/purchased for CR {cr_id}: {materials_already_approved}")
+
+        # Count existing POChild records to determine next suffix for NEW vendors
+        # Use max suffix to avoid gaps if POChildren were deleted
+        max_suffix = 0
+        for existing_po in existing_po_children:
+            if existing_po.suffix:
+                try:
+                    suffix_num = int(existing_po.suffix.replace('.', ''))
+                    if suffix_num > max_suffix:
+                        max_suffix = suffix_num
+                except (ValueError, AttributeError):
+                    pass
+        next_suffix_number = max_suffix + 1
+
+        for vendor_group in vendor_groups:
             vendor_id = vendor_group.get('vendor_id')
             vendor_name = vendor_group.get('vendor_name')
             materials = vendor_group.get('materials')
 
             if not vendor_id or not materials:
                 continue
+
+            # CRITICAL FIX: Filter out materials that are already in approved POChildren
+            # This prevents duplicate ordering of the same materials
+            filtered_materials = []
+            duplicate_materials = []
+            for material in materials:
+                mat_name = material.get('material_name', '')
+                if mat_name.lower().strip() in materials_already_approved:
+                    duplicate_materials.append(mat_name)
+                else:
+                    filtered_materials.append(material)
+
+            if duplicate_materials:
+                log.warning(f"Skipping {len(duplicate_materials)} duplicate materials already approved for vendor {vendor_id}: {duplicate_materials}")
+
+            if not filtered_materials:
+                # All materials were duplicates, skip this vendor group entirely
+                log.warning(f"All materials for vendor {vendor_id} are already approved - skipping vendor group")
+                continue
+
+            # Use filtered materials for the rest of the function
+            materials = filtered_materials
 
             # Verify vendor exists and is active
             vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
@@ -3630,42 +3607,122 @@ def create_po_children(cr_id):
                     'total_price': material_total,  # Vendor's total
                     'boq_unit_price': boq_unit_price,  # Original BOQ price for comparison
                     'boq_total_price': boq_total_price,  # BOQ total for comparison
-                    'master_material_id': parent_material.get('master_material_id') if parent_material else None
+                    'master_material_id': parent_material.get('master_material_id') if parent_material else None,
+                    'negotiated_price': negotiated_price  # Store negotiated price
                 })
 
-            # Create the POChild record
-            po_child = POChild(
-                parent_cr_id=parent_cr.cr_id,
-                suffix=f".{idx}",
-                boq_id=parent_cr.boq_id,
-                project_id=parent_cr.project_id,
-                item_id=parent_cr.item_id,
-                item_name=parent_cr.item_name,
-                submission_group_id=submission_group_id,
-                materials_data=po_materials,
-                materials_total_cost=total_cost,
-                vendor_id=vendor_id,
-                vendor_name=vendor.company_name,
-                vendor_selected_by_buyer_id=user_id,
-                vendor_selected_by_buyer_name=user_name,
-                vendor_selection_date=datetime.utcnow(),
-                vendor_selection_status='pending_td_approval',
-                status='pending_td_approval',
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
+            # Check if a POChild already exists for this vendor (consolidate materials)
+            # Consolidation logic:
+            # - 'pending_td_approval': Not yet approved by TD → MERGE into existing
+            # - 'rejected': TD rejected → MERGE into existing (resubmit)
+            # - 'vendor_approved' / 'approved': TD approved → CREATE NEW (separate purchase)
+            # - 'purchase_completed': Already purchased → CREATE NEW (separate purchase)
+            existing_po_child = existing_vendor_po_children.get(vendor_id)
 
-            db.session.add(po_child)
-            db.session.flush()  # Get the id
+            # Determine if we should consolidate or create new
+            should_consolidate = False
+            if existing_po_child:
+                consolidate_statuses = ['pending_td_approval', 'rejected']
+                if existing_po_child.status in consolidate_statuses:
+                    should_consolidate = True
+                    log.info(f"🔄 Found existing POChild {existing_po_child.get_formatted_id()} for vendor {vendor.company_name} with status '{existing_po_child.status}' - will MERGE materials")
+                else:
+                    # TD already approved or purchase completed - create new POChild for new purchase
+                    log.info(f"✅ Existing POChild {existing_po_child.get_formatted_id()} for vendor {vendor.company_name} has status '{existing_po_child.status}' (approved/completed) - will create NEW POChild for new purchase")
 
-            created_po_children.append({
-                'id': po_child.id,
-                'formatted_id': po_child.get_formatted_id(),
-                'vendor_id': vendor_id,
-                'vendor_name': vendor.company_name,
-                'materials_count': len(po_materials),
-                'total_cost': total_cost
-            })
+            if should_consolidate and existing_po_child:
+                # Consolidate: Add new materials to existing POChild for same vendor
+                # Get existing materials and build a lookup by material_name
+                existing_materials = list(existing_po_child.materials_data or [])  # Make a copy
+                existing_material_names = {m.get('material_name'): idx for idx, m in enumerate(existing_materials)}
+
+                materials_added = 0
+                materials_updated = 0
+                for new_mat in po_materials:
+                    mat_name = new_mat.get('material_name')
+                    if mat_name in existing_material_names:
+                        # Update existing material (replace with new pricing/quantity)
+                        existing_materials[existing_material_names[mat_name]] = new_mat
+                        materials_updated += 1
+                    else:
+                        # Add new material
+                        existing_materials.append(new_mat)
+                        materials_added += 1
+
+                # Recalculate total cost
+                new_total_cost = sum(m.get('total_price', 0) for m in existing_materials)
+
+                # Update existing POChild
+                existing_po_child.materials_data = existing_materials
+                existing_po_child.materials_total_cost = new_total_cost
+                existing_po_child.vendor_selected_by_buyer_id = user_id
+                existing_po_child.vendor_selected_by_buyer_name = user_name
+                existing_po_child.vendor_selection_date = datetime.utcnow()
+                existing_po_child.vendor_selection_status = 'pending_td_approval'
+                existing_po_child.status = 'pending_td_approval'
+                existing_po_child.updated_at = datetime.utcnow()
+                # Clear any previous rejection
+                existing_po_child.rejection_reason = None
+
+                # Mark JSON field as modified for SQLAlchemy
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(existing_po_child, 'materials_data')
+
+                po_child = existing_po_child
+                log.info(f"📦 Consolidated into POChild {po_child.get_formatted_id()} for vendor {vendor.company_name}: {materials_added} added, {materials_updated} updated. Total: {len(existing_materials)} materials, AED {new_total_cost:.2f}")
+
+                created_po_children.append({
+                    'id': po_child.id,
+                    'formatted_id': po_child.get_formatted_id(),
+                    'vendor_id': vendor_id,
+                    'vendor_name': vendor.company_name,
+                    'materials_count': len(existing_materials),
+                    'total_cost': new_total_cost,
+                    'consolidated': True,
+                    'materials_added': materials_added,
+                    'materials_updated': materials_updated
+                })
+            else:
+                # Create NEW POChild record for this vendor
+                po_child = POChild(
+                    parent_cr_id=parent_cr.cr_id,
+                    suffix=f".{next_suffix_number}",
+                    boq_id=parent_cr.boq_id,
+                    project_id=parent_cr.project_id,
+                    item_id=parent_cr.item_id,
+                    item_name=parent_cr.item_name,
+                    submission_group_id=submission_group_id,
+                    materials_data=po_materials,
+                    materials_total_cost=total_cost,
+                    vendor_id=vendor_id,
+                    vendor_name=vendor.company_name,
+                    vendor_selected_by_buyer_id=user_id,
+                    vendor_selected_by_buyer_name=user_name,
+                    vendor_selection_date=datetime.utcnow(),
+                    vendor_selection_status='pending_td_approval',
+                    status='pending_td_approval',
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+
+                db.session.add(po_child)
+                db.session.flush()  # Get the id
+
+                # Add to existing map to prevent duplicates in same batch
+                existing_vendor_po_children[vendor_id] = po_child
+                next_suffix_number += 1
+
+                log.info(f"📦 Created new POChild {po_child.get_formatted_id()} for vendor {vendor.company_name}")
+
+                created_po_children.append({
+                    'id': po_child.id,
+                    'formatted_id': po_child.get_formatted_id(),
+                    'vendor_id': vendor_id,
+                    'vendor_name': vendor.company_name,
+                    'materials_count': len(po_materials),
+                    'total_cost': total_cost,
+                    'consolidated': False
+                })
 
         # Check if ALL materials from parent CR have been assigned to PO children
         all_po_children = POChild.query.filter_by(
@@ -7667,9 +7724,9 @@ def preview_lpo_pdf(cr_id):
                 # Debug logging
                 print(f">>> LPO Price Debug for '{mat_name}': stored={stored_unit_price}, negotiated={negotiated_price}, selection={selection_price}, vendor_product={vendor_product_price}, raw_material={material}")
 
-                # Use best available price: stored > negotiated > selection > vendor_product
-                # Priority: stored unit_price first (from POChild), then negotiated, then selection, then vendor product
-                final_price = stored_unit_price or negotiated_price or selection_price or vendor_product_price
+                # Use best available price: vendor_product > negotiated > selection > stored
+                # Priority: vendor catalog price first (actual vendor price), then negotiated, then selection, then stored fallback
+                final_price = vendor_product_price or negotiated_price or selection_price or stored_unit_price
                 mat_total = quantity * final_price if final_price else float(material.get('total_price', 0) or 0)
 
                 # Preserve BOQ/original prices for comparison display

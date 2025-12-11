@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   TruckIcon,
@@ -27,6 +28,10 @@ interface DeliveryNoteItem {
 }
 
 interface ReturnableMaterial {
+  delivery_note_item_id: number;
+  delivery_note_id: number;
+  delivery_note_number: string;
+  delivery_date?: string;
   inventory_material_id: number;
   material_code: string;
   material_name: string;
@@ -49,6 +54,7 @@ interface ReturnableProject {
 
 interface MaterialReturnRecord {
   return_id: number;
+  delivery_note_item_id?: number;
   inventory_material_id: number;
   project_id: number;
   quantity: number;
@@ -64,6 +70,8 @@ interface MaterialReturnRecord {
   unit?: string;
   project_name?: string;
   project_code?: string;
+  delivery_note_number?: string;
+  delivery_date?: string;
 }
 
 interface DeliveryNote {
@@ -96,10 +104,21 @@ interface DeliveryNote {
 const MATERIAL_CONDITIONS = ['Good', 'Damaged', 'Defective'] as const;
 
 const MaterialReceipts: React.FC = () => {
+  // URL params for navigation from notifications
+  const [searchParams] = useSearchParams();
+
   const [deliveryNotes, setDeliveryNotes] = useState<DeliveryNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pending' | 'received' | 'return'>('pending');
   const [expandedNotes, setExpandedNotes] = useState<Set<number>>(new Set());
+
+  // Handle URL parameters for navigation (e.g., from notifications)
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'pending') setActiveTab('pending');
+    else if (tab === 'received') setActiveTab('received');
+    else if (tab === 'return') setActiveTab('return');
+  }, [searchParams]);
 
   // Confirm receipt modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -226,7 +245,7 @@ const MaterialReceipts: React.FC = () => {
   };
 
   const handleSubmitReturn = async () => {
-    if (!selectedMaterial || !selectedProjectId) return;
+    if (!selectedMaterial) return;
 
     if (returnForm.quantity <= 0 || returnForm.quantity > selectedMaterial.returnable_quantity) {
       showError(`Quantity must be between 1 and ${selectedMaterial.returnable_quantity}`);
@@ -236,13 +255,11 @@ const MaterialReceipts: React.FC = () => {
     try {
       setSubmittingReturn(true);
       await apiClient.post('/material_return', {
-        inventory_material_id: selectedMaterial.inventory_material_id,
-        project_id: selectedProjectId,
+        delivery_note_item_id: selectedMaterial.delivery_note_item_id,
         quantity: returnForm.quantity,
         condition: returnForm.condition,
         return_reason: returnForm.return_reason,
-        notes: returnForm.notes,
-        add_to_stock: returnForm.condition === 'Good' ? returnForm.add_to_stock : false
+        notes: returnForm.notes
       });
       showSuccess('Material return submitted successfully!');
       setShowReturnModal(false);
@@ -496,6 +513,7 @@ const MaterialReceipts: React.FC = () => {
                                   <thead>
                                     <tr className="text-left text-gray-500 border-b">
                                       <th className="pb-2 font-medium">Material</th>
+                                      <th className="pb-2 font-medium">Delivery Note</th>
                                       <th className="pb-2 font-medium text-right">Dispatched</th>
                                       <th className="pb-2 font-medium text-right">Returned</th>
                                       <th className="pb-2 font-medium text-right">Returnable</th>
@@ -504,10 +522,18 @@ const MaterialReceipts: React.FC = () => {
                                   </thead>
                                   <tbody className="divide-y divide-gray-100">
                                     {project.materials.map((material) => (
-                                      <tr key={material.inventory_material_id}>
+                                      <tr key={material.delivery_note_item_id}>
                                         <td className="py-3">
                                           <p className="font-medium text-gray-900">{material.material_name}</p>
                                           <p className="text-xs text-gray-500">{material.material_code} {material.brand && `• ${material.brand}`}</p>
+                                        </td>
+                                        <td className="py-3">
+                                          <p className="font-medium text-gray-700">{material.delivery_note_number}</p>
+                                          {material.delivery_date && (
+                                            <p className="text-xs text-gray-500">
+                                              {new Date(material.delivery_date).toLocaleDateString()}
+                                            </p>
+                                          )}
                                         </td>
                                         <td className="py-3 text-right text-gray-600">
                                           {material.dispatched_quantity} {material.unit}
@@ -569,7 +595,7 @@ const MaterialReceipts: React.FC = () => {
                       <thead className="bg-gray-50">
                         <tr className="text-left text-gray-500">
                           <th className="px-4 py-3 font-medium">Material</th>
-                          <th className="px-4 py-3 font-medium">Project</th>
+                          <th className="px-4 py-3 font-medium">Delivery Note</th>
                           <th className="px-4 py-3 font-medium text-right">Qty</th>
                           <th className="px-4 py-3 font-medium">Condition</th>
                           <th className="px-4 py-3 font-medium">Status</th>
@@ -586,8 +612,12 @@ const MaterialReceipts: React.FC = () => {
                                 <p className="text-xs text-gray-500">{ret.material_code}</p>
                               </td>
                               <td className="px-4 py-3 text-gray-600">
-                                <p>{ret.project_name}</p>
-                                <p className="text-xs text-gray-400">{ret.project_code}</p>
+                                <p className="font-medium">{ret.delivery_note_number || '-'}</p>
+                                {ret.delivery_date && (
+                                  <p className="text-xs text-gray-400">
+                                    {new Date(ret.delivery_date).toLocaleDateString()}
+                                  </p>
+                                )}
                               </td>
                               <td className="px-4 py-3 text-right font-medium text-gray-900">
                                 {ret.quantity} {ret.unit}
@@ -1034,6 +1064,18 @@ const MaterialReceipts: React.FC = () => {
                     <div>
                       <p className="text-gray-500">Unit</p>
                       <p className="font-medium text-gray-900">{selectedMaterial.unit}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Delivery Note</p>
+                      <p className="font-medium text-gray-900">{selectedMaterial.delivery_note_number}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Delivery Date</p>
+                      <p className="font-medium text-gray-900">
+                        {selectedMaterial.delivery_date
+                          ? new Date(selectedMaterial.delivery_date).toLocaleDateString()
+                          : '-'}
+                      </p>
                     </div>
                     <div>
                       <p className="text-gray-500">Dispatched</p>

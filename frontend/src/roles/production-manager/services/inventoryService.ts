@@ -11,6 +11,8 @@ export interface InventoryMaterial {
   category?: string;
   unit: string;
   current_stock: number;
+  backup_stock?: number;  // Partially usable/damaged stock
+  backup_condition_notes?: string;  // Description of backup stock condition
   min_stock_level?: number;
   unit_price: number;
   description?: string;
@@ -83,7 +85,7 @@ export interface InternalMaterialRequest {
 }
 
 export type MaterialCondition = 'Good' | 'Damaged' | 'Defective';
-export type DisposalStatus = 'pending_review' | 'approved_disposal' | 'disposed' | 'repaired' | null;
+export type DisposalStatus = 'pending_approval' | 'approved' | 'pending_review' | 'approved_disposal' | 'disposed' | 'repaired' | 'rejected' | null;
 
 export interface MaterialReturn {
   return_id?: number;
@@ -127,9 +129,10 @@ export interface CreateMaterialReturnData {
 }
 
 export interface ReviewDisposalData {
-  action: 'approve' | 'repair';
+  action: 'approve' | 'backup';  // approve = disposal, backup = add to backup stock
   disposal_value?: number;
   notes?: string;
+  usable_quantity?: number;  // For backup: how many items are still usable
 }
 
 export interface DispatchedMaterial {
@@ -910,6 +913,49 @@ class InventoryService {
       console.error('Error adding repaired to stock:', axiosError);
       throw new Error(
         (axiosError.response?.data as any)?.error || 'Failed to add repaired material to stock'
+      );
+    }
+  }
+
+  /**
+   * Approve a Good condition return and add to stock (PM action)
+   */
+  async approveReturnToStock(id: number, notes?: string): Promise<{
+    return: MaterialReturn;
+    new_stock_level: number;
+  }> {
+    try {
+      const response = await apiClient.post(
+        `/material_return/${id}/approve`,
+        { notes },
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error approving return:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to approve return'
+      );
+    }
+  }
+
+  /**
+   * Reject a return (PM action)
+   */
+  async rejectReturn(id: number, notes?: string): Promise<MaterialReturn> {
+    try {
+      const response = await apiClient.post(
+        `/material_return/${id}/reject`,
+        { notes },
+        { headers: this.getAuthHeader() }
+      );
+      return response.data.return;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error rejecting return:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to reject return'
       );
     }
   }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Package, CheckCircle, X, Save, RefreshCw,
   ArrowDownCircle, ArrowUpCircle, AlertTriangle,
@@ -20,12 +21,14 @@ import {
   DeliveryNoteItem,
   ProjectWithManagers,
   InventoryConfig,
-  DispatchedMaterial
+  DispatchedMaterial,
+  DisposalStatus,
+  ReviewDisposalData
 } from '../services/inventoryService';
 import { showSuccess, showError, showWarning } from '@/utils/toastHelper';
 
 type MainTabType = 'materials' | 'stock-in' | 'stock-out';
-type StockInSubTab = 'grn' | 'returns';
+type StockInSubTab = 'grn' | 'returns' | 'backup';
 type StockOutSubTab = 'requests' | 'delivery-notes';
 
 // Stock status types for materials
@@ -40,10 +43,32 @@ const getStockStatus = (current: number, min: number): StockStatus => {
 };
 
 const StockManagement: React.FC = () => {
+  // URL params for navigation from notifications
+  const [searchParams] = useSearchParams();
+
   // Main tab state
   const [activeMainTab, setActiveMainTab] = useState<MainTabType>('stock-in');
   const [stockInSubTab, setStockInSubTab] = useState<StockInSubTab>('grn');
   const [stockOutSubTab, setStockOutSubTab] = useState<StockOutSubTab>('requests');
+
+  // Handle URL parameters for navigation (e.g., from notifications)
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    const subtab = searchParams.get('subtab');
+
+    if (tab === 'materials') {
+      setActiveMainTab('materials');
+    } else if (tab === 'stock-in') {
+      setActiveMainTab('stock-in');
+      if (subtab === 'grn') setStockInSubTab('grn');
+      else if (subtab === 'returns') setStockInSubTab('returns');
+      else if (subtab === 'backup') setStockInSubTab('backup');
+    } else if (tab === 'stock-out') {
+      setActiveMainTab('stock-out');
+      if (subtab === 'requests') setStockOutSubTab('requests');
+      else if (subtab === 'delivery-notes') setStockOutSubTab('delivery-notes');
+    }
+  }, [searchParams]);
 
   // Data states
   const [transactions, setTransactions] = useState<InventoryTransaction[]>([]);
@@ -87,6 +112,15 @@ const StockManagement: React.FC = () => {
 
   // Selected request for creating DN from approved request
   const [selectedRequestForDN, setSelectedRequestForDN] = useState<InternalMaterialRequest | null>(null);
+
+  // Return review modal state (for PM to review damaged/defective returns)
+  const [showReviewReturnModal, setShowReviewReturnModal] = useState(false);
+  const [selectedReturnForReview, setSelectedReturnForReview] = useState<MaterialReturn | null>(null);
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [disposalValue, setDisposalValue] = useState<number>(0);
+  const [processingReview, setProcessingReview] = useState(false);
+  const [reviewAction, setReviewAction] = useState<'dispose' | 'backup'>('dispose');
+  const [usableQuantity, setUsableQuantity] = useState<number>(0);
 
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -157,6 +191,7 @@ const StockManagement: React.FC = () => {
     quantity: number;
     notes: string;
     internal_request_id?: number;
+    use_backup?: boolean;  // Whether to use backup stock for this item
   }>>([]);
 
   // Form state for adding/editing material
@@ -298,6 +333,155 @@ const StockManagement: React.FC = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Open review modal for damaged/defective returns
+  const openReviewReturnModal = (returnItem: MaterialReturn) => {
+    setSelectedReturnForReview(returnItem);
+    setReviewNotes('');
+    setDisposalValue(0);
+    setReviewAction('dispose');
+    setUsableQuantity(returnItem.quantity); // Default to full quantity for backup
+    setShowReviewReturnModal(true);
+  };
+
+  // Handle PM review of damaged/defective return - can dispose or add to backup stock
+  const handleReviewReturn = async () => {
+    if (!selectedReturnForReview?.return_id) return;
+
+    // Validate backup quantity
+    if (reviewAction === 'backup' && (usableQuantity <= 0 || usableQuantity > selectedReturnForReview.quantity)) {
+      showError('Please enter a valid usable quantity');
+      return;
+    }
+
+    setProcessingReview(true);
+    try {
+      const reviewData: ReviewDisposalData = {
+        action: reviewAction === 'backup' ? 'backup' : 'approve',
+        notes: reviewNotes || undefined,
+        disposal_value: reviewAction === 'dispose' ? disposalValue : undefined,
+        usable_quantity: reviewAction === 'backup' ? usableQuantity : undefined
+      };
+
+      await inventoryService.reviewDisposal(selectedReturnForReview.return_id, reviewData);
+
+      setShowReviewReturnModal(false);
+      setSelectedReturnForReview(null);
+      fetchData();
+      showSuccess(reviewAction === 'backup'
+        ? `${usableQuantity} ${selectedReturnForReview.unit} added to backup stock`
+        : 'Return approved for disposal');
+    } catch (error: any) {
+      console.error('Error reviewing return:', error);
+      showError(error.message || 'Failed to review return');
+    } finally {
+      setProcessingReview(false);
+    }
+  };
+
+  // Mark approved disposal as physically disposed
+  const handleMarkDisposed = async (returnId: number) => {
+    showConfirmation(
+      'Mark as Disposed',
+      'Confirm that this material has been physically disposed?',
+      async () => {
+        try {
+          await inventoryService.markAsDisposed(returnId);
+          fetchData();
+          showSuccess('Material marked as disposed');
+          closeConfirmation();
+        } catch (error: any) {
+          showError(error.message || 'Failed to mark as disposed');
+        }
+      },
+      'Confirm Disposal',
+      'red'
+    );
+  };
+
+  // Add repaired material back to stock
+  const handleAddRepairedToStock = async (returnId: number) => {
+    showConfirmation(
+      'Add to Stock',
+      'Add this repaired material back to inventory stock?',
+      async () => {
+        try {
+          const result = await inventoryService.addRepairedToStock(returnId);
+          fetchData();
+          showSuccess(`Material added to stock. New stock level: ${result.new_stock_level}`);
+          closeConfirmation();
+        } catch (error: any) {
+          showError(error.message || 'Failed to add to stock');
+        }
+      },
+      'Add to Stock',
+      'green'
+    );
+  };
+
+  // PM approves a Good condition return and adds to stock
+  const handleApproveReturn = async (returnId: number) => {
+    showConfirmation(
+      'Approve Return',
+      'Approve this return and add the material to inventory stock?',
+      async () => {
+        try {
+          const result = await inventoryService.approveReturnToStock(returnId);
+          fetchData();
+          showSuccess(`Return approved. New stock level: ${result.new_stock_level}`);
+          closeConfirmation();
+        } catch (error: any) {
+          showError(error.message || 'Failed to approve return');
+        }
+      },
+      'Approve & Add to Stock',
+      'green'
+    );
+  };
+
+  // PM rejects a return
+  const handleRejectReturn = async (returnId: number) => {
+    showConfirmation(
+      'Reject Return',
+      'Are you sure you want to reject this return? The material will NOT be added to stock.',
+      async () => {
+        try {
+          await inventoryService.rejectReturn(returnId, 'Rejected by PM');
+          fetchData();
+          showSuccess('Return rejected');
+          closeConfirmation();
+        } catch (error: any) {
+          showError(error.message || 'Failed to reject return');
+        }
+      },
+      'Reject',
+      'red'
+    );
+  };
+
+  // Get disposal status badge
+  const getDisposalStatusBadge = (status: DisposalStatus) => {
+    if (!status) return null;
+    const styles: Record<string, string> = {
+      'pending_approval': 'bg-yellow-100 text-yellow-800',
+      'approved': 'bg-green-100 text-green-800',
+      'pending_review': 'bg-yellow-100 text-yellow-800',
+      'approved_disposal': 'bg-orange-100 text-orange-800',
+      'disposed': 'bg-gray-100 text-gray-600',
+      'repaired': 'bg-blue-100 text-blue-800',
+      'rejected': 'bg-red-100 text-red-800'
+    };
+    const labels: Record<string, string> = {
+      'pending_approval': 'Pending Approval',
+      'approved': 'Approved & Added',
+      'pending_review': 'Pending Review',
+      'approved_disposal': 'Approved for Disposal',
+      'disposed': 'Disposed',
+      'repaired': 'Repaired',
+      'rejected': 'Rejected'
+    };
+    return <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray-600'}`}>{labels[status] || status}</span>;
   };
 
   // Handler for project selection in Return modal - fetches dispatched materials
@@ -1110,6 +1294,9 @@ const StockManagement: React.FC = () => {
     return matchesSearch && matchesCategory;
   });
 
+  // Count materials with backup stock (for Stock In tab)
+  const backupStockCount = materials.filter(m => (m.backup_stock ?? 0) > 0).length;
+
   // Pagination for materials
   const totalMaterialPages = Math.ceil(filteredMaterials.length / materialsPerPage);
   const paginatedMaterials = filteredMaterials.slice(
@@ -1125,9 +1312,12 @@ const StockManagement: React.FC = () => {
       return txnDate === new Date().toDateString();
     });
     const goodReturns = returns.filter(r => r.condition === 'Good').length;
-    const pendingDisposal = returns.filter(r => r.disposal_status === 'pending_review').length;
+    // Count all pending items (both pending_approval for Good and pending_review for Damaged/Defective)
+    const pendingCount = returns.filter(r =>
+      r.disposal_status === 'pending_review' || r.disposal_status === 'pending_approval'
+    ).length;
 
-    return { todayTransactions: todayTransactions.length, goodReturns, pendingDisposal };
+    return { todayTransactions: todayTransactions.length, goodReturns, pendingDisposal: pendingCount };
   };
 
   const getStockOutStats = () => {
@@ -1427,6 +1617,15 @@ const StockManagement: React.FC = () => {
                             {material.current_stock} {material.unit}
                           </div>
                           <div className="text-gray-500 text-xs">Min: {material.min_stock_level || 0}</div>
+                          {/* Show backup stock if available */}
+                          {(material.backup_stock ?? 0) > 0 && (
+                            <div className="mt-1 flex items-center gap-1" title={material.backup_condition_notes || 'Partially usable stock'}>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                <Package className="w-3 h-3" />
+                                +{material.backup_stock} backup
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -1541,6 +1740,24 @@ const StockManagement: React.FC = () => {
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setStockInSubTab('backup')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                stockInSubTab === 'backup'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+              }`}
+            >
+              <Package className="w-4 h-4 inline mr-2" />
+              Backup Stock
+              {backupStockCount > 0 && (
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                  stockInSubTab === 'backup' ? 'bg-white text-blue-600' : 'bg-blue-100 text-blue-700'
+                }`}>
+                  {backupStockCount}
+                </span>
+              )}
+            </button>
           </div>
 
           {/* Search and Actions */}
@@ -1628,50 +1845,97 @@ const StockManagement: React.FC = () => {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">From Project</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Condition</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-green-50">Stock Added</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">From Project</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Condition</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {filteredReturns.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                        No material returns found. Click "Record Return" to add materials returned from site.
+                      <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                        No material returns found. Returns from Site Engineers will appear here for review.
                       </td>
                     </tr>
                   ) : (
                     filteredReturns.map((ret) => (
-                      <tr key={ret.return_id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 text-sm text-gray-500">
+                      <tr key={ret.return_id} className={`hover:bg-gray-50 ${(ret.disposal_status === 'pending_review' || ret.disposal_status === 'pending_approval') ? 'bg-yellow-50' : ''}`}>
+                        <td className="px-4 py-4 text-sm text-gray-500">
                           {new Date(ret.created_at || '').toLocaleDateString()}
                         </td>
-                        <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                        <td className="px-4 py-4 text-sm font-medium text-gray-900">
                           {ret.reference_number || '-'}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-900">
+                        <td className="px-4 py-4 text-sm text-gray-900">
                           <div className="font-medium">{ret.material_name || 'Unknown'}</div>
                           <span className="text-gray-500 text-xs">{ret.material_code}</span>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-900">
+                        <td className="px-4 py-4 text-sm text-gray-900">
                           {ret.project_details?.project_name || `Project ${ret.project_id}`}
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-4 text-sm text-gray-900">
+                          {ret.quantity} {ret.unit}
+                        </td>
+                        <td className="px-4 py-4">
                           {getConditionBadge(ret.condition)}
                         </td>
-                        <td className="px-6 py-4 text-center bg-green-50">
-                          {ret.add_to_stock ? (
-                            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-bold bg-green-100 text-green-800">
-                              <ArrowDownCircle className="w-4 h-4" />
-                              +{ret.quantity} {ret.unit}
+                        <td className="px-4 py-4">
+                          {/* Status column - show disposal_status badge for all items */}
+                          {getDisposalStatusBadge(ret.disposal_status || null)}
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          {/* Actions based on condition and disposal_status */}
+                          {/* Good condition with pending_approval - show Approve/Reject */}
+                          {ret.condition === 'Good' && ret.disposal_status === 'pending_approval' ? (
+                            <div className="flex gap-1 justify-center">
+                              <button
+                                onClick={() => ret.return_id && handleApproveReturn(ret.return_id)}
+                                className="px-3 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => ret.return_id && handleRejectReturn(ret.return_id)}
+                                className="px-2 py-1 text-xs font-medium bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          ) : ret.condition === 'Good' && (ret.disposal_status === 'approved' || ret.add_to_stock) ? (
+                            <span className="inline-flex items-center gap-1 text-green-600 text-xs">
+                              <CheckCircle className="w-3 h-3" />
+                              Completed
                             </span>
+                          ) : ret.condition === 'Good' && ret.disposal_status === 'rejected' ? (
+                            <span className="text-red-500 text-xs">Rejected</span>
+                          ) : ret.disposal_status === 'pending_review' ? (
+                            <button
+                              onClick={() => openReviewReturnModal(ret)}
+                              className="px-3 py-1 text-xs font-medium bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors"
+                            >
+                              Review
+                            </button>
+                          ) : ret.disposal_status === 'approved_disposal' ? (
+                            <button
+                              onClick={() => ret.return_id && handleMarkDisposed(ret.return_id)}
+                              className="px-3 py-1 text-xs font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                            >
+                              Mark Disposed
+                            </button>
+                          ) : ret.disposal_status === 'repaired' && !ret.add_to_stock ? (
+                            <button
+                              onClick={() => ret.return_id && handleAddRepairedToStock(ret.return_id)}
+                              className="px-3 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                            >
+                              Add to Stock
+                            </button>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-500">
-                              Not Added
-                            </span>
+                            <span className="text-gray-400 text-xs">Completed</span>
                           )}
                         </td>
                       </tr>
@@ -1679,6 +1943,88 @@ const StockManagement: React.FC = () => {
                   )}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Backup Stock Table */}
+          {stockInSubTab === 'backup' && (
+            <div className="space-y-4">
+              {/* Info Banner for Backup Stock */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <Package className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h3 className="font-semibold text-blue-900">Backup Stock (Partially Usable Materials)</h3>
+                    <p className="text-sm text-blue-700 mt-1">
+                      Materials that were returned as damaged but still have some usable quantity. These can be used for non-critical applications.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Backup Stock List */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-blue-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-blue-700 uppercase">Code</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-blue-700 uppercase">Material</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-blue-700 uppercase">Category</th>
+                      <th className="px-6 py-3 text-center text-xs font-medium text-blue-700 uppercase">Backup Qty</th>
+                      <th className="px-6 py-3 text-center text-xs font-medium text-blue-700 uppercase">Main Stock</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-blue-700 uppercase">Condition Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {materials.filter(m => (m.backup_stock ?? 0) > 0).length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                          <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                          <p className="font-medium">No backup stock available</p>
+                          <p className="text-sm mt-1">Materials added to backup from damaged returns will appear here.</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      materials.filter(m => (m.backup_stock ?? 0) > 0).map((material) => (
+                        <tr key={material.inventory_material_id} className="hover:bg-blue-50">
+                          <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                            {material.material_code}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-900">
+                            <div>
+                              <div className="font-medium">{material.material_name}</div>
+                              {material.brand && <div className="text-gray-500 text-xs">{material.brand}</div>}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-500">
+                            {material.category || '-'}
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-bold bg-blue-100 text-blue-800">
+                              <Package className="w-4 h-4" />
+                              {material.backup_stock} {material.unit}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <span className={`font-medium ${material.current_stock > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                              {material.current_stock} {material.unit}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
+                            {material.backup_condition_notes ? (
+                              <div className="whitespace-pre-wrap text-xs bg-gray-50 p-2 rounded border">
+                                {material.backup_condition_notes}
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 italic">No notes</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -2564,6 +2910,196 @@ const StockManagement: React.FC = () => {
         </div>
       )}
 
+      {/* ==================== REVIEW RETURN MODAL (PM reviews damaged/defective returns) ==================== */}
+      {showReviewReturnModal && selectedReturnForReview && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Review Material Return</h2>
+              <button onClick={() => setShowReviewReturnModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Return Details Summary */}
+            <div className="bg-gray-50 rounded-lg p-4 mb-4">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <span className="text-gray-500">Material:</span>
+                  <p className="font-medium">{selectedReturnForReview.material_name}</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">Quantity:</span>
+                  <p className="font-medium">{selectedReturnForReview.quantity} {selectedReturnForReview.unit}</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">From Project:</span>
+                  <p className="font-medium">{selectedReturnForReview.project_details?.project_name}</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">Condition:</span>
+                  <p className="font-medium">{getConditionBadge(selectedReturnForReview.condition)}</p>
+                </div>
+                {selectedReturnForReview.return_reason && (
+                  <div className="col-span-2">
+                    <span className="text-gray-500">Return Reason:</span>
+                    <p className="font-medium">{selectedReturnForReview.return_reason}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Review Action - Choose between Disposal or Backup Stock */}
+            <div className="space-y-4">
+              {/* Action Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">What would you like to do with this material?</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setReviewAction('backup')}
+                    className={`p-3 rounded-lg border-2 text-left transition-all ${
+                      reviewAction === 'backup'
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <Package className="w-5 h-5 text-blue-600" />
+                      <span className="font-medium text-gray-900">Add to Backup</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Partially usable, keep for future use</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReviewAction('dispose')}
+                    className={`p-3 rounded-lg border-2 text-left transition-all ${
+                      reviewAction === 'dispose'
+                        ? 'border-orange-500 bg-orange-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <Trash2 className="w-5 h-5 text-orange-600" />
+                      <span className="font-medium text-gray-900">Dispose</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Completely unusable, mark for disposal</p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Backup Stock Fields */}
+              {reviewAction === 'backup' && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <Package className="w-5 h-5 text-blue-600 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-blue-800">Partially Usable Material</h4>
+                      <p className="text-sm text-blue-700 mt-1">
+                        This material will be added to backup stock and can be used when explicitly selected.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Usable Quantity * (Max: {selectedReturnForReview.quantity} {selectedReturnForReview.unit})
+                    </label>
+                    <input
+                      type="number"
+                      value={usableQuantity}
+                      onChange={(e) => setUsableQuantity(Number(e.target.value))}
+                      min={1}
+                      max={selectedReturnForReview.quantity}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">How many items are still usable from this return?</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Condition Notes *</label>
+                    <textarea
+                      value={reviewNotes}
+                      onChange={(e) => setReviewNotes(e.target.value)}
+                      placeholder="Describe the condition of the material (e.g., minor scratches, partial damage, etc.)"
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Disposal Fields */}
+              {reviewAction === 'dispose' && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-orange-600 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-orange-800">Damaged/Defective Material</h4>
+                      <p className="text-sm text-orange-700 mt-1">
+                        This material will be marked for disposal.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Disposal/Scrap Value ({inventoryConfig.currency})</label>
+                    <input
+                      type="number"
+                      value={disposalValue}
+                      onChange={(e) => setDisposalValue(Number(e.target.value))}
+                      placeholder="0.00"
+                      min={0}
+                      step={0.01}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Enter scrap/salvage value if material can be sold, otherwise leave as 0</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Disposal Notes *</label>
+                    <textarea
+                      value={reviewNotes}
+                      onChange={(e) => setReviewNotes(e.target.value)}
+                      placeholder="Describe the damage/defect and reason for disposal..."
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowReviewReturnModal(false)}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReviewReturn}
+                disabled={processingReview || !reviewNotes.trim()}
+                className={`px-4 py-2 text-white rounded-lg flex items-center gap-2 disabled:opacity-50 ${
+                  reviewAction === 'backup'
+                    ? 'bg-blue-600 hover:bg-blue-700'
+                    : 'bg-orange-600 hover:bg-orange-700'
+                }`}
+              >
+                {processingReview ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : reviewAction === 'backup' ? (
+                  <Package className="w-4 h-4" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                {reviewAction === 'backup' ? 'Add to Backup Stock' : 'Approve Disposal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ==================== DELIVERY NOTE MODAL ==================== */}
       {showDeliveryNoteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
@@ -2724,18 +3260,42 @@ const StockManagement: React.FC = () => {
                                 </div>
                               </div>
                             ) : (
-                              <select
-                                value={item.inventory_material_id}
-                                onChange={(e) => handleDnItemChange(index, 'inventory_material_id', Number(e.target.value))}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-sm"
-                              >
-                                <option value={0}>Select Material</option>
-                                {materials.map((m) => (
-                                  <option key={m.inventory_material_id} value={m.inventory_material_id}>
-                                    {m.material_name} ({m.material_code}) - Stock: {m.current_stock} {m.unit}
-                                  </option>
-                                ))}
-                              </select>
+                              <>
+                                <select
+                                  value={item.inventory_material_id}
+                                  onChange={(e) => handleDnItemChange(index, 'inventory_material_id', Number(e.target.value))}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-sm"
+                                >
+                                  <option value={0}>Select Material</option>
+                                  {materials.map((m) => (
+                                    <option key={m.inventory_material_id} value={m.inventory_material_id}>
+                                      {m.material_name} ({m.material_code}) - Stock: {m.current_stock}{(m.backup_stock ?? 0) > 0 ? ` (+${m.backup_stock} backup)` : ''} {m.unit}
+                                    </option>
+                                  ))}
+                                </select>
+                                {/* Show backup stock option if available */}
+                                {selectedMaterial && (selectedMaterial.backup_stock ?? 0) > 0 && (
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      id={`use-backup-${index}`}
+                                      checked={item.use_backup || false}
+                                      onChange={(e) => handleDnItemChange(index, 'use_backup', e.target.checked)}
+                                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                    />
+                                    <label htmlFor={`use-backup-${index}`} className="text-xs text-blue-700 flex items-center gap-1">
+                                      <Package className="w-3 h-3" />
+                                      Use backup stock ({selectedMaterial.backup_stock} {selectedMaterial.unit} available)
+                                    </label>
+                                  </div>
+                                )}
+                                {item.use_backup && (
+                                  <div className="mt-1 bg-yellow-50 border border-yellow-200 rounded p-2 text-xs text-yellow-800">
+                                    <AlertTriangle className="w-3 h-3 inline mr-1" />
+                                    Warning: Backup stock may be partially damaged. Condition: {selectedMaterial?.backup_condition_notes?.split('\n').pop() || 'See notes'}
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                           <div className="w-24">

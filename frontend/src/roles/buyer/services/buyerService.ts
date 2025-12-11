@@ -29,6 +29,9 @@ export interface PurchaseMaterial {
   unit_price: number;
   total_price: number;
   master_material_id?: number | null;  // Null for NEW materials, number for existing BOQ materials
+  negotiated_price?: number;  // Negotiated price for this material (used in PO children)
+  boq_unit_price?: number;  // BOQ unit price for comparison (used in PO children)
+  boq_total_price?: number;  // BOQ total price for comparison (used in PO children)
 }
 
 // POChild type for tracking vendor-specific purchase order splits
@@ -69,7 +72,12 @@ export interface POChild {
     unit: string;
     unit_price: number;
     total_price: number;
-    master_material_id?: number | null;
+    master_material_id?: string | null;
+    boq_unit_price?: number;
+    boq_total_price?: number;
+    negotiated_price?: number;
+    justification?: string;
+    reason?: string;
   }>;
   materials_count?: number;
   materials_total_cost?: number;

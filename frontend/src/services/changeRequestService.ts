@@ -8,7 +8,11 @@ export interface ChangeRequestItem {
   project_id: number;
   project_name?: string;
   project_code?: string;
+  project_location?: string;
+  project_client?: string;
+  area?: string;
   boq_name?: string;
+  boq_status?: string;
   item_id?: string | null;
   item_name?: string | null;
   requested_by_user_id: number;
@@ -133,9 +137,6 @@ export interface ChangeRequestItem {
   assigned_to_buyer_user_id?: number | null;
   assigned_to_buyer_name?: string | null;
   assigned_to_buyer_date?: string | null;
-  project_client?: string | null;
-  project_location?: string | null;
-  area?: string | null;
 
   // PO Child Support (for separate vendor submissions)
   submission_group_id?: string | null;

@@ -1204,6 +1204,336 @@ class ComprehensiveNotificationService:
         except Exception as e:
             log.error(f"Error sending maintenance complete notification: {e}")
 
+    # ==================== INVENTORY BACKUP STOCK NOTIFICATIONS ====================
+
+    @staticmethod
+    def notify_material_added_to_backup(
+        material_name, material_code, quantity, unit, condition_notes,
+        return_id, reviewed_by_name, site_engineer_id=None
+    ):
+        """
+        Notify relevant users when material is added to backup stock
+        Trigger: PM reviews damaged return and adds to backup stock
+        Recipients: Site Engineer who returned it (if available), Production Manager role
+        """
+        try:
+            # Get all Production Managers
+            pm_role = Role.query.filter_by(role='Production Manager').first()
+            pm_users = []
+            if pm_role:
+                pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True).all()
+
+            # Notify Production Managers
+            for pm in pm_users:
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='info',
+                    title='Material Added to Backup Stock',
+                    message=f'{quantity} {unit} of {material_name} ({material_code}) added to backup stock by {reviewed_by_name}. Condition: {condition_notes[:50] if condition_notes else "N/A"}...',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url='/production-manager/stock-management?tab=stock-in&subtab=backup',
+                    action_label='View Backup Stock',
+                    metadata={
+                        'return_id': return_id,
+                        'material_code': material_code,
+                        'quantity': quantity,
+                        'unit': unit,
+                        'workflow': 'backup_stock'
+                    },
+                    sender_name=reviewed_by_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+
+            # Also notify the Site Engineer who returned it (if available)
+            if site_engineer_id:
+                notification = NotificationManager.create_notification(
+                    user_id=site_engineer_id,
+                    type='success',
+                    title='Returned Material Added to Backup',
+                    message=f'Your returned material {material_name} ({quantity} {unit}) has been added to backup stock. It can still be used for non-critical applications.',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url='/site-engineer/material-receipts',
+                    action_label='View Materials',
+                    metadata={
+                        'return_id': return_id,
+                        'material_code': material_code,
+                        'workflow': 'backup_stock'
+                    },
+                    sender_name=reviewed_by_name
+                )
+                send_notification_to_user(site_engineer_id, notification.to_dict())
+
+            log.info(f"Sent backup stock notification for {material_name} ({quantity} {unit})")
+        except Exception as e:
+            log.error(f"Error sending backup stock notification: {e}")
+
+    @staticmethod
+    def notify_material_disposal_approved(
+        material_name, material_code, quantity, unit, disposal_value,
+        return_id, reviewed_by_name, site_engineer_id=None
+    ):
+        """
+        Notify relevant users when material is approved for disposal
+        Trigger: PM reviews damaged return and approves disposal
+        Recipients: Site Engineer who returned it (if available), Production Manager role
+        """
+        try:
+            # Get all Production Managers
+            pm_role = Role.query.filter_by(role='Production Manager').first()
+            pm_users = []
+            if pm_role:
+                pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True).all()
+
+            # Notify Production Managers
+            for pm in pm_users:
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='warning',
+                    title='Material Approved for Disposal',
+                    message=f'{quantity} {unit} of {material_name} ({material_code}) approved for disposal. Write-off value: {disposal_value}',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url='/production-manager/stock-management?tab=stock-in&subtab=returns',
+                    action_label='View Returns',
+                    metadata={
+                        'return_id': return_id,
+                        'material_code': material_code,
+                        'quantity': quantity,
+                        'disposal_value': disposal_value,
+                        'workflow': 'material_disposal'
+                    },
+                    sender_name=reviewed_by_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+
+            # Notify Site Engineer
+            if site_engineer_id:
+                notification = NotificationManager.create_notification(
+                    user_id=site_engineer_id,
+                    type='warning',
+                    title='Returned Material Marked for Disposal',
+                    message=f'Your returned material {material_name} ({quantity} {unit}) has been approved for disposal due to damage.',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url='/site-engineer/material-receipts',
+                    action_label='View Materials',
+                    metadata={
+                        'return_id': return_id,
+                        'material_code': material_code,
+                        'workflow': 'material_disposal'
+                    },
+                    sender_name=reviewed_by_name
+                )
+                send_notification_to_user(site_engineer_id, notification.to_dict())
+
+            log.info(f"Sent disposal approval notification for {material_name} ({quantity} {unit})")
+        except Exception as e:
+            log.error(f"Error sending disposal notification: {e}")
+
+    @staticmethod
+    def notify_damaged_return_needs_review(
+        material_name, material_code, quantity, unit, condition,
+        return_id, project_name, returned_by_name
+    ):
+        """
+        Notify Production Managers when a damaged/defective material return needs review
+        Trigger: Site Engineer returns damaged material
+        Recipients: All Production Managers
+        """
+        try:
+            # Get all Production Managers
+            pm_role = Role.query.filter_by(role='Production Manager').first()
+            if not pm_role:
+                log.warning("Production Manager role not found")
+                return
+
+            pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True).all()
+
+            for pm in pm_users:
+                # Check for duplicate
+                if check_duplicate_notification(pm.user_id, 'Damaged Material Return', 'return_id', return_id):
+                    continue
+
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='warning',
+                    title='Damaged Material Return - Review Required',
+                    message=f'{quantity} {unit} of {material_name} ({material_code}) returned as {condition} from {project_name}. Please review and decide: dispose or add to backup stock.',
+                    priority='urgent',
+                    category='inventory',
+                    action_required=True,
+                    action_url='/production-manager/stock-management?tab=stock-in&subtab=returns',
+                    action_label='Review Return',
+                    metadata={
+                        'return_id': return_id,
+                        'material_code': material_code,
+                        'quantity': quantity,
+                        'condition': condition,
+                        'project_name': project_name,
+                        'workflow': 'material_return_review'
+                    },
+                    sender_name=returned_by_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+
+            log.info(f"Sent damaged return review notification for {material_name} to {len(pm_users)} PMs")
+        except Exception as e:
+            log.error(f"Error sending damaged return notification: {e}")
+
+    @staticmethod
+    def notify_return_approved_to_stock(
+        material_name, material_code, quantity, unit,
+        return_id, approved_by_name, site_engineer_id
+    ):
+        """
+        Notify Site Engineer when their material return is approved and added to stock
+        Trigger: PM approves good condition return
+        Recipients: Site Engineer who created the return
+        """
+        try:
+            if not site_engineer_id:
+                return
+
+            notification = NotificationManager.create_notification(
+                user_id=site_engineer_id,
+                type='success',
+                title='Material Return Approved',
+                message=f'Your return of {quantity} {unit} of {material_name} ({material_code}) has been approved and added back to stock.',
+                priority='normal',
+                category='inventory',
+                action_required=False,
+                action_url='/site-engineer/material-receipts',
+                action_label='View Materials',
+                metadata={
+                    'return_id': return_id,
+                    'material_code': material_code,
+                    'workflow': 'material_return'
+                },
+                sender_name=approved_by_name
+            )
+            send_notification_to_user(site_engineer_id, notification.to_dict())
+            log.info(f"Sent return approved notification to SE {site_engineer_id}")
+        except Exception as e:
+            log.error(f"Error sending return approved notification: {e}")
+
+    @staticmethod
+    def notify_return_rejected(
+        material_name, material_code, quantity, unit,
+        return_id, rejected_by_name, rejection_reason, site_engineer_id
+    ):
+        """
+        Notify Site Engineer when their material return is rejected
+        Trigger: PM rejects a return
+        Recipients: Site Engineer who created the return
+        """
+        try:
+            if not site_engineer_id:
+                return
+
+            notification = NotificationManager.create_notification(
+                user_id=site_engineer_id,
+                type='error',
+                title='Material Return Rejected',
+                message=f'Your return of {quantity} {unit} of {material_name} ({material_code}) was rejected. Reason: {rejection_reason or "Not specified"}',
+                priority='normal',
+                category='inventory',
+                action_required=False,
+                action_url='/site-engineer/material-receipts',
+                action_label='View Materials',
+                metadata={
+                    'return_id': return_id,
+                    'material_code': material_code,
+                    'rejection_reason': rejection_reason,
+                    'workflow': 'material_return'
+                },
+                sender_name=rejected_by_name
+            )
+            send_notification_to_user(site_engineer_id, notification.to_dict())
+            log.info(f"Sent return rejected notification to SE {site_engineer_id}")
+        except Exception as e:
+            log.error(f"Error sending return rejected notification: {e}")
+
+    @staticmethod
+    def notify_delivery_note_dispatched(
+        delivery_note_number, project_name, materials_summary,
+        dispatched_by_name, site_engineer_ids
+    ):
+        """
+        Notify Site Engineers when materials are dispatched to their project
+        Trigger: PM dispatches delivery note
+        Recipients: Site Engineers assigned to the project
+        """
+        try:
+            for se_id in site_engineer_ids:
+                notification = NotificationManager.create_notification(
+                    user_id=se_id,
+                    type='info',
+                    title='Materials Dispatched to Your Site',
+                    message=f'Delivery Note {delivery_note_number} dispatched to {project_name}. Materials: {materials_summary[:100]}...',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url='/site-engineer/material-receipts',
+                    action_label='View Deliveries',
+                    metadata={
+                        'delivery_note_number': delivery_note_number,
+                        'project_name': project_name,
+                        'workflow': 'delivery_note'
+                    },
+                    sender_name=dispatched_by_name
+                )
+                send_notification_to_user(se_id, notification.to_dict())
+
+            log.info(f"Sent dispatch notification to {len(site_engineer_ids)} SEs for DN {delivery_note_number}")
+        except Exception as e:
+            log.error(f"Error sending dispatch notification: {e}")
+
+    @staticmethod
+    def notify_delivery_confirmed(
+        delivery_note_number, project_name, confirmed_by_name
+    ):
+        """
+        Notify Production Managers when delivery is confirmed at site
+        Trigger: SE confirms delivery receipt
+        Recipients: All Production Managers
+        """
+        try:
+            pm_role = Role.query.filter_by(role='Production Manager').first()
+            if not pm_role:
+                return
+
+            pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True).all()
+
+            for pm in pm_users:
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='success',
+                    title='Delivery Confirmed at Site',
+                    message=f'Delivery Note {delivery_note_number} has been received and confirmed at {project_name} by {confirmed_by_name}.',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url='/production-manager/stock-management?tab=stock-out&subtab=delivery-notes',
+                    action_label='View Delivery Notes',
+                    metadata={
+                        'delivery_note_number': delivery_note_number,
+                        'project_name': project_name,
+                        'workflow': 'delivery_note'
+                    },
+                    sender_name=confirmed_by_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+
+            log.info(f"Sent delivery confirmed notification for DN {delivery_note_number}")
+        except Exception as e:
+            log.error(f"Error sending delivery confirmed notification: {e}")
+
 
 # Create singleton instance
 notification_service = ComprehensiveNotificationService()

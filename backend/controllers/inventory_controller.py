@@ -5,6 +5,7 @@ from models.project import Project
 from models.user import User
 from models.system_settings import SystemSettings
 from datetime import datetime
+from utils.comprehensive_notification_service import ComprehensiveNotificationService
 
 
 # ==================== HELPER FUNCTIONS ====================
@@ -43,6 +44,79 @@ def generate_material_code():
 
 DELIVERY_NOTE_PREFIX = 'MDN'
 MAX_STOCK_ALERTS = 10
+
+# Material return constants
+MATERIAL_CONDITIONS = ['Good', 'Damaged', 'Defective']
+RETURNABLE_DN_STATUSES = ['DELIVERED']  # Only delivered materials can be returned
+
+# Disposal status constants
+DISPOSAL_PENDING_APPROVAL = 'pending_approval'
+DISPOSAL_APPROVED = 'approved'
+DISPOSAL_PENDING_REVIEW = 'pending_review'
+DISPOSAL_APPROVED_DISPOSAL = 'approved_disposal'
+DISPOSAL_DISPOSED = 'disposed'
+DISPOSAL_REPAIRED = 'repaired'
+DISPOSAL_REJECTED = 'rejected'
+
+
+def build_returnable_material_item(delivery_note, item, material):
+    """Build returnable material dictionary for a delivery note item.
+
+    Args:
+        delivery_note: MaterialDeliveryNote object
+        item: DeliveryNoteItem object
+        material: InventoryMaterial object
+
+    Returns:
+        dict with returnable material info, or None if nothing to return
+    """
+    returns = MaterialReturn.query.filter_by(
+        delivery_note_item_id=item.item_id
+    ).all()
+
+    total_returned = sum(r.quantity for r in returns)
+    returnable_quantity = max(0, item.quantity - total_returned)
+
+    if returnable_quantity <= 0:
+        return None
+
+    return {
+        'delivery_note_item_id': item.item_id,
+        'delivery_note_id': delivery_note.delivery_note_id,
+        'delivery_note_number': delivery_note.delivery_note_number,
+        'delivery_date': delivery_note.delivery_date.isoformat() if delivery_note.delivery_date else None,
+        'inventory_material_id': item.inventory_material_id,
+        'material_code': material.material_code,
+        'material_name': material.material_name,
+        'brand': material.brand,
+        'unit': material.unit,
+        'is_returnable': material.is_returnable,
+        'dispatched_quantity': item.quantity,
+        'returned_quantity': total_returned,
+        'returnable_quantity': returnable_quantity
+    }
+
+
+def validate_quantity(value, field_name='quantity'):
+    """Validate that a value is a valid positive number.
+
+    Args:
+        value: The value to validate
+        field_name: Name of the field for error messages
+
+    Returns:
+        tuple: (is_valid: bool, parsed_value: float or None, error_message: str or None)
+    """
+    if value is None:
+        return False, None, f'{field_name} is required'
+
+    try:
+        parsed = float(value)
+        if parsed <= 0:
+            return False, None, f'{field_name} must be greater than 0'
+        return True, parsed, None
+    except (TypeError, ValueError):
+        return False, None, f'{field_name} must be a valid number'
 
 
 def get_store_name():
@@ -1332,45 +1406,79 @@ def issue_material_from_inventory(request_id):
 # ==================== MATERIAL RETURN APIs ====================
 
 def create_material_return():
-    """Create a material return record with condition tracking and optional stock update"""
+    """Create a material return record with condition tracking linked to specific delivery note item"""
     try:
         data = request.get_json()
         current_user = g.user.get('email', 'system')
 
-        # Validate required fields
-        required_fields = ['inventory_material_id', 'project_id', 'quantity', 'condition']
+        # Validate required fields - delivery_note_item_id is now required
+        required_fields = ['delivery_note_item_id', 'quantity', 'condition']
         for field in required_fields:
             if field not in data or data[field] is None:
                 return jsonify({'error': f'{field} is required'}), 400
 
-        # Validate condition value
-        valid_conditions = ['Good', 'Damaged', 'Defective']
-        if data['condition'] not in valid_conditions:
-            return jsonify({'error': f'Invalid condition. Must be one of: {", ".join(valid_conditions)}'}), 400
+        # Validate condition value using constant
+        if data['condition'] not in MATERIAL_CONDITIONS:
+            return jsonify({'error': f'Invalid condition. Must be one of: {", ".join(MATERIAL_CONDITIONS)}'}), 400
 
-        # Check if material exists
-        material = InventoryMaterial.query.get(data['inventory_material_id'])
+        # Validate quantity using helper
+        is_valid, quantity, error_msg = validate_quantity(data['quantity'])
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
+
+        # Validate delivery note item exists
+        delivery_note_item = DeliveryNoteItem.query.get(data['delivery_note_item_id'])
+        if not delivery_note_item:
+            return jsonify({'error': 'Delivery note item not found'}), 404
+
+        # Get the delivery note to extract project_id
+        delivery_note = MaterialDeliveryNote.query.get(delivery_note_item.delivery_note_id)
+        if not delivery_note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        # Validate delivery note status - only delivered materials can be returned
+        if delivery_note.status not in RETURNABLE_DN_STATUSES:
+            return jsonify({'error': 'Can only return materials from delivered shipments'}), 400
+
+        # Get material from the delivery note item
+        material = InventoryMaterial.query.get(delivery_note_item.inventory_material_id)
         if not material:
             return jsonify({'error': 'Material not found in inventory'}), 404
 
-        # Validate project exists
-        project = Project.query.get(data['project_id'])
+        # Get project from delivery note
+        project = Project.query.get(delivery_note.project_id)
         if not project:
             return jsonify({'error': 'Project not found'}), 404
 
-        quantity = float(data['quantity'])
         condition = data['condition']
-        add_to_stock = data.get('add_to_stock', False) and condition == 'Good'
 
-        # Set disposal status for damaged/defective items
-        disposal_status = None
-        if condition in ['Damaged', 'Defective']:
-            disposal_status = 'pending_review'
+        # Calculate already returned quantity for this specific delivery note item
+        existing_returns = MaterialReturn.query.filter_by(
+            delivery_note_item_id=data['delivery_note_item_id']
+        ).all()
+        total_returned = sum(r.quantity for r in existing_returns)
+        returnable_quantity = delivery_note_item.quantity - total_returned
 
-        # Create the return record
+        # Validate return quantity against returnable
+        if quantity > returnable_quantity:
+            return jsonify({
+                'error': f'Return quantity ({quantity}) exceeds returnable quantity ({returnable_quantity})'
+            }), 400
+
+        # ALL returns require PM approval - do not auto-add to stock
+        add_to_stock = False
+
+        # Set disposal status based on condition using constants
+        if condition == 'Good':
+            disposal_status = DISPOSAL_PENDING_APPROVAL
+        else:
+            disposal_status = DISPOSAL_PENDING_REVIEW
+
+        # Create the return record with delivery_note_item_id
         new_return = MaterialReturn(
-            inventory_material_id=data['inventory_material_id'],
-            project_id=data['project_id'],
+            delivery_note_item_id=data['delivery_note_item_id'],
+            inventory_material_id=delivery_note_item.inventory_material_id,
+            project_id=delivery_note.project_id,
             quantity=quantity,
             condition=condition,
             add_to_stock=add_to_stock,
@@ -1381,43 +1489,30 @@ def create_material_return():
             created_by=current_user
         )
 
-        stock_updated = False
         new_stock_level = material.current_stock
-
-        # If condition is Good and user chose to add to stock, update inventory
-        if add_to_stock:
-            # Create RETURN transaction
-            total_amount = quantity * material.unit_price
-            new_transaction = InventoryTransaction(
-                inventory_material_id=data['inventory_material_id'],
-                transaction_type='RETURN',
-                quantity=quantity,
-                unit_price=material.unit_price,
-                total_amount=total_amount,
-                reference_number=data.get('reference_number'),
-                project_id=data['project_id'],
-                notes=f'Material return - {data.get("return_reason", "No reason provided")}',
-                created_by=current_user
-            )
-            db.session.add(new_transaction)
-
-            # Update material stock
-            material.current_stock += quantity
-            material.last_modified_at = datetime.utcnow()
-            material.last_modified_by = current_user
-
-            new_return.inventory_transaction_id = new_transaction.inventory_transaction_id
-
-            stock_updated = True
-            new_stock_level = material.current_stock
 
         db.session.add(new_return)
         db.session.commit()
 
-        # Update transaction ID after commit
-        if add_to_stock:
-            new_return.inventory_transaction_id = new_transaction.inventory_transaction_id
-            db.session.commit()
+        # Send notification for damaged/defective returns that need review
+        if condition in ['Damaged', 'Defective']:
+            try:
+                # Get the user who created the return
+                returned_by_user = User.query.filter_by(email=current_user).first()
+                returned_by_name = returned_by_user.full_name if returned_by_user else current_user
+
+                ComprehensiveNotificationService.notify_damaged_return_needs_review(
+                    material_name=material.material_name,
+                    material_code=material.material_code,
+                    quantity=quantity,
+                    unit=material.unit,
+                    condition=condition,
+                    return_id=new_return.return_id,
+                    project_name=project.project_name,
+                    returned_by_name=returned_by_name
+                )
+            except Exception as notif_err:
+                print(f"Error sending damaged return notification: {notif_err}")
 
         # Get project details for response
         project_info = {
@@ -1426,12 +1521,21 @@ def create_material_return():
             'project_code': project.project_code
         }
 
+        # Get delivery note details for response
+        delivery_info = {
+            'delivery_note_id': delivery_note.delivery_note_id,
+            'delivery_note_number': delivery_note.delivery_note_number,
+            'delivery_date': delivery_note.delivery_date.isoformat() if delivery_note.delivery_date else None
+        }
+
         return jsonify({
-            'message': 'Material return recorded successfully',
+            'message': 'Material return recorded successfully. Awaiting PM approval.',
             'return': new_return.to_dict(),
-            'stock_updated': stock_updated,
+            'stock_updated': False,
             'new_stock_level': new_stock_level,
-            'project_details': project_info
+            'project_details': project_info,
+            'delivery_details': delivery_info,
+            'requires_approval': True
         }), 201
 
     except Exception as e:
@@ -1523,59 +1627,32 @@ def get_material_return_by_id(return_id):
 def get_dispatched_materials_for_project(project_id):
     """Get materials dispatched to a project that can be returned.
 
-    Returns materials from delivery notes (ISSUED, IN_TRANSIT, DELIVERED status)
+    Returns materials from delivered delivery notes tracked per delivery note item
     with their dispatched quantity, already returned quantity, and returnable quantity.
     """
     try:
-        # Get all delivery notes for this project with relevant statuses
+        # Get all delivery notes for this project with delivered status
         delivery_notes = MaterialDeliveryNote.query.filter(
             MaterialDeliveryNote.project_id == project_id,
-            MaterialDeliveryNote.status.in_(['ISSUED', 'IN_TRANSIT', 'DELIVERED'])
-        ).all()
+            MaterialDeliveryNote.status.in_(RETURNABLE_DN_STATUSES)
+        ).order_by(MaterialDeliveryNote.delivery_date.desc()).all()
 
-        # Aggregate materials dispatched
-        dispatched_materials = {}
+        # Track each delivery note item separately using helper function
+        result = []
 
         for dn in delivery_notes:
             for item in dn.items:
-                material_id = item.inventory_material_id
-                if material_id not in dispatched_materials:
-                    material = InventoryMaterial.query.get(material_id)
-                    if material:
-                        dispatched_materials[material_id] = {
-                            'inventory_material_id': material_id,
-                            'material_code': material.material_code,
-                            'material_name': material.material_name,
-                            'brand': material.brand,
-                            'unit': material.unit,
-                            'is_returnable': material.is_returnable,
-                            'dispatched_quantity': 0,
-                            'returned_quantity': 0,
-                            'returnable_quantity': 0
-                        }
+                material = InventoryMaterial.query.get(item.inventory_material_id)
+                if not material:
+                    continue
 
-                if material_id in dispatched_materials:
-                    dispatched_materials[material_id]['dispatched_quantity'] += item.quantity
+                # Use helper function to build returnable material dict
+                material_data = build_returnable_material_item(dn, item, material)
+                if material_data:
+                    result.append(material_data)
 
-        # Get already returned quantities for each material from this project
-        for material_id in dispatched_materials.keys():
-            returns = MaterialReturn.query.filter_by(
-                inventory_material_id=material_id,
-                project_id=project_id
-            ).all()
-
-            total_returned = sum(r.quantity for r in returns)
-            dispatched_materials[material_id]['returned_quantity'] = total_returned
-            dispatched_materials[material_id]['returnable_quantity'] = max(
-                0,
-                dispatched_materials[material_id]['dispatched_quantity'] - total_returned
-            )
-
-        # Filter out materials with no returnable quantity
-        result = [m for m in dispatched_materials.values() if m['returnable_quantity'] > 0]
-
-        # Sort by material name
-        result.sort(key=lambda x: x['material_name'])
+        # Sort by material name, then by delivery date
+        result.sort(key=lambda x: (x['material_name'], x['delivery_date'] or ''))
 
         return jsonify({
             'project_id': project_id,
@@ -1591,7 +1668,7 @@ def get_pending_disposal_returns():
     """Get all material returns pending disposal review"""
     try:
         returns = MaterialReturn.query.filter_by(
-            disposal_status='pending_review'
+            disposal_status=DISPOSAL_PENDING_REVIEW
         ).order_by(MaterialReturn.created_at.desc()).all()
 
         # Enrich with project and material details
@@ -1620,42 +1697,146 @@ def get_pending_disposal_returns():
 
 
 def review_disposal(return_id):
-    """Review and approve/reject disposal of damaged/defective materials"""
+    """Review and approve disposal of damaged/defective materials.
+
+    Options:
+    - 'approve': Mark for disposal (material is completely unusable)
+    - 'backup': Add to backup stock (material is partially usable)
+    """
     try:
         material_return = MaterialReturn.query.get(return_id)
 
         if not material_return:
             return jsonify({'error': 'Material return not found'}), 404
 
-        if material_return.disposal_status != 'pending_review':
+        if material_return.disposal_status != DISPOSAL_PENDING_REVIEW:
             return jsonify({'error': f'Cannot review disposal. Current status is {material_return.disposal_status}'}), 400
 
         data = request.get_json()
-        action = data.get('action')  # 'approve' or 'repair'
+        action = data.get('action')
 
-        if action not in ['approve', 'repair']:
-            return jsonify({'error': 'Invalid action. Must be "approve" or "repair"'}), 400
+        # Valid actions: approve (disposal) or backup (add to backup stock)
+        if action not in ['approve', 'backup']:
+            return jsonify({'error': 'Invalid action. Use "approve" for disposal or "backup" for partial use'}), 400
 
         current_user = g.user.get('email', 'system')
 
-        if action == 'approve':
-            # Mark for disposal
-            material_return.disposal_status = 'approved_disposal'
-            material_return.disposal_value = data.get('disposal_value', 0)
+        if action == 'backup':
+            # Add to backup stock (partially usable material)
+            usable_quantity = data.get('usable_quantity')
+            notes = data.get('notes')
+
+            if not usable_quantity or usable_quantity <= 0:
+                return jsonify({'error': 'Usable quantity is required for backup stock'}), 400
+
+            if usable_quantity > material_return.quantity:
+                return jsonify({'error': f'Usable quantity cannot exceed returned quantity ({material_return.quantity})'}), 400
+
+            if not notes:
+                return jsonify({'error': 'Condition notes are required for backup stock'}), 400
+
+            # Get the inventory material
+            material = InventoryMaterial.query.get(material_return.inventory_material_id)
+            if not material:
+                return jsonify({'error': 'Material not found in inventory'}), 404
+
+            # Update backup stock on the material
+            material.backup_stock = (material.backup_stock or 0) + usable_quantity
+
+            # Append condition notes (with date and source info)
+            condition_note = f"[{datetime.utcnow().strftime('%Y-%m-%d')}] {usable_quantity} {material.unit} from return #{return_id}: {notes}"
+            if material.backup_condition_notes:
+                material.backup_condition_notes = f"{material.backup_condition_notes}\n{condition_note}"
+            else:
+                material.backup_condition_notes = condition_note
+
+            material.last_modified_by = current_user
+            material.last_modified_at = datetime.utcnow()
+
+            # Update the return record
+            material_return.disposal_status = 'backup_added'
+            material_return.disposal_reviewed_by = current_user
+            material_return.disposal_reviewed_at = datetime.utcnow()
+            material_return.disposal_notes = notes
+
+            db.session.commit()
+
+            # Send notification for backup stock added
+            try:
+                # Get the user who created the return (site engineer)
+                site_engineer_id = None
+                if material_return.created_by:
+                    se_user = User.query.filter_by(email=material_return.created_by).first()
+                    if se_user:
+                        site_engineer_id = se_user.user_id
+
+                # Get reviewer name
+                reviewer_user = User.query.filter_by(email=current_user).first()
+                reviewer_name = reviewer_user.full_name if reviewer_user else current_user
+
+                ComprehensiveNotificationService.notify_material_added_to_backup(
+                    material_name=material.material_name,
+                    material_code=material.material_code,
+                    quantity=usable_quantity,
+                    unit=material.unit,
+                    condition_notes=notes,
+                    return_id=return_id,
+                    reviewed_by_name=reviewer_name,
+                    site_engineer_id=site_engineer_id
+                )
+            except Exception as notif_err:
+                print(f"Error sending backup stock notification: {notif_err}")
+
+            return jsonify({
+                'message': f'{usable_quantity} {material.unit} added to backup stock',
+                'return': material_return.to_dict(),
+                'new_backup_stock': material.backup_stock
+            }), 200
+
         else:
-            # Mark as repaired - can be added back to stock
-            material_return.disposal_status = 'repaired'
+            # Mark for disposal (original behavior)
+            # Get material info for notification
+            material = InventoryMaterial.query.get(material_return.inventory_material_id)
 
-        material_return.disposal_reviewed_by = current_user
-        material_return.disposal_reviewed_at = datetime.utcnow()
-        material_return.disposal_notes = data.get('notes')
+            material_return.disposal_status = DISPOSAL_APPROVED_DISPOSAL
+            material_return.disposal_value = data.get('disposal_value', 0)
+            material_return.disposal_reviewed_by = current_user
+            material_return.disposal_reviewed_at = datetime.utcnow()
+            material_return.disposal_notes = data.get('notes')
 
-        db.session.commit()
+            db.session.commit()
 
-        return jsonify({
-            'message': f'Disposal review completed - {action}d',
-            'return': material_return.to_dict()
-        }), 200
+            # Send notification for disposal approved
+            try:
+                # Get the user who created the return (site engineer)
+                site_engineer_id = None
+                if material_return.created_by:
+                    se_user = User.query.filter_by(email=material_return.created_by).first()
+                    if se_user:
+                        site_engineer_id = se_user.user_id
+
+                # Get reviewer name
+                reviewer_user = User.query.filter_by(email=current_user).first()
+                reviewer_name = reviewer_user.full_name if reviewer_user else current_user
+
+                if material:
+                    ComprehensiveNotificationService.notify_material_disposal_approved(
+                        material_name=material.material_name,
+                        material_code=material.material_code,
+                        quantity=material_return.quantity,
+                        unit=material.unit,
+                        disposal_value=material_return.disposal_value,
+                        return_id=return_id,
+                        reviewed_by_name=reviewer_name,
+                        site_engineer_id=site_engineer_id
+                    )
+            except Exception as notif_err:
+                print(f"Error sending disposal notification: {notif_err}")
+
+            return jsonify({
+                'message': 'Material approved for disposal',
+                'return': material_return.to_dict()
+            }), 200
 
     except Exception as e:
         db.session.rollback()
@@ -1670,13 +1851,13 @@ def mark_as_disposed(return_id):
         if not material_return:
             return jsonify({'error': 'Material return not found'}), 404
 
-        if material_return.disposal_status != 'approved_disposal':
+        if material_return.disposal_status != DISPOSAL_APPROVED_DISPOSAL:
             return jsonify({'error': f'Cannot mark as disposed. Status must be approved_disposal, current: {material_return.disposal_status}'}), 400
 
         data = request.get_json()
         current_user = g.user.get('email', 'system')
 
-        material_return.disposal_status = 'disposed'
+        material_return.disposal_status = DISPOSAL_DISPOSED
         material_return.disposal_notes = data.get('notes', material_return.disposal_notes)
 
         db.session.commit()
@@ -1699,7 +1880,7 @@ def add_repaired_to_stock(return_id):
         if not material_return:
             return jsonify({'error': 'Material return not found'}), 404
 
-        if material_return.disposal_status != 'repaired':
+        if material_return.disposal_status != DISPOSAL_REPAIRED:
             return jsonify({'error': f'Material must be marked as repaired first. Current status: {material_return.disposal_status}'}), 400
 
         if material_return.add_to_stock:
@@ -1742,6 +1923,156 @@ def add_repaired_to_stock(return_id):
             'message': 'Repaired material added to stock successfully',
             'return': material_return.to_dict(),
             'new_stock_level': material.current_stock
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def approve_return_to_stock(return_id):
+    """PM approves a Good condition return and adds it to stock"""
+    try:
+        material_return = MaterialReturn.query.get(return_id)
+
+        if not material_return:
+            return jsonify({'error': 'Material return not found'}), 404
+
+        # Only Good condition returns with pending_approval status can be approved
+        if material_return.condition != 'Good':
+            return jsonify({'error': f'Only Good condition returns can be approved. This return is: {material_return.condition}'}), 400
+
+        if material_return.disposal_status != DISPOSAL_PENDING_APPROVAL:
+            return jsonify({'error': f'Return is not pending approval. Current status: {material_return.disposal_status}'}), 400
+
+        if material_return.add_to_stock:
+            return jsonify({'error': 'Material has already been added to stock'}), 400
+
+        current_user = g.user.get('email', 'system')
+        data = request.get_json() or {}
+
+        # Get material
+        material = InventoryMaterial.query.get(material_return.inventory_material_id)
+        if not material:
+            return jsonify({'error': 'Material not found in inventory'}), 404
+
+        # Create RETURN transaction
+        total_amount = material_return.quantity * material.unit_price
+        new_transaction = InventoryTransaction(
+            inventory_material_id=material_return.inventory_material_id,
+            transaction_type='RETURN',
+            quantity=material_return.quantity,
+            unit_price=material.unit_price,
+            total_amount=total_amount,
+            reference_number=material_return.reference_number,
+            project_id=material_return.project_id,
+            notes=f'Approved return from site - {material_return.return_reason or "Material returned in good condition"}',
+            created_by=current_user
+        )
+        db.session.add(new_transaction)
+
+        # Update material stock
+        material.current_stock += material_return.quantity
+        material.last_modified_at = datetime.utcnow()
+        material.last_modified_by = current_user
+
+        # Update return record
+        material_return.add_to_stock = True
+        material_return.disposal_status = 'approved'
+        material_return.disposal_reviewed_by = current_user
+        material_return.disposal_reviewed_at = datetime.utcnow()
+        material_return.disposal_notes = data.get('notes', 'Approved and added to stock')
+        material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+        db.session.commit()
+
+        # Send notification to Site Engineer
+        try:
+            site_engineer_id = None
+            if material_return.created_by:
+                se_user = User.query.filter_by(email=material_return.created_by).first()
+                if se_user:
+                    site_engineer_id = se_user.user_id
+
+            approver_user = User.query.filter_by(email=current_user).first()
+            approver_name = approver_user.full_name if approver_user else current_user
+
+            ComprehensiveNotificationService.notify_return_approved_to_stock(
+                material_name=material.material_name,
+                material_code=material.material_code,
+                quantity=material_return.quantity,
+                unit=material.unit,
+                return_id=return_id,
+                approved_by_name=approver_name,
+                site_engineer_id=site_engineer_id
+            )
+        except Exception as notif_err:
+            print(f"Error sending return approved notification: {notif_err}")
+
+        return jsonify({
+            'message': 'Return approved and added to stock successfully',
+            'return': material_return.to_dict(),
+            'new_stock_level': material.current_stock
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def reject_return(return_id):
+    """PM rejects a return (for Good condition items that shouldn't be added to stock)"""
+    try:
+        material_return = MaterialReturn.query.get(return_id)
+
+        if not material_return:
+            return jsonify({'error': 'Material return not found'}), 404
+
+        if material_return.disposal_status not in [DISPOSAL_PENDING_APPROVAL, DISPOSAL_PENDING_REVIEW]:
+            return jsonify({'error': f'Return is not pending. Current status: {material_return.disposal_status}'}), 400
+
+        current_user = g.user.get('email', 'system')
+        data = request.get_json() or {}
+
+        # Get material info for notification
+        material = InventoryMaterial.query.get(material_return.inventory_material_id)
+
+        # Update return record
+        material_return.disposal_status = DISPOSAL_REJECTED
+        material_return.disposal_reviewed_by = current_user
+        material_return.disposal_reviewed_at = datetime.utcnow()
+        material_return.disposal_notes = data.get('notes', 'Return rejected by PM')
+
+        db.session.commit()
+
+        # Send notification to Site Engineer
+        try:
+            site_engineer_id = None
+            if material_return.created_by:
+                se_user = User.query.filter_by(email=material_return.created_by).first()
+                if se_user:
+                    site_engineer_id = se_user.user_id
+
+            rejector_user = User.query.filter_by(email=current_user).first()
+            rejector_name = rejector_user.full_name if rejector_user else current_user
+
+            if material:
+                ComprehensiveNotificationService.notify_return_rejected(
+                    material_name=material.material_name,
+                    material_code=material.material_code,
+                    quantity=material_return.quantity,
+                    unit=material.unit,
+                    return_id=return_id,
+                    rejected_by_name=rejector_name,
+                    rejection_reason=data.get('notes'),
+                    site_engineer_id=site_engineer_id
+                )
+        except Exception as notif_err:
+            print(f"Error sending return rejected notification: {notif_err}")
+
+        return jsonify({
+            'message': 'Return rejected',
+            'return': material_return.to_dict()
         }), 200
 
     except Exception as e:
@@ -2004,7 +2335,8 @@ def add_item_to_delivery_note(delivery_note_id):
             internal_request_id=data.get('internal_request_id'),
             quantity=quantity,
             unit_price=material.unit_price,
-            notes=data.get('notes')
+            notes=data.get('notes'),
+            use_backup=data.get('use_backup', False)
         )
 
         db.session.add(new_item)
@@ -2114,16 +2446,29 @@ def issue_delivery_note(delivery_note_id):
             material = InventoryMaterial.query.get(item.inventory_material_id)
             if not material:
                 return jsonify({'error': f'Material with ID {item.inventory_material_id} not found'}), 404
-            if material.current_stock < item.quantity:
-                return jsonify({
-                    'error': f'Insufficient stock for {material.material_name}. Available: {material.current_stock} {material.unit}, Required: {item.quantity}'
-                }), 400
+
+            # Check appropriate stock based on use_backup flag
+            if item.use_backup:
+                available_backup = material.backup_stock or 0
+                if available_backup < item.quantity:
+                    return jsonify({
+                        'error': f'Insufficient backup stock for {material.material_name}. Available: {available_backup} {material.unit}, Required: {item.quantity}'
+                    }), 400
+            else:
+                if material.current_stock < item.quantity:
+                    return jsonify({
+                        'error': f'Insufficient stock for {material.material_name}. Available: {material.current_stock} {material.unit}, Required: {item.quantity}'
+                    }), 400
 
         # Deduct stock and create transactions
         for item in note.items:
             material = InventoryMaterial.query.get(item.inventory_material_id)
 
             total_amount = item.quantity * material.unit_price
+            transaction_notes = f'Material delivery - {note.delivery_note_number}'
+            if item.use_backup:
+                transaction_notes += ' (from backup stock)'
+
             new_transaction = InventoryTransaction(
                 inventory_material_id=item.inventory_material_id,
                 transaction_type='WITHDRAWAL',
@@ -2132,12 +2477,17 @@ def issue_delivery_note(delivery_note_id):
                 total_amount=total_amount,
                 reference_number=note.delivery_note_number,
                 project_id=note.project_id,
-                notes=f'Material delivery - {note.delivery_note_number}',
+                notes=transaction_notes,
                 created_by=current_user
             )
             db.session.add(new_transaction)
 
-            material.current_stock -= item.quantity
+            # Deduct from appropriate stock
+            if item.use_backup:
+                material.backup_stock = (material.backup_stock or 0) - item.quantity
+            else:
+                material.current_stock -= item.quantity
+
             material.last_modified_at = datetime.utcnow()
             material.last_modified_by = current_user
 
@@ -2372,21 +2722,18 @@ def get_returnable_materials_for_se():
     """Get all returnable materials for Site Engineer's assigned projects.
 
     Returns materials from delivered delivery notes that can still be returned,
-    grouped by project.
+    tracked per delivery note item and grouped by project.
     """
     try:
         current_user_id = g.user.get('user_id')
 
         # Get projects where user is site supervisor
-        from models.project import Project
         assigned_projects = Project.query.filter(
             Project.site_supervisor_id == current_user_id,
             Project.is_deleted == False
         ).all()
 
-        project_ids = [p.project_id for p in assigned_projects]
-
-        if not project_ids:
+        if not assigned_projects:
             return jsonify({
                 'projects': [],
                 'message': 'No assigned projects found'
@@ -2395,59 +2742,32 @@ def get_returnable_materials_for_se():
         result = []
 
         for project in assigned_projects:
-            # Get delivery notes for this project that are delivered
+            # Get delivery notes for this project with returnable status
             delivery_notes = MaterialDeliveryNote.query.filter(
                 MaterialDeliveryNote.project_id == project.project_id,
-                MaterialDeliveryNote.status == 'DELIVERED'
-            ).all()
+                MaterialDeliveryNote.status.in_(RETURNABLE_DN_STATUSES)
+            ).order_by(MaterialDeliveryNote.delivery_date.desc()).all()
 
             if not delivery_notes:
                 continue
 
-            # Aggregate materials dispatched
-            dispatched_materials = {}
+            # Track each delivery note item separately using helper function
+            materials = []
 
             for dn in delivery_notes:
                 for item in dn.items:
-                    material_id = item.inventory_material_id
-                    if material_id not in dispatched_materials:
-                        material = InventoryMaterial.query.get(material_id)
-                        if material:
-                            dispatched_materials[material_id] = {
-                                'inventory_material_id': material_id,
-                                'material_code': material.material_code,
-                                'material_name': material.material_name,
-                                'brand': material.brand,
-                                'unit': material.unit,
-                                'is_returnable': material.is_returnable,
-                                'dispatched_quantity': 0,
-                                'returned_quantity': 0,
-                                'returnable_quantity': 0
-                            }
+                    material = InventoryMaterial.query.get(item.inventory_material_id)
+                    if not material:
+                        continue
 
-                    if material_id in dispatched_materials:
-                        dispatched_materials[material_id]['dispatched_quantity'] += item.quantity
-
-            # Get already returned quantities for each material from this project
-            for material_id in dispatched_materials.keys():
-                returns = MaterialReturn.query.filter_by(
-                    inventory_material_id=material_id,
-                    project_id=project.project_id
-                ).all()
-
-                total_returned = sum(r.quantity for r in returns)
-                dispatched_materials[material_id]['returned_quantity'] = total_returned
-                dispatched_materials[material_id]['returnable_quantity'] = max(
-                    0,
-                    dispatched_materials[material_id]['dispatched_quantity'] - total_returned
-                )
-
-            # Filter out materials with no returnable quantity
-            materials = [m for m in dispatched_materials.values() if m['returnable_quantity'] > 0]
+                    # Use helper function to build returnable material dict
+                    material_data = build_returnable_material_item(dn, item, material)
+                    if material_data:
+                        materials.append(material_data)
 
             if materials:
-                # Sort by material name
-                materials.sort(key=lambda x: x['material_name'])
+                # Sort by material name, then by delivery date
+                materials.sort(key=lambda x: (x['material_name'], x['delivery_date'] or ''))
 
                 result.append({
                     'project_id': project.project_id,
@@ -2507,6 +2827,16 @@ def get_material_returns_for_se():
             ret_data['project_name'] = project_map.get(ret.project_id, {}).get('project_name', f'Project #{ret.project_id}')
             ret_data['project_code'] = project_map.get(ret.project_id, {}).get('project_code', '')
             ret_data['project_location'] = project_map.get(ret.project_id, {}).get('location', '')
+
+            # Add delivery note info if available
+            if ret.delivery_note_item_id:
+                delivery_note_item = DeliveryNoteItem.query.get(ret.delivery_note_item_id)
+                if delivery_note_item:
+                    delivery_note = MaterialDeliveryNote.query.get(delivery_note_item.delivery_note_id)
+                    if delivery_note:
+                        ret_data['delivery_note_number'] = delivery_note.delivery_note_number
+                        ret_data['delivery_date'] = delivery_note.delivery_date.isoformat() if delivery_note.delivery_date else None
+
             result.append(ret_data)
 
         return jsonify({

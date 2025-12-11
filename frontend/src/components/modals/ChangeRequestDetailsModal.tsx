@@ -154,19 +154,21 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     }
 
     // Get BOQ price from material or LPO item
-    const boqUnitPrice = mat.boq_unit_price || mat.original_unit_price || lpoItem?.boq_rate || 0;
+    const boqUnitPrice = mat.boq_unit_price || mat.original_unit_price || lpoItem?.boq_rate || mat.unit_price || 0;
     const boqTotalPrice = mat.boq_total_price || mat.original_total_price || (mat.quantity * boqUnitPrice) || 0;
 
-    // If material already has vendor price, keep it but add BOQ for comparison
-    if (mat.unit_price && mat.unit_price > 0) {
+    // PRIORITY 1: Use negotiated_price if available (vendor's quoted/negotiated price for this PO)
+    if (mat.negotiated_price != null && mat.negotiated_price >= 0) {
       return {
         ...mat,
+        unit_price: mat.negotiated_price,
+        total_price: mat.negotiated_price * mat.quantity,
         boq_unit_price: boqUnitPrice,
         boq_total_price: boqTotalPrice
       };
     }
 
-    // Enrich with LPO vendor prices if available
+    // PRIORITY 2: Use LPO vendor price if available (vendor catalog price)
     if (lpoItem && lpoItem.rate > 0) {
       return {
         ...mat,
@@ -177,7 +179,17 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       };
     }
 
-    // No enrichment possible, just add BOQ prices if available
+    // PRIORITY 3: If no negotiated price or LPO data but material has unit_price, use it
+    // This handles legacy data where unit_price might be the vendor price
+    if (mat.unit_price && mat.unit_price > 0) {
+      return {
+        ...mat,
+        boq_unit_price: boqUnitPrice,
+        boq_total_price: boqTotalPrice
+      };
+    }
+
+    // No vendor price available, just add BOQ prices
     return {
       ...mat,
       boq_unit_price: boqUnitPrice,
@@ -211,8 +223,12 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
   const userIsBuyer = user?.role?.toLowerCase() === 'buyer' || user?.role_name?.toLowerCase() === 'buyer';
 
-  // Final statuses where no actions should be allowed
-  const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'purchase_completed', 'approved', 'rejected', 'pending_td_approval', 'vendor_approved'].includes(changeRequest.status);
+  // Final statuses where no actions should be allowed (except for vendor approval pending TD)
+  // Note: vendor_selection_status === 'pending_td_approval' is allowed to show buttons for vendor approval
+  const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'purchase_completed', 'approved', 'rejected', 'vendor_approved'].includes(changeRequest.status);
+
+  // Check if this is a vendor approval pending TD - these should show approve/reject buttons
+  const isVendorApprovalPending = changeRequest.vendor_selection_status === 'pending_td_approval';
 
   // Check if vendor selection is pending TD approval (no edits allowed)
   const isVendorPendingApproval = changeRequest.vendor_selection_status === 'pending_td_approval';
@@ -333,7 +349,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       PO-{changeRequest.cr_id || 'N/A'}
                     </h1>
                     <p className="text-xs sm:text-sm text-white/80 mt-0.5 sm:mt-1 truncate max-w-[180px] sm:max-w-none">
-                      BOQ: {changeRequest.boq_name || `#${changeRequest.boq_id}` || 'N/A'}
+                      {changeRequest.project_name || 'Project'} • BOQ: {changeRequest.boq_name || `#${changeRequest.boq_id}` || 'N/A'}
                     </p>
                   </div>
                 </div>
@@ -376,6 +392,109 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           year: 'numeric'
                         }) : 'N/A'}
                       </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Project & BOQ Details Section - Professional Layout */}
+                <div className="bg-white rounded-lg shadow-sm mb-4 sm:mb-6 overflow-hidden">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-200">
+                    {/* Project Information */}
+                    <div className="p-4 sm:p-5">
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                          </svg>
+                        </div>
+                        <h3 className="text-sm font-semibold text-gray-900">Project Information</h3>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-start">
+                          <span className="text-xs text-gray-500 min-w-[80px]">Project</span>
+                          <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4" title={changeRequest.project_name || 'N/A'}>
+                            {changeRequest.project_name || 'N/A'}
+                          </span>
+                        </div>
+                        {changeRequest.project_code && (
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[80px]">Code</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
+                              {changeRequest.project_code}
+                            </span>
+                          </div>
+                        )}
+                        {changeRequest.project_client && (
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[80px]">Client</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4" title={changeRequest.project_client}>
+                              {changeRequest.project_client}
+                            </span>
+                          </div>
+                        )}
+                        {changeRequest.project_location && (
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[80px]">Location</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4" title={changeRequest.project_location}>
+                              {changeRequest.project_location}
+                            </span>
+                          </div>
+                        )}
+                        {changeRequest.area && (
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[80px]">Area</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
+                              {changeRequest.area}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* BOQ Information */}
+                    <div className="p-4 sm:p-5">
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                        </div>
+                        <h3 className="text-sm font-semibold text-gray-900">BOQ Information</h3>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-start">
+                          <span className="text-xs text-gray-500 min-w-[80px]">BOQ Name</span>
+                          <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4" title={changeRequest.boq_name || `BOQ #${changeRequest.boq_id}`}>
+                            {changeRequest.boq_name || `BOQ #${changeRequest.boq_id}`}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-start">
+                          <span className="text-xs text-gray-500 min-w-[80px]">BOQ ID</span>
+                          <span className="text-sm font-medium text-blue-600 text-right flex-1 ml-4">
+                            #{changeRequest.boq_id}
+                          </span>
+                        </div>
+                        {changeRequest.item_name && (
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[80px]">Item</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4" title={changeRequest.item_name}>
+                              {changeRequest.item_name}
+                            </span>
+                          </div>
+                        )}
+                        {changeRequest.boq_status && (
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[80px]">Status</span>
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                              changeRequest.boq_status === 'approved' ? 'bg-green-100 text-green-700' :
+                              changeRequest.boq_status === 'draft' ? 'bg-gray-100 text-gray-700' :
+                              'bg-blue-100 text-blue-700'
+                            }`}>
+                              {changeRequest.boq_status.charAt(0).toUpperCase() + changeRequest.boq_status.slice(1)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -539,9 +658,27 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
                     {/* Total Cost on Mobile */}
                     {shouldShowPricing && (
-                      <div className="bg-purple-50 rounded-lg p-3 border border-purple-200 flex justify-between items-center">
-                        <span className="text-sm font-bold text-gray-700">Total Cost:</span>
-                        <span className="text-base font-bold text-purple-700">{formatCurrency(totalMaterialsCost)}</span>
+                      <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-bold text-gray-700">Total Cost:</span>
+                          <span className="text-base font-bold text-purple-700">{formatCurrency(totalMaterialsCost)}</span>
+                        </div>
+                        {/* BOQ Total as secondary - always show */}
+                        {(() => {
+                          const boqTotal = materialsData.reduce((sum: number, mat: any) => {
+                            const boqPrice = mat.boq_unit_price || mat.original_unit_price || 0;
+                            return sum + (boqPrice * (mat.quantity || 0));
+                          }, 0);
+                          if (boqTotal > 0) {
+                            return (
+                              <div className="flex justify-between items-center mt-1 text-xs text-gray-400">
+                                <span>BOQ:</span>
+                                <span>{formatCurrency(boqTotal)}</span>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
                       </div>
                     )}
                   </div>
@@ -706,11 +843,16 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                                 </td>
                                 {/* Total */}
                                 <td className="px-4 py-3 text-sm text-right whitespace-nowrap">
-                                  {vendorTotal > 0 ? (
-                                    <span className="font-bold text-gray-900">{formatCurrency(vendorTotal)}</span>
-                                  ) : (
-                                    <span className="text-amber-600 text-xs italic">-</span>
-                                  )}
+                                  <div className="flex flex-col items-end">
+                                    {vendorTotal > 0 ? (
+                                      <span className="font-bold text-gray-900">{formatCurrency(vendorTotal)}</span>
+                                    ) : (
+                                      <span className="text-amber-600 text-xs italic">-</span>
+                                    )}
+                                    {boqTotal > 0 && (
+                                      <span className="text-[10px] text-gray-400 mt-0.5">BOQ: {formatCurrency(boqTotal)}</span>
+                                    )}
+                                  </div>
                                 </td>
                               </>
                             );
@@ -724,8 +866,25 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             Total Cost:
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-700 text-right"></td>
-                          <td className="px-4 py-3 text-base font-bold text-purple-700 text-right whitespace-nowrap">
-                            {formatCurrency(totalMaterialsCost)}
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <div className="text-base font-bold text-purple-700">
+                              {formatCurrency(totalMaterialsCost)}
+                            </div>
+                            {/* BOQ Total as secondary - always show */}
+                            {(() => {
+                              const boqTotal = materialsData.reduce((sum: number, mat: any) => {
+                                const boqPrice = mat.boq_unit_price || mat.original_unit_price || 0;
+                                return sum + (boqPrice * (mat.quantity || 0));
+                              }, 0);
+                              if (boqTotal > 0) {
+                                return (
+                                  <div className="text-[10px] text-gray-400 mt-0.5">
+                                    BOQ: {formatCurrency(boqTotal)}
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </td>
                         </tr>
                       )}
@@ -1153,7 +1312,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
             </div>
 
             {/* Footer - Only show if can approve/reject */}
-            {!isFinalStatus && canApproveReject && (
+            {((!isFinalStatus && canApproveReject) || (isVendorApprovalPending && canApproveReject)) && (
               <div className="border-t border-gray-200 px-3 sm:px-6 py-3 sm:py-4 bg-gray-50 flex-shrink-0">
                 <div className="max-w-7xl mx-auto flex items-center justify-end gap-2 sm:gap-4">
                   <button
@@ -1184,8 +1343,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
             changeRequest={changeRequest}
             onSuccess={() => {
               setShowEditModal(false);
-              // Optionally refresh the data
-              window.location.reload();
+              // Trigger parent refresh callback instead of full page reload
+              onClose();
             }}
           />
         )}

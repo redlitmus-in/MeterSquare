@@ -14,6 +14,8 @@ class InventoryMaterial(db.Model):
     category = db.Column(db.Text, nullable=True)
     unit = db.Column(db.Text, nullable=False)
     current_stock = db.Column(db.Float, default=0.0, nullable=False)
+    backup_stock = db.Column(db.Float, default=0.0, nullable=False)  # Partially usable/damaged stock
+    backup_condition_notes = db.Column(db.Text, nullable=True)  # Description of backup stock condition
     min_stock_level = db.Column(db.Float, default=0.0, nullable=True)
     unit_price = db.Column(db.Float, nullable=False)
     description = db.Column(db.Text, nullable=True)
@@ -36,6 +38,8 @@ class InventoryMaterial(db.Model):
             'category': self.category,
             'unit': self.unit,
             'current_stock': self.current_stock,
+            'backup_stock': self.backup_stock,
+            'backup_condition_notes': self.backup_condition_notes,
             'min_stock_level': self.min_stock_level,
             'unit_price': self.unit_price,
             'description': self.description,
@@ -152,6 +156,7 @@ class MaterialReturn(db.Model):
     return_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     inventory_material_id = db.Column(db.Integer, db.ForeignKey('inventory_materials.inventory_material_id'), nullable=False)
     project_id = db.Column(db.Integer, nullable=False)  # Required - project material is returned from
+    delivery_note_item_id = db.Column(db.Integer, db.ForeignKey('delivery_note_items.item_id'), nullable=True)  # Link to specific delivery
     quantity = db.Column(db.Float, nullable=False)
     condition = db.Column(db.String(20), nullable=False)  # Good, Damaged, Defective
     add_to_stock = db.Column(db.Boolean, default=False)  # Only applicable for 'Good' condition
@@ -160,7 +165,7 @@ class MaterialReturn(db.Model):
     notes = db.Column(db.Text, nullable=True)
 
     # Disposal workflow fields (for Damaged/Defective items)
-    disposal_status = db.Column(db.String(30), nullable=True)  # pending_review, approved_disposal, disposed, repaired
+    disposal_status = db.Column(db.String(30), nullable=True)  # pending_approval, approved, pending_review, approved_disposal, disposed, repaired, rejected
     disposal_reviewed_by = db.Column(db.String(255), nullable=True)
     disposal_reviewed_at = db.Column(db.DateTime, nullable=True)
     disposal_notes = db.Column(db.Text, nullable=True)
@@ -175,12 +180,14 @@ class MaterialReturn(db.Model):
 
     # Relationships
     inventory_material = db.relationship('InventoryMaterial', backref='returns', lazy=True)
+    delivery_note_item = db.relationship('DeliveryNoteItem', backref='returns', lazy=True)
 
     def to_dict(self):
         return {
             'return_id': self.return_id,
             'inventory_material_id': self.inventory_material_id,
             'project_id': self.project_id,
+            'delivery_note_item_id': self.delivery_note_item_id,
             'quantity': self.quantity,
             'condition': self.condition,
             'add_to_stock': self.add_to_stock,
@@ -284,6 +291,7 @@ class DeliveryNoteItem(db.Model):
     quantity = db.Column(db.Float, nullable=False)
     unit_price = db.Column(db.Float, nullable=True)
     notes = db.Column(db.Text, nullable=True)
+    use_backup = db.Column(db.Boolean, default=False)  # Whether to use backup stock
 
     # Received quantity tracking (for partial deliveries)
     quantity_received = db.Column(db.Float, nullable=True)
@@ -304,6 +312,7 @@ class DeliveryNoteItem(db.Model):
             'quantity': self.quantity,
             'unit_price': self.unit_price,
             'notes': self.notes,
+            'use_backup': self.use_backup,
             'quantity_received': self.quantity_received,
             'inventory_transaction_id': self.inventory_transaction_id,
             # Include material details

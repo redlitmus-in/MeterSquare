@@ -258,7 +258,74 @@ export const getNotificationRedirectPath = (
   }
 
   // Handle Material/Inventory notifications
-  if (titleLower.includes('material') || titleLower.includes('inventory') || category === 'material') {
+  if (titleLower.includes('material') || titleLower.includes('inventory') ||
+      titleLower.includes('backup') || titleLower.includes('disposal') ||
+      titleLower.includes('return') || category === 'material') {
+
+    // Backup Stock notifications - redirect to Stock In > Backup tab
+    if (titleLower.includes('backup') || messageLower.includes('backup stock') ||
+        messageLower.includes('added to backup')) {
+      return {
+        path: buildPath('/stock-management'),
+        queryParams: {
+          tab: 'stock-in',
+          subtab: 'backup',
+          ...(metadata?.return_id && { return_id: String(metadata.return_id) }),
+          ...(metadata?.material_id && { material_id: metadata.material_id })
+        },
+      };
+    }
+
+    // Disposal notifications - redirect to Stock In > Backup tab (disposal review)
+    if (titleLower.includes('disposal') || messageLower.includes('disposal') ||
+        messageLower.includes('disposed')) {
+      return {
+        path: buildPath('/stock-management'),
+        queryParams: {
+          tab: 'stock-in',
+          subtab: 'backup',
+          ...(metadata?.return_id && { return_id: String(metadata.return_id) }),
+          ...(metadata?.material_id && { material_id: metadata.material_id })
+        },
+      };
+    }
+
+    // Return Approved notifications - for SE, redirect to Material Receipts > Return tab
+    if ((titleLower.includes('return') && titleLower.includes('approved')) ||
+        messageLower.includes('return approved') || messageLower.includes('return has been approved')) {
+      return {
+        path: buildPath('/material-receipts'),
+        queryParams: {
+          tab: 'return',
+          ...(metadata?.return_id && { return_id: String(metadata.return_id) })
+        },
+      };
+    }
+
+    // Return Rejected notifications - for SE, redirect to Material Receipts > Return tab
+    if ((titleLower.includes('return') && titleLower.includes('rejected')) ||
+        messageLower.includes('return rejected') || messageLower.includes('return has been rejected')) {
+      return {
+        path: buildPath('/material-receipts'),
+        queryParams: {
+          tab: 'return',
+          ...(metadata?.return_id && { return_id: String(metadata.return_id) })
+        },
+      };
+    }
+
+    // Damaged Material Return - needs PM review
+    if (titleLower.includes('damaged') || messageLower.includes('damaged material') ||
+        messageLower.includes('needs review')) {
+      return {
+        path: buildPath('/stock-management'),
+        queryParams: {
+          tab: 'stock-in',
+          subtab: 'returns',
+          ...(metadata?.return_id && { return_id: String(metadata.return_id) })
+        },
+      };
+    }
 
     // Low Stock Alert
     if (titleLower.includes('low stock') || messageLower.includes('low stock')) {
@@ -282,12 +349,42 @@ export const getNotificationRedirectPath = (
       };
     }
 
-    // Material Dispatch
-    if (titleLower.includes('dispatch')) {
+    // Material Dispatch - for SE, redirect to Material Receipts > Pending
+    if (titleLower.includes('dispatch') || messageLower.includes('dispatched')) {
+      // Check if user is Site Engineer
+      const isSE = userRole && (
+        userRole.toString().toLowerCase().includes('site') ||
+        userRole.toString().toLowerCase().includes('engineer') ||
+        userRole === '5' || // SE role_id
+        userRole === 5
+      );
+
+      if (isSE) {
+        return {
+          path: buildPath('/material-receipts'),
+          queryParams: {
+            tab: 'pending',
+            ...(metadata?.dispatch_id && { dispatch_id: metadata.dispatch_id })
+          },
+        };
+      }
+
       return {
         path: buildPath('/m2-store/dispatch'),
         queryParams: {
           dispatch_id: metadata?.dispatch_id
+        },
+      };
+    }
+
+    // Delivery Confirmed - PM notification
+    if (titleLower.includes('delivery confirmed') || messageLower.includes('delivery confirmed') ||
+        messageLower.includes('confirmed receipt')) {
+      return {
+        path: buildPath('/stock-management'),
+        queryParams: {
+          tab: 'stock-out',
+          ...(metadata?.delivery_note_id && { delivery_note_id: String(metadata.delivery_note_id) })
         },
       };
     }

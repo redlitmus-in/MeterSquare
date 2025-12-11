@@ -41,11 +41,21 @@ interface MaterialVendorSelectionModalProps {
   viewMode?: 'buyer' | 'td'; // 'buyer' = full edit mode, 'td' = simplified view for TD to change vendor
 }
 
+// Constants
+const CURRENCY_CODE = 'AED';
+const DEFAULT_VENDORS_PER_PAGE = 100;
+const WORD_MATCH_THRESHOLD = 0.6;
+const SHORT_MATERIAL_MAX_LENGTH = 2;
+const SHORT_WORD_MAX_LENGTH = 3;
+const MIN_CATEGORY_LENGTH = 3;
+const MAX_VISIBLE_PRODUCTS = 3;
+const SUBMISSION_ID_LENGTH = 9;
+
 interface SelectedVendorInfo {
   vendor_id: number;
   vendor_name: string;
   send_individually: boolean; // Whether to send PO to this vendor separately
-  negotiated_price?: number; // Custom price for this purchase
+  negotiated_price?: number | null; // Custom price for this purchase
   save_price_for_future?: boolean; // Whether to update vendor's product price
 }
 
@@ -118,6 +128,25 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                user?.role?.toLowerCase().includes('director') ||
                                user?.role_name?.toLowerCase().includes('technical');
 
+  // Helper function to check if a material is already in an approved POChild
+  const isMaterialInApprovedPOChild = (materialName: string): boolean => {
+    if (!purchase.po_children || purchase.po_children.length === 0) return false;
+
+    const materialNameLower = materialName.toLowerCase().trim();
+    return purchase.po_children.some(poChild => {
+      // Check if POChild is approved or completed
+      const isApproved = poChild.vendor_selection_status === 'approved' ||
+                         poChild.status === 'vendor_approved' ||
+                         poChild.status === 'purchase_completed';
+      if (!isApproved) return false;
+
+      // Check if this material is in the POChild
+      return poChild.materials?.some(mat =>
+        mat.material_name?.toLowerCase().trim() === materialNameLower
+      );
+    });
+  };
+
   // Initialize material vendors state from purchase with auto-selection
   useEffect(() => {
     if (isOpen && purchase.materials && vendors.length > 0 && vendorProducts.size > 0) {
@@ -131,10 +160,40 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       });
       setExpandedVendorGroups(vendorIds);
 
-      const initialState = purchase.materials.map(material => {
+      // CRITICAL FIX: Filter out materials that are already in approved POChildren
+      // This prevents duplicate vendor selection for already-approved materials
+      const availableMaterials = purchase.materials.filter(material => {
+        const isApproved = isMaterialInApprovedPOChild(material.material_name);
+        return !isApproved;
+      });
+
+      const initialState = availableMaterials.map(material => {
         const existingSelection = purchase.material_vendor_selections?.[material.material_name];
 
-        // Check if there's any existing selection data (could be vendor selection or just negotiated price)
+        // PRIORITY 1: If this is a PO child, check if the material is part of this PO child's materials
+        // and use the vendor info from the PO child record itself
+        if (purchase.po_child_id && purchase.vendor_id) {
+          // This is a PO child view - check if this material has vendor info and negotiated price
+          const matchingMaterial = purchase.materials.find(m => m.material_name === material.material_name);
+          if (matchingMaterial && matchingMaterial.negotiated_price !== undefined) {
+            return {
+              material_name: material.material_name,
+              quantity: material.quantity,
+              unit: material.unit,
+              selected_vendors: [{
+                vendor_id: purchase.vendor_id,
+                vendor_name: purchase.vendor_name || 'Selected Vendor',
+                send_individually: false,
+                negotiated_price: matchingMaterial.negotiated_price,
+                save_price_for_future: false
+              }],
+              expanded: false,
+              selection_mode: 'single' as const
+            };
+          }
+        }
+
+        // PRIORITY 2: Check if there's any existing selection data (could be vendor selection or just negotiated price)
         if (existingSelection && existingSelection.vendor_id) {
           // If vendor_name exists, it means vendor was officially selected
           // If vendor_name is null/undefined, it means only negotiated price was saved
@@ -176,7 +235,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           selectedVendors.push({
             vendor_id: bestVendor.vendor_id!,
             vendor_name: bestVendor.company_name,
-            send_individually: false
+            send_individually: false,
+            negotiated_price: bestVendor.lowestPrice && bestVendor.lowestPrice < Infinity ? bestVendor.lowestPrice : undefined
           });
         }
 
@@ -201,9 +261,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       const existingSentVendorIds = new Set<number>();
 
       // Check purchase.po_children first (new system)
+      // Only add vendors from PENDING PO children - approved vendors can be reused for new materials
       if (purchase.po_children && purchase.po_children.length > 0) {
         purchase.po_children.forEach(poChild => {
-          if (poChild.vendor_id) {
+          if (poChild.vendor_id && poChild.vendor_selection_status === 'pending_td_approval') {
             existingSentVendorIds.add(poChild.vendor_id);
           }
         });
@@ -215,9 +276,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
   // Load LPO data when modal opens (for buyer mode only)
   useEffect(() => {
-    console.log('>>> LPO useEffect triggered:', { isOpen, includeLpoPdf, lpoData: !!lpoData, viewMode });
     if (isOpen && includeLpoPdf && !lpoData && viewMode === 'buyer') {
-      console.log('>>> Loading LPO data for cr_id:', purchase.cr_id);
       loadLpoData();
     }
   }, [isOpen, includeLpoPdf, viewMode]);
@@ -228,7 +287,6 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       console.log('>>> loadLpoData: Starting for cr_id:', purchase.cr_id, 'po_child_id:', purchase.po_child_id);
       setIsLoadingLpo(true);
       const response = await buyerService.previewLPOPdf(purchase.cr_id, purchase.po_child_id);
-      console.log('>>> loadLpoData: Response:', response);
       let enrichedLpoData = response.lpo_data;
 
       // Try to load default template if no custom terms exist
@@ -262,19 +320,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
             toast.info('Loaded default LPO template');
           }
         } catch {
-          console.log('No default template found');
+          // No default template found - use existing data
         }
       }
 
-      console.log('>>> loadLpoData: Setting lpoData:', enrichedLpoData);
       setLpoData(enrichedLpoData);
-    } catch (error: any) {
-      console.error('>>> loadLpoData: Error:', error);
-      toast.error(error.message || 'Failed to load LPO data');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load LPO data';
+      toast.error(errorMessage);
       // Don't uncheck the checkbox - let user retry
     } finally {
       setIsLoadingLpo(false);
-      console.log('>>> loadLpoData: Done');
     }
   };
 
@@ -359,7 +415,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       return true;
     }
 
-    if (material.length <= 2) {
+    if (material.length <= SHORT_MATERIAL_MAX_LENGTH) {
       // For very short materials (1-2 chars), check if product name contains the exact material as a standalone word
       const escapedMaterial = material.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const materialRegex = new RegExp(`\\b${escapedMaterial}\\b`, 'i');
@@ -391,12 +447,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         if (prodWord === matWord) return true;
 
         // For longer words (>3 chars), allow partial matching
-        if (prodWord.length > 3 && matWord.length > 3) {
+        if (prodWord.length > SHORT_WORD_MAX_LENGTH && matWord.length > SHORT_WORD_MAX_LENGTH) {
           if (prodWord.includes(matWord) || matWord.includes(prodWord)) return true;
         }
 
         // For short words (1-3 chars), check if they appear as substrings in longer words
-        if (matWord.length >= 1 && matWord.length <= 3 && prodWord.length > matWord.length) {
+        if (matWord.length >= 1 && matWord.length <= SHORT_WORD_MAX_LENGTH && prodWord.length > matWord.length) {
           if (prodWord.startsWith(matWord) || prodWord.endsWith(matWord)) return true;
         }
 
@@ -410,12 +466,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       if (matched) matchingWords++;
     });
 
-    const matchThreshold = totalWords <= 2 ? totalWords : Math.ceil(totalWords * 0.6);
+    const matchThreshold = totalWords <= SHORT_MATERIAL_MAX_LENGTH ? totalWords : Math.ceil(totalWords * WORD_MATCH_THRESHOLD);
     const hasGoodWordMatch = matchingWords >= matchThreshold;
 
     const categoryMatch = !!(
-      (productCategory && material.includes(productCategory) && productCategory.length > 3) ||
-      (vendorCategory && material.includes(vendorCategory) && vendorCategory.length > 3)
+      (productCategory && material.includes(productCategory) && productCategory.length > MIN_CATEGORY_LENGTH) ||
+      (vendorCategory && material.includes(vendorCategory) && vendorCategory.length > MIN_CATEGORY_LENGTH)
     );
 
     return hasGoodWordMatch || categoryMatch;
@@ -427,7 +483,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       // Use optimized endpoint that fetches vendors with products in a single request
       const response = await buyerVendorService.getAllVendorsWithProducts({
         status: 'active',
-        per_page: 100
+        per_page: DEFAULT_VENDORS_PER_PAGE
       });
 
       // Convert products array to Map for quick lookup
@@ -539,7 +595,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     ));
   };
 
-  const handleSelectVendorForMaterial = (materialName: string, vendorId: number, vendorName: string) => {
+  const handleSelectVendorForMaterial = (materialName: string, vendorId: number, vendorName: string, vendorLowestPrice?: number) => {
     // TD mode with sub-POs: allow different vendors - backend will split the sub-PO if needed
     // No longer auto-selecting same vendor for all materials
 
@@ -555,7 +611,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           selected_vendors: [{
             vendor_id: vendorId,
             vendor_name: vendorName,
-            send_individually: false
+            send_individually: false,
+            negotiated_price: vendorLowestPrice && vendorLowestPrice > 0 ? vendorLowestPrice : undefined
           }]
         };
       } else {
@@ -571,7 +628,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
             selected_vendors: [...m.selected_vendors, {
               vendor_id: vendorId,
               vendor_name: vendorName,
-              send_individually: false
+              send_individually: false,
+              negotiated_price: vendorLowestPrice && vendorLowestPrice > 0 ? vendorLowestPrice : undefined
             }]
           };
         }
@@ -646,7 +704,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           };
         }));
 
-        toast.success(`Price saved for future purchases: AED ${price.toFixed(2)}`);
+        toast.success(`Price saved for future purchases: ${CURRENCY_CODE} ${price.toFixed(2)}`);
       } else {
         // For "This BOQ" option, update UI state with negotiated price
         setMaterialVendors(prev => prev.map(m => {
@@ -666,7 +724,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           };
         }));
 
-        toast.success(`Negotiated price saved for this purchase: AED ${price.toFixed(2)}`);
+        toast.success(`Negotiated price saved for this purchase: ${CURRENCY_CODE} ${price.toFixed(2)}`);
 
         // Trigger refresh of purchase data in parent component so data persists on modal reopen
         if (onVendorSelected) {
@@ -749,16 +807,29 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   };
 
   const handleSubmit = async () => {
-    // Check if at least one material has a vendor selected
-    const selectedMaterials = materialVendors.filter(m => m.selected_vendors.length > 0);
+    // CRITICAL FIX: Filter out materials that are already in approved POChildren
+    // This is a safety check in case the initialization didn't catch all cases
+    const materialsNotApproved = materialVendors.filter(m => {
+      const isApproved = isMaterialInApprovedPOChild(m.material_name);
+      return !isApproved;
+    });
+
+    // Check if at least one material has a vendor selected (from non-approved materials only)
+    const selectedMaterials = materialsNotApproved.filter(m => m.selected_vendors.length > 0);
 
     if (selectedMaterials.length === 0) {
-      toast.error('Please select at least one vendor for any material');
+      // Check if all materials were already approved
+      const allApproved = materialVendors.every(m => isMaterialInApprovedPOChild(m.material_name));
+      if (allApproved) {
+        toast.error('All materials have already been approved. No new vendor selection needed.');
+      } else {
+        toast.error('Please select at least one vendor for any material');
+      }
       return;
     }
 
     // Show warning if some materials don't have vendors
-    const unselectedMaterials = materialVendors.filter(m => m.selected_vendors.length === 0);
+    const unselectedMaterials = materialsNotApproved.filter(m => m.selected_vendors.length === 0);
     if (unselectedMaterials.length > 0) {
       toast.warning(`${unselectedMaterials.length} material(s) without vendors will be skipped: ${unselectedMaterials.map(m => m.material_name).join(', ')}`);
     }
@@ -817,7 +888,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       });
 
       const uniqueVendorCount = vendorGroupsMap.size;
-      const allMaterialsSelected = selectedMaterials.length === materialVendors.length;
+      // Compare against non-approved materials, not all materialVendors
+      const allMaterialsSelected = selectedMaterials.length === materialsNotApproved.length;
 
       // FULL PURCHASE TO SINGLE VENDOR: Update parent PO directly (no sub-PO)
       if (uniqueVendorCount === 1 && allMaterialsSelected) {
@@ -844,7 +916,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         }));
 
         // Generate submission group ID
-        const submissionGroupId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const submissionGroupId = `${Date.now()}-${Math.random().toString(36).slice(2, 2 + SUBMISSION_ID_LENGTH)}`;
 
         // Call API to create PO children
         const response = await buyerService.createPOChildren(
@@ -1341,17 +1413,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
                                     return (
                                       <div className="flex items-center gap-2">
-                                        {/* BOQ Amount - Always show if available */}
-                                        {boqTotalAmount > 0 && (
-                                          <Badge className="bg-gray-100 text-gray-700 text-xs font-medium">
-                                            BOQ: AED {boqTotalAmount.toFixed(2)}
-                                          </Badge>
-                                        )}
-                                        {/* Vendor Amount - Show if vendor selected */}
+                                        {/* Vendor Amount - Primary display */}
                                         {vendorTotalAmount !== null && (
                                           <Badge className="bg-blue-100 text-blue-800 text-xs font-medium">
-                                            Vendor: AED {vendorTotalAmount.toFixed(2)}
+                                            {CURRENCY_CODE} {vendorTotalAmount.toFixed(2)}
                                           </Badge>
+                                        )}
+                                        {/* BOQ Amount - Secondary (smaller/grey) */}
+                                        {boqTotalAmount > 0 && (
+                                          <span className="text-[10px] text-gray-400">
+                                            BOQ: {CURRENCY_CODE} {boqTotalAmount.toFixed(2)}
+                                          </span>
                                         )}
                                       </div>
                                     );
@@ -1529,7 +1601,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                 handleSelectVendorForMaterial(
                                                   material.material_name,
                                                   vendor.vendor_id!,
-                                                  vendor.company_name
+                                                  vendor.company_name,
+                                                  lowestPrice > 0 ? lowestPrice : undefined
                                                 );
                                               }}
                                               onDoubleClick={(e) => {
@@ -1616,15 +1689,15 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                               <div className="flex-shrink-0 text-right min-w-[80px]">
                                                 {negotiatedPrice ? (
                                                   <>
-                                                    <div className="text-sm font-semibold text-blue-700">AED {negotiatedPrice.toFixed(2)}</div>
+                                                    <div className="text-sm font-semibold text-blue-700">{CURRENCY_CODE} {negotiatedPrice.toFixed(2)}</div>
                                                     {lowestPrice > 0 && (
-                                                      <div className="text-[10px] text-gray-400 line-through">AED {lowestPrice.toFixed(2)}</div>
+                                                      <div className="text-[10px] text-gray-400 line-through">{CURRENCY_CODE} {lowestPrice.toFixed(2)}</div>
                                                     )}
                                                     <div className="text-[10px] text-purple-600">negotiated</div>
                                                   </>
                                                 ) : lowestPrice > 0 ? (
                                                   <>
-                                                    <div className="text-sm font-semibold text-blue-700">AED {lowestPrice.toFixed(2)}</div>
+                                                    <div className="text-sm font-semibold text-blue-700">{CURRENCY_CODE} {lowestPrice.toFixed(2)}</div>
                                                     <div className="text-[10px] text-gray-500">/{material.unit}</div>
                                                   </>
                                                 ) : (
@@ -1637,12 +1710,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                 {(negotiatedPrice ? negotiatedPrice * material.quantity : totalEstimate) > 0 ? (
                                                   <>
                                                     <div className="text-sm font-bold text-gray-900">
-                                                      AED {(negotiatedPrice
+                                                      {CURRENCY_CODE} {(negotiatedPrice
                                                         ? negotiatedPrice * material.quantity
                                                         : totalEstimate).toFixed(2)}
                                                     </div>
                                                     {negotiatedPrice && totalEstimate > 0 && (
-                                                      <div className="text-[10px] text-gray-400 line-through">AED {totalEstimate.toFixed(2)}</div>
+                                                      <div className="text-[10px] text-gray-400 line-through">{CURRENCY_CODE} {totalEstimate.toFixed(2)}</div>
                                                     )}
                                                     {/* BOQ Comparison - Below the amount */}
                                                     {(() => {
@@ -1698,7 +1771,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                       <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-2.5 rounded-lg border-2 border-blue-300">
                                                         <div className="flex items-center gap-2">
                                                           <Edit className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
-                                                          <span className="text-[10px] font-semibold text-gray-600 flex-shrink-0">AED</span>
+                                                          <span className="text-[10px] font-semibold text-gray-600 flex-shrink-0">{CURRENCY_CODE}</span>
                                                           <Input
                                                             type="number"
                                                             step="0.01"
@@ -1806,11 +1879,11 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                                   <div className="text-[10px] text-gray-500 mb-1">BOQ Estimate</div>
                                                                   <div className="text-xs">
                                                                     <span className="text-gray-600">Unit: </span>
-                                                                    <span className="font-semibold text-gray-800">AED {boqUnitPrice.toFixed(2)}</span>
+                                                                    <span className="font-semibold text-gray-800">{CURRENCY_CODE} {boqUnitPrice.toFixed(2)}</span>
                                                                   </div>
                                                                   <div className="text-xs mt-1">
                                                                     <span className="text-gray-600">Total: </span>
-                                                                    <span className="font-bold text-gray-800">AED {boqTotalAmount.toFixed(2)}</span>
+                                                                    <span className="font-bold text-gray-800">{CURRENCY_CODE} {boqTotalAmount.toFixed(2)}</span>
                                                                   </div>
                                                                 </div>
                                                                 {/* Vendor Price */}
@@ -1818,11 +1891,11 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                                   <div className="text-[10px] text-blue-600 mb-1">Vendor Price</div>
                                                                   <div className="text-xs">
                                                                     <span className="text-gray-600">Unit: </span>
-                                                                    <span className="font-semibold text-blue-700">AED {vendorUnitPrice.toFixed(2)}</span>
+                                                                    <span className="font-semibold text-blue-700">{CURRENCY_CODE} {vendorUnitPrice.toFixed(2)}</span>
                                                                   </div>
                                                                   <div className="text-xs mt-1">
                                                                     <span className="text-gray-600">Total: </span>
-                                                                    <span className="font-bold text-blue-700">AED {vendorTotalAmount.toFixed(2)}</span>
+                                                                    <span className="font-bold text-blue-700">{CURRENCY_CODE} {vendorTotalAmount.toFixed(2)}</span>
                                                                   </div>
                                                                 </div>
                                                               </div>
@@ -1832,9 +1905,9 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                                   isOverBudget ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
                                                                 }`}>
                                                                   {isOverBudget ? (
-                                                                    <span>Over Budget: +AED {priceDiff.toFixed(2)}</span>
+                                                                    <span>Over Budget: +{CURRENCY_CODE} {priceDiff.toFixed(2)}</span>
                                                                   ) : priceDiff < 0 ? (
-                                                                    <span>Under Budget: AED {Math.abs(priceDiff).toFixed(2)} saved</span>
+                                                                    <span>Under Budget: {CURRENCY_CODE} {Math.abs(priceDiff).toFixed(2)} saved</span>
                                                                   ) : (
                                                                     <span>On Budget</span>
                                                                   )}
@@ -1850,19 +1923,19 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                             Matching Products ({matchingProducts.length})
                                                           </div>
                                                           <div className="space-y-1">
-                                                            {matchingProducts.slice(0, 3).map((product, idx) => (
+                                                            {matchingProducts.slice(0, MAX_VISIBLE_PRODUCTS).map((product, idx) => (
                                                               <div key={idx} className="flex justify-between items-center text-xs py-1">
                                                                 <span className="text-gray-700 flex-1 truncate">{product.product_name}</span>
                                                                 {product.unit_price && (
                                                                   <span className="text-blue-600 font-medium ml-2">
-                                                                    AED {product.unit_price}/{product.unit || material.unit}
+                                                                    {CURRENCY_CODE} {product.unit_price}/{product.unit || material.unit}
                                                                   </span>
                                                                 )}
                                                               </div>
                                                             ))}
-                                                            {matchingProducts.length > 3 && (
+                                                            {matchingProducts.length > MAX_VISIBLE_PRODUCTS && (
                                                               <div className="text-[10px] text-gray-500 italic pt-1">
-                                                                +{matchingProducts.length - 3} more products...
+                                                                +{matchingProducts.length - MAX_VISIBLE_PRODUCTS} more products...
                                                               </div>
                                                             )}
                                                           </div>
@@ -1942,6 +2015,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         if (m.selected_vendors.length === 0) return false;
                         // Exclude materials that are actually in a pending PO child
                         if (isMaterialActuallyLocked(m.material_name)) return false;
+                        // Exclude materials that are in an approved PO child (already processed)
+                        const isMaterialInApprovedPO = purchase.po_children?.some(poChild =>
+                          poChild.vendor_selection_status === 'approved' &&
+                          poChild.materials?.some(pm => pm.material_name === m.material_name)
+                        ) || false;
+                        if (isMaterialInApprovedPO) return false;
                         // Exclude if selected vendor is already sent to TD
                         const selectedVendorId = m.selected_vendors[0]?.vendor_id;
                         const isVendorAlreadySent = purchase.po_children?.some(poChild =>
@@ -2036,7 +2115,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                       <div className="flex items-center gap-2">
                                         {vendorGroup.total_amount > 0 && (
                                           <span className="text-sm font-bold text-blue-700">
-                                            AED {vendorGroup.total_amount.toFixed(2)}
+                                            {CURRENCY_CODE} {vendorGroup.total_amount.toFixed(2)}
                                           </span>
                                         )}
                                         {isExpanded ? (
@@ -2048,9 +2127,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                     </div>
                                   </div>
 
-                                  {/* Right Column: Send Button - Only show when multiple vendors selected */}
-                                  {/* When only 1 vendor, user should use "Submit for TD Approval" button at bottom */}
-                                  {hasMultipleVendors && (
+                                  {/* Right Column: Send Button - Show when:
+                                      1. Multiple vendors are selected (hasMultipleVendors), OR
+                                      2. Purchase is already split (isPurchaseAlreadySplit) - always use individual buttons */}
+                                  {(hasMultipleVendors || isPurchaseAlreadySplit) && (
                                     <div className="flex items-center px-3 bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200">
                                       <Button
                                         onClick={(e) => {
@@ -2122,12 +2202,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                   <div className="flex-1">
                                                     <div className="font-medium text-gray-900">{mat.material_name}</div>
                                                     <div className="text-xs text-gray-500 mt-0.5">
-                                                      {mat.quantity} {mat.unit} {mat.unit_price > 0 && `× AED ${mat.unit_price.toFixed(2)}`}
+                                                      {mat.quantity} {mat.unit} {mat.unit_price > 0 && `× ${CURRENCY_CODE} ${mat.unit_price.toFixed(2)}`}
                                                     </div>
                                                   </div>
                                                   {mat.total_amount > 0 && (
                                                     <span className="text-sm font-semibold text-blue-700">
-                                                      AED {mat.total_amount.toFixed(2)}
+                                                      {CURRENCY_CODE} {mat.total_amount.toFixed(2)}
                                                     </span>
                                                   )}
                                                 </div>
@@ -2136,7 +2216,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                 {mat.boq_total_amount > 0 && (
                                                   <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-200 mt-1">
                                                     <span className="text-gray-500">
-                                                      BOQ: AED {mat.boq_total_amount.toFixed(2)}
+                                                      BOQ: {CURRENCY_CODE} {mat.boq_total_amount.toFixed(2)}
                                                     </span>
                                                     {priceDiff !== 0 && (
                                                       <span className={`font-medium ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
@@ -2202,13 +2282,13 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                           <div className="mt-3 pt-3 border-t border-green-300">
                             <div className="flex items-center justify-between mb-2">
                               <span className="text-sm font-semibold text-green-900">Estimated Total:</span>
-                              <span className="text-lg font-bold text-green-700">AED {vendorGrandTotal.toFixed(2)}</span>
+                              <span className="text-lg font-bold text-green-700">{CURRENCY_CODE} {vendorGrandTotal.toFixed(2)}</span>
                             </div>
                             {boqGrandTotal > 0 && (
                               <div className="flex items-center justify-between text-xs">
                                 <span className="text-gray-600">BOQ Total:</span>
                                 <div className="flex items-center gap-2">
-                                  <span className="text-gray-600">AED {boqGrandTotal.toFixed(2)}</span>
+                                  <span className="text-gray-600">{CURRENCY_CODE} {boqGrandTotal.toFixed(2)}</span>
                                   {totalDiff !== 0 && (
                                     <span className={`font-semibold ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
                                       ({isOverBudget ? '+' : ''}{totalDiff.toFixed(2)} {isOverBudget ? 'Over' : 'Under'})
@@ -2619,15 +2699,15 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                           <div className="grid grid-cols-3 gap-2 text-sm">
                             <div>
                               <span className="text-gray-500">Subtotal:</span>
-                              <span className="ml-2 font-medium">AED {lpoData.totals.subtotal.toLocaleString()}</span>
+                              <span className="ml-2 font-medium">{CURRENCY_CODE} {lpoData.totals.subtotal.toLocaleString()}</span>
                             </div>
                             <div>
                               <span className="text-gray-500">VAT ({lpoData.totals.vat_percent}%):</span>
-                              <span className="ml-2 font-medium">AED {lpoData.totals.vat_amount.toLocaleString()}</span>
+                              <span className="ml-2 font-medium">{CURRENCY_CODE} {lpoData.totals.vat_amount.toLocaleString()}</span>
                             </div>
                             <div>
                               <span className="text-gray-500">Total:</span>
-                              <span className="ml-2 font-bold text-blue-600">AED {lpoData.totals.grand_total.toLocaleString()}</span>
+                              <span className="ml-2 font-bold text-blue-600">{CURRENCY_CODE} {lpoData.totals.grand_total.toLocaleString()}</span>
                             </div>
                           </div>
                         </div>
@@ -2726,7 +2806,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   ) : (
                     /* Buyer Mode: Submit All Together - Single Purchase Indicator */
                     /* Hide this button if purchase is already split - user should use individual vendor buttons */
-                    !isPurchaseAlreadySplit && (
+                    !isPurchaseAlreadySplit && selectedCount > 0 && (
                       <div className="flex flex-col items-end gap-1">
                         <span className="text-xs text-gray-500 italic">
                           Send all materials as one purchase
@@ -2963,7 +3043,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                               return;
                             }
 
-                            const submissionGroupId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                            const submissionGroupId = `${Date.now()}-${Math.random().toString(36).slice(2, 2 + SUBMISSION_ID_LENGTH)}`;
 
                             const response = await buyerService.createPOChildren(
                               purchase.cr_id,
