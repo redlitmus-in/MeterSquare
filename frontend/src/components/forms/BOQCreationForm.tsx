@@ -3932,7 +3932,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       className="w-full px-3 py-2 pr-8 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                                       placeholder="Search or type item name"
                                       disabled={isSubmitting || loadingItemData[item.id]}
-                                      onFocus={() => setItemDropdownOpen(prev => ({ ...prev, [item.id]: true }))}
+                                      onFocus={() => {
+                                        // Only open dropdown if no master item is selected yet
+                                        if (!item.master_item_id) {
+                                          setItemDropdownOpen(prev => ({ ...prev, [item.id]: true }));
+                                        }
+                                      }}
                                     />
                                     {loadingItemData[item.id] ? (
                                       <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
@@ -3946,7 +3951,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     </span>
                                   </div>
                                   {itemDropdownOpen[item.id] && (
-                                    <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
+                                    <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl" style={{ maxHeight: '320px', overflowY: 'auto', height: 'auto' }}>
                                       {(() => {
                                         const filtered = getFilteredItems(itemSearchTerms[item.id] || '');
                                         const showNewOption = itemSearchTerms[item.id] &&
