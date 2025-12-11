@@ -96,10 +96,9 @@ const AdminSettings = lazy(() => import('@/pages/admin/Settings'));
 const AdminSignatureUpload = lazy(() => import('@/pages/admin/SignatureUpload'));
 const AdminMyProjects = lazy(() => import('@/pages/admin/AdminMyProjects'));
 const AdminSEProjects = lazy(() => import('@/pages/admin/AdminSEProjects'));
-const AdminSupportManagement = lazy(() => import('@/pages/admin/SupportManagement'));
-
-// Common Pages
-const PublicSupportPage = lazy(() => import('@/pages/common/PublicSupportPage'));
+// Support Pages (for dev team - not client admin)
+const AdminSupportManagement = lazy(() => import('@/pages/support/SupportManagement'));
+const PublicSupportPage = lazy(() => import('@/pages/support/PublicSupportPage'));
 
 // Lazy load workflow pages
 const MaterialDispatchProductionPage = lazy(() => import('@/pages/workflows/MaterialDispatchProductionPage'));
@@ -856,8 +855,8 @@ function App() {
           }
         />
 
-        {/* Public Support Page - Anyone can access without login */}
-        <Route path="/support-public" element={<PublicSupportPage />} />
+        {/* Public Support Page - Temporarily disabled, use logged-in route instead */}
+        {/* <Route path="/support-public" element={<PublicSupportPage />} /> */}
 
         {/* Support Management - For dev team to review tickets (outside client routes) */}
         <Route path="/support-management" element={<AdminSupportManagement />} />

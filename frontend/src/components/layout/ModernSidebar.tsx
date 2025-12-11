@@ -25,7 +25,8 @@ import {
   ClockIcon,
   UserGroupIcon,
   Cog6ToothIcon as Settings,
-  PencilSquareIcon as PencilIcon
+  PencilSquareIcon as PencilIcon,
+  BugAntIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -1057,6 +1058,18 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                     >
                       <UserCircleIcon className="w-5 h-5 md:w-4 md:h-4 text-gray-500 mr-3" />
                       <span>Profile Settings</span>
+                    </Link>
+
+                    <Link
+                      to={buildRolePath(user?.role || user?.role_id || '', 'support')}
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        setSidebarOpen(false);
+                      }}
+                      className="flex items-center px-4 py-3.5 md:py-3 text-sm md:text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                    >
+                      <BugAntIcon className="w-5 h-5 md:w-4 md:h-4 text-gray-500 mr-3" />
+                      <span>Support</span>
                     </Link>
 
                     <button
