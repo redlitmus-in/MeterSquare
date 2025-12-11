@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import {
@@ -267,6 +268,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [items, setItems] = useState<BOQItemForm[]>([]);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
+  const [expandedSubItems, setExpandedSubItems] = useState<string[]>([]);
   const [overallOverhead, setOverallOverhead] = useState(10);
   const [overallProfit, setOverallProfit] = useState(15);
   const [overallDiscount, setOverallDiscount] = useState(0); // Overall BOQ discount percentage
@@ -338,6 +340,23 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
   // Track if we restored a draft to avoid overwriting with master data
   const draftRestoredRef = useRef(false);
+
+  // Sub-item selection modal state
+  const [subItemSelectionModal, setSubItemSelectionModal] = useState<{
+    isOpen: boolean;
+    itemId: string;
+    masterItem: MasterItem | null;
+    subItems: any[];
+    selectedSubItemIds: (number | string)[];
+    searchTerm: string;
+  }>({
+    isOpen: false,
+    itemId: '',
+    masterItem: null,
+    subItems: [],
+    selectedSubItemIds: [],
+    searchTerm: ''
+  });
 
   // Auto-save function - saves to localStorage for both CREATE and EDIT modes
   const handleAutoSave = async (formData: any, isAutoSave: boolean) => {
@@ -1400,7 +1419,89 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         })
       );
 
-      // Update the item with master data
+      // If there are sub-items, show selection modal
+      if (subItemsWithImages.length > 0) {
+        // Use sub_item_id or generate unique index-based ID for selection tracking
+        const subItemsWithIds = subItemsWithImages.map((si, idx) => ({
+          ...si,
+          _selectionId: si.sub_item_id != null ? si.sub_item_id : `idx-${idx}` // Use sub_item_id or unique string fallback
+        }));
+
+        setSubItemSelectionModal({
+          isOpen: true,
+          itemId,
+          masterItem,
+          subItems: subItemsWithIds,
+          selectedSubItemIds: subItemsWithIds.map(si => si._selectionId), // All selected by default
+          searchTerm: ''
+        });
+        // Close dropdown
+        setItemDropdownOpen(prev => ({ ...prev, [itemId]: false }));
+      } else {
+        // No sub-items, just update the item with master data
+        applyMasterItemWithSubItems(itemId, masterItem, []);
+      }
+    } catch (error) {
+      console.error('Failed to load item details:', error);
+      showError('Failed to load item details');
+    } finally {
+      setLoadingItemData(prev => ({ ...prev, [itemId]: false }));
+    }
+  };
+
+  // Handle sub-item selection toggle in modal
+  const handleSubItemSelectionToggle = (selectionId: number | string) => {
+    setSubItemSelectionModal(prev => ({
+      ...prev,
+      selectedSubItemIds: prev.selectedSubItemIds.includes(selectionId)
+        ? prev.selectedSubItemIds.filter(id => id !== selectionId)
+        : [...prev.selectedSubItemIds, selectionId]
+    }));
+  };
+
+  // Handle select all / deselect all sub-items
+  const handleSelectAllSubItems = (selectAll: boolean) => {
+    setSubItemSelectionModal(prev => ({
+      ...prev,
+      selectedSubItemIds: selectAll ? prev.subItems.map(si => si._selectionId) : []
+    }));
+  };
+
+  // Confirm sub-item selection and apply to form
+  const handleConfirmSubItemSelection = () => {
+    const { itemId, masterItem, subItems, selectedSubItemIds } = subItemSelectionModal;
+    if (!masterItem) return;
+
+    // Filter only selected sub-items
+    const selectedSubItems = subItems.filter(si => selectedSubItemIds.includes(si._selectionId));
+
+    applyMasterItemWithSubItems(itemId, masterItem, selectedSubItems);
+
+    // Close modal
+    setSubItemSelectionModal({
+      isOpen: false,
+      itemId: '',
+      masterItem: null,
+      subItems: [],
+      selectedSubItemIds: [],
+      searchTerm: ''
+    });
+  };
+
+  // Cancel sub-item selection
+  const handleCancelSubItemSelection = () => {
+    setSubItemSelectionModal({
+      isOpen: false,
+      itemId: '',
+      masterItem: null,
+      subItems: [],
+      selectedSubItemIds: [],
+      searchTerm: ''
+    });
+  };
+
+  // Apply master item with selected sub-items
+  const applyMasterItemWithSubItems = (itemId: string, masterItem: MasterItem, subItemsWithImages: any[]) => {
     setItems(items.map(item => {
       if (item.id === itemId) {
         // Convert master sub-items to form sub-items
@@ -1417,10 +1518,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           misc_percentage: BOQ_CONFIG.DEFAULT_MISC_PERCENTAGE,
           overhead_profit_percentage: BOQ_CONFIG.DEFAULT_OVERHEAD_PROFIT_PERCENTAGE,
           transport_percentage: BOQ_CONFIG.DEFAULT_TRANSPORT_PERCENTAGE,
-          master_sub_item_id: subItem.sub_item_id, // Store master sub-item ID
-          imageUrls: (subItem as any).imageUrls || [], // Add fetched images
-          imageData: (subItem as any).imageData || [], // Add image metadata
-          materials: (subItem.materials || []).map((mat, matIndex) => ({
+          master_sub_item_id: subItem.sub_item_id,
+          imageUrls: (subItem as any).imageUrls || [],
+          imageData: (subItem as any).imageData || [],
+          materials: (subItem.materials || []).map((mat: any, matIndex: number) => ({
             id: `mat-si-${itemId}-${index}-${matIndex}-${Date.now()}`,
             material_name: mat.material_name,
             quantity: mat.quantity || 1,
@@ -1434,7 +1535,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             is_from_master: true,
             is_new: false
           })),
-          labour: (subItem.labour || []).map((lab, labIndex) => ({
+          labour: (subItem.labour || []).map((lab: any, labIndex: number) => ({
             id: `lab-si-${itemId}-${index}-${labIndex}-${Date.now()}`,
             labour_role: lab.labour_role,
             hours: lab.hours || 8,
@@ -1453,28 +1554,22 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           master_item_id: masterItem.item_id,
           overhead_percentage: masterItem.default_overhead_percentage || item.overhead_percentage,
           profit_margin_percentage: masterItem.default_profit_percentage || item.profit_margin_percentage,
-          sub_items: formSubItems.length > 0 ? formSubItems : item.sub_items, // Use fetched sub-items or preserve existing
-          materials: item.materials || [], // Keep existing materials at item level
-          labour: item.labour || [], // Keep existing labour at item level
+          sub_items: formSubItems.length > 0 ? formSubItems : item.sub_items,
+          materials: item.materials || [],
+          labour: item.labour || [],
           is_new: false
         };
       }
       return item;
     }));
 
-      // Close dropdown and update search term
-      setItemDropdownOpen(prev => ({ ...prev, [itemId]: false }));
-      setItemSearchTerms(prev => ({ ...prev, [itemId]: masterItem.item_name }));
+    // Update search term
+    setItemDropdownOpen(prev => ({ ...prev, [itemId]: false }));
+    setItemSearchTerms(prev => ({ ...prev, [itemId]: masterItem.item_name }));
 
-      // Show success message if sub-items were loaded
-      if (subItemsData.sub_items.length > 0) {
-        showSuccess(`Loaded ${subItemsData.sub_items.length} sub-item(s) with materials and labour`);
-      }
-    } catch (error) {
-      console.error('Failed to load item details:', error);
-      showError('Failed to load item details');
-    } finally {
-      setLoadingItemData(prev => ({ ...prev, [itemId]: false }));
+    // Show success message
+    if (subItemsWithImages.length > 0) {
+      showSuccess(`Added ${subItemsWithImages.length} sub-item(s) with materials and labour`);
     }
   };
 
@@ -1547,6 +1642,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       setExpandedItems(expandedItems.filter(id => id !== itemId));
     } else {
       setExpandedItems([...expandedItems, itemId]);
+    }
+  };
+
+  const toggleSubItemExpanded = (subItemId: string) => {
+    if (expandedSubItems.includes(subItemId)) {
+      setExpandedSubItems(expandedSubItems.filter(id => id !== subItemId));
+    } else {
+      setExpandedSubItems([...expandedSubItems, subItemId]);
     }
   };
 
@@ -3843,7 +3946,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     </span>
                                   </div>
                                   {itemDropdownOpen[item.id] && (
-                                    <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                                    <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
                                       {(() => {
                                         const filtered = getFilteredItems(itemSearchTerms[item.id] || '');
                                         const showNewOption = itemSearchTerms[item.id] &&
@@ -3864,15 +3967,15 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 key={masterItem.item_id}
                                                 type="button"
                                                 onClick={() => selectMasterItem(item.id, masterItem)}
-                                                className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors flex items-center justify-between group"
+                                                className={`w-full px-3 text-left text-sm hover:bg-blue-50 transition-colors flex items-center justify-between group border-b border-gray-100 last:border-b-0 ${masterItem.description ? 'py-2' : 'py-1.5'}`}
                                               >
-                                                <div>
-                                                  <div className="font-medium text-gray-900">{masterItem.item_name}</div>
+                                                <div className="flex-1 min-w-0">
+                                                  <div className="font-medium text-gray-900 text-sm">{masterItem.item_name}</div>
                                                   {masterItem.description && (
                                                     <div className="text-xs text-gray-500 truncate">{masterItem.description}</div>
                                                   )}
                                                 </div>
-                                                <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity ml-2 flex-shrink-0">
                                                   Select
                                                 </span>
                                               </button>
@@ -3939,21 +4042,50 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                           <div className="space-y-3">
                             {item.sub_items.map((subItem, subIndex) => (
-                              <div key={subItem.id} className="bg-white rounded-lg p-3 border border-green-200">
-                                <div className="flex items-center justify-between mb-3">
-                                  <span className="text-xs font-semibold text-green-900">Sub Item #{subIndex + 1}</span>
+                              <div key={subItem.id} className="bg-white rounded-lg border border-green-200 overflow-hidden">
+                                {/* Sub-item Header - Clickable to expand/collapse */}
+                                <div
+                                  className="flex items-center justify-between p-3 cursor-pointer hover:bg-green-50 transition-colors"
+                                  onClick={() => toggleSubItemExpanded(subItem.id)}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      className="p-0.5 hover:bg-green-100 rounded transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleSubItemExpanded(subItem.id);
+                                      }}
+                                    >
+                                      {expandedSubItems.includes(subItem.id) ? (
+                                        <ChevronDown className="w-4 h-4 text-green-600" />
+                                      ) : (
+                                        <ChevronRight className="w-4 h-4 text-green-600" />
+                                      )}
+                                    </button>
+                                    <span className="text-xs font-semibold text-green-900">Sub Item #{subIndex + 1}</span>
+                                    {subItem.sub_item_name && (
+                                      <span className="text-sm text-gray-700 font-medium truncate max-w-[300px]">
+                                        - {subItem.sub_item_name}
+                                      </span>
+                                    )}
+                                  </div>
                                   <button
                                     type="button"
-                                    onClick={() => removeSubItem(item.id, subItem.id)}
-                                    className="text-red-500 hover:text-red-700"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeSubItem(item.id, subItem.id);
+                                    }}
+                                    className="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded"
                                     disabled={isSubmitting}
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 </div>
 
-                                {/* Sub-item Fields */}
-                                <div className="space-y-3">
+                                {/* Sub-item Fields - Expandable */}
+                                {expandedSubItems.includes(subItem.id) && (
+                                <div className="p-3 pt-0 space-y-3 border-t border-green-100">
                                   <div>
                                     <label className="block text-xs font-medium text-gray-700 mb-1">
                                       Sub Item Name <span className="text-red-500">*</span>
@@ -5063,6 +5195,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     );
                                   })()}
                                 </div>
+                                )}
                               </div>
                             ))}
 
@@ -5915,6 +6048,171 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           item.sub_items.some(subItem => subItem.images && subItem.images.length > 0)
         )}
       />
+
+      {/* Sub-Item Selection Modal - Using Portal to render at document body */}
+      {subItemSelectionModal.isOpen && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={handleCancelSubItemSelection}
+          />
+          {/* Modal Content - Wider and taller */}
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col">
+            {/* Header - Compact */}
+            <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Select Sub-Items</h3>
+                <p className="text-xs text-gray-500">
+                  for "<span className="font-medium text-gray-700">{subItemSelectionModal.masterItem?.item_name}</span>"
+                </p>
+              </div>
+              <button
+                onClick={handleCancelSubItemSelection}
+                className="p-1.5 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Search + Select All in one row */}
+            <div className="px-5 py-2 border-b border-gray-100 bg-gray-50 flex-shrink-0 flex items-center gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search sub-items..."
+                  value={subItemSelectionModal.searchTerm}
+                  onChange={(e) => setSubItemSelectionModal(prev => ({ ...prev, searchTerm: e.target.value }))}
+                  className="w-full pl-9 pr-8 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
+                />
+                {subItemSelectionModal.searchTerm && (
+                  <button
+                    onClick={() => setSubItemSelectionModal(prev => ({ ...prev, searchTerm: '' }))}
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-0.5 hover:bg-gray-200 rounded-full"
+                  >
+                    <X className="w-3.5 h-3.5 text-gray-400" />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-xs text-gray-500">
+                  {subItemSelectionModal.selectedSubItemIds.length}/{subItemSelectionModal.subItems.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleSelectAllSubItems(true)}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-1 hover:bg-blue-50 rounded transition-colors"
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectAllSubItems(false)}
+                  className="text-xs text-gray-500 hover:text-gray-700 font-medium px-2 py-1 hover:bg-gray-100 rounded transition-colors"
+                >
+                  None
+                </button>
+              </div>
+            </div>
+
+            {/* Sub-Items List - Maximum space for scrolling */}
+            <div className="flex-1 overflow-y-auto px-5 py-3 min-h-0">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+                {subItemSelectionModal.subItems
+                  .filter(subItem => {
+                    const searchTerm = subItemSelectionModal.searchTerm.toLowerCase();
+                    if (!searchTerm) return true;
+                    return (
+                      (subItem.sub_item_name || '').toLowerCase().includes(searchTerm) ||
+                      (subItem.description || '').toLowerCase().includes(searchTerm)
+                    );
+                  })
+                  .map((subItem, index) => {
+                  const isSelected = subItemSelectionModal.selectedSubItemIds.includes(subItem._selectionId);
+                  const materialsCount = subItem.materials?.length || 0;
+                  const labourCount = subItem.labour?.length || 0;
+
+                  return (
+                    <label
+                      key={subItem._selectionId ?? index}
+                      className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                        isSelected
+                          ? 'border-green-500 bg-green-50'
+                          : 'border-gray-200 hover:border-gray-300 bg-white'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleSubItemSelectionToggle(subItem._selectionId)}
+                        className="mt-0.5 w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 flex-shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-medium text-gray-900 text-sm leading-tight">
+                            {subItem.sub_item_name || `Sub-Item ${index + 1}`}
+                          </span>
+                          {subItem.unit && (
+                            <span className="text-[10px] px-1 py-0.5 bg-gray-100 text-gray-600 rounded">
+                              {subItem.unit}
+                            </span>
+                          )}
+                        </div>
+                        {subItem.description && (
+                          <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">
+                            {subItem.description}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-500 flex-wrap">
+                          {materialsCount > 0 && (
+                            <span className="flex items-center gap-0.5">
+                              <Package className="w-3 h-3" />
+                              {materialsCount}
+                            </span>
+                          )}
+                          {labourCount > 0 && (
+                            <span className="flex items-center gap-0.5">
+                              <Users className="w-3 h-3" />
+                              {labourCount}
+                            </span>
+                          )}
+                          {subItem.per_unit_cost > 0 && (
+                            <span className="flex items-center gap-0.5 text-green-600 font-medium">
+                              AED {subItem.per_unit_cost.toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Footer - Compact */}
+            <div className="px-5 py-2.5 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={handleCancelSubItemSelection}
+                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSubItemSelection}
+                disabled={subItemSelectionModal.selectedSubItemIds.length === 0}
+                className="px-4 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                Apply {subItemSelectionModal.selectedSubItemIds.length} Sub-Item{subItemSelectionModal.selectedSubItemIds.length !== 1 ? 's' : ''}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   );
 };

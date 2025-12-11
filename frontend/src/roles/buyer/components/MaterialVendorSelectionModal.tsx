@@ -225,9 +225,9 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   // Load LPO data function
   const loadLpoData = async () => {
     try {
-      console.log('>>> loadLpoData: Starting for cr_id:', purchase.cr_id);
+      console.log('>>> loadLpoData: Starting for cr_id:', purchase.cr_id, 'po_child_id:', purchase.po_child_id);
       setIsLoadingLpo(true);
-      const response = await buyerService.previewLPOPdf(purchase.cr_id);
+      const response = await buyerService.previewLPOPdf(purchase.cr_id, purchase.po_child_id);
       console.log('>>> loadLpoData: Response:', response);
       let enrichedLpoData = response.lpo_data;
 
@@ -283,7 +283,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     if (!lpoData) return;
     setIsSavingLpo(true);
     try {
-      await buyerService.saveLPOCustomization(purchase.cr_id, lpoData, includeSignatures);
+      await buyerService.saveLPOCustomization(purchase.cr_id, lpoData, includeSignatures, purchase.po_child_id);
       setLpoLastSaved(new Date());
     } catch (error) {
       console.error('LPO auto-save failed:', error);

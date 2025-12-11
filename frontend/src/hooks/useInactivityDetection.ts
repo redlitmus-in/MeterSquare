@@ -49,8 +49,6 @@ export const useInactivityDetection = ({
     setIsInactive(false);
     setRemainingTime(timeout);
 
-    console.log('🔄 Inactivity timer reset');
-
     // Clear existing timeout
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
@@ -59,7 +57,6 @@ export const useInactivityDetection = ({
     // Set new timeout
     if (enabled) {
       timeoutRef.current = setTimeout(() => {
-        console.log('⏰ INACTIVITY TIMEOUT REACHED');
         setIsInactive(true);
         if (onInactive) {
           onInactive();
@@ -111,7 +108,6 @@ export const useInactivityDetection = ({
 
     // Cleanup
     return () => {
-      console.log('🧹 Cleaning up inactivity detection');
       events.forEach((event) => {
         window.removeEventListener(event, handleActivity);
       });
