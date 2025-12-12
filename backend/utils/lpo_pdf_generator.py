@@ -432,17 +432,25 @@ TRN# {company.get('trn', 'N/A')}'''
 
         # Add totals
         subtotal = totals.get('subtotal', 0)
-        vat_percent = totals.get('vat_percent', 5)
+        vat_percent = totals.get('vat_percent', 0)
         vat_amount = totals.get('vat_amount', 0)
         grand_total = totals.get('grand_total', 0)
 
         table_data.append(['', '', '', '', 'Total', f"{subtotal:,.2f}"])
-        table_data.append(['', '', '', '', f'VAT {vat_percent}%', f"{vat_amount:,.2f}"])
-        table_data.append(['', '', '', '', 'Total', f"{grand_total:,.2f}"])
+        # Only show VAT row if VAT is applicable (vat_percent > 0)
+        if vat_percent > 0:
+            table_data.append(['', '', '', '', f'VAT {vat_percent}%', f"{vat_amount:,.2f}"])
+            table_data.append(['', '', '', '', 'Total', f"{grand_total:,.2f}"])
 
         # Create table
         col_widths = [0.4*inch, 3.5*inch, 0.6*inch, 0.5*inch, 0.9*inch, 1*inch]
         items_table = Table(table_data, colWidths=col_widths)
+
+        # Calculate styling offsets based on whether VAT is shown
+        # With VAT: 3 total rows (subtotal, VAT, grand total)
+        # Without VAT: 1 total row (just subtotal/total)
+        total_rows = 3 if vat_percent > 0 else 1
+        body_end_offset = -(total_rows + 1)  # Row before totals section
 
         # Style the table
         style = TableStyle([
@@ -453,21 +461,21 @@ TRN# {company.get('trn', 'N/A')}'''
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
 
             # Body
-            ('FONTNAME', (0, 1), (-1, -4), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -4), 8),
+            ('FONTNAME', (0, 1), (-1, body_end_offset), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, body_end_offset), 8),
             ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # SI#
             ('ALIGN', (2, 1), (2, -1), 'CENTER'),  # Qty
             ('ALIGN', (3, 1), (3, -1), 'CENTER'),  # Unit
             ('ALIGN', (4, 1), (-1, -1), 'RIGHT'),  # Rate, Amount
 
             # Totals rows
-            ('FONTNAME', (4, -3), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (4, -3), (-1, -1), 8),
+            ('FONTNAME', (4, -total_rows), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (4, -total_rows), (-1, -1), 8),
 
             # Grid
-            ('GRID', (0, 0), (-1, -4), 0.5, colors.HexColor('#cccccc')),
-            ('BOX', (4, -3), (-1, -1), 0.5, colors.HexColor('#cccccc')),
-            ('LINEABOVE', (4, -3), (-1, -3), 0.5, colors.HexColor('#cccccc')),
+            ('GRID', (0, 0), (-1, body_end_offset), 0.5, colors.HexColor('#cccccc')),
+            ('BOX', (4, -total_rows), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+            ('LINEABOVE', (4, -total_rows), (-1, -total_rows), 0.5, colors.HexColor('#cccccc')),
             ('LINEABOVE', (4, -1), (-1, -1), 0.5, colors.HexColor('#cccccc')),
 
             # Padding

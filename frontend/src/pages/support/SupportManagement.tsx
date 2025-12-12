@@ -39,7 +39,8 @@ import {
   Bell,
   BellOff,
   MessageCircle,
-  Lock
+  Lock,
+  Rocket
 } from 'lucide-react';
 import { supportApi, SupportTicket } from '@/api/support';
 import { showSuccess, showError, showInfo } from '@/utils/toastHelper';
@@ -78,6 +79,7 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
   approved: { label: 'Approved', color: 'text-green-600', bgColor: 'bg-green-100', icon: CheckCircle },
   rejected: { label: 'Rejected', color: 'text-red-500', bgColor: 'bg-red-100', icon: XCircle },
   in_progress: { label: 'In Progress', color: 'text-purple-600', bgColor: 'bg-purple-100', icon: Play },
+  pending_deployment: { label: 'Pending Deployment', color: 'text-orange-600', bgColor: 'bg-orange-100', icon: Rocket },
   resolved: { label: 'Resolved', color: 'text-emerald-600', bgColor: 'bg-emerald-100', icon: Check },
   closed: { label: 'Closed', color: 'text-gray-600', bgColor: 'bg-gray-200', icon: XCircle }
 };
@@ -914,7 +916,7 @@ const SupportManagement: React.FC = () => {
                         )}
 
                         {/* Comments/Communication Section - Show for active and closed tickets */}
-                        {['approved', 'in_progress', 'resolved', 'closed'].includes(ticket.status) && (
+                        {['approved', 'in_progress', 'pending_deployment', 'resolved', 'closed'].includes(ticket.status) && (
                           <div className="mb-6">
                             <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
                               <MessageCircle className="w-4 h-4" />
@@ -1012,8 +1014,8 @@ const SupportManagement: React.FC = () => {
                             </>
                           )}
 
-                          {/* Resolve for approved/in_progress tickets */}
-                          {(ticket.status === 'approved' || ticket.status === 'in_progress') && (
+                          {/* Resolve for approved/in_progress/pending_deployment tickets */}
+                          {(ticket.status === 'approved' || ticket.status === 'in_progress' || ticket.status === 'pending_deployment') && (
                             <button
                               onClick={() => setActionModal({ type: 'resolve', ticket })}
                               className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
@@ -1024,7 +1026,7 @@ const SupportManagement: React.FC = () => {
                           )}
 
                           {/* Change Status - Only show after approved */}
-                          {['approved', 'in_progress'].includes(ticket.status) && (
+                          {['approved', 'in_progress', 'pending_deployment'].includes(ticket.status) && (
                             <button
                               onClick={() => setActionModal({ type: 'status', ticket })}
                               className="flex items-center gap-2 px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
@@ -1338,6 +1340,7 @@ const SupportManagement: React.FC = () => {
                       <option value="">Select status...</option>
                       <option value="in_review">In Review</option>
                       <option value="in_progress">In Progress</option>
+                      <option value="pending_deployment">Pending Deployment</option>
                       <option value="closed">Closed</option>
                     </select>
                   </div>

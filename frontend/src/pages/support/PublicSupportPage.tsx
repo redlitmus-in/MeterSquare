@@ -34,7 +34,8 @@ import {
   Mail,
   Search,
   MessageCircle,
-  Download
+  Download,
+  Rocket
 } from 'lucide-react';
 import { supportApi, SupportTicket } from '@/api/support';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
@@ -71,6 +72,7 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
   approved: { label: 'Approved', color: 'text-green-500', bgColor: 'bg-green-100', icon: CheckCircle },
   rejected: { label: 'Rejected', color: 'text-red-500', bgColor: 'bg-red-100', icon: XCircle },
   in_progress: { label: 'In Progress', color: 'text-purple-500', bgColor: 'bg-purple-100', icon: RefreshCw },
+  pending_deployment: { label: 'Pending Deployment', color: 'text-orange-500', bgColor: 'bg-orange-100', icon: Rocket },
   resolved: { label: 'Resolved', color: 'text-emerald-500', bgColor: 'bg-emerald-100', icon: CheckCircle },
   closed: { label: 'Closed', color: 'text-gray-600', bgColor: 'bg-gray-200', icon: XCircle }
 };
@@ -1283,7 +1285,7 @@ const PublicSupportPage: React.FC = () => {
                           )}
 
                           {/* Comments/Communication Section - Show for active and closed tickets */}
-                          {['approved', 'in_progress', 'resolved', 'closed'].includes(ticket.status) && (
+                          {['approved', 'in_progress', 'pending_deployment', 'resolved', 'closed'].includes(ticket.status) && (
                             <div className="mb-6">
                               <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
                                 <MessageCircle className="w-4 h-4" />

@@ -626,8 +626,8 @@ def admin_resolve_ticket(ticket_id):
         if not ticket:
             return jsonify({"success": False, "error": "Ticket not found"}), 404
 
-        if ticket.status not in ['approved', 'in_progress']:
-            return jsonify({"success": False, "error": "Only approved/in-progress tickets can be resolved"}), 400
+        if ticket.status not in ['approved', 'in_progress', 'pending_deployment']:
+            return jsonify({"success": False, "error": "Only approved/in-progress/pending-deployment tickets can be resolved"}), 400
 
         if request.content_type and 'multipart/form-data' in request.content_type:
             data = request.form.to_dict()
@@ -697,7 +697,7 @@ def admin_update_status(ticket_id):
         data = request.get_json()
         new_status = data.get('status')
 
-        valid_statuses = ['in_review', 'in_progress', 'closed']
+        valid_statuses = ['in_review', 'in_progress', 'pending_deployment', 'closed']
         if new_status not in valid_statuses:
             return jsonify({"success": False, "error": f"Invalid status. Must be one of: {valid_statuses}"}), 400
 

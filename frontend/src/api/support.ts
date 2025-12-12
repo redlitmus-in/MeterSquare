@@ -19,7 +19,7 @@ export interface SupportTicket {
   current_concern?: string;
   proposed_changes?: string;
   priority: 'low' | 'medium' | 'high' | 'critical';
-  status: 'draft' | 'submitted' | 'in_review' | 'approved' | 'rejected' | 'in_progress' | 'resolved' | 'closed';
+  status: 'draft' | 'submitted' | 'in_review' | 'approved' | 'rejected' | 'in_progress' | 'pending_deployment' | 'resolved' | 'closed';
   attachments: Attachment[];
   admin_response?: string;
   admin_user_id?: number;

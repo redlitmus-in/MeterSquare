@@ -1065,26 +1065,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-          />
-
-          {/* Modal */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          {/* Full Screen Page */}
+          <div className="fixed inset-0 z-50 flex flex-col bg-gray-50 h-screen overflow-hidden">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl my-8 overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col h-full w-full overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className={`px-6 py-5 border-b ${viewMode === 'td' ? 'bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200' : 'bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200'}`}>
+              <div className={`shrink-0 px-6 py-5 border-b ${viewMode === 'td' ? 'bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200' : 'bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200'}`}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
@@ -1112,8 +1103,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                 </div>
               </div>
 
-              {/* Body */}
-              <div className="p-6 max-h-[70vh] overflow-y-auto">
+              {/* Body - Full height scrollable */}
+              <div className="flex-1 p-6 overflow-y-auto" style={{ minHeight: 0 }}>
                 {/* Search Bar */}
                 <div className="mb-4">
                   <div className="relative">
@@ -2342,11 +2333,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     </div>
                   </div>
                 )}
-              </div>
 
               {/* LPO PDF Section - Only for Buyer mode */}
               {viewMode === 'buyer' && (
-                <div className="px-6 py-4 border-t border-gray-200">
+                <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -2712,32 +2702,15 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                           )}
                         </div>
 
-                        {/* Summary */}
-                        <div className="bg-white p-3 rounded border border-gray-200">
-                          <div className="text-xs font-medium text-gray-600 mb-2">LPO Summary</div>
-                          <div className="grid grid-cols-3 gap-2 text-sm">
-                            <div>
-                              <span className="text-gray-500">Subtotal:</span>
-                              <span className="ml-2 font-medium">{CURRENCY_CODE} {lpoData.totals.subtotal.toLocaleString()}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">VAT ({lpoData.totals.vat_percent}%):</span>
-                              <span className="ml-2 font-medium">{CURRENCY_CODE} {lpoData.totals.vat_amount.toLocaleString()}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Total:</span>
-                              <span className="ml-2 font-bold text-blue-600">{CURRENCY_CODE} {lpoData.totals.grand_total.toLocaleString()}</span>
-                            </div>
-                          </div>
-                        </div>
                       </div>
                     )}
                   </div>
                 </div>
               )}
+              </div>
 
               {/* Footer */}
-              <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between gap-4">
+              <div className="shrink-0 bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between gap-4">
                 <div className="text-sm text-gray-600">
                   {viewMode === 'td' ? (
                     // TD Mode: Simplified status

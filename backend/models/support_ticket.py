@@ -213,7 +213,7 @@ class SupportTicket(db.Model):
             'is_editable': self.status in ['draft'],
             'can_submit': self.status == 'draft',
             'can_approve': self.status == 'submitted',
-            'can_resolve': self.status in ['approved', 'in_progress'],
+            'can_resolve': self.status in ['approved', 'in_progress', 'pending_deployment'],
         }
 
     def __repr__(self):

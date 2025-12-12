@@ -6007,9 +6007,10 @@ def send_vendor_whatsapp(cr_id):
                             "amount": round(amount, 2)
                         })
 
-                    vat_percent = 5
-                    vat_amount = subtotal * (vat_percent / 100)
-                    grand_total = subtotal + vat_amount
+                    # VAT removed as per requirement
+                    vat_percent = 0
+                    vat_amount = 0
+                    grand_total = subtotal
 
                     DEFAULT_COMPANY_TRN = "100223723600003"
                     vendor_phone = vendor.phone or ""
@@ -7735,9 +7736,9 @@ def preview_lpo_pdf(cr_id):
                 # Debug logging
                 print(f">>> LPO Price Debug for '{mat_name}': stored={stored_unit_price}, negotiated={negotiated_price}, selection={selection_price}, vendor_product={vendor_product_price}, raw_material={material}")
 
-                # Use best available price: vendor_product > negotiated > selection > stored
-                # Priority: vendor catalog price first (actual vendor price), then negotiated, then selection, then stored fallback
-                final_price = vendor_product_price or negotiated_price or selection_price or stored_unit_price
+                # Use best available price: negotiated > stored (vendor rate) > vendor catalog > selection (BOQ fallback)
+                # Priority: negotiated first, then stored vendor rate from POChild, then vendor catalog, then BOQ rate as fallback
+                final_price = negotiated_price or stored_unit_price or vendor_product_price or selection_price
                 mat_total = quantity * final_price if final_price else float(material.get('total_price', 0) or 0)
 
                 # Preserve BOQ/original prices for comparison display
@@ -7785,9 +7786,10 @@ def preview_lpo_pdf(cr_id):
                 "boq_rate": round(float(boq_rate), 2) if boq_rate else 0
             })
 
-        vat_percent = 5
-        vat_amount = subtotal * (vat_percent / 100)
-        grand_total = subtotal + vat_amount
+        # VAT removed as per requirement
+        vat_percent = 0
+        vat_amount = 0
+        grand_total = subtotal
 
         # Default company TRN
         DEFAULT_COMPANY_TRN = "100223723600003"
