@@ -255,7 +255,7 @@ const SupportManagement: React.FC = () => {
     const ticket = actionModal.ticket;
     try {
       setIsProcessing(true);
-      const response = await supportApi.approveTicket(ticket.ticket_id, actionResponse);
+      const response = await supportApi.approveTicket(ticket.ticket_id, 'Development Team', actionResponse);
       if (response.success) {
         showSuccess('Ticket approved successfully');
         // Notify the ticket reporter
@@ -288,7 +288,8 @@ const SupportManagement: React.FC = () => {
       const response = await supportApi.rejectTicket(
         ticket.ticket_id,
         rejectionReason,
-        actionResponse
+        'Development Team',  // adminName
+        actionResponse       // response text
       );
       if (response.success) {
         showSuccess('Ticket rejected');
@@ -353,7 +354,8 @@ const SupportManagement: React.FC = () => {
       const response = await supportApi.updateTicketStatus(
         ticket.ticket_id,
         newStatus,
-        actionResponse
+        'Development Team',  // adminName
+        actionResponse       // response text
       );
       if (response.success) {
         showSuccess('Ticket status updated');
@@ -704,55 +706,137 @@ const SupportManagement: React.FC = () => {
                         )}
 
                         {/* Current Concern */}
-                        {ticket.current_concern && (
+                        {(ticket.current_concern || ticket.attachments?.some((a: any) => a.section === 'current_concern' || (!a.section && a.uploaded_by_role !== 'admin'))) && (
                           <div className="mb-6 p-4 bg-orange-50 rounded-lg border border-orange-200">
                             <h4 className="text-sm font-medium text-orange-700 mb-2">Current Concern</h4>
-                            <p className="text-orange-900 whitespace-pre-wrap">{ticket.current_concern}</p>
+                            {ticket.current_concern && (
+                              <p className="text-orange-900 whitespace-pre-wrap mb-3">{ticket.current_concern}</p>
+                            )}
+                            {/* Current Concern Attachments */}
+                            {ticket.attachments?.filter((a: any) => a.section === 'current_concern' || (!a.section && a.uploaded_by_role !== 'admin')).length > 0 && (
+                              <div className="mt-3 pt-3 border-t border-orange-200">
+                                <h5 className="text-sm font-medium text-orange-600 mb-2">Attachments</h5>
+                                <div className="flex flex-wrap gap-2">
+                                  {ticket.attachments
+                                    .filter((a: any) => a.section === 'current_concern' || (!a.section && a.uploaded_by_role !== 'admin'))
+                                    .map((attachment: any, index: number) => {
+                                      const fileUrl = attachment.file_path?.startsWith('http')
+                                        ? attachment.file_path
+                                        : `${API_BASE_URL}${attachment.file_path}`;
+                                      return (
+                                        <a
+                                          key={index}
+                                          href={fileUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex items-center gap-2 p-2 bg-orange-100 rounded-lg border border-orange-300 hover:bg-orange-200 transition-colors text-sm"
+                                        >
+                                          {attachment.file_type?.startsWith('image/') ? (
+                                            <Image className="w-4 h-4 text-orange-600" />
+                                          ) : (
+                                            <FileText className="w-4 h-4 text-orange-600" />
+                                          )}
+                                          <span className="text-orange-800">{attachment.file_name}</span>
+                                          <Download className="w-3 h-3 text-orange-500" />
+                                        </a>
+                                      );
+                                    })}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
 
                         {/* Concern Implementation */}
-                        {ticket.proposed_changes && (
+                        {(ticket.proposed_changes || ticket.attachments?.some((a: any) => a.section === 'implementation')) && (
                           <div className="mb-6 p-4 bg-purple-50 rounded-lg border border-purple-200">
                             <h4 className="text-sm font-medium text-purple-700 mb-2">Concern Implementation</h4>
-                            <p className="text-purple-900 whitespace-pre-wrap">{ticket.proposed_changes}</p>
+                            {ticket.proposed_changes && (
+                              <p className="text-purple-900 whitespace-pre-wrap mb-3">{ticket.proposed_changes}</p>
+                            )}
+                            {/* Implementation Attachments */}
+                            {ticket.attachments?.filter((a: any) => a.section === 'implementation').length > 0 && (
+                              <div className="mt-3 pt-3 border-t border-purple-200">
+                                <h5 className="text-sm font-medium text-purple-600 mb-2">Attachments</h5>
+                                <div className="flex flex-wrap gap-2">
+                                  {ticket.attachments
+                                    .filter((a: any) => a.section === 'implementation')
+                                    .map((attachment: any, index: number) => {
+                                      const fileUrl = attachment.file_path?.startsWith('http')
+                                        ? attachment.file_path
+                                        : `${API_BASE_URL}${attachment.file_path}`;
+                                      return (
+                                        <a
+                                          key={index}
+                                          href={fileUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex items-center gap-2 p-2 bg-purple-100 rounded-lg border border-purple-300 hover:bg-purple-200 transition-colors text-sm"
+                                        >
+                                          {attachment.file_type?.startsWith('image/') ? (
+                                            <Image className="w-4 h-4 text-purple-600" />
+                                          ) : (
+                                            <FileText className="w-4 h-4 text-purple-600" />
+                                          )}
+                                          <span className="text-purple-800">{attachment.file_name}</span>
+                                          <Download className="w-3 h-3 text-purple-500" />
+                                        </a>
+                                      );
+                                    })}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
 
-                        {/* Attachments */}
-                        {ticket.attachments && ticket.attachments.length > 0 && (
+                        {/* Development Team Response History */}
+                        {ticket.response_history && ticket.response_history.length > 0 && (
                           <div className="mb-6">
-                            <h4 className="text-sm font-medium text-gray-500 mb-2">Attachments ({ticket.attachments.length})</h4>
-                            <div className="flex flex-wrap gap-3">
-                              {ticket.attachments.map((attachment, index) => {
-                                // Use file_path directly if it's a full URL (Supabase), otherwise prepend API_BASE_URL
-                                const fileUrl = attachment.file_path?.startsWith('http')
-                                  ? attachment.file_path
-                                  : `${API_BASE_URL}${attachment.file_path}`;
+                            <h4 className="text-sm font-medium text-gray-700 mb-3">Development Team Response History</h4>
+                            <div className="space-y-3">
+                              {ticket.response_history.map((entry: any, index: number) => {
+                                // Determine colors based on response type
+                                const typeConfig = {
+                                  approval: { bg: 'bg-green-50', border: 'border-green-200', title: 'text-green-700', text: 'text-green-900', badge: 'bg-green-100 text-green-700', label: 'Approved' },
+                                  status_change: { bg: 'bg-blue-50', border: 'border-blue-200', title: 'text-blue-700', text: 'text-blue-900', badge: 'bg-blue-100 text-blue-700', label: 'Status Changed' },
+                                  rejection: { bg: 'bg-red-50', border: 'border-red-200', title: 'text-red-700', text: 'text-red-900', badge: 'bg-red-100 text-red-700', label: 'Rejected' },
+                                  resolution: { bg: 'bg-emerald-50', border: 'border-emerald-200', title: 'text-emerald-700', text: 'text-emerald-900', badge: 'bg-emerald-100 text-emerald-700', label: 'Resolved' }
+                                };
+                                const config = typeConfig[entry.type as keyof typeof typeConfig] || typeConfig.status_change;
+
                                 return (
-                                  <a
-                                    key={index}
-                                    href={fileUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border hover:bg-gray-100 transition-colors"
-                                  >
-                                    {attachment.file_type?.startsWith('image/') ? (
-                                      <Image className="w-5 h-5 text-blue-500" />
-                                    ) : (
-                                      <FileText className="w-5 h-5 text-gray-500" />
+                                  <div key={index} className={`p-4 rounded-lg border ${config.bg} ${config.border}`}>
+                                    <div className="flex items-center justify-between mb-2">
+                                      <span className={`px-2 py-1 rounded text-xs font-medium ${config.badge}`}>
+                                        {config.label}
+                                        {entry.type === 'status_change' && entry.new_status && (
+                                          <span className="ml-1">→ {entry.new_status.replace('_', ' ')}</span>
+                                        )}
+                                      </span>
+                                      <span className="text-xs text-gray-500">
+                                        {new Date(entry.created_at + 'Z').toLocaleString()}
+                                      </span>
+                                    </div>
+                                    {entry.response && (
+                                      <p className={`${config.text} whitespace-pre-wrap`}>{entry.response}</p>
                                     )}
-                                    <span className="text-sm text-gray-700">{attachment.file_name}</span>
-                                    <Download className="w-4 h-4 text-gray-400" />
-                                  </a>
+                                    {entry.reason && (
+                                      <p className={`${config.text} whitespace-pre-wrap mt-1`}>
+                                        <strong>Reason:</strong> {entry.reason}
+                                      </p>
+                                    )}
+                                    <p className={`text-sm ${config.title} mt-2`}>
+                                      — {entry.admin_name}
+                                    </p>
+                                  </div>
                                 );
                               })}
                             </div>
                           </div>
                         )}
 
-                        {/* Development Team Response */}
-                        {ticket.admin_response && (
+                        {/* Legacy: Show admin_response if no response_history (for older tickets) */}
+                        {(!ticket.response_history || ticket.response_history.length === 0) && ticket.admin_response && (
                           <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
                             <h4 className="text-sm font-medium text-blue-700 mb-2">Development Team Response</h4>
                             <p className="text-blue-900">{ticket.admin_response}</p>
@@ -765,14 +849,48 @@ const SupportManagement: React.FC = () => {
                         )}
 
                         {/* Development Team Resolution */}
-                        {ticket.resolution_notes && (
+                        {(ticket.resolution_notes || ticket.attachments?.some((a: any) => a.uploaded_by_role === 'admin' || a.section === 'admin')) && (
                           <div className="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
                             <h4 className="text-sm font-medium text-green-700 mb-2">Development Team Resolution</h4>
-                            <p className="text-green-900">{ticket.resolution_notes}</p>
+                            {ticket.resolution_notes && (
+                              <p className="text-green-900 whitespace-pre-wrap">{ticket.resolution_notes}</p>
+                            )}
                             {ticket.resolved_by_name && (
                               <p className="text-sm text-green-600 mt-2">
                                 — {ticket.resolved_by_name}, {ticket.resolution_date && new Date(ticket.resolution_date + 'Z').toLocaleString()}
                               </p>
+                            )}
+                            {/* Resolution Attachments */}
+                            {ticket.attachments?.filter((a: any) => a.uploaded_by_role === 'admin' || a.section === 'admin').length > 0 && (
+                              <div className="mt-4 pt-3 border-t border-green-200">
+                                <h5 className="text-sm font-medium text-green-700 mb-2">Resolution Files</h5>
+                                <div className="flex flex-wrap gap-2">
+                                  {ticket.attachments
+                                    .filter((a: any) => a.uploaded_by_role === 'admin' || a.section === 'admin')
+                                    .map((attachment: any, index: number) => {
+                                      const fileUrl = attachment.file_path?.startsWith('http')
+                                        ? attachment.file_path
+                                        : `${API_BASE_URL}${attachment.file_path}`;
+                                      return (
+                                        <a
+                                          key={index}
+                                          href={fileUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex items-center gap-2 p-2 bg-green-100 rounded-lg border border-green-300 hover:bg-green-200 transition-colors text-sm"
+                                        >
+                                          {attachment.file_type?.startsWith('image/') ? (
+                                            <Image className="w-4 h-4 text-green-600" />
+                                          ) : (
+                                            <FileText className="w-4 h-4 text-green-600" />
+                                          )}
+                                          <span className="text-green-800">{attachment.file_name}</span>
+                                          <Download className="w-3 h-3 text-green-500" />
+                                        </a>
+                                      );
+                                    })}
+                                </div>
+                              </div>
                             )}
                           </div>
                         )}
@@ -1200,21 +1318,25 @@ const SupportManagement: React.FC = () => {
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="">Select status...</option>
+                      <option value="in_review">In Review</option>
                       <option value="in_progress">In Progress</option>
                       <option value="closed">Closed</option>
                     </select>
                   </div>
                   <div className="mb-6">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Response (Optional)
+                      Status Update Note (Optional)
                     </label>
                     <textarea
                       value={actionResponse}
                       onChange={(e) => setActionResponse(e.target.value)}
-                      placeholder="Add a note about this status change..."
-                      rows={isModalExpanded ? 10 : 3}
+                      placeholder="Add a note about this status change (this will be visible to the client)..."
+                      rows={isModalExpanded ? 10 : 4}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 resize-y"
                     />
+                    <p className="text-xs text-gray-500 mt-1">
+                      This note will appear in the "Development Team Response" section of the ticket.
+                    </p>
                   </div>
                   <div className="flex justify-end gap-3">
                     <button

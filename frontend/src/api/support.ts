@@ -37,6 +37,7 @@ export interface SupportTicket {
   resolution_date?: string;
   resolution_notes?: string;
   comments?: Comment[];
+  response_history?: ResponseHistoryEntry[];
   created_at: string;
   updated_at?: string;
   submitted_at?: string;
@@ -53,6 +54,16 @@ export interface Comment {
   sender_name: string;
   sender_email?: string;
   message: string;
+  created_at: string;
+}
+
+export interface ResponseHistoryEntry {
+  type: 'approval' | 'status_change' | 'rejection' | 'resolution';
+  response: string;
+  reason?: string;
+  admin_name: string;
+  old_status?: string;
+  new_status: string;
   created_at: string;
 }
 
@@ -122,7 +133,7 @@ export const supportApi = {
     reporter_name: string;
     reporter_email: string;
     reporter_role?: string;
-  }, files?: File[], asDraft?: boolean): Promise<TicketResponse> {
+  }, concernFiles?: File[], implementationFiles?: File[], asDraft?: boolean): Promise<TicketResponse> {
     const formData = new FormData();
     formData.append('ticket_type', data.ticket_type);
     formData.append('title', data.title);
@@ -135,9 +146,17 @@ export const supportApi = {
     if (data.proposed_changes) formData.append('proposed_changes', data.proposed_changes);
     if (asDraft) formData.append('as_draft', 'true');
 
-    if (files && files.length > 0) {
-      files.forEach(file => {
-        formData.append('files', file);
+    // Add concern files (Current Concern section)
+    if (concernFiles && concernFiles.length > 0) {
+      concernFiles.forEach(file => {
+        formData.append('concern_files', file);
+      });
+    }
+
+    // Add implementation files (Concern Implementation section)
+    if (implementationFiles && implementationFiles.length > 0) {
+      implementationFiles.forEach(file => {
+        formData.append('implementation_files', file);
       });
     }
 
@@ -171,7 +190,8 @@ export const supportApi = {
       priority?: string;
       ticket_type?: string;
     },
-    files?: File[]
+    concernFiles?: File[],
+    implementationFiles?: File[]
   ): Promise<TicketResponse> {
     const formData = new FormData();
     if (data.title) formData.append('title', data.title);
@@ -181,9 +201,17 @@ export const supportApi = {
     if (data.priority) formData.append('priority', data.priority);
     if (data.ticket_type) formData.append('ticket_type', data.ticket_type);
 
-    if (files && files.length > 0) {
-      files.forEach(file => {
-        formData.append('files', file);
+    // Add concern files (Current Concern section)
+    if (concernFiles && concernFiles.length > 0) {
+      concernFiles.forEach(file => {
+        formData.append('concern_files', file);
+      });
+    }
+
+    // Add implementation files (Concern Implementation section)
+    if (implementationFiles && implementationFiles.length > 0) {
+      implementationFiles.forEach(file => {
+        formData.append('implementation_files', file);
       });
     }
 

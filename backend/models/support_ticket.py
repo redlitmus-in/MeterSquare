@@ -87,6 +87,21 @@ class SupportTicket(db.Model):
     ]
     """
 
+    # Response history - tracks all admin responses (approval, status change, etc.)
+    response_history = db.Column(JSONB, nullable=True, default=list)
+    """
+    Example structure:
+    [
+        {
+            "type": "approval" | "status_change" | "rejection",
+            "response": "Response text here",
+            "admin_name": "Development Team",
+            "new_status": "approved",
+            "created_at": "2024-01-01T00:00:00Z"
+        }
+    ]
+    """
+
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
@@ -174,6 +189,9 @@ class SupportTicket(db.Model):
 
             # Comments
             'comments': self.comments or [],
+
+            # Response history
+            'response_history': self.response_history or [],
 
             # Timestamps
             'created_at': self.created_at.isoformat() if self.created_at else None,

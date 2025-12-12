@@ -2683,6 +2683,28 @@ def update_boq(boq_id):
                     db.session.add(boq_prelim)
                     preliminary_selections_saved += 1
 
+        # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
+        terms_conditions = data.get("terms_conditions", [])
+        if terms_conditions and isinstance(terms_conditions, list):
+            from sqlalchemy import text
+            # Extract only checked term IDs
+            selected_term_ids = [
+                term.get('term_id') for term in terms_conditions
+                if term.get('term_id') and term.get('checked', False)
+            ]
+
+            # Insert or update single row with term_ids array
+            db.session.execute(text("""
+                INSERT INTO boq_terms_selections (boq_id, term_ids, created_at, updated_at)
+                VALUES (:boq_id, :term_ids, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (boq_id)
+                DO UPDATE SET term_ids = :term_ids, updated_at = CURRENT_TIMESTAMP
+            """), {
+                'boq_id': boq_id,
+                'term_ids': selected_term_ids
+            })
+            log.info(f"✅ Updated {len(selected_term_ids)} terms selections in boq_terms_selections for BOQ {boq_id}")
+
         db.session.commit()
 
         # Return updated BOQ

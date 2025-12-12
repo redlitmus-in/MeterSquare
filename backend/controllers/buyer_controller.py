@@ -3108,11 +3108,12 @@ def select_vendor_for_material(cr_id):
                             message=notification_message,
                             priority='high',
                             category='purchase',
-                            action_url=f'/technical-director/change-requests/{cr_id}',
+                            action_url=f'/technical-director/vendor-approval?cr_id={cr_id}',
                             action_label='Review Selections',
-                            metadata={'cr_id': str(cr_id), 'materials_count': len(updated_materials)},
+                            metadata={'cr_id': str(cr_id), 'materials_count': len(updated_materials), 'target_role': 'technical-director'},
                             sender_id=user_id,
-                            sender_name=user_name
+                            sender_name=user_name,
+                            target_role='technical-director'
                         )
                         send_notification_to_user(td_user.user_id, notification.to_dict())
             except Exception as notif_error:
@@ -3378,11 +3379,12 @@ def create_sub_crs_for_vendor_groups(cr_id):
                             message=f'Buyer created {len(created_sub_crs)} separate purchase orders from PO-{cr_id}. Each needs approval.',
                             priority='high',
                             category='purchase',
-                            action_url=f'/technical-director/change-requests',
+                            action_url=f'/technical-director/vendor-approval?cr_id={cr_id}',
                             action_label='Review Purchase Orders',
-                            metadata={'parent_cr_id': str(cr_id), 'sub_crs_count': len(created_sub_crs), 'submission_group_id': submission_group_id},
+                            metadata={'parent_cr_id': str(cr_id), 'sub_crs_count': len(created_sub_crs), 'submission_group_id': submission_group_id, 'target_role': 'technical-director'},
                             sender_id=user_id,
-                            sender_name=user_name
+                            sender_name=user_name,
+                            target_role='technical-director'
                         )
                         send_notification_to_user(td_user.user_id, notification.to_dict())
             except Exception as notif_error:
@@ -3771,11 +3773,12 @@ def create_po_children(cr_id):
                             message=f'Buyer created {len(created_po_children)} separate purchase orders from PO-{cr_id}. Each needs approval.',
                             priority='high',
                             category='purchase',
-                            action_url=f'/technical-director/change-requests',
+                            action_url=f'/technical-director/vendor-approval?cr_id={cr_id}',
                             action_label='Review Purchase Orders',
-                            metadata={'parent_cr_id': str(cr_id), 'po_children_count': len(created_po_children), 'submission_group_id': submission_group_id},
+                            metadata={'parent_cr_id': str(cr_id), 'po_children_count': len(created_po_children), 'submission_group_id': submission_group_id, 'target_role': 'technical-director'},
                             sender_id=user_id,
-                            sender_name=user_name
+                            sender_name=user_name,
+                            target_role='technical-director'
                         )
                         send_notification_to_user(td_user.user_id, notification.to_dict())
             except Exception as notif_error:
@@ -4413,15 +4416,17 @@ def reselect_vendor_for_po_child(po_child_id):
                     message=f'{buyer_name} re-selected vendor "{vendor.company_name}" for {po_child.get_formatted_id()} after previous rejection',
                     priority='high',
                     category='vendor',
-                    action_url='/td/vendor-approvals',
+                    action_url=f'/technical-director/vendor-approval?po_child_id={po_child_id}',
                     action_label='Review Selection',
                     metadata={
                         'po_child_id': str(po_child_id),
                         'vendor_name': vendor.company_name,
-                        'vendor_id': str(vendor_id)
+                        'vendor_id': str(vendor_id),
+                        'target_role': 'technical-director'
                     },
                     sender_id=buyer_id,
-                    sender_name=buyer_name
+                    sender_name=buyer_name,
+                    target_role='technical-director'
                 )
                 send_notification_to_user(td_user.user_id, notification.to_dict())
         except Exception as notif_error:

@@ -127,9 +127,10 @@ class ComprehensiveNotificationService:
                     category='boq',
                     action_url=f'/estimator/projects?tab=approved&boq_id={boq_id}',
                     action_label='View BOQ',
-                    metadata={'boq_id': boq_id, 'decision': 'approved'},
+                    metadata={'boq_id': boq_id, 'decision': 'approved', 'target_role': 'estimator'},
                     sender_id=pm_id,
-                    sender_name=pm_name
+                    sender_name=pm_name,
+                    target_role='estimator'
                 )
             else:
                 notification = NotificationManager.create_notification(
@@ -142,9 +143,10 @@ class ComprehensiveNotificationService:
                     action_required=True,
                     action_url=f'/estimator/projects?tab=rejected&boq_id={boq_id}',
                     action_label='View Details',
-                    metadata={'boq_id': boq_id, 'decision': 'rejected', 'reason': rejection_reason},
+                    metadata={'boq_id': boq_id, 'decision': 'rejected', 'reason': rejection_reason, 'target_role': 'estimator'},
                     sender_id=pm_id,
-                    sender_name=pm_name
+                    sender_name=pm_name,
+                    target_role='estimator'
                 )
 
             send_notification_to_user(estimator_user_id, notification.to_dict())
@@ -339,7 +341,7 @@ class ComprehensiveNotificationService:
                         category='boq',
                         action_url=f'/estimator/projects?tab=approved&boq_id={boq_id}',
                         action_label='View BOQ',
-                        metadata={'boq_id': boq_id, 'decision': 'approved'},
+                        metadata={'boq_id': boq_id, 'decision': 'approved', 'target_role': 'estimator'},
                         sender_id=td_id,
                         sender_name=td_name,
                         target_role='estimator'
@@ -355,7 +357,7 @@ class ComprehensiveNotificationService:
                         action_required=True,
                         action_url=f'/estimator/projects?tab=rejected&boq_id={boq_id}',
                         action_label='View Details',
-                        metadata={'boq_id': boq_id, 'decision': 'rejected', 'reason': rejection_reason},
+                        metadata={'boq_id': boq_id, 'decision': 'rejected', 'reason': rejection_reason, 'target_role': 'estimator'},
                         sender_id=td_id,
                         sender_name=td_name,
                         target_role='estimator'
@@ -526,10 +528,18 @@ class ComprehensiveNotificationService:
                     log.info(f"[notify_cr_created] Skipping duplicate CR created notification for CR {cr_id} to user {user_id}")
                     continue
 
-                # Determine correct route based on request_type
-                # EXTRA_MATERIALS goes to /extra-material, others go to /change-requests
-                route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
-                action_url = f'/{recipient_role.lower().replace(" ", "-")}/{route}?cr_id={cr_id}'
+                # Determine correct route based on recipient_role and request_type
+                # Buyer uses 'purchase-orders' page for all CR/PO work
+                recipient_role_lower = (recipient_role or '').lower().replace(' ', '-').replace('_', '-')
+
+                if recipient_role_lower == 'buyer':
+                    # Buyer views purchase requests on purchase-orders page
+                    route = 'purchase-orders'
+                else:
+                    # Other roles use extra-material or change-requests based on request_type
+                    route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
+
+                action_url = f'/{recipient_role_lower}/{route}?cr_id={cr_id}'
                 log.info(f"[notify_cr_created] Creating notification for user {user_id}, action_url: {action_url}")
 
                 # Determine notification title based on whether materials are new or existing BOQ items
@@ -550,9 +560,10 @@ class ComprehensiveNotificationService:
                     action_required=True,
                     action_url=action_url,
                     action_label='Review Request',
-                    metadata={'cr_id': cr_id, 'action_url': action_url, 'request_type': request_type},
+                    metadata={'cr_id': cr_id, 'action_url': action_url, 'request_type': request_type, 'target_role': recipient_role_lower},
                     sender_id=creator_id,
-                    sender_name=creator_name
+                    sender_name=creator_name,
+                    target_role=recipient_role_lower
                 )
 
                 log.info(f"[notify_cr_created] Notification created with ID: {notification.id}, sending to user {user_id}")
@@ -672,6 +683,8 @@ class ComprehensiveNotificationService:
                 log.info(f"Skipping duplicate vendor selection notification for CR {cr_id}")
                 return
 
+            log.info(f"[notify_vendor_selected_for_cr] Creating notification for TD user {td_user_id}, CR {cr_id}, vendor {vendor_name}")
+
             notification = NotificationManager.create_notification(
                 user_id=td_user_id,
                 type='approval',
@@ -682,13 +695,14 @@ class ComprehensiveNotificationService:
                 action_required=True,
                 action_url=f'/technical-director/vendor-approval?cr_id={cr_id}',
                 action_label='Review Vendor',
-                metadata={'cr_id': cr_id, 'vendor_name': vendor_name, 'request_type': request_type},
+                metadata={'cr_id': cr_id, 'vendor_name': vendor_name, 'request_type': request_type, 'target_role': 'technical-director'},
                 sender_id=buyer_id,
-                sender_name=buyer_name
+                sender_name=buyer_name,
+                target_role='technical-director'
             )
 
             send_notification_to_user(td_user_id, notification.to_dict())
-            log.info(f"Sent vendor selection notification to TD for CR {cr_id}")
+            log.info(f"[notify_vendor_selected_for_cr] Sent vendor selection notification to TD {td_user_id} for CR {cr_id}")
         except Exception as e:
             log.error(f"Error sending vendor selection notification: {e}")
 

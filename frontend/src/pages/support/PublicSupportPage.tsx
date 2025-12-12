@@ -33,7 +33,8 @@ import {
   User,
   Mail,
   Search,
-  MessageCircle
+  MessageCircle,
+  Download
 } from 'lucide-react';
 import { supportApi, SupportTicket } from '@/api/support';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
@@ -320,9 +321,7 @@ const PublicSupportPage: React.FC = () => {
       setIsSubmitting(true);
       saveUserInfo();
 
-      // Combine both file sets for upload
-      const allFiles = [...selectedFiles, ...implementationFiles];
-
+      // Send files separately by section
       const response = await supportApi.publicCreateTicket({
         ticket_type: formData.ticket_type,
         title: formData.title,
@@ -333,7 +332,7 @@ const PublicSupportPage: React.FC = () => {
         reporter_name: formData.reporter_name,
         reporter_email: formData.reporter_email,
         reporter_role: formData.reporter_role || 'Public User'
-      }, allFiles, asDraft);
+      }, selectedFiles, implementationFiles, asDraft);
 
       if (response.success) {
         showSuccess(asDraft ? 'Ticket saved as draft!' : 'Ticket submitted successfully!');
@@ -354,8 +353,7 @@ const PublicSupportPage: React.FC = () => {
       setIsSubmitting(true);
       saveUserInfo();
 
-      const allFiles = [...selectedFiles, ...implementationFiles];
-
+      // Send files separately by section
       const response = await supportApi.publicUpdateTicket(
         editingTicket.ticket_id,
         {
@@ -366,7 +364,8 @@ const PublicSupportPage: React.FC = () => {
           priority: formData.priority,
           ticket_type: formData.ticket_type
         },
-        allFiles
+        selectedFiles,
+        implementationFiles
       );
 
       if (response.success) {
@@ -1076,52 +1075,124 @@ const PublicSupportPage: React.FC = () => {
                           )}
 
                           {/* Current Concern */}
-                          {ticket.current_concern && (
+                          {(ticket.current_concern || ticket.attachments?.some((a: any) => a.section === 'current_concern' || (!a.section && a.uploaded_by_role !== 'admin'))) && (
                             <div className="mb-6 p-4 bg-orange-50 rounded-lg border border-orange-200">
                               <h4 className="text-sm font-medium text-orange-700 mb-2">Current Concern</h4>
-                              <p className="text-orange-900 whitespace-pre-wrap">{ticket.current_concern}</p>
+                              {ticket.current_concern && (
+                                <p className="text-orange-900 whitespace-pre-wrap mb-3">{ticket.current_concern}</p>
+                              )}
+                              {/* Current Concern Attachments */}
+                              {ticket.attachments?.filter((a: any) => a.section === 'current_concern' || (!a.section && a.uploaded_by_role !== 'admin')).length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-orange-200">
+                                  <h5 className="text-sm font-medium text-orange-600 mb-2">Attachments</h5>
+                                  <div className="flex flex-wrap gap-2">
+                                    {ticket.attachments
+                                      .filter((a: any) => a.section === 'current_concern' || (!a.section && a.uploaded_by_role !== 'admin'))
+                                      .map((attachment: any, index: number) => (
+                                        <a
+                                          key={index}
+                                          href={attachment.file_path?.startsWith('http') ? attachment.file_path : `${API_BASE_URL}${attachment.file_path}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex items-center gap-2 p-2 bg-orange-100 rounded-lg border border-orange-300 hover:bg-orange-200 transition-colors text-sm"
+                                        >
+                                          {attachment.file_type?.startsWith('image/') ? (
+                                            <Image className="w-4 h-4 text-orange-600" />
+                                          ) : (
+                                            <FileText className="w-4 h-4 text-orange-600" />
+                                          )}
+                                          <span className="text-orange-800">{attachment.file_name}</span>
+                                        </a>
+                                      ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
 
                           {/* Concern Implementation */}
-                          {ticket.proposed_changes && (
+                          {(ticket.proposed_changes || ticket.attachments?.some((a: any) => a.section === 'implementation')) && (
                             <div className="mb-6 p-4 bg-purple-50 rounded-lg border border-purple-200">
                               <h4 className="text-sm font-medium text-purple-700 mb-2">Concern Implementation</h4>
-                              <p className="text-purple-900 whitespace-pre-wrap">{ticket.proposed_changes}</p>
+                              {ticket.proposed_changes && (
+                                <p className="text-purple-900 whitespace-pre-wrap mb-3">{ticket.proposed_changes}</p>
+                              )}
+                              {/* Implementation Attachments */}
+                              {ticket.attachments?.filter((a: any) => a.section === 'implementation').length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-purple-200">
+                                  <h5 className="text-sm font-medium text-purple-600 mb-2">Attachments</h5>
+                                  <div className="flex flex-wrap gap-2">
+                                    {ticket.attachments
+                                      .filter((a: any) => a.section === 'implementation')
+                                      .map((attachment: any, index: number) => (
+                                        <a
+                                          key={index}
+                                          href={attachment.file_path?.startsWith('http') ? attachment.file_path : `${API_BASE_URL}${attachment.file_path}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex items-center gap-2 p-2 bg-purple-100 rounded-lg border border-purple-300 hover:bg-purple-200 transition-colors text-sm"
+                                        >
+                                          {attachment.file_type?.startsWith('image/') ? (
+                                            <Image className="w-4 h-4 text-purple-600" />
+                                          ) : (
+                                            <FileText className="w-4 h-4 text-purple-600" />
+                                          )}
+                                          <span className="text-purple-800">{attachment.file_name}</span>
+                                        </a>
+                                      ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
 
-                          {/* Attachments */}
-                          {ticket.attachments && ticket.attachments.length > 0 && (
+                          {/* Development Team Response History */}
+                          {ticket.response_history && ticket.response_history.length > 0 && (
                             <div className="mb-6">
-                              <h4 className="text-sm font-medium text-gray-500 mb-2">Attachments</h4>
-                              <div className="flex flex-wrap gap-3">
-                                {ticket.attachments.map((attachment, index) => (
-                                  <div
-                                    key={index}
-                                    className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg border"
-                                  >
-                                    {attachment.file_type?.startsWith('image/') ? (
-                                      <Image className="w-5 h-5 text-blue-500" />
-                                    ) : (
-                                      <FileText className="w-5 h-5 text-gray-500" />
-                                    )}
-                                    <a
-                                      href={attachment.file_path?.startsWith('http') ? attachment.file_path : `${API_BASE_URL}${attachment.file_path}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-sm text-blue-600 hover:underline"
-                                    >
-                                      {attachment.file_name}
-                                    </a>
-                                  </div>
-                                ))}
+                              <h4 className="text-sm font-medium text-gray-700 mb-3">Development Team Updates</h4>
+                              <div className="space-y-3">
+                                {ticket.response_history.map((entry: any, index: number) => {
+                                  const typeConfig = {
+                                    approval: { bg: 'bg-green-50', border: 'border-green-200', title: 'text-green-700', text: 'text-green-900', badge: 'bg-green-100 text-green-700', label: 'Approved' },
+                                    status_change: { bg: 'bg-blue-50', border: 'border-blue-200', title: 'text-blue-700', text: 'text-blue-900', badge: 'bg-blue-100 text-blue-700', label: 'Status Updated' },
+                                    rejection: { bg: 'bg-red-50', border: 'border-red-200', title: 'text-red-700', text: 'text-red-900', badge: 'bg-red-100 text-red-700', label: 'Rejected' },
+                                    resolution: { bg: 'bg-emerald-50', border: 'border-emerald-200', title: 'text-emerald-700', text: 'text-emerald-900', badge: 'bg-emerald-100 text-emerald-700', label: 'Resolved' }
+                                  };
+                                  const config = typeConfig[entry.type as keyof typeof typeConfig] || typeConfig.status_change;
+
+                                  return (
+                                    <div key={index} className={`p-4 rounded-lg border ${config.bg} ${config.border}`}>
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className={`px-2 py-1 rounded text-xs font-medium ${config.badge}`}>
+                                          {config.label}
+                                          {entry.type === 'status_change' && entry.new_status && (
+                                            <span className="ml-1">→ {entry.new_status.replace('_', ' ')}</span>
+                                          )}
+                                        </span>
+                                        <span className="text-xs text-gray-500">
+                                          {new Date(entry.created_at + 'Z').toLocaleString()}
+                                        </span>
+                                      </div>
+                                      {entry.response && (
+                                        <p className={`${config.text} whitespace-pre-wrap`}>{entry.response}</p>
+                                      )}
+                                      {entry.reason && (
+                                        <p className={`${config.text} whitespace-pre-wrap mt-1`}>
+                                          <strong>Reason:</strong> {entry.reason}
+                                        </p>
+                                      )}
+                                      <p className={`text-sm ${config.title} mt-2`}>
+                                        — {entry.admin_name}
+                                      </p>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           )}
 
-                          {/* Development Team Response */}
-                          {ticket.admin_response && (
+                          {/* Legacy: Show admin_response if no response_history (for older tickets) */}
+                          {(!ticket.response_history || ticket.response_history.length === 0) && ticket.admin_response && (
                             <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
                               <h4 className="text-sm font-medium text-blue-700 mb-2">Development Team Response</h4>
                               <p className="text-blue-900">{ticket.admin_response}</p>
@@ -1133,8 +1204,8 @@ const PublicSupportPage: React.FC = () => {
                             </div>
                           )}
 
-                          {/* Rejection Reason */}
-                          {ticket.rejection_reason && (
+                          {/* Legacy: Rejection Reason for older tickets */}
+                          {(!ticket.response_history || ticket.response_history.length === 0) && ticket.rejection_reason && (
                             <div className="mb-6 p-4 bg-red-50 rounded-lg border border-red-200">
                               <h4 className="text-sm font-medium text-red-700 mb-2">Rejection Reason</h4>
                               <p className="text-red-900">{ticket.rejection_reason}</p>
@@ -1147,14 +1218,48 @@ const PublicSupportPage: React.FC = () => {
                           )}
 
                           {/* Development Team Resolution */}
-                          {ticket.resolution_notes && (
+                          {(ticket.resolution_notes || ticket.attachments?.some((a: any) => a.uploaded_by_role === 'admin' || a.section === 'admin')) && (
                             <div className="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
                               <h4 className="text-sm font-medium text-green-700 mb-2">Development Team Resolution</h4>
-                              <p className="text-green-900">{ticket.resolution_notes}</p>
+                              {ticket.resolution_notes && (
+                                <p className="text-green-900 whitespace-pre-wrap">{ticket.resolution_notes}</p>
+                              )}
                               {ticket.resolved_by_name && (
                                 <p className="text-sm text-green-600 mt-2">
                                   - {ticket.resolved_by_name}, {ticket.resolution_date && new Date(ticket.resolution_date + 'Z').toLocaleString()}
                                 </p>
+                              )}
+                              {/* Resolution Attachments */}
+                              {ticket.attachments?.filter((a: any) => a.uploaded_by_role === 'admin' || a.section === 'admin').length > 0 && (
+                                <div className="mt-4 pt-3 border-t border-green-200">
+                                  <h5 className="text-sm font-medium text-green-700 mb-2">Resolution Files</h5>
+                                  <div className="flex flex-wrap gap-2">
+                                    {ticket.attachments
+                                      .filter((a: any) => a.uploaded_by_role === 'admin' || a.section === 'admin')
+                                      .map((attachment: any, index: number) => {
+                                        const fileUrl = attachment.file_path?.startsWith('http')
+                                          ? attachment.file_path
+                                          : `${API_BASE_URL}${attachment.file_path}`;
+                                        return (
+                                          <a
+                                            key={index}
+                                            href={fileUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-2 p-2 bg-green-100 rounded-lg border border-green-300 hover:bg-green-200 transition-colors text-sm"
+                                          >
+                                            {attachment.file_type?.startsWith('image/') ? (
+                                              <Image className="w-4 h-4 text-green-600" />
+                                            ) : (
+                                              <FileText className="w-4 h-4 text-green-600" />
+                                            )}
+                                            <span className="text-green-800">{attachment.file_name}</span>
+                                            <Download className="w-3 h-3 text-green-500" />
+                                          </a>
+                                        );
+                                      })}
+                                  </div>
+                                </div>
                               )}
                             </div>
                           )}

@@ -150,20 +150,48 @@ def public_create_ticket():
         db.session.add(new_ticket)
         db.session.commit()
 
-        # Handle file uploads
-        if 'files' in request.files and supabase:
+        # Handle file uploads - support both legacy 'files' and new section-based uploads
+        attachments = []
+
+        # Handle concern_files (Current Concern section)
+        if 'concern_files' in request.files and supabase:
+            concern_files = request.files.getlist('concern_files')
+            for file in concern_files:
+                if file and file.filename and allowed_file(file.filename):
+                    try:
+                        attachment = upload_file_to_supabase(file, new_ticket.ticket_id)
+                        attachment['section'] = 'current_concern'
+                        attachments.append(attachment)
+                    except Exception as e:
+                        log.warning(f"Failed to upload concern file {file.filename}: {str(e)}")
+
+        # Handle implementation_files (Concern Implementation section)
+        if 'implementation_files' in request.files and supabase:
+            impl_files = request.files.getlist('implementation_files')
+            for file in impl_files:
+                if file and file.filename and allowed_file(file.filename):
+                    try:
+                        attachment = upload_file_to_supabase(file, new_ticket.ticket_id)
+                        attachment['section'] = 'implementation'
+                        attachments.append(attachment)
+                    except Exception as e:
+                        log.warning(f"Failed to upload implementation file {file.filename}: {str(e)}")
+
+        # Legacy support for 'files' field (no section specified)
+        if 'files' in request.files and supabase and not attachments:
             files = request.files.getlist('files')
-            attachments = []
             for file in files:
                 if file and file.filename and allowed_file(file.filename):
                     try:
                         attachment = upload_file_to_supabase(file, new_ticket.ticket_id)
+                        attachment['section'] = 'current_concern'  # Default to current_concern
                         attachments.append(attachment)
                     except Exception as e:
                         log.warning(f"Failed to upload file {file.filename}: {str(e)}")
-            if attachments:
-                new_ticket.attachments = attachments
-                db.session.commit()
+
+        if attachments:
+            new_ticket.attachments = attachments
+            db.session.commit()
 
         log.info(f"Ticket created: {new_ticket.ticket_number} by {data['reporter_email']}")
 
@@ -255,17 +283,55 @@ def public_update_ticket(ticket_id):
         if data.get('ticket_type'):
             ticket.ticket_type = data['ticket_type']
 
-        if 'files' in request.files and supabase:
-            files = request.files.getlist('files')
-            attachments = ticket.attachments or []
-            for file in files:
-                if file and file.filename:
-                    result = upload_file_to_supabase(file, ticket.ticket_id)
-                    if result:
-                        attachments.append(result)
-            ticket.attachments = attachments
+        # Handle file uploads - support both legacy 'files' and new section-based uploads
+        attachments = ticket.attachments or []
+        new_files_added = False
 
+        # Handle concern_files (Current Concern section)
+        if 'concern_files' in request.files and supabase:
+            concern_files = request.files.getlist('concern_files')
+            for file in concern_files:
+                if file and file.filename and allowed_file(file.filename):
+                    try:
+                        attachment = upload_file_to_supabase(file, ticket.ticket_id)
+                        attachment['section'] = 'current_concern'
+                        attachments.append(attachment)
+                        new_files_added = True
+                    except Exception as e:
+                        log.warning(f"Failed to upload concern file {file.filename}: {str(e)}")
+
+        # Handle implementation_files (Concern Implementation section)
+        if 'implementation_files' in request.files and supabase:
+            impl_files = request.files.getlist('implementation_files')
+            for file in impl_files:
+                if file and file.filename and allowed_file(file.filename):
+                    try:
+                        attachment = upload_file_to_supabase(file, ticket.ticket_id)
+                        attachment['section'] = 'implementation'
+                        attachments.append(attachment)
+                        new_files_added = True
+                    except Exception as e:
+                        log.warning(f"Failed to upload implementation file {file.filename}: {str(e)}")
+
+        # Legacy support for 'files' field
+        if 'files' in request.files and supabase and not new_files_added:
+            files = request.files.getlist('files')
+            for file in files:
+                if file and file.filename and allowed_file(file.filename):
+                    try:
+                        result = upload_file_to_supabase(file, ticket.ticket_id)
+                        result['section'] = 'current_concern'
+                        attachments.append(result)
+                    except Exception as e:
+                        log.warning(f"Failed to upload file {file.filename}: {str(e)}")
+
+        ticket.attachments = attachments
         ticket.updated_at = datetime.utcnow()
+
+        # Flag attachments as modified for SQLAlchemy to detect JSONB change
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(ticket, 'attachments')
+
         db.session.commit()
 
         return jsonify({
@@ -450,6 +516,20 @@ def admin_approve_ticket(ticket_id):
         ticket.response_date = datetime.utcnow()
         ticket.updated_at = datetime.utcnow()
 
+        # Add to response history if response provided
+        if data.get('response'):
+            from sqlalchemy.orm.attributes import flag_modified
+            response_history = ticket.response_history or []
+            response_history.append({
+                'type': 'approval',
+                'response': data['response'],
+                'admin_name': data.get('admin_name', 'Dev Team'),
+                'new_status': 'approved',
+                'created_at': datetime.utcnow().isoformat()
+            })
+            ticket.response_history = response_history
+            flag_modified(ticket, 'response_history')
+
         db.session.commit()
         log.info(f"Ticket approved: {ticket.ticket_number}")
 
@@ -488,6 +568,20 @@ def admin_reject_ticket(ticket_id):
         ticket.response_date = datetime.utcnow()
         ticket.updated_at = datetime.utcnow()
 
+        # Add to response history
+        from sqlalchemy.orm.attributes import flag_modified
+        response_history = ticket.response_history or []
+        response_history.append({
+            'type': 'rejection',
+            'response': data.get('response', data['reason']),
+            'reason': data['reason'],
+            'admin_name': data.get('admin_name', 'Dev Team'),
+            'new_status': 'rejected',
+            'created_at': datetime.utcnow().isoformat()
+        })
+        ticket.response_history = response_history
+        flag_modified(ticket, 'response_history')
+
         db.session.commit()
         log.info(f"Ticket rejected: {ticket.ticket_number}")
 
@@ -518,13 +612,28 @@ def admin_resolve_ticket(ticket_id):
         else:
             data = request.get_json() or {}
 
+        old_status = ticket.status
         ticket.status = 'resolved'
         ticket.resolved_by_name = data.get('admin_name', 'Dev Team')
         ticket.resolution_date = datetime.utcnow()
         ticket.resolution_notes = data.get('notes', '')
         ticket.updated_at = datetime.utcnow()
 
-        # Handle file uploads
+        # Add to response history for resolution
+        from sqlalchemy.orm.attributes import flag_modified
+        response_history = ticket.response_history or []
+        response_history.append({
+            'type': 'resolution',
+            'response': data.get('notes', ''),
+            'admin_name': data.get('admin_name', 'Dev Team'),
+            'old_status': old_status,
+            'new_status': 'resolved',
+            'created_at': datetime.utcnow().isoformat()
+        })
+        ticket.response_history = response_history
+        flag_modified(ticket, 'response_history')
+
+        # Handle file uploads for resolution
         if 'files' in request.files and supabase:
             files = request.files.getlist('files')
             attachments = ticket.attachments or []
@@ -534,10 +643,12 @@ def admin_resolve_ticket(ticket_id):
                         attachment = upload_file_to_supabase(file, ticket.ticket_id)
                         attachment['uploaded_by'] = data.get('admin_name', 'Dev Team')
                         attachment['uploaded_by_role'] = 'admin'
+                        attachment['section'] = 'admin'  # Mark as admin/resolution files
                         attachments.append(attachment)
                     except Exception as e:
                         log.warning(f"Failed to upload file {file.filename}: {str(e)}")
             ticket.attachments = attachments
+            flag_modified(ticket, 'attachments')
 
         db.session.commit()
         log.info(f"Ticket resolved: {ticket.ticket_number}")
@@ -568,6 +679,7 @@ def admin_update_status(ticket_id):
         if new_status not in valid_statuses:
             return jsonify({"success": False, "error": f"Invalid status. Must be one of: {valid_statuses}"}), 400
 
+        old_status = ticket.status
         ticket.status = new_status
         ticket.admin_name = data.get('admin_name', 'Dev Team')
         ticket.updated_at = datetime.utcnow()
@@ -575,6 +687,20 @@ def admin_update_status(ticket_id):
         if data.get('response'):
             ticket.admin_response = data['response']
             ticket.response_date = datetime.utcnow()
+
+        # Add to response history for status change
+        from sqlalchemy.orm.attributes import flag_modified
+        response_history = ticket.response_history or []
+        response_history.append({
+            'type': 'status_change',
+            'response': data.get('response', ''),
+            'admin_name': data.get('admin_name', 'Dev Team'),
+            'old_status': old_status,
+            'new_status': new_status,
+            'created_at': datetime.utcnow().isoformat()
+        })
+        ticket.response_history = response_history
+        flag_modified(ticket, 'response_history')
 
         db.session.commit()
         log.info(f"Ticket status updated: {ticket.ticket_number} to {new_status}")
@@ -625,6 +751,10 @@ def admin_add_files(ticket_id):
 
         ticket.attachments = attachments
         ticket.updated_at = datetime.utcnow()
+
+        # Flag attachments as modified for SQLAlchemy to detect JSONB change
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(ticket, 'attachments')
 
         if data.get('response'):
             ticket.admin_response = data['response']
