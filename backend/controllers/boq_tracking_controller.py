@@ -941,10 +941,6 @@ def get_boq_planned_vs_actual(boq_id):
                 # Check if this is a CR sub-item
                 is_cr_sub_item = sub_item_name.startswith('Extra Materials - CR #')
 
-                print(f"\n=== Processing sub-item: {sub_item_name} ===")
-                print(f"Is CR sub-item: {is_cr_sub_item}")
-                print(f"Item-level labour assigned flag: {item_level_labour_assigned}")
-
                 # Also track internal costs (materials + labour) for comparison
                 # Calculate from materials and labour arrays if not provided
                 # IMPORTANT: CR sub-items should have ZERO planned costs (they're unplanned additions)
@@ -1057,23 +1053,17 @@ def get_boq_planned_vs_actual(boq_id):
                 # 2. Item-level labour (should be assigned to first non-CR sub-item only)
 
                 # Case 1: Process labour from sub-item's labour array
-                print(f"Case 1: Processing sub-item labour array, count: {len(sub_item.get('labour', []))}")
                 for planned_labour_entry in sub_item.get('labour', []):
                     labour_id = planned_labour_entry.get('master_labour_id')
                     labour_role = planned_labour_entry.get('labour_role', '').lower().strip()
-                    print(f"  Labour: id={labour_id}, role='{labour_role}'")
-
                     # Skip labour entries with both empty ID and empty role (invalid)
                     if not labour_id and not labour_role:
-                        print(f"  -> SKIPPED (Empty ID and empty role)")
                         continue
 
                     # Skip if this labour was already processed in a previous sub-item
                     if labour_id and labour_id in item_level_labour_ids_processed:
-                        print(f"  -> SKIPPED (ID already processed)")
                         continue
                     if labour_role and labour_role in item_level_labour_roles_processed:
-                        print(f"  -> SKIPPED (Role '{labour_role}' already processed)")
                         continue
 
                     # Find matching entry in labour_comparison
@@ -1099,7 +1089,6 @@ def get_boq_planned_vs_actual(boq_id):
                         else:
                             # Pending labour - use planned cost
                             lab_cost = Decimal(str(matching_labour['planned']['total']))
-                        print(f"  -> Adding {lab_cost} from labour_comparison")
                         sub_actual_labour_cost += lab_cost
                         # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
                         if labour_id:
@@ -1113,7 +1102,6 @@ def get_boq_planned_vs_actual(boq_id):
                             lab_hours = Decimal(str(planned_labour_entry.get('hours', 0)))
                             lab_rate = Decimal(str(planned_labour_entry.get('rate_per_hour', 0)))
                             lab_cost = lab_hours * lab_rate
-                        print(f"  -> Adding {lab_cost} from sub_item data")
                         sub_actual_labour_cost += lab_cost
                         # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
                         if labour_id:
@@ -1124,24 +1112,19 @@ def get_boq_planned_vs_actual(boq_id):
                 # Case 2: If this is the first non-CR sub-item and item-level labour hasn't been assigned yet,
                 # assign item-level labour to this sub-item
                 if not item_level_labour_assigned and not is_cr_sub_item:
-                    print(f"Case 2: Processing item-level labour, count: {len(planned_item.get('labour', []))}")
                     for item_labour_entry in planned_item.get('labour', []):
                         labour_id = item_labour_entry.get('master_labour_id')
                         labour_role = item_labour_entry.get('labour_role', '').lower().strip()
-                        print(f"  Item-level Labour: id={labour_id}, role='{labour_role}'")
 
                         # Skip labour entries with both empty ID and empty role (invalid)
                         if not labour_id and not labour_role:
-                            print(f"  -> SKIPPED (Empty ID and empty role)")
                             continue
 
                         # Skip if this labour was already processed from any sub-item's labour array
                         # Check both by ID (if available) and by role name
                         if labour_id and labour_id in item_level_labour_ids_processed:
-                            print(f"  -> SKIPPED (ID already processed)")
                             continue
                         if labour_role and labour_role in item_level_labour_roles_processed:
-                            print(f"  -> SKIPPED (Role '{labour_role}' already processed)")
                             continue
 
                         # Find matching entry in labour_comparison
@@ -1190,7 +1173,6 @@ def get_boq_planned_vs_actual(boq_id):
                     # Mark that item-level labour has been assigned
                     item_level_labour_assigned = True
 
-                print(f"Sub-item '{sub_item_name}' labour total: {sub_actual_labour_cost}")
                 sub_actual_internal_cost = sub_actual_materials_cost + sub_actual_labour_cost
 
                 # Actual percentages stay the same (based on base_total)
