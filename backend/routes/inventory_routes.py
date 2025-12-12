@@ -370,15 +370,85 @@ def get_my_material_returns_route():
 @inventory_routes.route('/return_delivery_notes', methods=['POST'])
 @jwt_required
 def create_return_delivery_note_route():
-    """Create a new return delivery note"""
+    """STEP 1: Create a new return delivery note (RDN)"""
     return create_return_delivery_note()
+
+
+@inventory_routes.route('/return_delivery_notes', methods=['GET'])
+@jwt_required
+def get_all_return_delivery_notes_route():
+    """Get all return delivery notes with filters"""
+    return get_all_return_delivery_notes()
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>', methods=['GET'])
+@jwt_required
+def get_return_delivery_note_route(return_note_id):
+    """Get specific return delivery note by ID"""
+    return get_return_delivery_note_by_id(return_note_id)
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>', methods=['PUT'])
+@jwt_required
+def update_return_delivery_note_route(return_note_id):
+    """Update return delivery note (only DRAFT)"""
+    return update_return_delivery_note(return_note_id)
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>', methods=['DELETE'])
+@jwt_required
+def delete_return_delivery_note_route(return_note_id):
+    """Delete return delivery note (only DRAFT)"""
+    return delete_return_delivery_note(return_note_id)
 
 
 @inventory_routes.route('/return_delivery_note/<int:return_note_id>/items', methods=['POST'])
 @jwt_required
 def add_return_delivery_note_item_route(return_note_id):
-    """Add an item to a return delivery note"""
+    """STEP 2: Add an item to return delivery note"""
     return add_item_to_return_delivery_note(return_note_id)
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>/items/<int:item_id>', methods=['PUT'])
+@jwt_required
+def update_return_delivery_note_item_route(return_note_id, item_id):
+    """Update an item in return delivery note"""
+    return update_return_delivery_note_item(return_note_id, item_id)
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>/items/<int:item_id>', methods=['DELETE'])
+@jwt_required
+def remove_return_delivery_note_item_route(return_note_id, item_id):
+    """Remove an item from return delivery note"""
+    return remove_return_delivery_note_item(return_note_id, item_id)
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>/issue', methods=['POST'])
+@jwt_required
+def issue_return_delivery_note_route(return_note_id):
+    """STEP 3: Issue RDN - SE finalizes and validates"""
+    return issue_return_delivery_note(return_note_id)
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>/dispatch', methods=['POST'])
+@jwt_required
+def dispatch_return_delivery_note_route(return_note_id):
+    """STEP 4: Dispatch RDN - Materials in transit"""
+    return dispatch_return_delivery_note(return_note_id)
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>/confirm', methods=['POST'])
+@jwt_required
+def confirm_return_delivery_receipt_route(return_note_id):
+    """STEP 5: PM confirms receipt at store"""
+    return confirm_return_delivery_receipt(return_note_id)
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>/items/<int:item_id>/process', methods=['POST'])
+@jwt_required
+def process_return_delivery_item_route(return_note_id, item_id):
+    """STEP 6: PM processes individual RDN item"""
+    return process_return_delivery_item(return_note_id, item_id)
 
 
 @inventory_routes.route('/my-return-delivery-notes', methods=['GET'])
@@ -388,15 +458,15 @@ def get_my_return_delivery_notes_route():
     return get_return_delivery_notes_for_se()
 
 
-@inventory_routes.route('/return_delivery_note/<int:return_note_id>', methods=['GET'])
+@inventory_routes.route('/pm-return-delivery-notes', methods=['GET'])
 @jwt_required
-def get_return_delivery_note_by_id_route(return_note_id):
-    """Get a specific return delivery note by ID"""
-    return get_return_delivery_note_by_id(return_note_id)
+def get_pm_return_delivery_notes_route():
+    """Get all return delivery notes for PM"""
+    return get_return_delivery_notes_for_pm()
 
 
-@inventory_routes.route('/return_delivery_note/<int:return_note_id>/issue', methods=['POST'])
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>/download', methods=['GET'])
 @jwt_required
-def issue_return_delivery_note_route(return_note_id):
-    """Issue a return delivery note"""
-    return issue_return_delivery_note(return_note_id)
+def download_rdn_pdf_route(return_note_id):
+    """Download RDN as PDF"""
+    return download_rdn_pdf(return_note_id)

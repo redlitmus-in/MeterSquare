@@ -588,25 +588,35 @@ const ChangeRequestsPage: React.FC = () => {
     setShowRejectionModal(true);
   };
 
-  // Handle vendor approval from modal (for PO children with pending_td_approval)
+  // Handle vendor approval from modal (for PO children or legacy CRs with pending_td_approval)
   const handleApproveVendorFromModal = async () => {
     if (!selectedChangeRequest) return;
     const poChildId = (selectedChangeRequest as any).po_child_id;
+    setShowDetailsModal(false);
+
     if (poChildId) {
-      setShowDetailsModal(false);
+      // POChild-based vendor approval
       await handleApprovePOChild(poChildId);
+    } else {
+      // Legacy CR-based vendor approval
+      await handleApproveVendor(selectedChangeRequest.cr_id);
     }
   };
 
-  // Handle vendor rejection from modal (for PO children with pending_td_approval)
+  // Handle vendor rejection from modal (for PO children or legacy CRs with pending_td_approval)
   const handleRejectVendorFromModal = () => {
     if (!selectedChangeRequest) return;
     const poChildId = (selectedChangeRequest as any).po_child_id;
+    setShowDetailsModal(false);
+
     if (poChildId) {
-      setShowDetailsModal(false);
+      // POChild-based vendor rejection
       setRejectingPOChildId(poChildId);
-      setShowRejectionModal(true);
+    } else {
+      // Legacy CR-based vendor rejection
+      setRejectingCrId(selectedChangeRequest.cr_id);
     }
+    setShowRejectionModal(true);
   };
 
   // formatCurrency imported from @/utils/formatters
@@ -2073,14 +2083,16 @@ const ChangeRequestsPage: React.FC = () => {
         }}
         changeRequest={selectedChangeRequest}
         onApprove={
-          // If this is a PO child with pending vendor approval, use vendor approval handler
-          selectedChangeRequest?.vendor_selection_status === 'pending_td_approval' && (selectedChangeRequest as any).po_child_id
+          // If this is a vendor approval (pending TD approval), use vendor approval handler
+          // Works for both POChild-based and legacy CR-based vendor approvals
+          selectedChangeRequest?.vendor_selection_status === 'pending_td_approval'
             ? handleApproveVendorFromModal
             : handleApproveFromModal
         }
         onReject={
-          // If this is a PO child with pending vendor approval, use vendor rejection handler
-          selectedChangeRequest?.vendor_selection_status === 'pending_td_approval' && (selectedChangeRequest as any).po_child_id
+          // If this is a vendor approval (pending TD approval), use vendor rejection handler
+          // Works for both POChild-based and legacy CR-based vendor approvals
+          selectedChangeRequest?.vendor_selection_status === 'pending_td_approval'
             ? handleRejectVendorFromModal
             : handleRejectFromModal
         }

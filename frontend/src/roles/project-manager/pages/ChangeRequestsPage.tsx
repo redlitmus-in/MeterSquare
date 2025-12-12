@@ -788,7 +788,7 @@ const ChangeRequestsPage: React.FC = () => {
                     className="rounded-lg border-2 border-transparent data-[state=active]:border-[#243d8a] data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#243d8a]/10 data-[state=active]:to-[#4a5fa8]/10 data-[state=active]:text-[#243d8a] text-gray-500 px-3 sm:px-4 py-2.5 font-semibold text-xs sm:text-sm transition-all hover:bg-gray-50"
                   >
                     <Box className="w-4 h-4 mr-2" />
-                    Requested
+                    SE Requested
                     <span className="ml-1 sm:ml-2 px-2 py-0.5 rounded-full bg-gray-100 data-[state=active]:bg-[#243d8a]/20 text-xs">({stats.my_requests})</span>
                   </TabsTrigger>
                   <TabsTrigger
@@ -796,7 +796,7 @@ const ChangeRequestsPage: React.FC = () => {
                     className="rounded-lg border-2 border-transparent data-[state=active]:border-[#243d8a] data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#243d8a]/10 data-[state=active]:to-[#4a5fa8]/10 data-[state=active]:text-[#243d8a] text-gray-500 px-3 sm:px-4 py-2.5 font-semibold text-xs sm:text-sm transition-all hover:bg-gray-50"
                   >
                     <Clock className="w-4 h-4 mr-2" />
-                    Pending
+                    My Requests
                     <span className="ml-1 sm:ml-2 px-2 py-0.5 rounded-full bg-gray-100 data-[state=active]:bg-[#243d8a]/20 text-xs">({stats.pending_approval})</span>
                   </TabsTrigger>
                   <TabsTrigger

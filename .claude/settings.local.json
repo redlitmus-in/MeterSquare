@@ -47,7 +47,9 @@
       "Bash(DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol\\$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" /home/development1/Desktop/MeterSquare/backend/venv/bin/python:*)",
       "Bash(npm run build:*)",
       "Bash(grep:*)",
-      "Bash(kill:*)"
+      "Bash(kill:*)",
+      "SlashCommand(/security-scan)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

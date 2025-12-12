@@ -1,6 +1,6 @@
 {
   "name": "corporate-interiors-erp-frontend",
-  "version": "1.0.0",
+  "version": "1.2.1",
   "type": "module",
   "description": "Corporate Interiors ERP System - React TypeScript Frontend",
   "scripts": {
