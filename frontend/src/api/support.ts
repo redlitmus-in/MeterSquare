@@ -36,6 +36,9 @@ export interface SupportTicket {
   resolved_by_name?: string;
   resolution_date?: string;
   resolution_notes?: string;
+  closed_by?: 'client' | 'dev_team';
+  closed_by_name?: string;
+  closed_date?: string;
   comments?: Comment[];
   response_history?: ResponseHistoryEntry[];
   created_at: string;
@@ -58,12 +61,13 @@ export interface Comment {
 }
 
 export interface ResponseHistoryEntry {
-  type: 'approval' | 'status_change' | 'rejection' | 'resolution';
+  type: 'approval' | 'status_change' | 'rejection' | 'resolution' | 'closed';
   response: string;
   reason?: string;
   admin_name: string;
   old_status?: string;
   new_status: string;
+  closed_by?: 'client' | 'dev_team';
   created_at: string;
 }
 

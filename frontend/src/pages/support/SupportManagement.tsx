@@ -82,8 +82,8 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
   closed: { label: 'Closed', color: 'text-gray-600', bgColor: 'bg-gray-200', icon: XCircle }
 };
 
-// Polling interval for checking new tickets (10 seconds for faster updates)
-const POLLING_INTERVAL = 10000;
+// Polling interval for checking new tickets (60 seconds to avoid rate limiting)
+const POLLING_INTERVAL = 60000;
 
 const SupportManagement: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -217,14 +217,20 @@ const SupportManagement: React.FC = () => {
     initNotifications();
   }, []);
 
-  // Load tickets on mount and set up polling
+  // Store loadTickets in a ref to avoid dependency issues
+  const loadTicketsRef = useRef(loadTickets);
+  loadTicketsRef.current = loadTickets;
+
+  // Load tickets on mount and when filters change
   useEffect(() => {
     loadTickets();
+  }, [loadTickets]);
 
-    // Set up polling interval for checking new tickets
+  // Set up polling separately (only depends on isPolling)
+  useEffect(() => {
     if (isPolling) {
       pollingIntervalRef.current = setInterval(() => {
-        loadTickets(false); // Silent load (no loader)
+        loadTicketsRef.current(false); // Silent load (no loader)
       }, POLLING_INTERVAL);
     }
 
@@ -233,7 +239,7 @@ const SupportManagement: React.FC = () => {
         clearInterval(pollingIntervalRef.current);
       }
     };
-  }, [loadTickets, isPolling]);
+  }, [isPolling]);
 
   // Handle notification permission request
   const handleRequestNotificationPermission = async () => {
@@ -649,7 +655,11 @@ const SupportManagement: React.FC = () => {
                     <div className="flex items-center gap-4">
                       <div className={`flex items-center gap-1 px-3 py-1 rounded-full ${statusCfg.bgColor}`}>
                         <StatusIcon className={`w-4 h-4 ${statusCfg.color}`} />
-                        <span className={`text-sm font-medium ${statusCfg.color}`}>{statusCfg.label}</span>
+                        <span className={`text-sm font-medium ${statusCfg.color}`}>
+                          {ticket.status === 'closed' && ticket.closed_by
+                            ? `Closed by ${ticket.closed_by === 'client' ? 'Client' : 'Dev Team'}`
+                            : statusCfg.label}
+                        </span>
                       </div>
                       <div className="flex items-center gap-1 text-sm text-gray-500">
                         <Calendar className="w-4 h-4" />
@@ -794,21 +804,29 @@ const SupportManagement: React.FC = () => {
                           <div className="mb-6">
                             <h4 className="text-sm font-medium text-gray-700 mb-3">Development Team Response History</h4>
                             <div className="space-y-3">
-                              {ticket.response_history.map((entry: any, index: number) => {
+                              {[...ticket.response_history].sort((a: any, b: any) =>
+                                new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                              ).map((entry: any, index: number) => {
                                 // Determine colors based on response type
                                 const typeConfig = {
                                   approval: { bg: 'bg-green-50', border: 'border-green-200', title: 'text-green-700', text: 'text-green-900', badge: 'bg-green-100 text-green-700', label: 'Approved' },
                                   status_change: { bg: 'bg-blue-50', border: 'border-blue-200', title: 'text-blue-700', text: 'text-blue-900', badge: 'bg-blue-100 text-blue-700', label: 'Status Changed' },
                                   rejection: { bg: 'bg-red-50', border: 'border-red-200', title: 'text-red-700', text: 'text-red-900', badge: 'bg-red-100 text-red-700', label: 'Rejected' },
-                                  resolution: { bg: 'bg-emerald-50', border: 'border-emerald-200', title: 'text-emerald-700', text: 'text-emerald-900', badge: 'bg-emerald-100 text-emerald-700', label: 'Resolved' }
+                                  resolution: { bg: 'bg-emerald-50', border: 'border-emerald-200', title: 'text-emerald-700', text: 'text-emerald-900', badge: 'bg-emerald-100 text-emerald-700', label: 'Resolved' },
+                                  closed: { bg: 'bg-gray-50', border: 'border-gray-300', title: 'text-gray-700', text: 'text-gray-900', badge: 'bg-gray-200 text-gray-700', label: 'Closed' }
                                 };
                                 const config = typeConfig[entry.type as keyof typeof typeConfig] || typeConfig.status_change;
+
+                                // Custom label for closed type showing who closed it
+                                const displayLabel = entry.type === 'closed'
+                                  ? `Closed by ${entry.closed_by === 'client' ? 'Client' : 'Dev Team'}`
+                                  : config.label;
 
                                 return (
                                   <div key={index} className={`p-4 rounded-lg border ${config.bg} ${config.border}`}>
                                     <div className="flex items-center justify-between mb-2">
                                       <span className={`px-2 py-1 rounded text-xs font-medium ${config.badge}`}>
-                                        {config.label}
+                                        {displayLabel}
                                         {entry.type === 'status_change' && entry.new_status && (
                                           <span className="ml-1">→ {entry.new_status.replace('_', ' ')}</span>
                                         )}

@@ -412,8 +412,30 @@ def public_confirm_resolution(ticket_id):
         if ticket.status != 'resolved':
             return jsonify({"success": False, "error": "Can only confirm resolved tickets"}), 400
 
+        old_status = ticket.status
         ticket.status = 'closed'
         ticket.updated_at = datetime.utcnow()
+
+        # Track who closed the ticket
+        ticket.closed_by = 'client'
+        ticket.closed_by_name = ticket.reporter_name
+        ticket.closed_date = datetime.utcnow()
+
+        # Add to response history
+        from sqlalchemy.orm.attributes import flag_modified
+        response_history = ticket.response_history or []
+        response_history.append({
+            'type': 'closed',
+            'response': 'Resolution confirmed by client',
+            'admin_name': ticket.reporter_name,
+            'closed_by': 'client',
+            'old_status': old_status,
+            'new_status': 'closed',
+            'created_at': datetime.utcnow().isoformat()
+        })
+        ticket.response_history = response_history
+        flag_modified(ticket, 'response_history')
+
         db.session.commit()
 
         return jsonify({
@@ -787,10 +809,16 @@ def admin_close_ticket(ticket_id):
             return jsonify({"success": False, "error": "Ticket is already closed"}), 400
 
         data = request.get_json() or {}
+        old_status = ticket.status
 
         ticket.status = 'closed'
         ticket.admin_name = data.get('admin_name', 'Dev Team')
         ticket.updated_at = datetime.utcnow()
+
+        # Track who closed the ticket
+        ticket.closed_by = 'dev_team'
+        ticket.closed_by_name = data.get('admin_name', 'Dev Team')
+        ticket.closed_date = datetime.utcnow()
 
         if data.get('notes'):
             # Add closing note to admin response
@@ -800,6 +828,21 @@ def admin_close_ticket(ticket_id):
             else:
                 ticket.admin_response = closing_note
             ticket.response_date = datetime.utcnow()
+
+        # Add to response history
+        from sqlalchemy.orm.attributes import flag_modified
+        response_history = ticket.response_history or []
+        response_history.append({
+            'type': 'closed',
+            'response': data.get('notes', ''),
+            'admin_name': data.get('admin_name', 'Dev Team'),
+            'closed_by': 'dev_team',
+            'old_status': old_status,
+            'new_status': 'closed',
+            'created_at': datetime.utcnow().isoformat()
+        })
+        ticket.response_history = response_history
+        flag_modified(ticket, 'response_history')
 
         db.session.commit()
         log.info(f"Ticket closed by admin: {ticket.ticket_number}")

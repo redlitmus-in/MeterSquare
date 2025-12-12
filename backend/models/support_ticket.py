@@ -71,6 +71,11 @@ class SupportTicket(db.Model):
     resolution_date = db.Column(db.DateTime, nullable=True)
     resolution_notes = db.Column(db.Text, nullable=True)
 
+    # Closure tracking - who closed the ticket
+    closed_by = db.Column(db.String(50), nullable=True)  # 'client' or 'dev_team'
+    closed_by_name = db.Column(db.String(255), nullable=True)
+    closed_date = db.Column(db.DateTime, nullable=True)
+
     # Comments/Communication between client and dev team
     comments = db.Column(JSONB, nullable=True, default=list)
     """
@@ -186,6 +191,11 @@ class SupportTicket(db.Model):
             'resolved_by_name': self.resolved_by_name,
             'resolution_date': self.resolution_date.isoformat() if self.resolution_date else None,
             'resolution_notes': self.resolution_notes,
+
+            # Closure
+            'closed_by': self.closed_by,
+            'closed_by_name': self.closed_by_name,
+            'closed_date': self.closed_date.isoformat() if self.closed_date else None,
 
             # Comments
             'comments': self.comments or [],
