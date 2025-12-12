@@ -1422,6 +1422,21 @@ def get_all_change_requests():
 
         # Overhead tracking columns removed - negotiable margin calculated on-the-fly
 
+        # PERFORMANCE: Batch load BOQ details for enriching materials_total_cost
+        # This prevents N+1 queries when SE-created requests have 0 cost
+        boq_ids_needing_enrichment = set()
+        for cr in change_requests:
+            if (not cr.materials_total_cost or cr.materials_total_cost == 0) and cr.boq_id:
+                boq_ids_needing_enrichment.add(cr.boq_id)
+
+        boq_details_map = {}
+        if boq_ids_needing_enrichment:
+            boq_details_list = BOQDetails.query.filter(
+                BOQDetails.boq_id.in_(list(boq_ids_needing_enrichment)),
+                BOQDetails.is_deleted == False
+            ).all()
+            boq_details_map = {bd.boq_id: bd for bd in boq_details_list}
+
         # Convert to dict with project and BOQ info
         result = []
         for cr in change_requests:
@@ -1439,6 +1454,77 @@ def get_all_change_requests():
             if cr.boq:
                 cr_dict['boq_name'] = cr.boq.boq_name
                 cr_dict['boq_status'] = cr.boq.status
+
+            # Enrich materials_total_cost if it's 0 (SE-created requests have no prices)
+            # This calculates the cost from BOQ prices for display in cards
+            if (not cr_dict.get('materials_total_cost') or cr_dict.get('materials_total_cost') == 0) and cr.boq_id:
+                try:
+                    # Use batch-loaded BOQ details (no N+1 query)
+                    boq_details = boq_details_map.get(cr.boq_id)
+                    if boq_details and boq_details.boq_details:
+                        # Build material price lookup from BOQ
+                        material_prices = {}
+                        boq_items = boq_details.boq_details.get('items', [])
+                        for item_idx, item in enumerate(boq_items):
+                            for sub_item_idx, sub_item in enumerate(item.get('sub_items', [])):
+                                for mat_idx, boq_material in enumerate(sub_item.get('materials', [])):
+                                    material_id = f"mat_{cr.boq_id}_{item_idx+1}_{sub_item_idx+1}_{mat_idx+1}"
+                                    material_prices[material_id] = boq_material.get('unit_price', 0)
+                                    # Also store by material name for fallback lookup
+                                    mat_name = boq_material.get('material_name', '').lower().strip()
+                                    if mat_name:
+                                        material_prices[f"name:{mat_name}"] = boq_material.get('unit_price', 0)
+
+                        # Calculate total cost from materials
+                        total_cost = 0.0
+                        for mat in cr_dict.get('materials_data', []):
+                            try:
+                                quantity = float(mat.get('quantity', 0) or 0)
+                                unit_price = float(mat.get('unit_price', 0) or 0)
+                            except (ValueError, TypeError):
+                                quantity = 0
+                                unit_price = 0
+
+                            # If unit_price is 0, try to get from BOQ lookup
+                            if not unit_price:
+                                mat_id = mat.get('master_material_id')
+                                if mat_id and mat_id in material_prices:
+                                    unit_price = float(material_prices[mat_id] or 0)
+                                else:
+                                    # Fallback to name lookup
+                                    mat_name = mat.get('material_name', '').lower().strip()
+                                    if mat_name and f"name:{mat_name}" in material_prices:
+                                        unit_price = float(material_prices[f"name:{mat_name}"] or 0)
+
+                            total_cost += quantity * unit_price
+
+                        # Also check sub_items_data if materials_data total is 0
+                        if total_cost == 0:
+                            for sub in cr_dict.get('sub_items_data', []):
+                                try:
+                                    quantity = float(sub.get('quantity', 0) or 0)
+                                    unit_price = float(sub.get('unit_price', 0) or 0)
+                                except (ValueError, TypeError):
+                                    quantity = 0
+                                    unit_price = 0
+
+                                if not unit_price:
+                                    mat_id = sub.get('master_material_id')
+                                    if mat_id and mat_id in material_prices:
+                                        unit_price = float(material_prices[mat_id] or 0)
+                                    else:
+                                        # Fallback to name lookup (consistent with materials_data)
+                                        mat_name = sub.get('material_name', '').lower().strip()
+                                        if mat_name and f"name:{mat_name}" in material_prices:
+                                            unit_price = float(material_prices[f"name:{mat_name}"] or 0)
+
+                                total_cost += quantity * unit_price
+
+                        if total_cost > 0:
+                            cr_dict['materials_total_cost'] = round(total_cost, 2)
+                except Exception as e:
+                    log.error(f"Failed to enrich materials_total_cost for CR {cr.cr_id}: {e}")
+                    # Continue processing - don't crash the whole request
 
             # Overhead analysis removed - columns dropped from database
             # Negotiable margin is now calculated on-the-fly by negotiable_profit_calculator

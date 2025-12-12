@@ -90,6 +90,7 @@ const ChangeRequestsPage: React.FC = () => {
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
   const [rejectingPOChildId, setRejectingPOChildId] = useState<number | null>(null);
+  const [isVendorRejectionFromModal, setIsVendorRejectionFromModal] = useState(false);
 
   // LPO Editor state
   const [showLpoEditorModal, setShowLpoEditorModal] = useState(false);
@@ -406,7 +407,9 @@ const ChangeRequestsPage: React.FC = () => {
 
     // Map materials to match ChangeRequestItem format
     // Ensure prices are calculated even if missing from backend
+    // The backend enriches materials with vendor prices in unit_price field
     const mappedMaterials = (poChild.materials || []).map(m => {
+      // unit_price from backend should already be vendor negotiated price
       const unitPrice = m.unit_price || m.boq_unit_price || 0;
       const quantity = m.quantity || 0;
       const totalPrice = m.total_price || m.boq_total_price || (unitPrice * quantity) || 0;
@@ -417,10 +420,19 @@ const ChangeRequestsPage: React.FC = () => {
         unit: m.unit,
         unit_price: unitPrice,
         total_price: totalPrice,
+        // Include negotiated_price so modal knows this is the vendor price
+        negotiated_price: m.negotiated_price || unitPrice,
         boq_unit_price: m.boq_unit_price,
         boq_total_price: m.boq_total_price,
+        // Preserve original BOQ price for reference
+        original_unit_price: m.boq_unit_price || m.original_unit_price,
+        original_total_price: m.boq_total_price || m.original_total_price,
         master_material_id: m.master_material_id || undefined,
         justification: m.justification || m.reason || '',
+        brand: m.brand,
+        size: m.size,
+        specification: m.specification,
+        sub_item_name: m.sub_item_name,
       };
     });
 
@@ -486,13 +498,14 @@ const ChangeRequestsPage: React.FC = () => {
         await handleRejectPOChild(rejectingPOChildId, reason);
         setShowRejectionModal(false);
         setRejectingPOChildId(null);
+        setIsVendorRejectionFromModal(false);
         return;
       }
 
       if (!rejectingCrId) return;
 
-      // Check if this is a vendor selection rejection (from vendor approvals tab)
-      const isVendorRejection = vendorApprovals.some(p => p.cr_id === rejectingCrId);
+      // Check if this is a vendor selection rejection (from vendor approvals tab OR from modal)
+      const isVendorRejection = isVendorRejectionFromModal || vendorApprovals.some(p => p.cr_id === rejectingCrId);
 
       if (isVendorRejection) {
         // Reject vendor selection
@@ -534,8 +547,14 @@ const ChangeRequestsPage: React.FC = () => {
 
       setShowRejectionModal(false);
       setRejectingCrId(null);
+      setIsVendorRejectionFromModal(false);
     } catch (error: any) {
       showError(error.message || 'Failed to reject');
+      // Clean up state on error to prevent stale flags
+      setShowRejectionModal(false);
+      setRejectingCrId(null);
+      setRejectingPOChildId(null);
+      setIsVendorRejectionFromModal(false);
     }
   };
 
@@ -616,6 +635,8 @@ const ChangeRequestsPage: React.FC = () => {
       // Legacy CR-based vendor rejection
       setRejectingCrId(selectedChangeRequest.cr_id);
     }
+    // Set flag so handleRejectionSubmit knows this is a vendor rejection
+    setIsVendorRejectionFromModal(true);
     setShowRejectionModal(true);
   };
 
@@ -2106,11 +2127,57 @@ const ChangeRequestsPage: React.FC = () => {
             // Convert back to POChild format if it has po_child_id
             const poChildId = (selectedChangeRequest as any).po_child_id;
             if (poChildId) {
-              // Find the POChild from the pending list
-              const poChild = pendingPOChildren.find(p => p.id === poChildId);
+              // Find the POChild from all lists (pending, approved, rejected)
+              const poChild = pendingPOChildren.find(p => p.id === poChildId) ||
+                              approvedPOChildren.find(p => p.id === poChildId) ||
+                              rejectedPOChildren.find(p => p.id === poChildId);
               if (poChild) {
-                handleOpenLpoEditor(poChild, false);
+                // Close details modal first, then open LPO editor (edit mode)
+                setShowDetailsModal(false);
+                setSelectedChangeRequest(null);
+                // Use setTimeout to ensure state updates before opening new modal
+                setTimeout(() => {
+                  handleOpenLpoEditor(poChild, false); // false = edit mode
+                }, 50);
+              } else {
+                // If POChild not found in lists, create a minimal POChild object from selectedChangeRequest
+                const minimalPOChild: POChild = {
+                  id: poChildId,
+                  parent_cr_id: selectedChangeRequest.cr_id,
+                  materials: selectedChangeRequest.sub_items_data || selectedChangeRequest.materials_data || [],
+                  materials_total_cost: selectedChangeRequest.materials_total_cost || 0,
+                  status: selectedChangeRequest.status,
+                  vendor_selection_status: selectedChangeRequest.vendor_selection_status || 'pending',
+                  selected_vendor_id: (selectedChangeRequest as any).selected_vendor_id,
+                  selected_vendor_name: selectedChangeRequest.selected_vendor_name,
+                  created_at: selectedChangeRequest.created_at,
+                  updated_at: selectedChangeRequest.updated_at || selectedChangeRequest.created_at
+                };
+                setShowDetailsModal(false);
+                setSelectedChangeRequest(null);
+                setTimeout(() => {
+                  handleOpenLpoEditor(minimalPOChild, false); // false = edit mode
+                }, 50);
               }
+            } else {
+              // No po_child_id - this is a legacy CR, open LPO editor with CR data
+              const legacyPOChild: POChild = {
+                id: 0, // No POChild ID
+                parent_cr_id: selectedChangeRequest.cr_id,
+                materials: selectedChangeRequest.sub_items_data || selectedChangeRequest.materials_data || [],
+                materials_total_cost: selectedChangeRequest.materials_total_cost || 0,
+                status: selectedChangeRequest.status,
+                vendor_selection_status: selectedChangeRequest.vendor_selection_status || 'pending',
+                selected_vendor_id: (selectedChangeRequest as any).selected_vendor_id,
+                selected_vendor_name: selectedChangeRequest.selected_vendor_name,
+                created_at: selectedChangeRequest.created_at,
+                updated_at: selectedChangeRequest.updated_at || selectedChangeRequest.created_at
+              };
+              setShowDetailsModal(false);
+              setSelectedChangeRequest(null);
+              setTimeout(() => {
+                handleOpenLpoEditor(legacyPOChild, false); // false = edit mode
+              }, 50);
             }
           }
         }}
@@ -2417,9 +2484,10 @@ const ChangeRequestsPage: React.FC = () => {
           setRejectingCrId(null);
           setRejectingPOChildId(null);
           setSelectedChangeRequest(null);
+          setIsVendorRejectionFromModal(false);
         }}
         onSubmit={handleRejectionSubmit}
-        title={rejectingPOChildId ? "Reject Vendor Selection" : rejectingCrId && vendorApprovals.some(p => p.cr_id === rejectingCrId) ? "Reject Vendor Selection" : "Reject PO"}
+        title={rejectingPOChildId || isVendorRejectionFromModal ? "Reject Vendor Selection" : rejectingCrId && vendorApprovals.some(p => p.cr_id === rejectingCrId) ? "Reject Vendor Selection" : "Reject PO"}
       />
 
       {/* TD LPO Editor Modal */}

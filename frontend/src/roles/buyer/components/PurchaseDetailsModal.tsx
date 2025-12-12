@@ -113,12 +113,12 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
         total_cost: totalCost
       });
 
-      toast.success('Purchase amounts updated successfully!');
+      showSuccess('Purchase amounts updated successfully!');
       setIsEditMode(false);
       onVendorSelected?.(); // Refresh the purchase list
     } catch (error: any) {
       console.error('Error saving purchase:', error);
-      toast.error(error.message || 'Failed to update purchase amounts');
+      showError(error.message || 'Failed to update purchase amounts');
     } finally {
       setIsSaving(false);
     }
@@ -405,7 +405,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         {purchase.vendor_email && (
                           <div>
                             <p className="text-xs text-gray-500 mb-1">Email</p>
-                            <p className="text-gray-900">{purchase.vendor_email}</p>
+                            <p className="text-gray-900 break-words">{purchase.vendor_email}</p>
                           </div>
                         )}
 

@@ -49,7 +49,15 @@
       "Bash(grep:*)",
       "Bash(kill:*)",
       "SlashCommand(/security-scan)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(SUPABASE_URL=\"https://cbzdvghmrpsolryzdpxi.supabase.co\" SUPABASE_KEY=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNiemR2Z2htcnBzb2xyeXpkcHhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzMyMjk4MDcsImV4cCI6MjA0ODgwNTgwN30.XpxFXsQNDqvhLtELyJJgAV7Y8jjzKwBMFdyMq-sWnfM\" DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" python:*)",
+      "Bash(SUPABASE_URL=\"https://cbzdvghmrpsolryzdpxi.supabase.co\" SUPABASE_KEY=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNiemR2Z2htcnBzb2xyeXpkcHhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzMyMjk4MDcsImV4cCI6MjA0ODgwNTgwN30.XpxFXsQNDqvhLtELyJJgAV7Y8jjzKwBMFdyMq-sWnfM\" DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" python -c \"\nfrom app import create_app\nfrom models.change_request import ChangeRequest\n\napp = create_app()\nwith app.app_context():\n    # Get recent CRs\n    crs = ChangeRequest.query.order_by(ChangeRequest.cr_id.desc()).limit(5).all()\n    for cr in crs:\n        print(f''=== CR-{cr.cr_id} ==='')\n        print(f''Overall justification: {cr.justification[:50] if cr.justification else \"\"None\"\"}...'')\n        if cr.sub_items_data and len(cr.sub_items_data) > 0:\n            mat = cr.sub_items_data[0]\n            print(f''First material: {mat.get(\"\"material_name\"\")}'')\n            print(f''Per-material justification: \"\"{mat.get(\"\"justification\"\", \"\"NOT FOUND\"\")}\"\"'')\n        print()\n\")",
+      "Bash(SUPABASE_URL=\"https://wgddnoiakkoskbbkbygw.supabase.co\" SUPABASE_KEY=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndnZGRub2lha2tvc2tiYmtieWd3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5NTg0MjAsImV4cCI6MjA0NjUzNDQyMH0.aYPiz1p8tkEJmyLT5xNdKlTKL1GiqHLvqDPUtuRiLFo\" DATABASE_URL=\"postgresql://postgres.wgddnoiakkoskbbkbygw:Rameshdev$08@aws-0-ap-south-1.pooler.supabase.com:6543/postgres\" python:*)",
+      "Bash(PGPASSWORD=Rameshdev$08 psql:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npm run lint)",
+      "Bash(python3 -m ruff check:*)",
+      "Bash(python -m py_compile:*)"
     ],
     "deny": [],
     "ask": []

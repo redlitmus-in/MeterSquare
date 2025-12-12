@@ -228,7 +228,7 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
                     <FileText className="w-6 h-6 text-blue-600" />
                   </div>
                   <div>
-                    <h1 className="text-2xl font-bold text-[#243d8a]">Edit LPO Details</h1>
+                    <h1 className="text-2xl font-bold text-[#243d8a]">{isReadOnly ? 'View LPO Details' : 'Edit LPO Details'}</h1>
                     <p className="text-sm text-gray-600">
                       {poChild?.formatted_id || `PO-${crId}`} - {poChild?.project_name || 'Purchase Order'}
                     </p>

@@ -3712,6 +3712,7 @@ def download_rdn_pdf(return_note_id):
                 'material_code': material.material_code if material else 'N/A',
                 'quantity': item.quantity,
                 'unit': material.unit if material else '',
+                'size': (material.size or '') if material else '',
                 'condition': item.condition,
                 'return_reason': item.return_reason or '',
             })

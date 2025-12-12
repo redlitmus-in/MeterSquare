@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send, FileText, Download, Loader2, ChevronDown, Edit } from 'lucide-react';
+import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send, FileText, Download, Loader2, ChevronDown, Edit, Eye } from 'lucide-react';
 import { ChangeRequestItem } from '@/services/changeRequestService';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
@@ -55,7 +55,23 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   // Use isOpen and changeRequest as dependencies to ensure fresh data on every open
   React.useEffect(() => {
     if (isOpen && changeRequest) {
-      const materials = changeRequest.sub_items_data || changeRequest.materials_data || [];
+      const rawMaterials = changeRequest.sub_items_data || changeRequest.materials_data || [];
+      // Enrich materials with vendor negotiated prices from material_vendor_selections
+      const materials = rawMaterials.map((mat: any) => {
+        const materialName = mat.material_name || mat.sub_item_name || '';
+        const vendorSelection = (changeRequest as any).material_vendor_selections?.[materialName];
+
+        // If we have a negotiated price from vendor selection, use it
+        if (vendorSelection?.negotiated_price != null && vendorSelection.negotiated_price > 0) {
+          return {
+            ...mat,
+            negotiated_price: vendorSelection.negotiated_price,
+            unit_price: vendorSelection.negotiated_price,
+            total_price: vendorSelection.negotiated_price * (mat.quantity || 0)
+          };
+        }
+        return mat;
+      });
       setEditedMaterials(JSON.parse(JSON.stringify(materials))); // Deep copy
       // Reset LPO data when modal opens with new request
       setLpoData(null);
@@ -68,9 +84,17 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     const fetchLPOForPrices = async () => {
       if (!isOpen || !changeRequest || lpoData) return;
 
-      // Check if we need prices (materials have 0 prices)
+      // Check if we need prices (materials have 0 prices AND no vendor negotiated price)
       const materials = changeRequest.sub_items_data || changeRequest.materials_data || [];
-      const needsPrices = materials.some((m: any) => !m.unit_price || m.unit_price === 0);
+      const materialVendorSelections = (changeRequest as any).material_vendor_selections || {};
+
+      const needsPrices = materials.some((m: any) => {
+        const materialName = m.material_name || m.sub_item_name || '';
+        const hasVendorNegotiatedPrice = materialVendorSelections[materialName]?.negotiated_price > 0;
+        const hasMaterialPrice = m.unit_price && m.unit_price > 0;
+        // Only need to fetch LPO if no vendor negotiated price AND no material price
+        return !hasVendorNegotiatedPrice && !hasMaterialPrice;
+      });
 
       // Only fetch if vendor is selected and we need prices
       if (needsPrices && changeRequest.selected_vendor_name) {
@@ -143,6 +167,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
   // Enrich materials with LPO prices if we have them and material prices are 0
   // Also preserve BOQ prices for comparison display
+  const materialVendorSelectionsForEnrich = (changeRequest as any).material_vendor_selections || {};
+
   const materialsData = rawMaterialsData.map((mat: any) => {
     // Try to find matching item from LPO data for price enrichment
     let lpoItem = null;
@@ -153,12 +179,28 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       );
     }
 
-    // Get BOQ price from material or LPO item
-    const boqUnitPrice = mat.boq_unit_price || mat.original_unit_price || lpoItem?.boq_rate || mat.unit_price || 0;
+    // Check for vendor negotiated price from material_vendor_selections
+    const materialName = mat.material_name || mat.sub_item_name || '';
+    const vendorSelectionPrice = materialVendorSelectionsForEnrich[materialName]?.negotiated_price;
+
+    // Get BOQ price from material or LPO item (don't use unit_price as it might be vendor price)
+    const boqUnitPrice = mat.boq_unit_price || mat.original_unit_price || lpoItem?.boq_rate || 0;
     const boqTotalPrice = mat.boq_total_price || mat.original_total_price || (mat.quantity * boqUnitPrice) || 0;
 
-    // PRIORITY 1: Use negotiated_price if available (vendor's quoted/negotiated price for this PO)
-    if (mat.negotiated_price != null && mat.negotiated_price >= 0) {
+    // PRIORITY 1: Use vendor negotiated price from material_vendor_selections
+    if (vendorSelectionPrice != null && vendorSelectionPrice > 0) {
+      return {
+        ...mat,
+        unit_price: vendorSelectionPrice,
+        total_price: vendorSelectionPrice * mat.quantity,
+        negotiated_price: vendorSelectionPrice,
+        boq_unit_price: boqUnitPrice,
+        boq_total_price: boqTotalPrice
+      };
+    }
+
+    // PRIORITY 2: Use negotiated_price if available on material (vendor's quoted/negotiated price for this PO)
+    if (mat.negotiated_price != null && mat.negotiated_price > 0) {
       return {
         ...mat,
         unit_price: mat.negotiated_price,
@@ -168,22 +210,21 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       };
     }
 
-    // PRIORITY 2: Use LPO vendor price if available (vendor catalog price)
-    if (lpoItem && lpoItem.rate > 0) {
+    // PRIORITY 3: Use material's unit_price if it's already set and valid
+    if (mat.unit_price && mat.unit_price > 0) {
       return {
         ...mat,
-        unit_price: lpoItem.rate,
-        total_price: lpoItem.amount || (mat.quantity * lpoItem.rate),
         boq_unit_price: boqUnitPrice,
         boq_total_price: boqTotalPrice
       };
     }
 
-    // PRIORITY 3: If no negotiated price or LPO data but material has unit_price, use it
-    // This handles legacy data where unit_price might be the vendor price
-    if (mat.unit_price && mat.unit_price > 0) {
+    // PRIORITY 4: Use LPO vendor price as fallback (vendor catalog price)
+    if (lpoItem && lpoItem.rate > 0) {
       return {
         ...mat,
+        unit_price: lpoItem.rate,
+        total_price: lpoItem.amount || (mat.quantity * lpoItem.rate),
         boq_unit_price: boqUnitPrice,
         boq_total_price: boqTotalPrice
       };
@@ -631,13 +672,15 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             </div>
                           </div>
 
-                          {/* Justification - Always show */}
-                          <div className="mt-2 pt-2 border-t border-gray-200">
-                            <p className="text-[10px] text-gray-500 mb-0.5">Justification:</p>
-                            <p className="text-xs text-gray-700 line-clamp-2">
-                              {material.justification || <span className="text-gray-400 italic">No justification</span>}
-                            </p>
-                          </div>
+                          {/* Justification - Only show for NEW materials */}
+                          {isNewMaterial && (
+                            <div className="mt-2 pt-2 border-t border-gray-200">
+                              <p className="text-[10px] text-gray-500 mb-0.5">Justification:</p>
+                              <p className="text-xs text-gray-700 line-clamp-2">
+                                {material.justification || <span className="text-gray-400 italic">No justification</span>}
+                              </p>
+                            </div>
+                          )}
 
                           {/* Pricing (if shown) */}
                           {shouldShowPricing && (
@@ -756,46 +799,50 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             <td className="px-4 py-3 text-sm text-gray-900 text-center whitespace-nowrap font-medium">
                               {material.quantity} <span className="text-gray-500 font-normal">{material.unit}</span>
                             </td>
-                            {/* Justification */}
+                            {/* Justification - Only show content for NEW materials */}
                             <td className="px-4 py-3 text-sm" style={{ maxWidth: '280px', minWidth: '200px' }}>
-                              {material.justification ? (
-                                <div className="w-full">
-                                  {material.justification.length > 100 ? (
-                                    <div>
-                                      {expandedJustifications.has(idx) ? (
-                                        <>
-                                          <p className="text-sm text-gray-700 leading-relaxed break-words whitespace-pre-wrap">
-                                            {material.justification}
-                                          </p>
-                                          <button
-                                            onClick={() => toggleJustification(idx)}
-                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2 hover:underline inline-flex items-center gap-1"
-                                          >
-                                            ↑ Show less
-                                          </button>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <p className="text-sm text-gray-700 leading-relaxed break-words">
-                                            {material.justification.substring(0, 100)}...
-                                          </p>
-                                          <button
-                                            onClick={() => toggleJustification(idx)}
-                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-1 hover:underline inline-flex items-center gap-1"
-                                          >
-                                            See more ↓
-                                          </button>
-                                        </>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <p className="text-sm text-gray-700 leading-relaxed break-words">
-                                      {material.justification}
-                                    </p>
-                                  )}
-                                </div>
+                              {isNewMaterial ? (
+                                material.justification ? (
+                                  <div className="w-full">
+                                    {material.justification.length > 100 ? (
+                                      <div>
+                                        {expandedJustifications.has(idx) ? (
+                                          <>
+                                            <p className="text-sm text-gray-700 leading-relaxed break-words whitespace-pre-wrap">
+                                              {material.justification}
+                                            </p>
+                                            <button
+                                              onClick={() => toggleJustification(idx)}
+                                              className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2 hover:underline inline-flex items-center gap-1"
+                                            >
+                                              ↑ Show less
+                                            </button>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <p className="text-sm text-gray-700 leading-relaxed break-words">
+                                              {material.justification.substring(0, 100)}...
+                                            </p>
+                                            <button
+                                              onClick={() => toggleJustification(idx)}
+                                              className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-1 hover:underline inline-flex items-center gap-1"
+                                            >
+                                              See more ↓
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <p className="text-sm text-gray-700 leading-relaxed break-words">
+                                        {material.justification}
+                                      </p>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400 italic">No justification</span>
+                                )
                               ) : (
-                                <span className="text-gray-400 italic">No justification</span>
+                                <span className="text-gray-400">-</span>
                               )}
                             </td>
                             {shouldShowPricing && (() => {
@@ -1095,17 +1142,17 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         )}
                       </button>
 
-                      {/* Edit Button */}
+                      {/* Edit LPO Button */}
                       {onEditLPO && (
                         <button
                           onClick={() => {
+                            // Parent component handles modal close and opens LPO editor
                             onEditLPO();
-                            onClose();
                           }}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs sm:text-sm font-medium rounded-lg transition-colors"
                         >
                           <Edit className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                          <span>Edit</span>
+                          <span>Edit LPO</span>
                         </button>
                       )}
                     </div>
