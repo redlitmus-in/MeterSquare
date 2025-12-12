@@ -36,6 +36,23 @@ def get_boq_planned_vs_actual(boq_id):
         boq_level_discount_percentage = Decimal(str(boq_data.get('discount_percentage', 0)))
         boq_level_discount_amount = Decimal(str(boq_data.get('discount_amount', 0)))
 
+        # Extract preliminaries data from BOQ
+        preliminaries_data = boq_data.get('preliminaries', {})
+        preliminary_cost_details = preliminaries_data.get('cost_details', {})
+
+        # Convert all preliminary values to Decimal for consistent calculations
+        preliminary_amount = Decimal(str(preliminary_cost_details.get('amount', 0) or 0))
+        preliminary_quantity = float(preliminary_cost_details.get('quantity', 0) or 0)
+        preliminary_unit = preliminary_cost_details.get('unit', 'Nos') or 'Nos'
+        preliminary_rate = Decimal(str(preliminary_cost_details.get('rate', 0) or 0))
+
+        # Calculate preliminary internal cost breakdown
+        preliminary_internal_cost = Decimal(str(preliminary_cost_details.get('internal_cost', 0) or 0))
+        preliminary_misc_amount = Decimal(str(preliminary_cost_details.get('misc_amount', 0) or 0))
+        preliminary_overhead_profit_amount = Decimal(str(preliminary_cost_details.get('overhead_profit_amount', 0) or 0))
+        preliminary_transport_amount = Decimal(str(preliminary_cost_details.get('transport_amount', 0) or 0))
+        preliminary_planned_profit = Decimal(str(preliminary_cost_details.get('planned_profit', 0) or 0))
+
         # Fetch ALL change requests (regardless of status) to show in comparison
         change_requests = ChangeRequest.query.filter_by(
             boq_id=boq_id,
@@ -165,6 +182,45 @@ def get_boq_planned_vs_actual(boq_id):
             "boq_name": boq.boq_name,
             "items": []
         }
+
+        # Calculate total items base cost for preliminary distribution
+        # This is needed to calculate each item's proportional share of preliminaries
+        # Use base_total (same as planned_base calculation) to ensure consistency
+        total_items_base_cost = Decimal('0')
+        for item in boq_data.get('items', []):
+            for sub_item in item.get('sub_items', []):
+                # IMPORTANT: Calculate base_total from quantity × rate to ensure correctness
+                sub_item_quantity = Decimal(str(sub_item.get('quantity', 1)))
+                sub_item_rate = Decimal(str(sub_item.get('rate', 0)))
+
+                # Calculate base_total as quantity × rate if both are available
+                if sub_item_quantity > 0 and sub_item_rate > 0:
+                    sub_item_base_total = sub_item_quantity * sub_item_rate
+                else:
+                    # Fallback: Get base_total from stored value
+                    sub_item_base_total = Decimal(str(
+                        sub_item.get('base_total') or
+                        sub_item.get('per_unit_cost') or
+                        sub_item.get('client_rate') or
+                        0
+                    ))
+
+                    # If still no base_total, calculate from materials + labour
+                    if sub_item_base_total == 0:
+                        sub_item_materials = sub_item.get('materials', [])
+                        sub_item_labour = sub_item.get('labour', [])
+
+                        sub_item_materials_cost = sum(
+                            Decimal(str(mat.get('quantity', 0))) * Decimal(str(mat.get('unit_price', 0)))
+                            for mat in sub_item_materials
+                        )
+                        sub_item_labour_cost = sum(
+                            Decimal(str(lab.get('hours', 0))) * Decimal(str(lab.get('rate_per_hour', 0)))
+                            for lab in sub_item_labour
+                        )
+                        sub_item_base_total = sub_item_materials_cost + sub_item_labour_cost
+
+                total_items_base_cost += sub_item_base_total
 
         # Process each item
         for planned_item in boq_data.get('items', []):
@@ -874,6 +930,9 @@ def get_boq_planned_vs_actual(boq_id):
 
             # Track if item-level labour has been assigned to a sub-item
             item_level_labour_assigned = False
+            # Track which labour IDs and roles have been processed across ALL sub-items to prevent double-counting
+            item_level_labour_ids_processed = set()
+            item_level_labour_roles_processed = set()
 
             for sub_item in planned_item.get('sub_items', []):
                 sub_item_name = sub_item.get('sub_item_name', '')
@@ -881,6 +940,10 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Check if this is a CR sub-item
                 is_cr_sub_item = sub_item_name.startswith('Extra Materials - CR #')
+
+                print(f"\n=== Processing sub-item: {sub_item_name} ===")
+                print(f"Is CR sub-item: {is_cr_sub_item}")
+                print(f"Item-level labour assigned flag: {item_level_labour_assigned}")
 
                 # Also track internal costs (materials + labour) for comparison
                 # Calculate from materials and labour arrays if not provided
@@ -915,18 +978,25 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Get the base_total (client rate) from sub-item
                 # This is the main amount on which percentages are calculated
-                # Try base_total first, then fall back to per_unit_cost or client_rate
-                # If none provided, use internal_cost as base
-                sub_item_base_total = Decimal(str(
-                    sub_item.get('base_total') or
-                    sub_item.get('per_unit_cost') or
-                    sub_item.get('client_rate') or
-                    0
-                ))
+                # IMPORTANT: Calculate base_total from quantity × rate to ensure correctness
+                sub_item_quantity = Decimal(str(sub_item.get('quantity', 1)))
+                sub_item_rate = Decimal(str(sub_item.get('rate', 0)))
 
-                # If no base_total provided, use internal_cost as the base
-                if sub_item_base_total == 0:
-                    sub_item_base_total = sub_item_internal_cost
+                # Calculate base_total as quantity × rate if both are available
+                if sub_item_quantity > 0 and sub_item_rate > 0:
+                    sub_item_base_total = sub_item_quantity * sub_item_rate
+                else:
+                    # Fallback: Try base_total first, then fall back to per_unit_cost or client_rate
+                    sub_item_base_total = Decimal(str(
+                        sub_item.get('base_total') or
+                        sub_item.get('per_unit_cost') or
+                        sub_item.get('client_rate') or
+                        0
+                    ))
+
+                    # If no base_total provided, use internal_cost as the base
+                    if sub_item_base_total == 0:
+                        sub_item_base_total = sub_item_internal_cost
 
                 # Get percentages from sub-item or use defaults
                 misc_pct = Decimal(str(sub_item.get('misc_percentage', 10)))
@@ -987,14 +1057,40 @@ def get_boq_planned_vs_actual(boq_id):
                 # 2. Item-level labour (should be assigned to first non-CR sub-item only)
 
                 # Case 1: Process labour from sub-item's labour array
+                print(f"Case 1: Processing sub-item labour array, count: {len(sub_item.get('labour', []))}")
                 for planned_labour_entry in sub_item.get('labour', []):
                     labour_id = planned_labour_entry.get('master_labour_id')
+                    labour_role = planned_labour_entry.get('labour_role', '').lower().strip()
+                    print(f"  Labour: id={labour_id}, role='{labour_role}'")
+
+                    # Skip labour entries with both empty ID and empty role (invalid)
+                    if not labour_id and not labour_role:
+                        print(f"  -> SKIPPED (Empty ID and empty role)")
+                        continue
+
+                    # Skip if this labour was already processed in a previous sub-item
+                    if labour_id and labour_id in item_level_labour_ids_processed:
+                        print(f"  -> SKIPPED (ID already processed)")
+                        continue
+                    if labour_role and labour_role in item_level_labour_roles_processed:
+                        print(f"  -> SKIPPED (Role '{labour_role}' already processed)")
+                        continue
 
                     # Find matching entry in labour_comparison
-                    matching_labour = next(
-                        (lab for lab in labour_comparison if lab.get('master_labour_id') == labour_id),
-                        None
-                    )
+                    # Match by ID if available, otherwise match by role
+                    if labour_id:
+                        matching_labour = next(
+                            (lab for lab in labour_comparison if lab.get('master_labour_id') == labour_id),
+                            None
+                        )
+                    elif labour_role:
+                        matching_labour = next(
+                            (lab for lab in labour_comparison
+                             if lab.get('labour_role', '').lower().strip() == labour_role),
+                            None
+                        )
+                    else:
+                        matching_labour = None
 
                     if matching_labour:
                         # Use actual if available, otherwise use planned for pending labour
@@ -1003,7 +1099,13 @@ def get_boq_planned_vs_actual(boq_id):
                         else:
                             # Pending labour - use planned cost
                             lab_cost = Decimal(str(matching_labour['planned']['total']))
+                        print(f"  -> Adding {lab_cost} from labour_comparison")
                         sub_actual_labour_cost += lab_cost
+                        # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
+                        if labour_id:
+                            item_level_labour_ids_processed.add(labour_id)
+                        if labour_role:
+                            item_level_labour_roles_processed.add(labour_role)
                     else:
                         # If no tracking data found, use planned from sub_item
                         lab_cost = Decimal(str(planned_labour_entry.get('total_cost', 0)))
@@ -1011,19 +1113,52 @@ def get_boq_planned_vs_actual(boq_id):
                             lab_hours = Decimal(str(planned_labour_entry.get('hours', 0)))
                             lab_rate = Decimal(str(planned_labour_entry.get('rate_per_hour', 0)))
                             lab_cost = lab_hours * lab_rate
+                        print(f"  -> Adding {lab_cost} from sub_item data")
                         sub_actual_labour_cost += lab_cost
+                        # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
+                        if labour_id:
+                            item_level_labour_ids_processed.add(labour_id)
+                        if labour_role:
+                            item_level_labour_roles_processed.add(labour_role)
 
                 # Case 2: If this is the first non-CR sub-item and item-level labour hasn't been assigned yet,
                 # assign item-level labour to this sub-item
                 if not item_level_labour_assigned and not is_cr_sub_item:
+                    print(f"Case 2: Processing item-level labour, count: {len(planned_item.get('labour', []))}")
                     for item_labour_entry in planned_item.get('labour', []):
                         labour_id = item_labour_entry.get('master_labour_id')
+                        labour_role = item_labour_entry.get('labour_role', '').lower().strip()
+                        print(f"  Item-level Labour: id={labour_id}, role='{labour_role}'")
+
+                        # Skip labour entries with both empty ID and empty role (invalid)
+                        if not labour_id and not labour_role:
+                            print(f"  -> SKIPPED (Empty ID and empty role)")
+                            continue
+
+                        # Skip if this labour was already processed from any sub-item's labour array
+                        # Check both by ID (if available) and by role name
+                        if labour_id and labour_id in item_level_labour_ids_processed:
+                            print(f"  -> SKIPPED (ID already processed)")
+                            continue
+                        if labour_role and labour_role in item_level_labour_roles_processed:
+                            print(f"  -> SKIPPED (Role '{labour_role}' already processed)")
+                            continue
 
                         # Find matching entry in labour_comparison
-                        matching_labour = next(
-                            (lab for lab in labour_comparison if lab.get('master_labour_id') == labour_id),
-                            None
-                        )
+                        # Match by ID if available, otherwise match by role
+                        if labour_id:
+                            matching_labour = next(
+                                (lab for lab in labour_comparison if lab.get('master_labour_id') == labour_id),
+                                None
+                            )
+                        elif labour_role:
+                            matching_labour = next(
+                                (lab for lab in labour_comparison
+                                 if lab.get('labour_role', '').lower().strip() == labour_role),
+                                None
+                            )
+                        else:
+                            matching_labour = None
 
                         if matching_labour:
                             # Use actual if available, otherwise use planned for pending labour
@@ -1033,6 +1168,11 @@ def get_boq_planned_vs_actual(boq_id):
                                 # Pending labour - use planned cost
                                 lab_cost = Decimal(str(matching_labour['planned']['total']))
                             sub_actual_labour_cost += lab_cost
+                            # Track this labour to prevent processing in future sub-items
+                            if labour_id:
+                                item_level_labour_ids_processed.add(labour_id)
+                            if labour_role:
+                                item_level_labour_roles_processed.add(labour_role)
                         else:
                             # If no tracking data found, use planned from item
                             lab_cost = Decimal(str(item_labour_entry.get('total_cost', 0)))
@@ -1041,10 +1181,16 @@ def get_boq_planned_vs_actual(boq_id):
                                 lab_rate = Decimal(str(item_labour_entry.get('rate_per_hour', 0)))
                                 lab_cost = lab_hours * lab_rate
                             sub_actual_labour_cost += lab_cost
+                            # Track this labour to prevent processing in future sub-items
+                            if labour_id:
+                                item_level_labour_ids_processed.add(labour_id)
+                            if labour_role:
+                                item_level_labour_roles_processed.add(labour_role)
 
                     # Mark that item-level labour has been assigned
                     item_level_labour_assigned = True
 
+                print(f"Sub-item '{sub_item_name}' labour total: {sub_actual_labour_cost}")
                 sub_actual_internal_cost = sub_actual_materials_cost + sub_actual_labour_cost
 
                 # Actual percentages stay the same (based on base_total)
@@ -1144,8 +1290,17 @@ def get_boq_planned_vs_actual(boq_id):
             overhead_pct = overhead_profit_pct * Decimal('0.4')
             profit_pct = overhead_profit_pct * Decimal('0.6')
 
-            # The selling price BEFORE discount is calculated from sub-items
-            selling_price_before_discount = planned_base
+            # Calculate item's proportional share of preliminaries
+            # This ensures discount is applied to the combined amount (items + preliminaries)
+            item_preliminary_share = Decimal('0')
+            if total_items_base_cost > 0 and preliminary_amount > 0:
+                # Item's proportion of total items base cost
+                item_proportion = planned_base / total_items_base_cost
+                # Item's share of preliminaries
+                item_preliminary_share = preliminary_amount * item_proportion
+
+            # The selling price BEFORE discount includes item base cost + preliminary share
+            selling_price_before_discount = planned_base + item_preliminary_share
 
             # USE BOQ-LEVEL DISCOUNT (from top-level boq_data)
             # If sub-item level discount exists, use that; otherwise use BOQ-level discount
@@ -1153,17 +1308,17 @@ def get_boq_planned_vs_actual(boq_id):
             item_discount_percentage = Decimal('0')
 
             # If no sub-item discount and BOQ has discount, calculate item's share
-            if item_discount_amount == 0 and boq_level_discount_amount > 0:
-                # Apply BOQ-level discount amount directly to this item
-                item_discount_amount = boq_level_discount_amount
+            if item_discount_amount == 0 and boq_level_discount_percentage > 0:
+                # Apply BOQ-level discount PERCENTAGE to this item's selling price (including preliminary share)
                 item_discount_percentage = boq_level_discount_percentage
+                item_discount_amount = selling_price_before_discount * (item_discount_percentage / Decimal('100'))
             elif item_discount_amount > 0 and selling_price_before_discount > 0:
                 # Calculate percentage from sub-item discount
-                item_discount_percentage = (item_discount_amount / selling_price_before_discount) * 100
+                item_discount_percentage = (item_discount_amount / selling_price_before_discount) * Decimal('100')
 
             # If still no discount amount but have percentage, calculate it
             if item_discount_amount == 0 and item_discount_percentage > 0 and selling_price_before_discount > 0:
-                item_discount_amount = selling_price_before_discount * (item_discount_percentage / 100)
+                item_discount_amount = selling_price_before_discount * (item_discount_percentage / Decimal('100'))
 
             # Calculate Client Amount (Grand Total) after discount
             # This is the actual amount client will pay
@@ -1280,8 +1435,8 @@ def get_boq_planned_vs_actual(boq_id):
                     "miscellaneous_percentage": float(misc_pct),
                     "overhead_amount": float(planned_overhead),
                     "overhead_percentage": float(overhead_pct),
-                    "profit_amount": float(combined_overhead_profit),
-                    "profit_percentage": float(overhead_profit_pct),
+                    "profit_amount": float(planned_profit),
+                    "profit_percentage": float(profit_pct),
                     "transport_amount": float(planned_transport),
                     "total": float(planned_total),
                     "selling_price": float(selling_price)
@@ -1363,14 +1518,18 @@ def get_boq_planned_vs_actual(boq_id):
             comparison['items'].append(item_comparison)
 
         # Calculate overall summary
-        total_base_cost = sum(float(item['planned']['base_cost']) for item in comparison['items'])  # Base cost
-        total_client_amount_before_discount = sum(float(item['planned']['client_amount_before_discount']) for item in comparison['items'])
+        total_base_cost = sum(float(item['planned']['base_cost']) for item in comparison['items'])  # Base cost (items only, no preliminaries)
+        total_client_amount_before_discount = sum(float(item['planned']['client_amount_before_discount']) for item in comparison['items'])  # Includes preliminary shares
         total_planned = sum(float(item['planned']['total']) for item in comparison['items'])
         total_actual = sum(float(item['actual']['total']) for item in comparison['items'])
         total_discount_amount = sum(float(item['planned']['discount_amount']) for item in comparison['items'])
         total_client_amount_after_discount = sum(float(item['planned']['client_amount_after_discount']) for item in comparison['items'])
         total_profit_before_discount = sum(float(item['actual']['profit_before_discount']) for item in comparison['items'])
         total_after_discount_profit = sum(float(item['actual']['negotiable_margin']) for item in comparison['items'])
+
+        # Calculate items subtotal (base cost only, without preliminary shares)
+        # This is the sum of items' base costs before adding preliminaries
+        items_only_subtotal = Decimal(str(total_base_cost))
 
         # Add materials and labour totals for variance display
         total_planned_materials = sum(float(item['planned']['materials_total']) for item in comparison['items'])
@@ -1415,6 +1574,27 @@ def get_boq_planned_vs_actual(boq_id):
         # This is the REAL profit/loss - what client pays minus what we spent
         actual_project_profit = total_client_amount_after_discount - total_actual
 
+        # Calculate combined subtotal and discount
+        # NOTE: total_client_amount_before_discount already includes each item's preliminary share
+        # So we DON'T add preliminary_amount again (that would be double-counting)
+        combined_subtotal_before_discount = Decimal(str(total_client_amount_before_discount))
+
+        # Calculate discount on combined subtotal
+        combined_discount_amount = Decimal('0')
+        combined_discount_percentage = Decimal('0')
+
+        if boq_level_discount_percentage > 0:
+            combined_discount_percentage = boq_level_discount_percentage
+            combined_discount_amount = combined_subtotal_before_discount * (combined_discount_percentage / Decimal('100'))
+
+        # Calculate grand total after discount
+        combined_grand_total_after_discount = combined_subtotal_before_discount - combined_discount_amount
+
+        # Calculate profit impact on combined totals
+        combined_profit_before_discount = combined_subtotal_before_discount - Decimal(str(total_actual))
+        combined_profit_after_discount = combined_grand_total_after_discount - Decimal(str(total_actual))
+        combined_profit_reduction = combined_profit_before_discount - combined_profit_after_discount
+
         comparison['summary'] = {
             "base_cost": float(total_base_cost),  # Add base cost to summary
             "client_amount_before_discount": float(total_client_amount_before_discount),
@@ -1425,15 +1605,15 @@ def get_boq_planned_vs_actual(boq_id):
             "profit_before_discount": float(total_profit_before_discount),
             "negotiable_margin": float(actual_project_profit),  # Use the correctly calculated profit
             "discount_details": {
-                "has_discount": float(total_discount_amount) > 0,
-                "client_cost_before_discount": float(total_client_amount_before_discount),
-                "discount_percentage": float(total_discount_percentage),
-                "discount_amount": float(total_discount_amount),
-                "grand_total_after_discount": float(total_client_amount_after_discount),
+                "has_discount": float(combined_discount_amount) > 0,
+                "client_cost_before_discount": float(combined_subtotal_before_discount),
+                "discount_percentage": float(combined_discount_percentage),
+                "discount_amount": float(combined_discount_amount),
+                "grand_total_after_discount": float(combined_grand_total_after_discount),
                 "profit_impact": {
-                    "profit_before_discount": float(total_profit_before_discount),
-                    "profit_after_discount": float(actual_project_profit),  # Use the correctly calculated profit
-                    "profit_reduction": float(total_profit_before_discount - actual_project_profit)
+                    "profit_before_discount": float(combined_profit_before_discount),
+                    "profit_after_discount": float(combined_profit_after_discount),
+                    "profit_reduction": float(combined_profit_reduction)
                 }
             },
             "planned_total": float(total_planned),
@@ -1455,9 +1635,9 @@ def get_boq_planned_vs_actual(boq_id):
             "total_actual_overhead": float(total_actual_overhead),
             "overhead_variance": float(abs(total_actual_overhead - total_planned_overhead)),
             "total_planned_profit": float(total_planned_profit),
-            "total_negotiable_margin": float(actual_project_profit),  # Use simple formula: Client Amount - Actual Spending
-            "total_actual_profit": float(actual_project_profit),  # Add this for frontend compatibility
-            "profit_variance": float(abs(actual_project_profit - total_planned_profit)),
+            "total_negotiable_margin": float(actual_project_profit),  # Overall project profit: Client Amount - Actual Spending
+            "total_actual_profit": float(total_negotiable_margin),  # Sum of actual profit components from items
+            "profit_variance": float(abs(total_negotiable_margin - total_planned_profit)),
             "profit_status": "loss" if actual_project_profit < 0 else ("reduced" if actual_project_profit < total_planned_profit else "maintained" if actual_project_profit == total_planned_profit else "increased"),
             "total_planned_transport": float(total_planned_transport),
             "total_actual_transport": float(total_actual_transport),
@@ -1469,7 +1649,25 @@ def get_boq_planned_vs_actual(boq_id):
             "total_overhead_consumed": float(total_overhead_consumed),
             "total_profit_consumed": float(total_profit_consumed),
             "total_loss_beyond_buffers": float(total_loss_beyond_buffers),
-            "calculation_note": "Client Amount (Before Discount) is the base selling price. Discount = Client Amount × Discount %. Grand Total (Client Amount After Discount) = Client Amount - Discount. Actual Profit = Grand Total - Actual Total Spending."
+            "calculation_note": "Client Amount (Before Discount) is the base selling price. Discount = Client Amount × Discount %. Grand Total (Client Amount After Discount) = Client Amount - Discount. Actual Profit = Grand Total - Actual Total Spending.",
+
+            # Add preliminaries data
+            "preliminaries": {
+                "client_amount": float(preliminary_amount),
+                "quantity": preliminary_quantity,
+                "unit": preliminary_unit,
+                "rate": float(preliminary_rate) if preliminary_rate else 0,
+                "internal_cost": float(preliminary_internal_cost),
+                "misc_amount": float(preliminary_misc_amount),
+                "overhead_profit_amount": float(preliminary_overhead_profit_amount),
+                "transport_amount": float(preliminary_transport_amount),
+                "planned_profit": float(preliminary_planned_profit),
+                "items": preliminaries_data.get('items', []),
+                "notes": preliminaries_data.get('notes', '')
+            },
+            "items_subtotal": float(items_only_subtotal),
+            "combined_subtotal": float(items_only_subtotal) + float(preliminary_amount),
+            "grand_total_with_preliminaries": float(combined_grand_total_after_discount)
         }
 
         return jsonify(comparison), 200
