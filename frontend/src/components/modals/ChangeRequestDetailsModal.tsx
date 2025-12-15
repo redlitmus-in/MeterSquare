@@ -557,6 +557,24 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   </div>
                 </div>
 
+                {/* Justification/Reason Section */}
+                {(changeRequest.justification || changeRequest.reason) && (
+                  <div className="bg-white rounded-lg shadow-sm p-4 sm:p-5 mb-4 sm:mb-6">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
+                        <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                      <h3 className="text-sm font-semibold text-gray-900">Justification / Reason</h3>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                        {changeRequest.justification || changeRequest.reason}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Approval Trail */}
                 {(changeRequest.pm_approval_date || changeRequest.td_approval_date || changeRequest.approval_date || changeRequest.rejection_reason) && (
@@ -653,10 +671,10 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   {/* Mobile: Card Layout */}
                   <div className="sm:hidden p-3 space-y-3">
                     {materialsData?.map((material: any, idx: number) => {
-                      const hasValidMaterialId = material.master_material_id &&
-                                                 (typeof material.master_material_id === 'string') &&
-                                                 material.master_material_id.startsWith('mat_');
-                      const isNewMaterial = !hasValidMaterialId;
+                      // Use is_new_material flag from backend (set when material doesn't exist in BOQ)
+                      // Fallback to checking master_material_id only if flag is not present
+                      const isNewMaterial = material.is_new_material === true || 
+                                            (material.is_new_material === undefined && material.master_material_id === null);
                       return (
                         <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                           {/* Material Name + NEW badge */}
@@ -699,15 +717,15 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             </div>
                           </div>
 
-                          {/* Justification - Always show for clearer review */}
-                          <div className="mt-2 pt-2 border-t border-gray-200">
-                            <p className="text-[10px] text-gray-500 mb-0.5">Justification:</p>
-                            <p className="text-xs text-gray-700 line-clamp-2">
-                              {material.justification && material.justification.trim().length > 0
-                                ? material.justification
-                                : <span className="text-gray-400 italic">No justification</span>}
-                            </p>
-                          </div>
+                          {/* Notes - Only show for NEW materials with justification */}
+                          {isNewMaterial && material.justification && material.justification.trim().length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-gray-200">
+                              <span className="text-gray-500 text-xs">Notes:</span>
+                              <p className="text-xs text-gray-700 line-clamp-2 mt-0.5">
+                                {material.justification}
+                              </p>
+                            </div>
+                          )}
 
                           {/* Pricing (if shown) */}
                           {shouldShowPricing && (
@@ -768,31 +786,38 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
                   {/* Desktop: Table Layout */}
                   <div className="hidden sm:block overflow-x-auto">
+                  {/* Check if there are any NEW materials to show Notes column */}
+                  {(() => {
+                    const hasNewMaterials = materialsData?.some((mat: any) => 
+                      mat.is_new_material === true || 
+                      (mat.is_new_material === undefined && mat.master_material_id === null)
+                    );
+                    return (
                   <table className="w-full table-fixed">
                     <thead className="bg-gray-100 border-b border-gray-200">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[15%]">Material</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[10%]">Brand</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[10%]">Size/Spec</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[10%]">Sub-Item</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider w-[8%]">Qty</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[27%]">Justification</th>
+                        <th className={`px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[18%]' : 'w-[22%]'}`}>Material</th>
+                        <th className={`px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[12%]' : 'w-[15%]'}`}>Brand</th>
+                        <th className={`px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[12%]' : 'w-[15%]'}`}>Size/Spec</th>
+                        <th className={`px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[10%]' : 'w-[12%]'}`}>Sub-Item</th>
+                        <th className={`px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[8%]' : 'w-[10%]'}`}>Qty</th>
+                        {hasNewMaterials && (
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[18%]">Notes</th>
+                        )}
                         {shouldShowPricing && (
                           <>
-                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider w-[10%]">Unit Price</th>
-                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider w-[10%]">Total</th>
+                            <th className={`px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[11%]' : 'w-[13%]'}`}>Unit Price</th>
+                            <th className={`px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[11%]' : 'w-[13%]'}`}>Total</th>
                           </>
                         )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {materialsData?.map((material: any, idx: number) => {
-                        // A material is NEW if master_material_id is null/undefined OR has invalid format
-                        // Valid format should start with "mat_" (e.g., mat_666_1_1_1)
-                        const hasValidMaterialId = material.master_material_id &&
-                                                   (typeof material.master_material_id === 'string') &&
-                                                   material.master_material_id.startsWith('mat_');
-                        const isNewMaterial = !hasValidMaterialId;
+                        // Use is_new_material flag from backend (set when material doesn't exist in BOQ)
+                        // Fallback to checking master_material_id only if flag is not present
+                        const isNewMaterial = material.is_new_material === true || 
+                                              (material.is_new_material === undefined && material.master_material_id === null);
                         return (
                           <tr key={idx} className="hover:bg-gray-50 transition-colors">
                             {/* Material Name */}
@@ -831,48 +856,18 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             <td className="px-4 py-3 text-sm text-gray-900 text-center whitespace-nowrap font-medium">
                               {material.quantity} <span className="text-gray-500 font-normal">{material.unit}</span>
                             </td>
-                            {/* Justification - Always visible for clarity */}
-                            <td className="px-4 py-3 text-sm" style={{ maxWidth: '280px', minWidth: '200px' }}>
-                              {material.justification && material.justification.trim().length > 0 ? (
-                                <div className="w-full">
-                                  {material.justification.length > 120 ? (
-                                    <div>
-                                      {expandedJustifications.has(idx) ? (
-                                        <>
-                                          <p className="text-sm text-gray-700 leading-relaxed break-words whitespace-pre-wrap">
-                                            {material.justification}
-                                          </p>
-                                          <button
-                                            onClick={() => toggleJustification(idx)}
-                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2 hover:underline inline-flex items-center gap-1"
-                                          >
-                                            ↑ Show less
-                                          </button>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <p className="text-sm text-gray-700 leading-relaxed break-words">
-                                            {material.justification.substring(0, 120)}...
-                                          </p>
-                                          <button
-                                            onClick={() => toggleJustification(idx)}
-                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-1 hover:underline inline-flex items-center gap-1"
-                                          >
-                                            See more ↓
-                                          </button>
-                                        </>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <p className="text-sm text-gray-700 leading-relaxed break-words">
-                                      {material.justification}
-                                    </p>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-gray-400 italic">No justification</span>
-                              )}
-                            </td>
+                            {/* Notes - Only show for NEW materials */}
+                            {hasNewMaterials && (
+                              <td className="px-4 py-3 text-sm">
+                                {isNewMaterial && material.justification && material.justification.trim().length > 0 ? (
+                                  <p className="text-xs text-gray-700 line-clamp-2" title={material.justification}>
+                                    {material.justification}
+                                  </p>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </td>
+                            )}
                             {shouldShowPricing && (() => {
                               // Get vendor price and BOQ price
                               const vendorUnitPrice = material.unit_price || 0;
@@ -937,10 +932,9 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       })}
                       {shouldShowPricing && (
                         <tr className="bg-gray-100 border-t-2 border-gray-300">
-                          <td colSpan={6} className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
+                          <td colSpan={hasNewMaterials ? 7 : 6} className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
                             Total Cost:
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-700 text-right"></td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
                             <div className="text-base font-bold text-purple-700">
                               {formatCurrency(totalMaterialsCost)}
@@ -965,6 +959,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       )}
                     </tbody>
                   </table>
+                    );
+                  })()}
                   </div>
                 </div>
 

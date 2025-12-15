@@ -263,6 +263,8 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         materials_list.append({
                             "material_name": material_name,
                             "master_material_id": master_material_id,
+                            "is_new_material": material.get('is_new_material', False),  # From change request
+                            "justification": material.get('justification', ''),  # Individual material justification
                             "quantity": quantity,
                             "unit": material.get('unit', ''),
                             "unit_price": display_unit_price,  # Vendor price when approved, BOQ otherwise
@@ -319,6 +321,8 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                     materials_list.append({
                         "material_name": material_name,
                         "master_material_id": master_material_id,
+                        "is_new_material": sub_item.get('is_new_material', False),  # From change request
+                        "justification": sub_item.get('justification', ''),  # Individual material justification
                         "sub_item_name": sub_item.get('sub_item_name', ''),
                         "brand": sub_item.get('brand', ''),
                         "specification": sub_item.get('specification', ''),
@@ -380,6 +384,8 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
             materials_list.append({
                 "material_name": material_name,
                 "master_material_id": master_material_id,
+                "is_new_material": material.get('is_new_material', False),  # From change request
+                "justification": material.get('justification', ''),  # Individual material justification
                 "sub_item_name": material.get('sub_item_name', ''),
                 "brand": material.get('brand', ''),
                 "specification": material.get('specification', ''),
