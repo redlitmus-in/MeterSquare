@@ -1059,6 +1059,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const selectedCount = unlockedMaterials.filter(m => m.selected_vendors.length > 0).length;
   const totalVendorSelections = unlockedMaterials.reduce((sum, m) => sum + m.selected_vendors.length, 0);
 
+  // Count unique vendors selected across all materials
+  // If more than 1 unique vendor is selected, hide the main "Submit for TD Approval" button
+  const uniqueSelectedVendorIds = new Set<number>();
+  unlockedMaterials.forEach(m => {
+    if (m.selected_vendors.length > 0) {
+      uniqueSelectedVendorIds.add(m.selected_vendors[0].vendor_id);
+    }
+  });
+  const hasMultipleUniqueVendors = uniqueSelectedVendorIds.size > 1;
+
   if (!isOpen) return null;
 
   return (
@@ -2797,8 +2807,9 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     </Button>
                   ) : (
                     /* Buyer Mode: Submit All Together - Single Purchase Indicator */
-                    /* Hide this button if purchase is already split - user should use individual vendor buttons */
-                    !isPurchaseAlreadySplit && selectedCount > 0 && (
+                    /* Hide this button if: 1) purchase is already split, OR 2) multiple unique vendors are selected */
+                    /* User should use individual "Send This Vendor to TD" buttons when there are multiple vendors */
+                    !isPurchaseAlreadySplit && !hasMultipleUniqueVendors && selectedCount > 0 && (
                       <div className="flex flex-col items-end gap-1">
                         <span className="text-xs text-gray-500 italic">
                           Send all materials as one purchase

@@ -84,19 +84,59 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
       if (result.success && result.data) {
         setBoqData(result.data);
 
-        // Auto-expand first few items for better UX
+        // Check if we need to highlight a specific sub-item
+        const highlightSubItem = boq?.highlightSubItem;
         const expandedIds: string[] = [];
-        // Expand first 2 existing items
-        if (result.data.existing_purchase?.items) {
-          expandedIds.push(...result.data.existing_purchase.items.slice(0, 2).map((_, index) => `existing-${index}`));
-        } else if (result.data.items) {
-          expandedIds.push(...result.data.items.slice(0, 2).map((_, index) => `item-${index}`));
+
+        if (highlightSubItem) {
+          // Find and expand the item containing the highlighted sub-item
+          const items = result.data.existing_purchase?.items || result.data.items || [];
+          items.forEach((item: any, index: number) => {
+            const hasMatchingSubItem = item.sub_items?.some((subItem: any) =>
+              subItem.sub_item_name === highlightSubItem || subItem.scope === highlightSubItem
+            );
+            if (hasMatchingSubItem) {
+              const prefix = result.data.existing_purchase?.items ? 'existing' : 'item';
+              expandedIds.push(`${prefix}-${index}`);
+            }
+          });
+          // If no matching sub-item found, fall back to default behavior
+          if (expandedIds.length === 0) {
+            if (result.data.existing_purchase?.items) {
+              expandedIds.push(...result.data.existing_purchase.items.slice(0, 2).map((_, index) => `existing-${index}`));
+            } else if (result.data.items) {
+              expandedIds.push(...result.data.items.slice(0, 2).map((_, index) => `item-${index}`));
+            }
+          }
+        } else {
+          // Auto-expand first few items for better UX
+          // Expand first 2 existing items
+          if (result.data.existing_purchase?.items) {
+            expandedIds.push(...result.data.existing_purchase.items.slice(0, 2).map((_, index) => `existing-${index}`));
+          } else if (result.data.items) {
+            expandedIds.push(...result.data.items.slice(0, 2).map((_, index) => `item-${index}`));
+          }
         }
         // Also expand all new purchase items (since they're important)
         if (result.data.new_purchase?.items) {
           expandedIds.push(...result.data.new_purchase.items.map((_, index) => `new-${index}`));
         }
         setExpandedItems(expandedIds);
+
+        // Scroll to highlighted sub-item after a short delay
+        if (highlightSubItem) {
+          setTimeout(() => {
+            // Use querySelectorAll with filter instead of direct string interpolation
+            // to avoid selector injection vulnerability
+            const allSubItems = document.querySelectorAll('[data-subitem-name]');
+            const highlightedElement = Array.from(allSubItems).find(
+              el => el.getAttribute('data-subitem-name') === highlightSubItem
+            );
+            if (highlightedElement) {
+              highlightedElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }, 300);
+        }
       } else {
         showError(result.message || 'Failed to fetch BOQ details');
       }
@@ -687,14 +727,30 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                     {/* Sub Items */}
                                     {item.sub_items?.length > 0 && (
                                       <div className="space-y-4">
-                                        {item.sub_items.map((subItem: any, subIndex: number) => (
-                                          <div key={subIndex} className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border-2 border-green-400 shadow-sm">
+                                        {item.sub_items.map((subItem: any, subIndex: number) => {
+                                          const isHighlighted = boq?.highlightSubItem &&
+                                            (subItem.sub_item_name === boq.highlightSubItem || subItem.scope === boq.highlightSubItem);
+                                          return (
+                                          <div
+                                            key={subIndex}
+                                            data-subitem-name={subItem.sub_item_name || subItem.scope}
+                                            className={`rounded-lg p-4 border-2 shadow-sm transition-all duration-300 ${
+                                              isHighlighted
+                                                ? 'bg-gradient-to-r from-yellow-100 to-yellow-50 border-yellow-500 ring-2 ring-yellow-400 ring-offset-2'
+                                                : 'bg-gradient-to-r from-green-50 to-green-100/30 border-green-400'
+                                            }`}
+                                          >
                                             <div className="mb-3">
-                                              <h4 className="text-sm font-bold text-green-900 flex items-center gap-2">
-                                                <div className="p-1.5 bg-white rounded shadow-sm">
-                                                  <FileText className="w-4 h-4 text-green-600" />
+                                              <h4 className={`text-sm font-bold flex items-center gap-2 ${isHighlighted ? 'text-yellow-900' : 'text-green-900'}`}>
+                                                <div className={`p-1.5 rounded shadow-sm ${isHighlighted ? 'bg-yellow-200' : 'bg-white'}`}>
+                                                  <FileText className={`w-4 h-4 ${isHighlighted ? 'text-yellow-700' : 'text-green-600'}`} />
                                                 </div>
                                                 Sub Item #{subIndex + 1}: {subItem.sub_item_name || subItem.scope}
+                                                {isHighlighted && (
+                                                  <span className="ml-2 px-2 py-0.5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full animate-pulse">
+                                                    Referenced in PO
+                                                  </span>
+                                                )}
                                               </h4>
                                               {subItem.scope && (
                                                 <p className="text-xs text-gray-600 mt-1 ml-8"><strong>Scope:</strong> {subItem.scope}</p>
@@ -981,7 +1037,8 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                               </div>
                                             </div>
                                           </div>
-                                        ))}
+                                        );
+                                        })}
                                       </div>
                                     )}
 
@@ -1258,14 +1315,30 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 {/* Sub Items */}
                                 {item.sub_items?.length > 0 && (
                                   <div className="space-y-4">
-                                    {item.sub_items.map((subItem: any, subIndex: number) => (
-                                      <div key={subIndex} className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border-2 border-green-400 shadow-sm">
+                                    {item.sub_items.map((subItem: any, subIndex: number) => {
+                                      const isHighlighted = boq?.highlightSubItem &&
+                                        (subItem.sub_item_name === boq.highlightSubItem || subItem.scope === boq.highlightSubItem);
+                                      return (
+                                      <div
+                                        key={subIndex}
+                                        data-subitem-name={subItem.sub_item_name || subItem.scope}
+                                        className={`rounded-lg p-4 border-2 shadow-sm transition-all duration-300 ${
+                                          isHighlighted
+                                            ? 'bg-gradient-to-r from-yellow-100 to-yellow-50 border-yellow-500 ring-2 ring-yellow-400 ring-offset-2'
+                                            : 'bg-gradient-to-r from-green-50 to-green-100/30 border-green-400'
+                                        }`}
+                                      >
                                         <div className="mb-3">
-                                          <h4 className="text-sm font-bold text-green-900 flex items-center gap-2">
-                                            <div className="p-1.5 bg-white rounded shadow-sm">
-                                              <FileText className="w-4 h-4 text-green-600" />
+                                          <h4 className={`text-sm font-bold flex items-center gap-2 ${isHighlighted ? 'text-yellow-900' : 'text-green-900'}`}>
+                                            <div className={`p-1.5 rounded shadow-sm ${isHighlighted ? 'bg-yellow-200' : 'bg-white'}`}>
+                                              <FileText className={`w-4 h-4 ${isHighlighted ? 'text-yellow-700' : 'text-green-600'}`} />
                                             </div>
                                             Sub Item #{subIndex + 1}: {subItem.sub_item_name || subItem.scope}
+                                            {isHighlighted && (
+                                              <span className="ml-2 px-2 py-0.5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full animate-pulse">
+                                                Referenced in PO
+                                              </span>
+                                            )}
                                           </h4>
                                           {subItem.scope && (
                                             <p className="text-xs text-gray-600 mt-1 ml-8"><strong>Scope:</strong> {subItem.scope}</p>
@@ -1365,7 +1438,8 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                           </div>
                                         )}
                                       </div>
-                                    ))}
+                                    );
+                                    })}
                                   </div>
                                 )}
 

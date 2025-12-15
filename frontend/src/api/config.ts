@@ -1,17 +1,10 @@
-import axios, { AxiosRequestConfig } from 'axios';
+import axios from 'axios';
 import { createClient } from '@supabase/supabase-js';
 import { getEnvironmentConfig } from '../utils/environment';
 import { API_TIMEOUTS, REALTIME_SETTINGS, STALE_TIMES } from '@/lib/constants';
 
 // Get validated environment configuration
 const envConfig = getEnvironmentConfig();
-
-// ✅ PERFORMANCE: Request deduplication - prevents duplicate concurrent requests
-const pendingRequests = new Map<string, Promise<any>>();
-
-const getRequestKey = (config: AxiosRequestConfig): string => {
-  return `${config.method}-${config.url}-${JSON.stringify(config.params || {})}`;
-};
 
 // ✅ PERFORMANCE: In-memory cache for GET requests (stale-while-revalidate pattern)
 interface CacheEntry {
@@ -168,6 +161,202 @@ apiClient.interceptors.request.use(
   }
 );
 
+// ✅ FIXED: Robust token validation with retry mechanism
+// Prevents false logouts when:
+// 1. One request fails with 401 but others succeed (race condition)
+// 2. Temporary network issues cause 401
+// 3. Background refresh requests fail intermittently
+
+// Increased debounce to handle slow concurrent requests
+const LOGOUT_DEBOUNCE_MS = 1500;
+
+// Number of consecutive 401s required before logout (prevents single request failures)
+const CONSECUTIVE_401_THRESHOLD = 2;
+
+// Auth endpoints that should NOT trigger logout on 401 (expected for invalid credentials)
+const AUTH_ENDPOINTS = ['/login', '/register', '/verification_otp', '/refresh', '/reset-password', '/self'];
+
+// Background endpoints that should not trigger logout (soft failures)
+const BACKGROUND_ENDPOINTS = ['/self', '/me', '/user/status'];
+
+const isAuthEndpoint = (url?: string): boolean => {
+  if (!url) return false;
+  return AUTH_ENDPOINTS.some(endpoint => url.includes(endpoint));
+};
+
+const isBackgroundEndpoint = (url?: string): boolean => {
+  if (!url) return false;
+  return BACKGROUND_ENDPOINTS.some(endpoint => url.includes(endpoint));
+};
+
+// Module-scoped state for logout debouncing
+let isLoggingOut = false;
+let logoutTimeout: ReturnType<typeof window.setTimeout> | null = null;
+let successfulRequestReceived = false;
+let consecutive401Count = 0; // Track consecutive 401 errors
+let lastSuccessfulRequestTime = Date.now();
+
+// Reset 401 counter on successful request
+const resetConsecutive401Count = () => {
+  consecutive401Count = 0;
+  lastSuccessfulRequestTime = Date.now();
+};
+
+const handleUnauthorized = async (requestUrl?: string) => {
+  // Skip background endpoints - they shouldn't trigger logout
+  if (isBackgroundEndpoint(requestUrl)) {
+    if (import.meta.env.DEV) {
+      console.log('[Auth] Background endpoint 401, ignoring:', requestUrl);
+    }
+    return;
+  }
+
+  // Increment consecutive 401 counter
+  consecutive401Count++;
+
+  if (import.meta.env.DEV) {
+    console.log(`[Auth] 401 received (count: ${consecutive401Count}/${CONSECUTIVE_401_THRESHOLD}), url: ${requestUrl}`);
+  }
+
+  // Only proceed if we've hit the threshold
+  if (consecutive401Count < CONSECUTIVE_401_THRESHOLD) {
+    // Check if we had a recent successful request (within last 5 seconds)
+    const timeSinceLastSuccess = Date.now() - lastSuccessfulRequestTime;
+    if (timeSinceLastSuccess < 5000) {
+      if (import.meta.env.DEV) {
+        console.log('[Auth] Recent successful request, likely race condition. Skipping logout.');
+      }
+      return;
+    }
+  }
+
+  // If already logging out, skip
+  if (isLoggingOut) {
+    if (import.meta.env.DEV) {
+      console.log('[Auth] Already logging out, skipping duplicate call');
+    }
+    return;
+  }
+
+  // Check if token still exists
+  const token = localStorage.getItem('access_token');
+  if (!token) {
+    if (!window.location.pathname.includes('/login')) {
+      window.location.replace('/login');
+    }
+    return;
+  }
+
+  // Set flag to prevent multiple logout triggers
+  isLoggingOut = true;
+  successfulRequestReceived = false;
+
+  // Clear any pending logout timeout
+  if (logoutTimeout) {
+    clearTimeout(logoutTimeout);
+  }
+
+  if (import.meta.env.DEV) {
+    console.log('[Auth] Starting debounce timer for logout');
+  }
+
+  // Delay to allow concurrent requests to complete
+  logoutTimeout = setTimeout(async () => {
+    // Check if any successful request was received during debounce window
+    if (successfulRequestReceived) {
+      if (import.meta.env.DEV) {
+        console.log('[Auth] Successful request received during debounce, canceling logout');
+      }
+      isLoggingOut = false;
+      logoutTimeout = null;
+      consecutive401Count = 0;
+      return;
+    }
+
+    // Double-check token still exists after delay
+    const tokenAfterDelay = localStorage.getItem('access_token');
+    if (!tokenAfterDelay) {
+      isLoggingOut = false;
+      logoutTimeout = null;
+      return;
+    }
+
+    // Final verification: Try to validate token one more time
+    try {
+      const response = await fetch(`${API_BASE_URL}/self`, {
+        headers: { 'Authorization': `Bearer ${tokenAfterDelay}` }
+      });
+
+      if (response.ok) {
+        if (import.meta.env.DEV) {
+          console.log('[Auth] Token validation succeeded, canceling logout');
+        }
+        isLoggingOut = false;
+        logoutTimeout = null;
+        consecutive401Count = 0;
+        return;
+      }
+    } catch {
+      // Validation failed, proceed with logout
+    }
+
+    if (import.meta.env.DEV) {
+      console.log('[Auth] Token invalid, proceeding with logout');
+    }
+
+    // Clear auth data
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('auth-storage');
+
+    // Clear auth store
+    try {
+      const authStore = (await import('@/store/authStore')).useAuthStore;
+      authStore.setState({
+        user: null,
+        isAuthenticated: false,
+        isLoading: false,
+        error: null
+      });
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error('[Auth] Failed to clear auth store:', error);
+      }
+    }
+
+    // Redirect to login
+    if (!window.location.pathname.includes('/login')) {
+      window.location.replace('/login');
+    }
+
+    // Reset flags
+    isLoggingOut = false;
+    logoutTimeout = null;
+    consecutive401Count = 0;
+  }, LOGOUT_DEBOUNCE_MS);
+};
+
+// Cleanup on page unload to prevent memory leaks
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    if (logoutTimeout) {
+      clearTimeout(logoutTimeout);
+      logoutTimeout = null;
+      isLoggingOut = false;
+    }
+  });
+
+  // Sync logout across browser tabs
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'access_token' && !e.newValue && e.oldValue) {
+      // Token was removed in another tab - redirect this tab too
+      if (!window.location.pathname.includes('/login')) {
+        window.location.replace('/login');
+      }
+    }
+  });
+}
+
 // Response interceptor with error handling and caching
 apiClient.interceptors.response.use(
   (response) => {
@@ -185,6 +374,19 @@ apiClient.interceptors.response.use(
       const cacheKey = getCacheKey(response.config.url || '', response.config.params);
       setCache(cacheKey, response.data);
     }
+
+    // ✅ FIXED: Reset 401 counter on any successful request
+    // This prevents false logouts from isolated 401 errors
+    resetConsecutive401Count();
+
+    // If a request succeeds during debounce window, mark it
+    if (isLoggingOut) {
+      successfulRequestReceived = true;
+      if (import.meta.env.DEV) {
+        console.log('[Auth] Successful request during logout debounce window');
+      }
+    }
+
     return response;
   },
   async (error) => {
@@ -198,26 +400,11 @@ apiClient.interceptors.response.use(
       });
     }
 
-    // Handle 401 Unauthorized - clear auth but don't redirect
+    // Handle 401 Unauthorized - with consecutive count and debounce
     if (error.response?.status === 401) {
-      // Clear auth data
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('user');
-      localStorage.removeItem('auth-storage');
-      
-      // Clear auth store
-      const authStore = (await import('@/store/authStore')).useAuthStore;
-      authStore.setState({
-        user: null,
-        isAuthenticated: false,
-        isLoading: false,
-        error: null
-      });
-      
-      // DISABLED: Auto redirect to login for debugging
-      // Uncomment to re-enable redirects
-      if (!window.location.pathname.includes('/login')) {
-        window.location.replace('/login');
+      // Skip auth endpoints - these 401s are expected for invalid credentials
+      if (!isAuthEndpoint(error.config?.url)) {
+        await handleUnauthorized(error.config?.url);
       }
     }
     
@@ -269,13 +456,27 @@ longRunningApiClient.interceptors.request.use(
 );
 
 longRunningApiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // ✅ FIXED: Reset 401 counter on successful request
+    resetConsecutive401Count();
+
+    // Mark successful request during logout debounce window
+    if (isLoggingOut) {
+      successfulRequestReceived = true;
+      if (import.meta.env.DEV) {
+        console.log('[Auth] Successful long-running request during logout debounce window');
+      }
+    }
+    return response;
+  },
   async (error) => {
-    console.error('Long-running API Error:', error.message);
+    if (import.meta.env.DEV) {
+      console.error('Long-running API Error:', error.message);
+    }
+    // ✅ FIXED: Use consecutive count and debounced handler
     if (error.response?.status === 401) {
-      localStorage.removeItem('access_token');
-      if (!window.location.pathname.includes('/login')) {
-        window.location.replace('/login');
+      if (!isAuthEndpoint(error.config?.url)) {
+        await handleUnauthorized(error.config?.url);
       }
     }
     return Promise.reject(error);

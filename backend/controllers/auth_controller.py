@@ -40,64 +40,9 @@ def map_frontend_role_to_db(frontend_role):
     frontend_role_lower = frontend_role.lower().strip()
     return FRONTEND_TO_DB_ROLE_MAP.get(frontend_role_lower, frontend_role_lower)
 
-def jwt_required(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        token = request.headers.get('Authorization')
-
-        # Extract token from Bearer header or cookie
-        if token and token.startswith("Bearer "):
-            token = token.split(" ")[1]
-        else:
-            token = request.cookies.get('access_token')
-
-        if not token:
-            return jsonify({"error": "Authorization token is missing"}), 401
-
-        try:
-            secret_key = current_app.config.get('SECRET_KEY')
-            if not secret_key:
-                raise Exception("SECRET_KEY not set in app configuration")
-
-            decoded = jwt.decode(token, secret_key, algorithms=["HS256"])
-            email = decoded.get("username") or decoded.get("email")
-            user = User.query.filter_by(email=email, is_deleted=False, is_active=True).first()
-            if not user:
-                return jsonify({"error": "User not found"}), 404
-
-            # Get role name safely
-            role_name = "user"
-            if user.role_id:
-                role = Role.query.filter_by(role_id=user.role_id, is_deleted=False).first()
-                if role:
-                    role_name = role.role
-
-            # Manually create user dict since no to_dict method
-            g.user = {
-                "user_id": user.user_id,
-                "email": user.email,
-                "full_name": user.full_name,
-                "phone": user.phone,
-                "role_id": user.role_id,
-                "role": role_name,
-                "role_name": role_name,
-                "department": user.department,
-                "is_active": user.is_active,
-                "user_status": user.user_status or 'offline'
-            }
-            g.user_id = user.user_id
-
-        except jwt.ExpiredSignatureError:
-            return jsonify({"error": "Token expired"}), 401
-        except jwt.InvalidTokenError as e:
-            return jsonify({"error": f"Invalid token: {str(e)}"}), 401
-        except Exception as e:
-            log.error(f"Auth error: {str(e)}")
-            return jsonify({"error": "Authentication failed"}), 401
-
-        return func(*args, **kwargs)
-
-    return wrapper
+# ✅ CONSOLIDATED: Import jwt_required from utils.authentication to avoid duplicates
+# This ensures consistent token validation across all routes
+from utils.authentication import jwt_required
 
 def user_register():
     """

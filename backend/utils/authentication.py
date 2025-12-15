@@ -512,15 +512,16 @@ def jwt_required(f):
 
         except jwt.ExpiredSignatureError:
             log.warning(f"Token has expired for token ending with: ...{token[-10:] if token else 'N/A'}")
-            return jsonify({'message': 'Token has expired'}), 401
+            # ✅ Consistent error format with 'error' key (matches auth_controller)
+            return jsonify({'error': 'Token expired', 'message': 'Token has expired'}), 401
         except jwt.InvalidTokenError as e:
             log.error(f"Invalid token error: {str(e)} - Token: {token[:20] if token else 'N/A'}...{token[-10:] if token and len(token) > 30 else ''}")
-            return jsonify({'message': 'Invalid token'}), 401
+            return jsonify({'error': 'Invalid token', 'message': 'Invalid token'}), 401
         except Exception as e:
             log.error(f"JWT verification error: {str(e)}")
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
-            return jsonify({'message': 'Token verification failed'}), 401
+            return jsonify({'error': 'Authentication failed', 'message': 'Token verification failed'}), 401
         
         return f(*args, **kwargs)
     

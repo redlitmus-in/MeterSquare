@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send, FileText, Download, Loader2, ChevronDown, Edit, Eye } from 'lucide-react';
+import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send, FileText, Download, Loader2, ChevronDown, Edit, Eye, ExternalLink } from 'lucide-react';
 import { ChangeRequestItem } from '@/services/changeRequestService';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
 import { isEstimator, isTechnicalDirector, isSiteEngineer, isProjectManager } from '@/utils/roleHelpers';
 import EditChangeRequestModal from './EditChangeRequestModal';
 import { buyerService } from '@/roles/buyer/services/buyerService';
+import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
 
 interface ChangeRequestDetailsModalProps {
   isOpen: boolean;
@@ -35,6 +36,10 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const [downloadingLPO, setDownloadingLPO] = useState(false);
   const [isLPOExpanded, setIsLPOExpanded] = useState(false);
 
+  // BOQ Details Modal state - for viewing sub-item in approved BOQ
+  const [showBOQModal, setShowBOQModal] = useState(false);
+  const [selectedSubItemForBOQ, setSelectedSubItemForBOQ] = useState<string | null>(null);
+
   // State to track edited materials with updated prices
   const [editedMaterials, setEditedMaterials] = useState<any[]>([]);
 
@@ -49,6 +54,18 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       }
       return newSet;
     });
+  };
+
+  // Handle clicking on sub-item to view in BOQ
+  const handleViewSubItemInBOQ = (subItemName: string) => {
+    if (!changeRequest?.boq_id || changeRequest.boq_id <= 0) {
+      return; // BOQ ID not available - silently ignore click
+    }
+    if (!subItemName || subItemName.trim() === '') {
+      return; // No sub-item name - silently ignore
+    }
+    setSelectedSubItemForBOQ(subItemName);
+    setShowBOQModal(true);
   };
 
   // Initialize edited materials when modal opens or changeRequest changes
@@ -664,7 +681,17 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             </div>
                             <div>
                               <span className="text-gray-500">Sub-Item:</span>
-                              <span className="ml-1 text-gray-900">{material.sub_item_name || '-'}</span>
+                              {material.sub_item_name ? (
+                                <button
+                                  onClick={() => handleViewSubItemInBOQ(material.sub_item_name)}
+                                  className="ml-1 text-purple-700 hover:text-purple-900 underline underline-offset-2 hover:no-underline"
+                                  title={`View "${material.sub_item_name}" in BOQ`}
+                                >
+                                  {material.sub_item_name}
+                                </button>
+                              ) : (
+                                <span className="ml-1 text-gray-900">-</span>
+                              )}
                             </div>
                             <div>
                               <span className="text-gray-500">Qty:</span>
@@ -787,12 +814,17 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             <td className="px-4 py-3 text-sm text-gray-600 truncate" title={material.size || material.specification || ''}>
                               {material.size || material.specification || <span className="text-gray-400">-</span>}
                             </td>
-                            {/* Sub-Item */}
+                            {/* Sub-Item - Clickable to view in BOQ */}
                             <td className="px-4 py-3 text-sm">
                               {material.sub_item_name ? (
-                                <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-800 truncate max-w-full" title={material.sub_item_name}>
-                                  {material.sub_item_name}
-                                </span>
+                                <button
+                                  onClick={() => handleViewSubItemInBOQ(material.sub_item_name)}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 hover:text-purple-900 transition-colors cursor-pointer truncate max-w-full group"
+                                  title={`Click to view "${material.sub_item_name}" in BOQ scope`}
+                                >
+                                  <span className="truncate">{material.sub_item_name}</span>
+                                  <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                                </button>
                               ) : <span className="text-gray-400">-</span>}
                             </td>
                             {/* Quantity */}
@@ -1392,6 +1424,22 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
               setShowEditModal(false);
               // Trigger parent refresh callback instead of full page reload
               onClose();
+            }}
+          />
+        )}
+
+        {/* BOQ Details Modal - View sub-item scope in approved BOQ */}
+        {showBOQModal && changeRequest?.boq_id && (
+          <BOQDetailsModal
+            isOpen={showBOQModal}
+            onClose={() => {
+              setShowBOQModal(false);
+              setSelectedSubItemForBOQ(null);
+            }}
+            boq={{
+              boq_id: changeRequest.boq_id,
+              boq_name: changeRequest.boq_name || `BOQ #${changeRequest.boq_id}`,
+              highlightSubItem: selectedSubItemForBOQ
             }}
           />
         )}
