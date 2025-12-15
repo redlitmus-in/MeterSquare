@@ -86,7 +86,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     }, 300); // Wait for page to load before showing bell icon
     return () => clearTimeout(timer);
   }, []);
-  
+
   // Refs for click outside detection
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -98,9 +98,9 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
 
     const handleClickOutside = (event: MouseEvent) => {
       if (panelRef.current &&
-          buttonRef.current &&
-          !panelRef.current.contains(event.target as Node) &&
-          !buttonRef.current.contains(event.target as Node)) {
+        buttonRef.current &&
+        !panelRef.current.contains(event.target as Node) &&
+        !buttonRef.current.contains(event.target as Node)) {
         setShowPanel(false);
       }
     };
@@ -323,10 +323,69 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
       }
     }
 
+
     // PRIORITY 2: Use backend actionUrl if smart redirect didn't work
     const backendActionUrl = notification.actionUrl || notification.metadata?.actionUrl || notification.metadata?.action_url;
     if (backendActionUrl && typeof backendActionUrl === 'string') {
       try {
+        // SPECIAL CASE: Estimators receiving purchase/material-purchase notifications
+        // Should go to their change-requests page, not buyer's purchase-orders page
+        const isEstimator = userRole && (
+          userRole.toString().toLowerCase().includes('estimator') ||
+          userRole === '3' || userRole === 3
+        );
+
+        // Check if URL is for buyer/purchase pages that Estimator shouldn't access
+        // Handle both /extra-material and /estimator/extra-material formats
+        const isBuyerPurchaseUrl =
+          backendActionUrl.includes('/material-purchase') ||
+          backendActionUrl.includes('/purchase-orders') ||
+          backendActionUrl.includes('/extra-material') ||
+          backendActionUrl.includes('/buyer/');
+
+        if (isEstimator && isBuyerPurchaseUrl) {
+          // Redirect Estimator to their change-requests page instead
+          const redirectPath = buildRolePath(userRole, '/change-requests');
+          const queryParams = new URLSearchParams();
+
+          // Extract cr_id from the original URL or metadata
+          if (notification.metadata?.cr_id) {
+            queryParams.set('cr_id', String(notification.metadata.cr_id));
+          } else {
+            // Try to extract from URL query params
+            try {
+              const urlObj = new URL(backendActionUrl, window.location.origin);
+              const crId = urlObj.searchParams.get('cr_id');
+              if (crId) {
+                queryParams.set('cr_id', crId);
+              }
+            } catch {
+              // Invalid URL, ignore
+            }
+          }
+
+          const fullPath = queryParams.toString()
+            ? `${redirectPath}?${queryParams.toString()}`
+            : redirectPath;
+
+          if (onNavigate) {
+            onNavigate(fullPath);
+          } else {
+            navigate(fullPath, {
+              replace: false,
+              state: {
+                from: location.pathname,
+                notification: notification.id,
+                autoFocus: true
+              }
+            });
+          }
+          setShowPanel(false);
+          markAsRead(notification.id);
+          return;
+        }
+
+        // Normal backend URL handling
         const knownRolePrefixes = [
           '/technical-director', '/estimator', '/project-manager',
           '/site-engineer', '/buyer', '/admin', '/production-manager',
@@ -558,21 +617,19 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
               <div className="flex">
                 <button
                   onClick={() => setActiveTab('all')}
-                  className={`flex-1 px-3 py-2 text-center text-[11px] sm:text-xs font-medium transition-colors ${
-                    activeTab === 'all'
-                      ? 'bg-white text-blue-600 border-b-2 border-blue-600'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                  }`}
+                  className={`flex-1 px-3 py-2 text-center text-[11px] sm:text-xs font-medium transition-colors ${activeTab === 'all'
+                    ? 'bg-white text-blue-600 border-b-2 border-blue-600'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    }`}
                 >
                   All {counts.all > 0 && `(${counts.all})`}
                 </button>
                 <button
                   onClick={() => setActiveTab('unread')}
-                  className={`flex-1 px-3 py-2 text-center text-[11px] sm:text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
-                    activeTab === 'unread'
-                      ? 'bg-white text-blue-600 border-b-2 border-blue-600'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                  }`}
+                  className={`flex-1 px-3 py-2 text-center text-[11px] sm:text-xs font-medium transition-colors flex items-center justify-center gap-1 ${activeTab === 'unread'
+                    ? 'bg-white text-blue-600 border-b-2 border-blue-600'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    }`}
                 >
                   Unread
                   {counts.unread > 0 && (
@@ -586,111 +643,110 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
 
             {/* Notifications Content */}
             <div className="flex-1 overflow-hidden">
-                {/* Notifications List */}
-                <div className="flex-1 overflow-y-auto max-h-[calc(85vh-100px)] sm:h-[400px]">
-                  {filteredNotifications.length === 0 ? (
-                    <div className="p-6 sm:p-8 text-center">
-                      <Bell className="w-10 sm:w-12 h-10 sm:h-12 text-gray-300 mx-auto mb-2 sm:mb-3" />
-                      <p className="text-gray-500 text-sm">No notifications</p>
-                    </div>
-                  ) : (
-                    <div className="divide-y">
-                      {filteredNotifications.map((notification) => (
-                        <motion.div
-                          key={notification.id}
-                          initial={{ opacity: 0, x: -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          className={`p-2.5 sm:p-3 hover:bg-gray-50 transition-colors cursor-pointer ${
-                            !notification.read ? 'bg-[#243d8a]/5/30' : ''
+              {/* Notifications List */}
+              <div className="flex-1 overflow-y-auto max-h-[calc(85vh-100px)] sm:h-[400px]">
+                {filteredNotifications.length === 0 ? (
+                  <div className="p-6 sm:p-8 text-center">
+                    <Bell className="w-10 sm:w-12 h-10 sm:h-12 text-gray-300 mx-auto mb-2 sm:mb-3" />
+                    <p className="text-gray-500 text-sm">No notifications</p>
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {filteredNotifications.map((notification) => (
+                      <motion.div
+                        key={notification.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className={`p-2.5 sm:p-3 hover:bg-gray-50 transition-colors cursor-pointer ${!notification.read ? 'bg-[#243d8a]/5/30' : ''
                           }`}
-                          onClick={() => handleNotificationAction(notification)}
-                        >
-                          <div className="flex items-start gap-2 sm:gap-3">
-                            <div className={`p-1 sm:p-1.5 rounded-md flex-shrink-0 ${getNotificationColor(notification.type)}`}>
-                              <span className="[&>svg]:w-4 [&>svg]:h-4 sm:[&>svg]:w-5 sm:[&>svg]:h-5">
-                                {getNotificationIcon(notification.type)}
-                              </span>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-medium text-xs sm:text-sm text-gray-900 mb-0.5 sm:mb-1 line-clamp-2">
-                                {notification.title}
-                              </h4>
-                              <p className="text-[10px] sm:text-xs text-gray-600 mb-1.5 sm:mb-2 line-clamp-2">
-                                {notification.message}
-                              </p>
+                        onClick={() => handleNotificationAction(notification)}
+                      >
+                        <div className="flex items-start gap-2 sm:gap-3">
+                          <div className={`p-1 sm:p-1.5 rounded-md flex-shrink-0 ${getNotificationColor(notification.type)}`}>
+                            <span className="[&>svg]:w-4 [&>svg]:h-4 sm:[&>svg]:w-5 sm:[&>svg]:h-5">
+                              {getNotificationIcon(notification.type)}
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-medium text-xs sm:text-sm text-gray-900 mb-0.5 sm:mb-1 line-clamp-2">
+                              {notification.title}
+                            </h4>
+                            <p className="text-[10px] sm:text-xs text-gray-600 mb-1.5 sm:mb-2 line-clamp-2">
+                              {notification.message}
+                            </p>
 
-                              {/* Metadata - Hidden on mobile for compactness */}
-                              {notification.metadata && (
-                                <div className="hidden sm:flex flex-wrap gap-1.5 mb-2">
-                                  {notification.metadata.project && (
-                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
-                                      <FileText className="w-3 h-3 mr-1" />
-                                      {notification.metadata.project}
-                                    </Badge>
-                                  )}
-                                  {notification.metadata.amount && (
-                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
-                                      <Banknote className="w-3 h-3 mr-1" />
-                                      AED {notification.metadata.amount.toLocaleString()}
-                                    </Badge>
-                                  )}
-                                </div>
-                              )}
+                            {/* Metadata - Hidden on mobile for compactness */}
+                            {notification.metadata && (
+                              <div className="hidden sm:flex flex-wrap gap-1.5 mb-2">
+                                {notification.metadata.project && (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
+                                    <FileText className="w-3 h-3 mr-1" />
+                                    {notification.metadata.project}
+                                  </Badge>
+                                )}
+                                {notification.metadata.amount && (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
+                                    <Banknote className="w-3 h-3 mr-1" />
+                                    AED {notification.metadata.amount.toLocaleString()}
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
 
-                              <div className="flex items-center gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
-                                <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
-                                  {/* Temporarily hidden - timestamp showing incorrect time */}
-                                  {/* <span className="text-xs text-gray-400">
+                            <div className="flex items-center gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                              <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
+                                {/* Temporarily hidden - timestamp showing incorrect time */}
+                                {/* <span className="text-xs text-gray-400">
                                     {formatTimestamp(notification.timestamp)}
                                   </span> */}
-                                  {notification.metadata?.sender && (
-                                    <span className="text-[10px] sm:text-xs text-gray-500 truncate">
-                                      <Users className="w-2.5 sm:w-3 h-2.5 sm:h-3 inline mr-0.5 sm:mr-1" />
-                                      {notification.metadata.sender}
-                                    </span>
-                                  )}
-                                </div>
+                                {notification.metadata?.sender && (
+                                  <span className="text-[10px] sm:text-xs text-gray-500 truncate">
+                                    <Users className="w-2.5 sm:w-3 h-2.5 sm:h-3 inline mr-0.5 sm:mr-1" />
+                                    {notification.metadata.sender}
+                                  </span>
+                                )}
+                              </div>
 
-                                {/* Actions */}
-                                <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
-                                  <Badge className={`text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-0 sm:py-0.5 ${getPriorityColor(notification.priority)} border`}>
-                                    {notification.priority}
-                                  </Badge>
-                                  {!notification.read && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        markAsRead(notification.id);
-                                      }}
-                                      className="h-5 w-5 sm:h-6 sm:w-6 p-0"
-                                      title="Mark as read"
-                                    >
-                                      <Check className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
-                                    </Button>
-                                  )}
+                              {/* Actions */}
+                              <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
+                                <Badge className={`text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-0 sm:py-0.5 ${getPriorityColor(notification.priority)} border`}>
+                                  {notification.priority}
+                                </Badge>
+                                {!notification.read && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      deleteNotification(notification.id);
+                                      markAsRead(notification.id);
                                     }}
-                                    className="h-5 w-5 sm:h-6 sm:w-6 p-0 text-gray-400 hover:text-red-600"
-                                    title="Delete"
+                                    className="h-5 w-5 sm:h-6 sm:w-6 p-0"
+                                    title="Mark as read"
                                   >
-                                    <X className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
+                                    <Check className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
                                   </Button>
-                                </div>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteNotification(notification.id);
+                                  }}
+                                  className="h-5 w-5 sm:h-6 sm:w-6 p-0 text-gray-400 hover:text-red-600"
+                                  title="Delete"
+                                >
+                                  <X className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
+                                </Button>
                               </div>
                             </div>
                           </div>
-                        </motion.div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </motion.div>
         )}

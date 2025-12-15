@@ -520,7 +520,7 @@ export function mapNotificationToWorkflow(
     }
     // Match "New BOQ for Approval", "BOQ Pending", "BOQ Created"
     if (titleLower.includes('new boq') || titleLower.includes('pending') || titleLower.includes('created') ||
-        messageLower.includes('requires your approval') || messageLower.includes('awaiting your approval')) {
+      messageLower.includes('requires your approval') || messageLower.includes('awaiting your approval')) {
       return NOTIFICATION_WORKFLOWS.find(w => w.id === 'est_create_boq');
     }
   }
@@ -559,7 +559,9 @@ export function mapNotificationToWorkflow(
   }
 
   // Check for Purchase Request/Order workflows (buyer receives these from PM/Estimator)
-  if (titleLower.includes('purchase request') || titleLower.includes('new purchase request assigned')) {
+  // NOTE: Don't match this for Estimators - they should use the materials purchase handler
+  if ((titleLower.includes('purchase request') || titleLower.includes('new purchase request assigned')) &&
+    metadata?.target_role !== 'estimator') {
     return NOTIFICATION_WORKFLOWS.find(w => w.id === 'cr_assigned_to_buyer');
   }
 

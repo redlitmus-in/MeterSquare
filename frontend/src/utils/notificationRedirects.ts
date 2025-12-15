@@ -53,22 +53,28 @@ export const getNotificationRedirectPath = (
   // These have category='change_request' or title contains 'materials purchase'
   // Must check BEFORE BOQ handling since they may have category='approval'
   if (titleLower.includes('materials purchase') || messageLower.includes('materials purchase') ||
-      titleLower.includes('change request') || messageLower.includes('change request') ||
-      category === 'change_request' || metadata?.cr_id) {
+    titleLower.includes('change request') || messageLower.includes('change request') ||
+    category === 'change_request' || metadata?.cr_id) {
 
-    console.log('[NotificationRedirect] Matched Materials Purchase/Change Request, request_type:', metadata?.request_type);
+    // Check if user is Estimator - they don't have /extra-material route
+    const isEstimator = userRole && (
+      userRole.toString().toLowerCase().includes('estimator') ||
+      userRole === '3' || userRole === 3
+    );
 
     // Determine correct route based on request_type from metadata
-    // EXTRA_MATERIALS goes to /extra-material, others go to /change-requests
+    // EXTRA_MATERIALS goes to /extra-material for PM/Buyer, but Estimators always go to /change-requests
     const isExtraMaterial = metadata?.request_type === 'EXTRA_MATERIALS';
-    const basePath = isExtraMaterial ? '/extra-material' : '/change-requests';
+    const basePath = isEstimator
+      ? '/change-requests'  // Estimators always go to change-requests
+      : (isExtraMaterial ? '/extra-material' : '/change-requests');
 
     // Materials Purchase Approved
     if (titleLower.includes('approved') || messageLower.includes('approved')) {
       return {
         path: buildPath(basePath),
         queryParams: {
-          tab: isExtraMaterial ? 'accepted' : 'approved',
+          tab: isExtraMaterial && !isEstimator ? 'accepted' : 'approved',
           ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
         },
       };
@@ -89,7 +95,7 @@ export const getNotificationRedirectPath = (
     return {
       path: buildPath(basePath),
       queryParams: {
-        tab: isExtraMaterial ? 'requested' : 'pending',
+        tab: isExtraMaterial && !isEstimator ? 'requested' : 'pending',
         ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
       },
     };
@@ -97,11 +103,11 @@ export const getNotificationRedirectPath = (
 
   // Handle BOQ-related notifications (only if NOT materials purchase)
   if (titleLower.includes('boq') || messageLower.includes('boq') ||
-      (category === 'approval' && (metadata?.boq_id || metadata?.documentId))) {
+    (category === 'approval' && (metadata?.boq_id || metadata?.documentId))) {
 
     // TD Approved BOQ - redirect to approved tab
     if (titleLower.includes('approved') || messageLower.includes('approved by td') ||
-        messageLower.includes('technical director approved')) {
+      messageLower.includes('technical director approved')) {
       return {
         path: buildPath('/projects'),
         queryParams: {
@@ -124,8 +130,8 @@ export const getNotificationRedirectPath = (
 
     // BOQ Pending Approval - for Technical Director, redirect to project-approvals
     if (titleLower.includes('pending') || messageLower.includes('pending approval') ||
-        titleLower.includes('new boq') || messageLower.includes('requires your approval') ||
-        messageLower.includes('awaiting your approval') || messageLower.includes('needs approval')) {
+      titleLower.includes('new boq') || messageLower.includes('requires your approval') ||
+      messageLower.includes('awaiting your approval') || messageLower.includes('needs approval')) {
       // Check if user is Technical Director
       const isTD = userRole && (
         userRole.toString().toLowerCase().includes('technical') ||
@@ -296,13 +302,30 @@ export const getNotificationRedirectPath = (
   // Handle Purchase Order notifications
   if (titleLower.includes('purchase order') || titleLower.includes('po ') || category === 'purchase' || category === 'procurement') {
 
+    // Check user role to determine correct redirect path
+    const isEstimator = userRole && (
+      userRole.toString().toLowerCase().includes('estimator') ||
+      userRole === '3' || userRole === 3
+    );
+
+    const isBuyer = userRole && (
+      userRole.toString().toLowerCase().includes('buyer') ||
+      userRole.toString().toLowerCase().includes('procurement') ||
+      userRole === '8' || userRole === 8
+    );
+
+    // Determine base path based on role
+    // Estimators see their change requests, Buyers see purchase orders
+    const basePath = isEstimator ? '/change-requests' : '/purchase-orders';
+
     // PO Approved
     if (titleLower.includes('approved')) {
       return {
-        path: buildPath('/purchase-orders'),
+        path: buildPath(basePath),
         queryParams: {
           tab: 'approved',
           ...(metadata?.po_id && { po_id: metadata.po_id }),
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }),
           ...(metadata?.po_child_id && { po_child_id: String(metadata.po_child_id) })
         },
       };
@@ -311,10 +334,11 @@ export const getNotificationRedirectPath = (
     // PO Rejected
     if (titleLower.includes('rejected')) {
       return {
-        path: buildPath('/purchase-orders'),
+        path: buildPath(basePath),
         queryParams: {
           tab: 'rejected',
           ...(metadata?.po_id && { po_id: metadata.po_id }),
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }),
           ...(metadata?.po_child_id && { po_child_id: String(metadata.po_child_id) })
         },
       };
@@ -323,17 +347,18 @@ export const getNotificationRedirectPath = (
     // New PO Created
     if (titleLower.includes('new') || titleLower.includes('created')) {
       return {
-        path: buildPath('/purchase-orders'),
+        path: buildPath(basePath),
         queryParams: {
           tab: 'pending',
-          ...(metadata?.po_id && { po_id: metadata.po_id })
+          ...(metadata?.po_id && { po_id: metadata.po_id }),
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
         },
       };
     }
 
     // Default PO redirect
     return {
-      path: buildPath('/purchase-orders'),
+      path: buildPath(basePath),
       queryParams: {
         ...(metadata?.po_id && { po_id: metadata.po_id }),
         ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
@@ -343,12 +368,12 @@ export const getNotificationRedirectPath = (
 
   // Handle Material/Inventory notifications
   if (titleLower.includes('material') || titleLower.includes('inventory') ||
-      titleLower.includes('backup') || titleLower.includes('disposal') ||
-      titleLower.includes('return') || category === 'material') {
+    titleLower.includes('backup') || titleLower.includes('disposal') ||
+    titleLower.includes('return') || category === 'material') {
 
     // Backup Stock notifications - redirect to Stock In > Backup tab
     if (titleLower.includes('backup') || messageLower.includes('backup stock') ||
-        messageLower.includes('added to backup')) {
+      messageLower.includes('added to backup')) {
       return {
         path: buildPath('/stock-management'),
         queryParams: {
@@ -362,7 +387,7 @@ export const getNotificationRedirectPath = (
 
     // Disposal notifications - redirect to Stock In > Backup tab (disposal review)
     if (titleLower.includes('disposal') || messageLower.includes('disposal') ||
-        messageLower.includes('disposed')) {
+      messageLower.includes('disposed')) {
       return {
         path: buildPath('/stock-management'),
         queryParams: {
@@ -376,7 +401,7 @@ export const getNotificationRedirectPath = (
 
     // Return Approved notifications - for SE, redirect to Material Receipts > Return tab
     if ((titleLower.includes('return') && titleLower.includes('approved')) ||
-        messageLower.includes('return approved') || messageLower.includes('return has been approved')) {
+      messageLower.includes('return approved') || messageLower.includes('return has been approved')) {
       return {
         path: buildPath('/material-receipts'),
         queryParams: {
@@ -388,7 +413,7 @@ export const getNotificationRedirectPath = (
 
     // Return Rejected notifications - for SE, redirect to Material Receipts > Return tab
     if ((titleLower.includes('return') && titleLower.includes('rejected')) ||
-        messageLower.includes('return rejected') || messageLower.includes('return has been rejected')) {
+      messageLower.includes('return rejected') || messageLower.includes('return has been rejected')) {
       return {
         path: buildPath('/material-receipts'),
         queryParams: {
@@ -400,7 +425,7 @@ export const getNotificationRedirectPath = (
 
     // Damaged Material Return - needs PM review
     if (titleLower.includes('damaged') || messageLower.includes('damaged material') ||
-        messageLower.includes('needs review')) {
+      messageLower.includes('needs review')) {
       return {
         path: buildPath('/stock-management'),
         queryParams: {
@@ -463,7 +488,7 @@ export const getNotificationRedirectPath = (
 
     // Delivery Confirmed - PM notification
     if (titleLower.includes('delivery confirmed') || messageLower.includes('delivery confirmed') ||
-        messageLower.includes('confirmed receipt')) {
+      messageLower.includes('confirmed receipt')) {
       return {
         path: buildPath('/stock-management'),
         queryParams: {

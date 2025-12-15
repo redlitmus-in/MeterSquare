@@ -530,13 +530,17 @@ class ComprehensiveNotificationService:
 
                 # Determine correct route based on recipient_role and request_type
                 # Buyer uses 'purchase-orders' page for all CR/PO work
+                # Estimator uses 'change-requests' page (they don't have /extra-material route)
                 recipient_role_lower = (recipient_role or '').lower().replace(' ', '-').replace('_', '-')
 
                 if recipient_role_lower == 'buyer':
                     # Buyer views purchase requests on purchase-orders page
                     route = 'purchase-orders'
+                elif recipient_role_lower == 'estimator':
+                    # Estimator ALWAYS goes to change-requests (they don't have /extra-material route)
+                    route = 'change-requests'
                 else:
-                    # Other roles use extra-material or change-requests based on request_type
+                    # Other roles (PM/TD) use extra-material or change-requests based on request_type
                     route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
 
                 action_url = f'/{recipient_role_lower}/{route}?cr_id={cr_id}'
@@ -587,13 +591,17 @@ class ComprehensiveNotificationService:
         try:
             # Determine correct route based on next_role and request_type
             # Buyer uses 'purchase-orders' page for all CR/PO work
+            # Estimator uses 'change-requests' page (they don't have /extra-material route)
             next_role_lower = (next_role or '').lower().replace(' ', '-').replace('_', '-')
 
             if next_role_lower == 'buyer':
                 # Buyer views purchase requests on purchase-orders page
                 route = 'purchase-orders'
+            elif next_role_lower == 'estimator':
+                # Estimator ALWAYS goes to change-requests (they don't have /extra-material route)
+                route = 'change-requests'
             else:
-                # Other roles use extra-material or change-requests
+                # Other roles (PM/TD) use extra-material or change-requests
                 route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
 
             for user_id in next_user_ids:

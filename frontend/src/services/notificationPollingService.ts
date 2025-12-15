@@ -17,8 +17,10 @@ class NotificationPollingService {
   private lastFetchTime: number = 0;
   private backoffMultiplier = 1; // Exponential backoff if no new notifications
   private maxBackoffMultiplier = 4; // Max 2 minutes (30s * 4 = 120s)
+  private processedNotificationIds: Set<string> = new Set(); // Track processed IDs
+  private maxProcessedIds = 500; // Limit to prevent memory leaks
 
-  private constructor() {}
+  private constructor() { }
 
   static getInstance(): NotificationPollingService {
     if (!NotificationPollingService.instance) {
@@ -126,6 +128,11 @@ class NotificationPollingService {
 
       if (data.success && data.notifications && Array.isArray(data.notifications)) {
         const newNotifications = data.notifications.filter((notif: any) => {
+          // Skip if already processed
+          if (this.processedNotificationIds.has(notif.id)) {
+            return false;
+          }
+
           const createdAt = new Date(notif.timestamp || notif.createdAt).getTime();
           return createdAt > this.lastFetchTime;
         });
@@ -138,6 +145,16 @@ class NotificationPollingService {
           // Add each new notification to the store
           const store = useNotificationStore.getState();
           for (const notif of newNotifications) {
+            // Mark as processed BEFORE adding to store
+            this.processedNotificationIds.add(notif.id);
+
+            // Limit processed IDs set size to prevent memory leaks
+            if (this.processedNotificationIds.size > this.maxProcessedIds) {
+              // Remove oldest entries (first 100)
+              const idsToRemove = Array.from(this.processedNotificationIds).slice(0, 100);
+              idsToRemove.forEach(id => this.processedNotificationIds.delete(id));
+            }
+
             store.addNotification({
               id: notif.id,
               type: notif.type || 'info',

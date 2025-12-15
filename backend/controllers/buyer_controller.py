@@ -62,30 +62,92 @@ supabase: Client = create_client(supabase_url, supabase_key) if supabase_url and
 
 
 def _parse_custom_terms(saved_customization, default_template=None):
-    """Helper to safely parse custom_terms from saved customization or default template"""
-    # Try saved_customization first
+    """
+    Parse custom terms similar to BOQ terms system.
+    
+    How it works (like BOQ):
+    1. Load master list from system_settings.lpo_payment_terms_list (global terms available to all)
+    2. Load saved selections from lpo_customizations.custom_terms (which terms are checked)
+    3. Merge them: return all master terms with 'selected' flag based on saved selections
+    
+    Returns: Array of {text: string, selected: boolean}
+    """
+    from models.system_settings import SystemSettings
+    
+    # Step 1: Get master list of terms from system settings (like boq_terms table)
+    master_terms = []
+    try:
+        settings = SystemSettings.query.first()
+        if settings:
+            # Get payment terms list from system settings
+            payment_terms_str = getattr(settings, 'lpo_payment_terms_list', None)
+            if payment_terms_str:
+                payment_terms_list = json.loads(payment_terms_str)
+                if payment_terms_list and isinstance(payment_terms_list, list):
+                    # Convert to new format if needed
+                    for term in payment_terms_list:
+                        if isinstance(term, str):
+                            master_terms.append({"text": term, "selected": False})
+                        elif isinstance(term, dict) and 'text' in term:
+                            master_terms.append(term)
+            
+            # Also get general terms if available
+            general_terms_str = getattr(settings, 'lpo_general_terms', None)
+            if general_terms_str:
+                general_terms_list = json.loads(general_terms_str)
+                if general_terms_list and isinstance(general_terms_list, list):
+                    for term in general_terms_list:
+                        if isinstance(term, str):
+                            master_terms.append({"text": term, "selected": False})
+                        elif isinstance(term, dict) and 'text' in term:
+                            master_terms.append(term)
+    except Exception as e:
+        log.warning(f"Error loading master terms from system settings: {e}")
+    
+    # Step 2: Get saved selections (which terms are checked for this specific LPO)
+    saved_selections = []
+    
+    # Priority 1: Check saved_customization (this specific LPO)
     if saved_customization:
         try:
             custom_terms_str = getattr(saved_customization, 'custom_terms', None)
             if custom_terms_str:
                 parsed = json.loads(custom_terms_str)
-                if parsed:  # Only return if not empty
-                    return parsed
+                if parsed and isinstance(parsed, list):
+                    saved_selections = parsed
         except Exception as e:
             log.warning(f"Error parsing custom_terms from customization: {e}")
-
-    # Fall back to default_template
-    if default_template:
+    
+    # Priority 2: If no saved customization, check default_template (user's defaults)
+    if not saved_selections and default_template:
         try:
             custom_terms_str = getattr(default_template, 'custom_terms', None)
             if custom_terms_str:
                 parsed = json.loads(custom_terms_str)
-                if parsed:
-                    return parsed
+                if parsed and isinstance(parsed, list):
+                    saved_selections = parsed
         except Exception as e:
             log.warning(f"Error parsing custom_terms from default template: {e}")
-
-    return []
+    
+    # Step 3: Merge master terms with saved selections
+    # If we have saved selections, use them to mark which terms are selected
+    if saved_selections:
+        # Create a set of selected term texts for quick lookup
+        selected_texts = {term.get('text', '') for term in saved_selections if term.get('selected', False)}
+        
+        # Update master terms with selection state
+        for term in master_terms:
+            if term.get('text') in selected_texts:
+                term['selected'] = True
+        
+        # Also add any custom terms from saved_selections that aren't in master list
+        # (user might have added custom terms)
+        master_term_texts = {term.get('text') for term in master_terms}
+        for saved_term in saved_selections:
+            if saved_term.get('text') and saved_term.get('text') not in master_term_texts:
+                master_terms.append(saved_term)
+    
+    return master_terms
 
 
 def process_materials_with_negotiated_prices(cr, boq_details=None):
