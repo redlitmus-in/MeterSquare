@@ -6,6 +6,7 @@ import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelp
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { useAuthStore } from '@/store/authStore';
+import { MATERIAL_CONSUMING_STATUSES } from '@/lib/constants';
 
 interface EditChangeRequestModalProps {
   isOpen: boolean;
@@ -100,13 +101,12 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
           const boqQty = item.original_boq_quantity || item.boq_quantity;
 
           // Calculate already purchased quantity for this material
-          // Only count approved/completed requests - not pending ones
-          const PURCHASED_STATUSES = ['approved', 'purchase_completed', 'assigned_to_buyer'];
+          // Uses centralized config to prevent over-allocation
           let alreadyPurchased = 0;
           if (item.master_material_id) {
             alreadyPurchased = allChangeRequests
               .filter((req: any) =>
-                PURCHASED_STATUSES.includes(req.status) &&
+                MATERIAL_CONSUMING_STATUSES.includes(req.status) &&
                 req.cr_id !== changeRequest.cr_id
               )
               .reduce((total, req) => {
@@ -528,7 +528,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                                     </div>
                                     {material.already_purchased !== undefined && material.already_purchased > 0 && (
                                       <div className="flex justify-between">
-                                        <span className="text-orange-600">Already Purchased:</span>
+                                        <span className="text-orange-600">Already Requested/Purchased:</span>
                                         <span className="font-semibold text-orange-700">{material.already_purchased} {material.unit}</span>
                                       </div>
                                     )}

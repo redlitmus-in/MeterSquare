@@ -48,6 +48,40 @@ class ChangeRequestConfig:
     STATUS_PURCHASE_COMPLETE = 'purchase_completed'  # Fixed: was 'purchase_complete', now 'purchase_completed'
     STATUS_REJECTED = 'rejected'
 
+    # Status Arrays for Filtering
+    # Statuses that consume/reserve material quantities (includes pending to prevent over-allocation)
+    MATERIAL_CONSUMING_STATUSES = [
+        'pending',
+        'approved',
+        'purchase_completed',
+        'assigned_to_buyer'
+    ]
+
+    # Statuses for approved workflow (all stages after initial approval)
+    APPROVED_WORKFLOW_STATUSES = [
+        'approved_by_pm',
+        'approved_by_td',
+        'assigned_to_buyer',
+        'purchase_completed',
+        'rejected',
+        'under_review',
+        'send_to_est',
+        'send_to_buyer',
+        'pending_td_approval'
+    ]
+
+    # Statuses for MEP approved workflow
+    MEP_APPROVED_STATUSES = [
+        'approved_by_pm',
+        'approved_by_td',
+        'assigned_to_buyer',
+        'purchase_completed',
+        'rejected',
+        'under_review',
+        'send_to_est',
+        'send_to_buyer'
+    ]
+
     # Request Types
     REQUEST_TYPE_EXTRA_MATERIALS = 'EXTRA_MATERIALS'
 

@@ -1758,10 +1758,11 @@ def get_boq(boq_id):
         try:
             from models.change_request import ChangeRequest
 
-            # Get approved and completed change requests for this BOQ
+            # Get change requests that consume/reserve material quantities
+            # Uses centralized config to prevent over-allocation
             approved_change_requests = ChangeRequest.query.filter(
                 ChangeRequest.boq_id == boq_id,
-                ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer']),
+                ChangeRequest.status.in_(CR_CONFIG.MATERIAL_CONSUMING_STATUSES),
                 ChangeRequest.is_deleted == False
             ).order_by(ChangeRequest.approval_date.desc()).all()
 

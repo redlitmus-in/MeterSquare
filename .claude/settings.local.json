@@ -57,7 +57,9 @@
       "Bash(npx eslint:*)",
       "Bash(npm run lint)",
       "Bash(python3 -m ruff check:*)",
-      "Bash(python -m py_compile:*)"
+      "Bash(python -m py_compile:*)",
+      "Bash(source:*)",
+      "Bash(python3 -m py_compile:*)"
     ],
     "deny": [],
     "ask": []

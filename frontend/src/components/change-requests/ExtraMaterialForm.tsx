@@ -12,6 +12,7 @@ import { apiClient, API_BASE_URL } from '@/api/config';
 import { useAuthStore } from '@/store/authStore';
 import { useAdminViewStore } from '@/store/adminViewStore';
 import { changeRequestService } from '@/services/changeRequestService';
+import { MATERIAL_CONSUMING_STATUSES } from '@/lib/constants';
 
 interface Project {
   project_id: number;
@@ -1427,11 +1428,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             const isBOQMaterial = hasValidMaterialId && material.original_boq_quantity !== undefined;
 
                             // If it's a BOQ material, calculate already purchased (excluding this request)
-                            // Only count requests that are approved or completed - not pending ones
+                            // Uses centralized config to prevent over-allocation
                             let alreadyPurchased = 0;
                             if (isBOQMaterial) {
                               alreadyPurchased = existingRequests
-                                .filter(req => ['approved', 'purchase_completed', 'assigned_to_buyer'].includes(req.status) && req.cr_id !== request.cr_id)
+                                .filter(req => MATERIAL_CONSUMING_STATUSES.includes(req.status) && req.cr_id !== request.cr_id)
                                 .reduce((total, req) => {
                                   const allMaterials = [
                                     ...(req.materials_data || []),
@@ -1480,7 +1481,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                                     </div>
                                     {alreadyPurchased > 0 && (
                                       <div className="flex justify-between">
-                                        <span className="text-orange-600">Already Purchased:</span>
+                                        <span className="text-orange-600">Already Requested/Purchased:</span>
                                         <span className="font-semibold text-orange-700">{alreadyPurchased} {material.unit}</span>
                                       </div>
                                     )}
@@ -1621,10 +1622,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         totalRequestsAvailable: existingRequests.length
                       });
 
-                      // Only count requests that are approved or completed - not pending ones
-                      const PURCHASED_STATUSES = ['approved', 'purchase_completed', 'assigned_to_buyer'];
+                      // Uses centralized config to prevent over-allocation
                       const alreadyPurchased = existingRequests
-                        .filter(req => PURCHASED_STATUSES.includes(req.status))
+                        .filter(req => MATERIAL_CONSUMING_STATUSES.includes(req.status))
                         .reduce((total, req) => {
                           const allMaterials = [
                             ...(req.materials_data || []),
@@ -1679,10 +1679,10 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               <span className="text-gray-600">BOQ Allocated:</span>
                               <span className="font-semibold text-gray-900">{boqQuantity} {material.unit}</span>
                             </div>
-                            {/* Only show "Already Purchased" when there are actual purchases */}
+                            {/* Only show "Already Requested/Purchased" when there are actual requests */}
                             {alreadyPurchased > 0 && (
                               <div className="flex justify-between">
-                                <span className="text-orange-600">Already Purchased (This Sub-Item):</span>
+                                <span className="text-orange-600">Already Requested/Purchased:</span>
                                 <span className="font-semibold text-orange-700">
                                   {alreadyPurchased} {material.unit}
                                 </span>
@@ -1721,12 +1721,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                 <div className="flex gap-2">
                   {subItem.materials && subItem.materials.length > 0 && (() => {
                     // Check if there are any available materials (not fully consumed)
-                    // Only count approved/completed requests as "purchased"
-                    const PURCHASED_STATUSES = ['approved', 'purchase_completed', 'assigned_to_buyer'];
+                    // Uses centralized config to prevent over-allocation
                     const availableMaterials = subItem.materials.filter(material => {
                       const materialKey = material.material_id || material.material_name;
                       const alreadyPurchased = existingRequests
-                        .filter(req => PURCHASED_STATUSES.includes(req.status))
+                        .filter(req => MATERIAL_CONSUMING_STATUSES.includes(req.status))
                         .reduce((total, req) => {
                           const allMaterials = [
                             ...(req.materials_data || []),
@@ -1843,11 +1842,10 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         {subItem.materials
                           .filter(material => {
                             // Calculate already purchased quantity for this material
-                            // Only count approved/completed requests as "purchased"
-                            const PURCHASED_STATUSES = ['approved', 'purchase_completed', 'assigned_to_buyer'];
+                            // Uses centralized config to prevent over-allocation
                             const materialKey = material.material_id || material.material_name;
                             const alreadyPurchased = existingRequests
-                              .filter(req => PURCHASED_STATUSES.includes(req.status))
+                              .filter(req => MATERIAL_CONSUMING_STATUSES.includes(req.status))
                               .reduce((total, req) => {
                                 const allMaterials = [
                                   ...(req.materials_data || []),
@@ -2023,10 +2021,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         (() => {
                           // Calculate already purchased quantity from existing requests
                           // Track per-sub-item allocation - includes ALL roles for same sub-item
-                          // Only count approved/completed requests as "purchased"
-                          const PURCHASED_STATUSES = ['approved', 'purchase_completed', 'assigned_to_buyer'];
+                          // Uses centralized config to prevent over-allocation
                           const alreadyPurchased = existingRequests
-                            .filter(req => PURCHASED_STATUSES.includes(req.status))
+                            .filter(req => MATERIAL_CONSUMING_STATUSES.includes(req.status))
                             .reduce((total, req) => {
                               // Check both materials_data and sub_items_data
                               const allMaterials = [
@@ -2072,7 +2069,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                                 </div>
                                 {alreadyPurchased > 0 && (
                                   <div className="flex justify-between">
-                                    <span className="text-orange-600">Already Purchased:</span>
+                                    <span className="text-orange-600">Already Requested/Purchased:</span>
                                     <span className="font-semibold text-orange-700">{alreadyPurchased} {material.unit}</span>
                                   </div>
                                 )}

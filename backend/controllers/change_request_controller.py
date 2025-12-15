@@ -175,14 +175,14 @@ def create_change_request():
                 'size': mat.get('size')  # Size for materials
             })
 
-        # Calculate already consumed from previous approved change requests (NEW materials only)
-        # Sum materials_total_cost from all approved/purchase_completed CRs for this BOQ
+        # Calculate already consumed from change requests that reserve material quantities
+        # Uses centralized config to prevent over-allocation
         already_consumed = db.session.query(
             db.func.coalesce(db.func.sum(ChangeRequest.materials_total_cost), 0)
         ).filter(
             ChangeRequest.boq_id == boq_id,
             ChangeRequest.is_deleted == False,
-            ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
+            ChangeRequest.status.in_(CR_CONFIG.MATERIAL_CONSUMING_STATUSES)
         ).scalar() or 0.0
 
         # Calculate negotiable margin analysis
@@ -1018,7 +1018,7 @@ def get_all_change_requests():
             # Filter for approved/completed requests (to show in Accepted/Completed tabs)
             # SE should ONLY see their own approved requests, NOT PM/MEP created requests
             se_approved_status_filter = and_(
-                ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'pending_td_approval']),
+                ChangeRequest.status.in_(CR_CONFIG.APPROVED_WORKFLOW_STATUSES),
                 ChangeRequest.requested_by_role.in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])  # Only SE created requests
             )
 
@@ -1083,7 +1083,7 @@ def get_all_change_requests():
 
             # Filter for approved/completed requests that were assigned to this PM (to show in Accepted/Completed tabs)
             # For SE-originated requests, only show to the PM who was originally assigned
-            approved_status_filter = ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'pending_td_approval'])
+            approved_status_filter = ChangeRequest.status.in_(CR_CONFIG.APPROVED_WORKFLOW_STATUSES)
 
             # Filter for SE-originated requests that were assigned to this PM and have been processed
             se_originated_assigned_to_this_pm = and_(
@@ -1212,7 +1212,7 @@ def get_all_change_requests():
 
             # Filter for approved/completed requests (to show in Accepted/Completed tabs)
             mep_approved_status_filter = and_(
-                ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer', 'pending_td_approval']),
+                ChangeRequest.status.in_(CR_CONFIG.APPROVED_WORKFLOW_STATUSES),
                 ChangeRequest.requested_by_role.in_(['mep', 'mepsupervisor'])  # Only MEP created requests
             )
 
@@ -1230,7 +1230,7 @@ def get_all_change_requests():
             )
 
             # Approved/completed requests status filter
-            mep_approved_statuses = ChangeRequest.status.in_(['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'rejected', 'under_review', 'send_to_est', 'send_to_buyer'])
+            mep_approved_statuses = ChangeRequest.status.in_(CR_CONFIG.MEP_APPROVED_STATUSES)
 
             # SE-originated requests assigned to this MEP
             se_originated_assigned_to_this_mep = and_(
@@ -1676,14 +1676,15 @@ def get_change_request_by_id(cr_id):
                 if displayed_total_cost > 0:
                     result['materials_total_cost'] = round(displayed_total_cost, 2)
 
-                # Calculate already consumed from OTHER approved CRs (exclude current CR)
+                # Calculate already consumed from OTHER CRs (exclude current CR)
+                # Uses centralized config to prevent over-allocation
                 already_consumed = db.session.query(
                     db.func.coalesce(db.func.sum(ChangeRequest.materials_total_cost), 0)
                 ).filter(
                     ChangeRequest.boq_id == change_request.boq_id,
                     ChangeRequest.cr_id != cr_id,  # Exclude current CR
                     ChangeRequest.is_deleted == False,
-                    ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
+                    ChangeRequest.status.in_(CR_CONFIG.MATERIAL_CONSUMING_STATUSES)
                 ).scalar() or 0.0
 
                 # Calculate negotiable margin analysis using the DISPLAYED total cost

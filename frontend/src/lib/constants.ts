@@ -354,9 +354,75 @@ export const REALTIME_TABLES = {
 } as const;
 
 // =============================================================================
+// CHANGE REQUEST STATUS CONSTANTS
+// =============================================================================
+
+/**
+ * Change Request Status Constants
+ * Centralized status definitions to avoid hardcoding across components
+ */
+export const CHANGE_REQUEST_STATUSES = {
+  PENDING: 'pending',
+  UNDER_REVIEW: 'under_review',
+  SEND_TO_PM: 'send_to_pm',
+  SEND_TO_MEP: 'send_to_mep',
+  SEND_TO_EST: 'send_to_est',
+  SEND_TO_BUYER: 'send_to_buyer',
+  APPROVED_BY_PM: 'approved_by_pm',
+  APPROVED_BY_TD: 'approved_by_td',
+  PENDING_TD_APPROVAL: 'pending_td_approval',
+  APPROVED: 'approved',
+  ASSIGNED_TO_BUYER: 'assigned_to_buyer',
+  PURCHASE_COMPLETED: 'purchase_completed',
+  REJECTED: 'rejected',
+} as const;
+
+/**
+ * Statuses that consume/reserve material quantities
+ * Includes pending to prevent over-allocation when multiple users request same materials
+ */
+export const MATERIAL_CONSUMING_STATUSES = [
+  'pending',
+  'approved',
+  'purchase_completed',
+  'assigned_to_buyer',
+] as const;
+
+/**
+ * Statuses for approved workflow (all stages after initial approval)
+ */
+export const APPROVED_WORKFLOW_STATUSES = [
+  'approved_by_pm',
+  'approved_by_td',
+  'assigned_to_buyer',
+  'purchase_completed',
+  'rejected',
+  'under_review',
+  'send_to_est',
+  'send_to_buyer',
+  'pending_td_approval',
+] as const;
+
+/**
+ * Statuses for MEP approved workflow
+ */
+export const MEP_APPROVED_STATUSES = [
+  'approved_by_pm',
+  'approved_by_td',
+  'assigned_to_buyer',
+  'purchase_completed',
+  'rejected',
+  'under_review',
+  'send_to_est',
+  'send_to_buyer',
+] as const;
+
+// =============================================================================
 // TYPE EXPORTS
 // =============================================================================
 
 export type CacheStrategy = keyof typeof CACHE_TIMES;
 export type StaleTimeKey = keyof typeof STALE_TIMES;
 export type QueryKeyFactory = typeof queryKeys;
+export type ChangeRequestStatus = typeof CHANGE_REQUEST_STATUSES[keyof typeof CHANGE_REQUEST_STATUSES];
+export type MaterialConsumingStatus = typeof MATERIAL_CONSUMING_STATUSES[number];
