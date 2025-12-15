@@ -70,6 +70,16 @@ export interface InternalMaterialRequest {
     project_name: string;
     project_code: string;
     location?: string;
+    site_supervisor?: {
+      user_id: number;
+      full_name: string;
+      email: string;
+    };
+    project_managers?: Array<{
+      user_id: number;
+      full_name: string;
+      email: string;
+    }>;
   };
   requester_details?: {
     user_id: number;

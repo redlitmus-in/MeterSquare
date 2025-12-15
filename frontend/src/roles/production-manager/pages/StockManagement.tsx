@@ -661,7 +661,7 @@ const StockManagement: React.FC = () => {
     setDnFormData({
       project_id: request.project_id || 0,
       delivery_date: new Date().toISOString().split('T')[0],
-      attention_to: request.project_details?.project_managers?.[0]?.full_name || '',
+      attention_to: request.project_details?.site_supervisor?.full_name || request.project_details?.project_managers?.[0]?.full_name || '',
       delivery_from: inventoryConfig.store_name,
       requested_by: request.requester_details?.full_name || '',
       vehicle_number: '',
@@ -3249,18 +3249,21 @@ const StockManagement: React.FC = () => {
                     {dnItems.map((item, index) => {
                       const selectedMaterial = materials.find(m => m.inventory_material_id === item.inventory_material_id);
                       return (
-                        <div key={index} className="flex gap-3 items-start bg-gray-50 p-3 rounded-lg">
-                          <div className="flex-1">
-                            {/* Read-only display when from request, editable select otherwise */}
-                            {selectedRequestForDN ? (
-                              <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm">
-                                <div className="font-medium">{selectedMaterial?.material_name || 'Unknown'}</div>
-                                <div className="text-xs text-gray-500">
-                                  {selectedMaterial?.material_code} • Stock: {selectedMaterial?.current_stock} {selectedMaterial?.unit}
-                                </div>
+                        <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                          {/* Read-only display when from request, editable layout otherwise */}
+                          {selectedRequestForDN ? (
+                            <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm">
+                              <div className="font-medium">{selectedMaterial?.material_name || 'Unknown'}</div>
+                              <div className="text-xs text-gray-500 mt-1">
+                                {selectedMaterial?.material_code} • Stock: {selectedMaterial?.current_stock} {selectedMaterial?.unit}
                               </div>
-                            ) : (
-                              <>
+                              <div className="text-sm text-purple-600 font-medium mt-2">
+                                Quantity: {item.quantity} {selectedMaterial?.unit}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex gap-3 items-start">
+                              <div className="flex-1">
                                 <select
                                   value={item.inventory_material_id}
                                   onChange={(e) => handleDnItemChange(index, 'inventory_material_id', Number(e.target.value))}
@@ -3295,42 +3298,33 @@ const StockManagement: React.FC = () => {
                                     Warning: Backup stock may be partially damaged. Condition: {selectedMaterial?.backup_condition_notes?.split('\n').pop() || 'See notes'}
                                   </div>
                                 )}
-                              </>
-                            )}
-                          </div>
-                          <div className="w-24">
-                            <input
-                              type="number"
-                              value={item.quantity || ''}
-                              onChange={(e) => handleDnItemChange(index, 'quantity', Number(e.target.value))}
-                              placeholder="Qty"
-                              readOnly={!!selectedRequestForDN}
-                              className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm ${
-                                selectedRequestForDN ? 'bg-gray-100 cursor-not-allowed' : 'focus:ring-2 focus:ring-purple-500'
-                              }`}
-                            />
-                          </div>
-                          {/* Only show item notes when NOT from request */}
-                          {!selectedRequestForDN && (
-                            <div className="flex-1">
-                              <input
-                                type="text"
-                                value={item.notes}
-                                onChange={(e) => handleDnItemChange(index, 'notes', e.target.value)}
-                                placeholder="Notes (optional)"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-sm"
-                              />
+                              </div>
+                              <div className="w-24">
+                                <input
+                                  type="number"
+                                  value={item.quantity || ''}
+                                  onChange={(e) => handleDnItemChange(index, 'quantity', Number(e.target.value))}
+                                  placeholder="Qty"
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:ring-2 focus:ring-purple-500"
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <input
+                                  type="text"
+                                  value={item.notes}
+                                  onChange={(e) => handleDnItemChange(index, 'notes', e.target.value)}
+                                  placeholder="Notes (optional)"
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-sm"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveDnItem(index)}
+                                className="p-2 text-red-500 hover:bg-red-100 rounded-lg"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </div>
-                          )}
-                          {/* Only show delete button when NOT from request */}
-                          {!selectedRequestForDN && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveDnItem(index)}
-                              className="p-2 text-red-500 hover:bg-red-100 rounded-lg"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
                           )}
                         </div>
                       );

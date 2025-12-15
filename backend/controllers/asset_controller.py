@@ -953,9 +953,11 @@ def get_dispatched_assets():
         ).all()
         for dm in dispatch_movements:
             key = (dm.category_id, dm.project_id)
-            if key not in received_info or (dm.received_at and (not received_info[key].get('received_at') or dm.received_at > received_info[key]['received_at'])):
+            existing = received_info.get(key)
+            if not existing or (dm.received_at and (not existing.get('_received_at_raw') or dm.received_at > existing['_received_at_raw'])):
                 received_info[key] = {
                     'received_at': dm.received_at.isoformat() if dm.received_at else None,
+                    '_received_at_raw': dm.received_at,  # Keep raw datetime for comparison
                     'received_by': dm.received_by,
                     'dispatched_at': dm.dispatched_at.isoformat() if dm.dispatched_at else None,
                     'dispatched_by': dm.dispatched_by

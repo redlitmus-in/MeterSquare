@@ -183,6 +183,19 @@ def get_mep_supervisors(project):
     return supervisors
 
 
+def get_site_supervisor(project):
+    """Extract site supervisor/engineer from project object"""
+    if project and project.site_supervisor_id:
+        site_user = User.query.get(project.site_supervisor_id)
+        if site_user:
+            return {
+                'user_id': site_user.user_id,
+                'full_name': site_user.full_name,
+                'email': site_user.email
+            }
+    return None
+
+
 def enrich_project_details(project, include_mep=True):
     """Get enriched project details including managers and supervisors"""
     if not project:
@@ -192,7 +205,8 @@ def enrich_project_details(project, include_mep=True):
         'project_name': project.project_name,
         'project_code': project.project_code,
         'location': project.location,
-        'project_managers': get_project_managers(project)
+        'project_managers': get_project_managers(project),
+        'site_supervisor': get_site_supervisor(project)
     }
     if include_mep:
         details['mep_managers'] = get_mep_supervisors(project)

@@ -491,7 +491,7 @@ const MaterialReceipts: React.FC = () => {
             }`}
           >
             <ArrowUturnLeftIcon className="w-4 h-4" />
-            Return Materials ({(returnableProjects.reduce((sum, p) => sum + p.materials.length, 0) + returnDeliveryNotes.length)})
+            Materials ({(returnableProjects.reduce((sum, p) => sum + p.materials.length, 0) + returnDeliveryNotes.length)})
           </button>
           <button
             onClick={() => setActiveTab('history')}
@@ -502,7 +502,7 @@ const MaterialReceipts: React.FC = () => {
             }`}
           >
             <DocumentTextIcon className="w-4 h-4" />
-            Return History ({(materialReturns.length + receivedNotes.length)})
+            History ({(materialReturns.length + receivedNotes.length)})
           </button>
         </div>
 
@@ -978,18 +978,16 @@ const MaterialReceipts: React.FC = () => {
                   </motion.div>
                 ) : (
                   <div className="space-y-4">
-                    {Object.entries(groupedNotes.reduce((acc: any, note: DeliveryNote) => {
-                      if (receivedNotes.includes(note)) {
-                        const key = `${note.project_id}-${note.project_name}`;
-                        if (!acc[key]) {
-                          acc[key] = {
-                            project_id: note.project_id,
-                            project_name: note.project_name,
-                            notes: []
-                          };
-                        }
-                        acc[key].notes.push(note);
+                    {Object.entries(receivedNotes.reduce((acc: any, note: DeliveryNote) => {
+                      const key = `${note.project_id}-${note.project_name}`;
+                      if (!acc[key]) {
+                        acc[key] = {
+                          project_id: note.project_id,
+                          project_name: note.project_name,
+                          notes: []
+                        };
                       }
+                      acc[key].notes.push(note);
                       return acc;
                     }, {})).map(([key, group]: [string, any]) => (
                       <motion.div
