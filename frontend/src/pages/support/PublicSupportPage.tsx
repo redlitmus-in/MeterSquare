@@ -1159,11 +1159,13 @@ const PublicSupportPage: React.FC = () => {
                           )}
 
                           {/* Development Team Response History */}
-                          {ticket.response_history && ticket.response_history.length > 0 && (
+                          {ticket.response_history && ticket.response_history.filter((e: any) => e.type !== 'resolution' && e.type !== 'closed').length > 0 && (
                             <div className="mb-6">
                               <h4 className="text-sm font-medium text-gray-700 mb-3">Development Team Updates</h4>
                               <div className="space-y-3">
-                                {[...ticket.response_history].sort((a: any, b: any) =>
+                                {[...ticket.response_history]
+                                  .filter((entry: any) => entry.type !== 'resolution' && entry.type !== 'closed') // Resolution and Closed shown separately below
+                                  .sort((a: any, b: any) =>
                                   new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
                                 ).map((entry: any, index: number) => {
                                   const typeConfig = {
@@ -1284,8 +1286,34 @@ const PublicSupportPage: React.FC = () => {
                             </div>
                           )}
 
-                          {/* Comments/Communication Section - Show for active and closed tickets */}
-                          {['approved', 'in_progress', 'pending_deployment', 'resolved', 'closed'].includes(ticket.status) && (
+                          {/* Ticket Closed Section - Show after Resolution */}
+                          {ticket.response_history?.filter((e: any) => e.type === 'closed').length > 0 && (
+                            <div className="mb-6">
+                              {ticket.response_history
+                                .filter((entry: any) => entry.type === 'closed')
+                                .map((entry: any, index: number) => (
+                                  <div key={index} className="p-4 bg-gray-50 rounded-lg border border-gray-300">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <span className="px-2 py-1 rounded text-xs font-medium bg-gray-200 text-gray-700">
+                                        {entry.closed_by === 'client' ? 'Closed by You' : 'Closed by Dev Team'}
+                                      </span>
+                                      <span className="text-xs text-gray-500">
+                                        {new Date(entry.created_at + 'Z').toLocaleString()}
+                                      </span>
+                                    </div>
+                                    {entry.response && (
+                                      <p className="text-gray-900 whitespace-pre-wrap">{entry.response}</p>
+                                    )}
+                                    <p className="text-sm text-gray-600 mt-2">
+                                      — {entry.admin_name}
+                                    </p>
+                                  </div>
+                                ))}
+                            </div>
+                          )}
+
+                          {/* Comments/Communication Section - Show for active and closed tickets, and in_review if previously approved */}
+                          {(['approved', 'in_progress', 'pending_deployment', 'resolved', 'closed'].includes(ticket.status) || (ticket.status === 'in_review' && ticket.approval_date)) && (
                             <div className="mb-6">
                               <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
                                 <MessageCircle className="w-4 h-4" />

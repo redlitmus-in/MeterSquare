@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -121,7 +121,6 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const [editingTermText, setEditingTermText] = useState('');
   const [isSavingLpo, setIsSavingLpo] = useState(false);
   const [lpoLastSaved, setLpoLastSaved] = useState<Date | null>(null);
-  const [isSavingDefault, setIsSavingDefault] = useState(false);
 
   // Check if current user is Technical Director
   const isTechnicalDirector = user?.role?.toLowerCase().includes('technical') ||
@@ -362,19 +361,43 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     }
   };
 
-  // Save as default template
-  const handleSaveAsDefault = async () => {
-    if (!lpoData) return;
-    setIsSavingDefault(true);
-    try {
-      await buyerService.saveLPODefaultTemplate(lpoData, includeSignatures);
-      toast.success('Default template saved!');
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to save default template');
-    } finally {
-      setIsSavingDefault(false);
+  // Auto-save effect - debounced to avoid excessive API calls
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isInitialLoadRef = useRef(true);
+
+  useEffect(() => {
+    // Skip auto-save on initial load and if no lpoData
+    if (!lpoData || isInitialLoadRef.current) {
+      isInitialLoadRef.current = false;
+      return;
     }
-  };
+
+    // Only auto-save in buyer mode
+    if (viewMode !== 'buyer') return;
+
+    // Clear previous timeout
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+
+    // Debounce auto-save by 1.5 seconds
+    autoSaveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await buyerService.saveLPOCustomization(purchase.cr_id, lpoData, includeSignatures, purchase.po_child_id);
+        setLpoLastSaved(new Date());
+        console.log('[LPO Auto-save] Saved successfully');
+      } catch (error) {
+        console.error('[LPO Auto-save] Failed:', error);
+      }
+    }, 1500);
+
+    // Cleanup on unmount
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [lpoData, includeSignatures, viewMode, purchase.cr_id, purchase.po_child_id]);
 
   // Download LPO PDF preview
   const handleDownloadLpoPdf = async () => {
@@ -846,7 +869,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     // Save LPO customization before sending to TD (for buyer mode only)
     if (viewMode === 'buyer' && includeLpoPdf && lpoData) {
       try {
-        await buyerService.saveLPOCustomization(purchase.cr_id, lpoData, includeSignatures);
+        await buyerService.saveLPOCustomization(purchase.cr_id, lpoData, includeSignatures, purchase.po_child_id);
       } catch (error) {
         console.error('Failed to save LPO customization:', error);
         // Don't block the submission, just log the error
@@ -2423,40 +2446,26 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       <div className="mt-4 space-y-4 border-t border-blue-200 pt-4">
                         <div className="flex items-center justify-between">
                           <div className="text-sm font-medium text-gray-700">Edit LPO Details</div>
-                          <div className="flex items-center gap-3">
-                            <div className="text-xs text-gray-500 flex items-center gap-1">
+                          <div className="flex items-center gap-2">
+                            {/* Auto-save indicator */}
+                            <div className="text-xs text-gray-500 flex items-center gap-1 bg-gray-50 px-2 py-1 rounded">
                               {isSavingLpo ? (
                                 <>
-                                  <Loader2 className="w-3 h-3 animate-spin" />
-                                  <span>Saving...</span>
+                                  <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
+                                  <span>Auto-saving...</span>
                                 </>
                               ) : lpoLastSaved ? (
                                 <>
                                   <CheckCircle className="w-3 h-3 text-green-500" />
-                                  <span>Saved</span>
-                                </>
-                              ) : null}
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={handleSaveAsDefault}
-                              disabled={isSavingDefault}
-                              className="text-xs bg-purple-50 border-purple-200 hover:bg-purple-100 text-purple-700"
-                            >
-                              {isSavingDefault ? (
-                                <>
-                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                  Saving...
+                                  <span>Auto-saved</span>
                                 </>
                               ) : (
                                 <>
-                                  <Save className="w-3 h-3 mr-1" />
-                                  Save as Default
+                                  <Edit3 className="w-3 h-3 text-gray-400" />
+                                  <span>Changes auto-save</span>
                                 </>
                               )}
-                            </Button>
+                            </div>
                           </div>
                         </div>
 

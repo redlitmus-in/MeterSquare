@@ -806,12 +806,12 @@ const SupportManagement: React.FC = () => {
                         )}
 
                         {/* Development Team Response History */}
-                        {ticket.response_history && ticket.response_history.filter((e: any) => e.type !== 'resolution').length > 0 && (
+                        {ticket.response_history && ticket.response_history.filter((e: any) => e.type !== 'resolution' && e.type !== 'closed').length > 0 && (
                           <div className="mb-6">
                             <h4 className="text-sm font-medium text-gray-700 mb-3">Development Team Response History</h4>
                             <div className="space-y-3">
                               {[...ticket.response_history]
-                                .filter((entry: any) => entry.type !== 'resolution') // Resolution shown separately below
+                                .filter((entry: any) => entry.type !== 'resolution' && entry.type !== 'closed') // Resolution and Closed shown separately below
                                 .sort((a: any, b: any) =>
                                 new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
                               ).map((entry: any, index: number) => {
@@ -921,8 +921,34 @@ const SupportManagement: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Comments/Communication Section - Show for active and closed tickets */}
-                        {['approved', 'in_progress', 'pending_deployment', 'resolved', 'closed'].includes(ticket.status) && (
+                        {/* Ticket Closed Section - Show after Resolution */}
+                        {ticket.response_history?.filter((e: any) => e.type === 'closed').length > 0 && (
+                          <div className="mb-6">
+                            {ticket.response_history
+                              .filter((entry: any) => entry.type === 'closed')
+                              .map((entry: any, index: number) => (
+                                <div key={index} className="p-4 bg-gray-50 rounded-lg border border-gray-300">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="px-2 py-1 rounded text-xs font-medium bg-gray-200 text-gray-700">
+                                      {entry.closed_by === 'client' ? 'Closed by Client' : 'Closed by Dev Team'}
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                      {new Date(entry.created_at + 'Z').toLocaleString()}
+                                    </span>
+                                  </div>
+                                  {entry.response && (
+                                    <p className="text-gray-900 whitespace-pre-wrap">{entry.response}</p>
+                                  )}
+                                  <p className="text-sm text-gray-600 mt-2">
+                                    — {entry.admin_name}
+                                  </p>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+
+                        {/* Comments/Communication Section - Show for active and closed tickets, and in_review if previously approved */}
+                        {(['approved', 'in_progress', 'pending_deployment', 'resolved', 'closed'].includes(ticket.status) || (ticket.status === 'in_review' && ticket.approval_date)) && (
                           <div className="mb-6">
                             <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
                               <MessageCircle className="w-4 h-4" />
@@ -1020,8 +1046,8 @@ const SupportManagement: React.FC = () => {
                             </>
                           )}
 
-                          {/* Resolve for approved/in_progress/pending_deployment tickets */}
-                          {(ticket.status === 'approved' || ticket.status === 'in_progress' || ticket.status === 'pending_deployment') && (
+                          {/* Resolve for approved/in_progress/pending_deployment tickets OR in_review with prior approval */}
+                          {(ticket.status === 'approved' || ticket.status === 'in_progress' || ticket.status === 'pending_deployment' || (ticket.status === 'in_review' && ticket.approval_date)) && (
                             <button
                               onClick={() => setActionModal({ type: 'resolve', ticket })}
                               className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
@@ -1031,8 +1057,8 @@ const SupportManagement: React.FC = () => {
                             </button>
                           )}
 
-                          {/* Change Status - Only show after approved */}
-                          {['approved', 'in_progress', 'pending_deployment'].includes(ticket.status) && (
+                          {/* Change Status - Show after approved or for in_review with prior approval */}
+                          {(['approved', 'in_progress', 'pending_deployment'].includes(ticket.status) || (ticket.status === 'in_review' && ticket.approval_date)) && (
                             <button
                               onClick={() => setActionModal({ type: 'status', ticket })}
                               className="flex items-center gap-2 px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
