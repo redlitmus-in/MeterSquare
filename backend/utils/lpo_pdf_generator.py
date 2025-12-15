@@ -416,14 +416,20 @@ TRN# {company.get('trn', 'N/A')}'''
         items = lpo_data.get('items', [])
         totals = lpo_data.get('totals', {})
 
-        # Table header
-        table_data = [['SI#', 'Description', 'Qty', 'Unit', 'Rate', 'Amount']]
+        # Table header with separate columns for Material, Brand, Specification
+        table_data = [['SI#', 'Material', 'Brand', 'Specification', 'Qty', 'Unit', 'Rate', 'Amount']]
 
         # Add items
         for i, item in enumerate(items, 1):
+            material_name = item.get('material_name', '') or item.get('description', '')
+            brand = item.get('brand', '') or '-'
+            specification = item.get('specification', '') or '-'
+            
             table_data.append([
                 str(item.get('sl_no', i)),
-                Paragraph(str(item.get('description', '')), self.styles['LPOSmall']),
+                Paragraph(str(material_name), self.styles['LPOSmall']),
+                Paragraph(str(brand), self.styles['LPOSmall']),
+                Paragraph(str(specification), self.styles['LPOSmall']),
                 str(item.get('qty', '')),
                 str(item.get('unit', '')),
                 f"{item.get('rate', 0):,.2f}",
@@ -436,14 +442,14 @@ TRN# {company.get('trn', 'N/A')}'''
         vat_amount = totals.get('vat_amount', 0)
         grand_total = totals.get('grand_total', 0)
 
-        table_data.append(['', '', '', '', 'Total', f"{subtotal:,.2f}"])
+        table_data.append(['', '', '', '', '', '', 'Total', f"{subtotal:,.2f}"])
         # Only show VAT row if VAT is applicable (vat_percent > 0)
         if vat_percent > 0:
-            table_data.append(['', '', '', '', f'VAT {vat_percent}%', f"{vat_amount:,.2f}"])
-            table_data.append(['', '', '', '', 'Total', f"{grand_total:,.2f}"])
+            table_data.append(['', '', '', '', '', '', f'VAT {vat_percent}%', f"{vat_amount:,.2f}"])
+            table_data.append(['', '', '', '', '', '', 'Total', f"{grand_total:,.2f}"])
 
-        # Create table
-        col_widths = [0.4*inch, 3.5*inch, 0.6*inch, 0.5*inch, 0.9*inch, 1*inch]
+        # Create table with adjusted column widths for 8 columns
+        col_widths = [0.35*inch, 1.6*inch, 1.0*inch, 1.2*inch, 0.5*inch, 0.45*inch, 0.8*inch, 0.9*inch]
         items_table = Table(table_data, colWidths=col_widths)
 
         # Calculate styling offsets based on whether VAT is shown
@@ -464,12 +470,12 @@ TRN# {company.get('trn', 'N/A')}'''
             ('FONTNAME', (0, 1), (-1, body_end_offset), 'Helvetica'),
             ('FONTSIZE', (0, 1), (-1, body_end_offset), 8),
             ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # SI#
-            ('ALIGN', (2, 1), (2, -1), 'CENTER'),  # Qty
-            ('ALIGN', (3, 1), (3, -1), 'CENTER'),  # Unit
-            ('ALIGN', (4, 1), (-1, -1), 'RIGHT'),  # Rate, Amount
+            ('ALIGN', (4, 1), (4, -1), 'CENTER'),  # Qty
+            ('ALIGN', (5, 1), (5, -1), 'CENTER'),  # Unit
+            ('ALIGN', (6, 1), (-1, -1), 'RIGHT'),  # Rate, Amount
 
             # Totals rows
-            ('FONTNAME', (4, -total_rows), (-1, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (6, -total_rows), (-1, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (4, -total_rows), (-1, -1), 8),
 
             # Grid

@@ -1265,7 +1265,9 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                               <thead>
                                 <tr className="bg-gray-100">
                                   <th className="px-2 sm:px-3 py-2 text-left border">#</th>
-                                  <th className="px-2 sm:px-3 py-2 text-left border">Description</th>
+                                  <th className="px-2 sm:px-3 py-2 text-left border">Material</th>
+                                  <th className="px-2 sm:px-3 py-2 text-left border">Brand</th>
+                                  <th className="px-2 sm:px-3 py-2 text-left border">Specification</th>
                                   <th className="px-2 sm:px-3 py-2 text-right border">Qty</th>
                                   <th className="px-2 sm:px-3 py-2 text-center border">Unit</th>
                                   <th className="px-2 sm:px-3 py-2 text-right border">Rate</th>
@@ -1276,7 +1278,9 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                                 {lpoData.items?.map((item: any, idx: number) => (
                                   <tr key={idx} className="hover:bg-gray-50">
                                     <td className="px-2 sm:px-3 py-2 border">{item.sl_no}</td>
-                                    <td className="px-2 sm:px-3 py-2 border">{item.description}</td>
+                                    <td className="px-2 sm:px-3 py-2 border">{item.material_name || item.description}</td>
+                                    <td className="px-2 sm:px-3 py-2 border">{item.brand || '-'}</td>
+                                    <td className="px-2 sm:px-3 py-2 border">{item.specification || '-'}</td>
                                     <td className="px-2 sm:px-3 py-2 text-right border">{item.qty}</td>
                                     <td className="px-2 sm:px-3 py-2 text-center border">{item.unit}</td>
                                     <td className="px-2 sm:px-3 py-2 text-right border">{formatCurrency(item.rate)}</td>

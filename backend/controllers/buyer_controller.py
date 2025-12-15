@@ -6139,9 +6139,18 @@ def send_vendor_whatsapp(cr_id):
                         qty = material.get('quantity', 0)
                         amount = float(qty) * float(rate)
                         subtotal += amount
+                        
+                        # Get separate fields for material name, brand, and specification
+                        material_name = material.get('material_name', '') or material.get('sub_item_name', '')
+                        brand = material.get('brand', '')
+                        specification = material.get('specification', '')
+                        
                         items.append({
                             "sl_no": i,
-                            "description": material.get('material_name', '') or material.get('sub_item_name', ''),
+                            "material_name": material_name,
+                            "brand": brand,
+                            "specification": specification,
+                            "description": material_name,  # Keep for backward compatibility
                             "qty": qty,
                             "unit": material.get('unit', 'Nos'),
                             "rate": round(rate, 2),
@@ -7917,9 +7926,17 @@ def preview_lpo_pdf(cr_id):
             # Get BOQ rate for comparison display
             boq_rate = material.get('boq_unit_price') or material.get('original_unit_price') or 0
 
+            # Get separate fields for material name, brand, and specification
+            material_name = material.get('material_name', '') or material.get('sub_item_name', '')
+            brand = material.get('brand', '')
+            specification = material.get('specification', '')
+            
             items.append({
                 "sl_no": i,
-                "description": material.get('material_name', '') or material.get('sub_item_name', ''),
+                "material_name": material_name,
+                "brand": brand,
+                "specification": specification,
+                "description": material_name,  # Keep for backward compatibility
                 "qty": qty,
                 "unit": material.get('unit', 'Nos'),
                 "rate": round(rate, 2),
