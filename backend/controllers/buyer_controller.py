@@ -185,17 +185,26 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         # Use vendor price if no negotiated price (prefer vendor catalog over BOQ)
                         effective_price = negotiated_price or vendor_product_price or original_unit_price
 
-                        # ALWAYS use original price for total calculation (for internal tracking)
-                        material_total = float(quantity) * float(original_unit_price)
+                        # CRITICAL FIX: When vendor is selected, use vendor price for display AND total
+                        # Show vendor price for both pending_td_approval AND approved status
+                        # Use vendor price if EITHER negotiated_price OR vendor_product_price exists
+                        has_vendor_price = (negotiated_price and negotiated_price > 0) or (vendor_product_price and vendor_product_price > 0)
+                        vendor_selected = (cr.vendor_selection_status in ['approved', 'pending_td_approval'] and has_vendor_price)
+                        
+                        # Use vendor price when vendor selected, otherwise BOQ price
+                        display_unit_price = effective_price if vendor_selected else original_unit_price
+                        material_total = float(quantity) * float(display_unit_price)
 
+                        # FIXED: Use vendor price for cr_total when approved
                         cr_total += material_total
+                        
                         materials_list.append({
                             "material_name": material_name,
                             "master_material_id": master_material_id,
                             "quantity": quantity,
                             "unit": material.get('unit', ''),
-                            "unit_price": original_unit_price,  # Keep original/BOQ price
-                            "total_price": material_total,  # Based on original price
+                            "unit_price": display_unit_price,  # Vendor price when approved, BOQ otherwise
+                            "total_price": material_total,  # Based on vendor/BOQ price depending on approval
                             "negotiated_price": effective_price if effective_price != original_unit_price else None,
                             "vendor_product_price": vendor_product_price,
                             "original_unit_price": original_unit_price,  # Add original for reference
@@ -232,10 +241,19 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                     # Use vendor price if no negotiated price (prefer vendor catalog over BOQ)
                     effective_price = negotiated_price or vendor_product_price or original_unit_price
 
-                    # ALWAYS use original price for total calculation (for internal tracking)
-                    sub_total = float(quantity) * float(original_unit_price)
+                    # CRITICAL FIX: When vendor is selected, use vendor price for display AND total
+                    # Show vendor price for both pending_td_approval AND approved status
+                    # Use vendor price if EITHER negotiated_price OR vendor_product_price exists
+                    has_vendor_price = (negotiated_price and negotiated_price > 0) or (vendor_product_price and vendor_product_price > 0)
+                    vendor_selected = (cr.vendor_selection_status in ['approved', 'pending_td_approval'] and has_vendor_price)
+                    
+                    # Use vendor price when vendor selected, otherwise BOQ price
+                    display_unit_price = effective_price if vendor_selected else original_unit_price
+                    sub_total = float(quantity) * float(display_unit_price)
 
+                    # FIXED: Use vendor price for cr_total when approved
                     cr_total += sub_total
+                    
                     materials_list.append({
                         "material_name": material_name,
                         "master_material_id": master_material_id,
@@ -245,8 +263,8 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         "size": sub_item.get('size', ''),
                         "quantity": quantity,
                         "unit": sub_item.get('unit', ''),
-                        "unit_price": original_unit_price,  # Keep original/BOQ price
-                        "total_price": sub_total,  # Based on original price
+                        "unit_price": display_unit_price,  # Vendor price when approved, BOQ otherwise
+                        "total_price": sub_total,  # Based on vendor/BOQ price depending on approval
                         "negotiated_price": effective_price if effective_price != original_unit_price else None,
                         "vendor_product_price": vendor_product_price,
                         "original_unit_price": original_unit_price,  # Add original for reference
@@ -284,10 +302,19 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
             # Use vendor price if no negotiated price (prefer vendor catalog over BOQ)
             effective_price = negotiated_price or vendor_product_price or original_unit_price
 
-            # ALWAYS use original price for total calculation (for internal tracking)
-            material_total = float(quantity) * float(original_unit_price)
+            # CRITICAL FIX: When vendor is selected, use vendor price for display AND total
+            # Show vendor price for both pending_td_approval AND approved status
+            # Use vendor price if EITHER negotiated_price OR vendor_product_price exists
+            has_vendor_price = (negotiated_price and negotiated_price > 0) or (vendor_product_price and vendor_product_price > 0)
+            vendor_selected = (cr.vendor_selection_status in ['approved', 'pending_td_approval'] and has_vendor_price)
+            
+            # Use vendor price when vendor selected, otherwise BOQ price
+            display_unit_price = effective_price if vendor_selected else original_unit_price
+            material_total = float(quantity) * float(display_unit_price)
 
+            # FIXED: Use vendor price for cr_total when approved
             cr_total += material_total
+            
             materials_list.append({
                 "material_name": material_name,
                 "master_material_id": master_material_id,
@@ -297,8 +324,8 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                 "size": material.get('size', ''),
                 "quantity": quantity,
                 "unit": material.get('unit', ''),
-                "unit_price": original_unit_price,  # Keep original/BOQ price
-                "total_price": material_total,  # Based on original price
+                "unit_price": display_unit_price,  # Vendor price when approved, BOQ otherwise
+                "total_price": material_total,  # Based on vendor/BOQ price depending on approval
                 "negotiated_price": effective_price if effective_price != original_unit_price else None,
                 "vendor_product_price": vendor_product_price,
                 "original_unit_price": original_unit_price,  # Add original for reference
@@ -3667,12 +3694,22 @@ def create_po_children(cr_id):
                             parent_material = pm
                             break
 
+                # CRITICAL FIX: If negotiated_price not provided, check parent CR's material_vendor_selections
+                # This is where the buyer stores the selected vendor price
+                if not negotiated_price and parent_cr.material_vendor_selections:
+                    vendor_selection = parent_cr.material_vendor_selections.get(material_name, {})
+                    if isinstance(vendor_selection, dict):
+                        negotiated_price = vendor_selection.get('negotiated_price')
+                        if negotiated_price:
+                            log.info(f"Using vendor price from parent CR material_vendor_selections for '{material_name}': {negotiated_price}")
+
                 # Lookup vendor product price as fallback
                 vendor_product_price = vendor_product_prices.get(material_name.lower().strip() if material_name else '', 0)
 
-                # Calculate price - priority: negotiated > parent material price > vendor product price
+                # Calculate price - priority: negotiated > vendor product price > parent material price (BOQ)
+                # CRITICAL: Changed order - only use parent_price (BOQ) as last resort
                 parent_price = parent_material.get('unit_price', 0) if parent_material else 0
-                unit_price = negotiated_price if negotiated_price else (parent_price if parent_price else vendor_product_price)
+                unit_price = negotiated_price if negotiated_price else (vendor_product_price if vendor_product_price else parent_price)
                 material_total = unit_price * quantity
                 total_cost += material_total
 
@@ -4980,18 +5017,19 @@ def get_rejected_po_children():
                 mat_copy['boq_unit_price'] = boq_price
                 mat_copy['boq_total_price'] = boq_price * quantity if boq_price else 0
 
-                # Use vendor/negotiated price if available, otherwise BOQ price
+                # CRITICAL FIX: For rejected PO children, ALWAYS use vendor price stored in material
+                # Do NOT fall back to BOQ price - the material.unit_price contains the vendor price
                 if vendor_price and vendor_price > 0:
                     mat_copy['unit_price'] = vendor_price
                     mat_copy['total_price'] = vendor_price * quantity
                     mat_copy['negotiated_price'] = vendor_price
-                elif boq_price and boq_price > 0:
-                    mat_copy['unit_price'] = boq_price
-                    mat_copy['total_price'] = boq_price * quantity
-                    mat_copy['negotiated_price'] = None
                 else:
-                    mat_copy['unit_price'] = material.get('unit_price', 0)
+                    # If no vendor price found, use stored unit_price (should be vendor price)
+                    # Only use BOQ price as absolute last resort for display reference
+                    stored_unit_price = material.get('unit_price', 0)
+                    mat_copy['unit_price'] = stored_unit_price if stored_unit_price > 0 else boq_price
                     mat_copy['total_price'] = mat_copy['unit_price'] * quantity if mat_copy['unit_price'] else 0
+                    mat_copy['negotiated_price'] = stored_unit_price if stored_unit_price > 0 else None
 
                 # Ensure total_price is calculated
                 if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
@@ -5280,18 +5318,20 @@ def get_approved_po_children():
                 mat_copy['boq_unit_price'] = boq_price
                 mat_copy['boq_total_price'] = boq_price * quantity if boq_price else 0
 
-                # Use vendor/negotiated price if available, otherwise BOQ price
+                # CRITICAL FIX: For approved PO children, ALWAYS use vendor price stored in material
+                # Do NOT fall back to BOQ price when vendor has been approved by TD
+                # The material.unit_price contains the TD-approved vendor price
                 if vendor_price and vendor_price > 0:
                     mat_copy['unit_price'] = vendor_price
                     mat_copy['total_price'] = vendor_price * quantity
                     mat_copy['negotiated_price'] = vendor_price
-                elif boq_price and boq_price > 0:
-                    mat_copy['unit_price'] = boq_price
-                    mat_copy['total_price'] = boq_price * quantity
-                    mat_copy['negotiated_price'] = None
                 else:
-                    mat_copy['unit_price'] = material.get('unit_price', 0)
+                    # If no vendor price found, use stored unit_price (should be vendor price)
+                    # Only use BOQ price as absolute last resort for display reference
+                    stored_unit_price = material.get('unit_price', 0)
+                    mat_copy['unit_price'] = stored_unit_price if stored_unit_price > 0 else boq_price
                     mat_copy['total_price'] = mat_copy['unit_price'] * quantity if mat_copy['unit_price'] else 0
+                    mat_copy['negotiated_price'] = stored_unit_price if stored_unit_price > 0 else None
 
                 # Ensure total_price is calculated
                 if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):

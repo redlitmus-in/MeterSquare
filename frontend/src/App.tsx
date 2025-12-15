@@ -87,6 +87,7 @@ const StockTake = lazy(() => import('@/roles/production-manager/pages/StockTake'
 const StockManagement = lazy(() => import('@/roles/production-manager/pages/StockManagement'));
 const M2StoreReports = lazy(() => import('@/roles/production-manager/pages/M2StoreReports'));
 const ReturnableAssets = lazy(() => import('@/roles/production-manager/pages/ReturnableAssets'));
+const ReceiveReturns = lazy(() => import('@/roles/production-manager/pages/ReceiveReturns'));
 
 // Admin Pages - Mix of custom admin pages and role pages
 const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
@@ -1065,6 +1066,11 @@ function App() {
             <Route path="m2-store/returnable-assets" element={
               <ProductionManagerRoute>
                 <ReturnableAssets />
+              </ProductionManagerRoute>
+            } />
+            <Route path="m2-store/receive-returns" element={
+              <ProductionManagerRoute>
+                <ReceiveReturns />
               </ProductionManagerRoute>
             } />
 

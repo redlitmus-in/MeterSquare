@@ -63,7 +63,19 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
 
   // Reset edited materials and local purchase when purchase changes or modal opens
   useEffect(() => {
-    setLocalPurchase(purchase);
+    // CRITICAL FIX: When vendor is approved, calculate total_cost from materials' vendor prices
+    // instead of using the BOQ total_cost that comes from backend
+    let updatedPurchase = { ...purchase };
+    
+    // If vendor is approved, recalculate total_cost from materials (which have vendor prices)
+    if (purchase.vendor_selection_status === 'approved' && purchase.materials && purchase.materials.length > 0) {
+      const vendorTotalCost = purchase.materials.reduce((sum, mat) => {
+        return sum + (mat.total_price || (mat.unit_price * mat.quantity) || 0);
+      }, 0);
+      updatedPurchase.total_cost = vendorTotalCost;
+    }
+    
+    setLocalPurchase(updatedPurchase);
     setEditedMaterials(purchase.materials);
     setIsEditMode(false);
   }, [purchase.cr_id, isOpen, purchase]);
@@ -488,8 +500,9 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <Package className="w-5 h-5" />
                       Materials Breakdown
                     </h3>
-                    {/* Edit button - only show when pending TD approval (not after TD approved or completed) */}
-                    {purchase.vendor_selection_status === 'pending_td_approval' && !isEditMode && (
+                    {/* Edit button - only show when NO vendor selected yet (before sending for approval) */}
+                    {/* Hide when pending_td_approval or approved - buyer already submitted */}
+                    {!purchase.vendor_selection_status && !purchase.vendor_id && !isEditMode && (
                       <Button
                         onClick={() => setIsEditMode(true)}
                         className="bg-blue-600 hover:bg-blue-700 text-white"

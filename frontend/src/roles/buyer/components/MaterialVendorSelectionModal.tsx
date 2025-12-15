@@ -61,6 +61,7 @@ interface SelectedVendorInfo {
 
 interface MaterialVendorState {
   material_name: string;
+  sub_item_name?: string;
   quantity: number;
   unit: string;
   selected_vendors: SelectedVendorInfo[]; // Changed to array for multi-select
@@ -185,6 +186,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           if (matchingMaterial && matchingMaterial.negotiated_price !== undefined) {
             return {
               material_name: material.material_name,
+              sub_item_name: material.sub_item_name,
               quantity: material.quantity,
               unit: material.unit,
               selected_vendors: [{
@@ -209,6 +211,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           if (vendorInfo) {
             return {
               material_name: material.material_name,
+              sub_item_name: material.sub_item_name,
               quantity: material.quantity,
               unit: material.unit,
               selected_vendors: [{
@@ -249,6 +252,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
         return {
           material_name: material.material_name,
+            sub_item_name: material.sub_item_name,
           quantity: material.quantity,
           unit: material.unit,
           selected_vendors: selectedVendors,
@@ -938,13 +942,41 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         const vendorGroups = Array.from(vendorGroupsMap.entries()).map(([vendorId, materials]) => ({
           vendor_id: vendorId,
           vendor_name: materials[0].selected_vendors[0].vendor_name,
-          materials: materials.map(m => ({
-            material_name: m.material_name,
-            quantity: m.quantity,
-            unit: m.unit,
-            negotiated_price: m.selected_vendors[0].negotiated_price,
-            save_price_for_future: m.selected_vendors[0].save_price_for_future
-          }))
+          materials: materials.map(m => {
+            const selectedVendor = m.selected_vendors[0];
+            
+            // CRITICAL FIX: Calculate actual vendor price to send to backend
+            // If buyer didn't manually negotiate, use vendor's product price
+            let vendorPrice = selectedVendor.negotiated_price;
+            
+            if (!vendorPrice || vendorPrice === 0) {
+              // Find vendor's product price
+              const vendorProductsList = vendorProducts.get(vendorId) || [];
+              const vendorInfo = vendors.find(v => v.vendor_id === vendorId);
+              const vendorCategory = vendorInfo?.category?.toLowerCase().trim() || '';
+              
+              const matchingProducts = vendorProductsList.filter(p => {
+                const productName = p.product_name?.toLowerCase().trim() || '';
+                const productCategory = p.category?.toLowerCase().trim() || '';
+                return isProductMatchingMaterial(productName, productCategory, vendorCategory, m.material_name.toLowerCase());
+              });
+              
+              if (matchingProducts.length > 0) {
+                const lowestPrice = Math.min(...matchingProducts.map(p => p.unit_price || 0).filter(p => p > 0));
+                if (lowestPrice > 0 && lowestPrice !== Infinity) {
+                  vendorPrice = lowestPrice;
+                }
+              }
+            }
+            
+            return {
+              material_name: m.material_name,
+              quantity: m.quantity,
+              unit: m.unit,
+              negotiated_price: vendorPrice, // Send actual vendor price, not null
+              save_price_for_future: selectedVendor.save_price_for_future
+            };
+          })
         }));
 
         // Generate submission group ID
@@ -1411,6 +1443,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                   <span className="text-sm text-gray-500 flex-shrink-0">
                                     ({material.quantity} {material.unit})
                                   </span>
+                                  {material.sub_item_name && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200 text-xs max-w-[220px] truncate">
+                                      <FileText className="w-3 h-3 flex-shrink-0" />
+                                      <span className="truncate">{material.sub_item_name}</span>
+                                    </span>
+                                  )}
                                   {(() => {
                                     // Get BOQ price from original purchase materials
                                     const boqMaterial = purchase.materials?.find(m => m.material_name === material.material_name);

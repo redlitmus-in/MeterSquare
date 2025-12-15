@@ -7,7 +7,7 @@ import { formatCurrency } from '@/utils/formatters';
 import { isEstimator, isTechnicalDirector, isSiteEngineer, isProjectManager } from '@/utils/roleHelpers';
 import EditChangeRequestModal from './EditChangeRequestModal';
 import { buyerService } from '@/roles/buyer/services/buyerService';
-import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
+import BOQSubItemDetailModal from './BOQSubItemDetailModal';
 
 interface ChangeRequestDetailsModalProps {
   isOpen: boolean;
@@ -661,9 +661,9 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                           {/* Material Name + NEW badge */}
                           <div className="flex items-center gap-2 mb-2">
-                            <span className="font-semibold text-sm text-gray-900">{material.material_name}</span>
+                            <span className="font-semibold text-sm text-gray-900 truncate" title={material.material_name}>{material.material_name}</span>
                             {isNewMaterial && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-100 text-green-700 border border-green-300">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-100 text-green-700 border border-green-300 flex-shrink-0">
                                 NEW
                               </span>
                             )}
@@ -671,20 +671,20 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
                           {/* Details Grid */}
                           <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div>
+                            <div className="truncate">
                               <span className="text-gray-500">Brand:</span>
-                              <span className="ml-1 text-gray-900">{material.brand || '-'}</span>
+                              <span className="ml-1 text-gray-900" title={material.brand || ''}>{material.brand || '-'}</span>
                             </div>
-                            <div>
+                            <div className="truncate">
                               <span className="text-gray-500">Size:</span>
-                              <span className="ml-1 text-gray-900">{material.size || material.specification || '-'}</span>
+                              <span className="ml-1 text-gray-900" title={material.size || material.specification || ''}>{material.size || material.specification || '-'}</span>
                             </div>
-                            <div>
+                            <div className="truncate">
                               <span className="text-gray-500">Sub-Item:</span>
                               {material.sub_item_name ? (
                                 <button
                                   onClick={() => handleViewSubItemInBOQ(material.sub_item_name)}
-                                  className="ml-1 text-purple-700 hover:text-purple-900 underline underline-offset-2 hover:no-underline"
+                                  className="ml-1 text-purple-700 hover:text-purple-900 underline underline-offset-2 hover:no-underline truncate"
                                   title={`View "${material.sub_item_name}" in BOQ`}
                                 >
                                   {material.sub_item_name}
@@ -699,15 +699,15 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             </div>
                           </div>
 
-                          {/* Justification - Only show for NEW materials */}
-                          {isNewMaterial && (
-                            <div className="mt-2 pt-2 border-t border-gray-200">
-                              <p className="text-[10px] text-gray-500 mb-0.5">Justification:</p>
-                              <p className="text-xs text-gray-700 line-clamp-2">
-                                {material.justification || <span className="text-gray-400 italic">No justification</span>}
-                              </p>
-                            </div>
-                          )}
+                          {/* Justification - Always show for clearer review */}
+                          <div className="mt-2 pt-2 border-t border-gray-200">
+                            <p className="text-[10px] text-gray-500 mb-0.5">Justification:</p>
+                            <p className="text-xs text-gray-700 line-clamp-2">
+                              {material.justification && material.justification.trim().length > 0
+                                ? material.justification
+                                : <span className="text-gray-400 italic">No justification</span>}
+                            </p>
+                          </div>
 
                           {/* Pricing (if shown) */}
                           {shouldShowPricing && (
@@ -831,50 +831,46 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             <td className="px-4 py-3 text-sm text-gray-900 text-center whitespace-nowrap font-medium">
                               {material.quantity} <span className="text-gray-500 font-normal">{material.unit}</span>
                             </td>
-                            {/* Justification - Only show content for NEW materials */}
+                            {/* Justification - Always visible for clarity */}
                             <td className="px-4 py-3 text-sm" style={{ maxWidth: '280px', minWidth: '200px' }}>
-                              {isNewMaterial ? (
-                                material.justification ? (
-                                  <div className="w-full">
-                                    {material.justification.length > 100 ? (
-                                      <div>
-                                        {expandedJustifications.has(idx) ? (
-                                          <>
-                                            <p className="text-sm text-gray-700 leading-relaxed break-words whitespace-pre-wrap">
-                                              {material.justification}
-                                            </p>
-                                            <button
-                                              onClick={() => toggleJustification(idx)}
-                                              className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2 hover:underline inline-flex items-center gap-1"
-                                            >
-                                              ↑ Show less
-                                            </button>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <p className="text-sm text-gray-700 leading-relaxed break-words">
-                                              {material.justification.substring(0, 100)}...
-                                            </p>
-                                            <button
-                                              onClick={() => toggleJustification(idx)}
-                                              className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-1 hover:underline inline-flex items-center gap-1"
-                                            >
-                                              See more ↓
-                                            </button>
-                                          </>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <p className="text-sm text-gray-700 leading-relaxed break-words">
-                                        {material.justification}
-                                      </p>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-gray-400 italic">No justification</span>
-                                )
+                              {material.justification && material.justification.trim().length > 0 ? (
+                                <div className="w-full">
+                                  {material.justification.length > 120 ? (
+                                    <div>
+                                      {expandedJustifications.has(idx) ? (
+                                        <>
+                                          <p className="text-sm text-gray-700 leading-relaxed break-words whitespace-pre-wrap">
+                                            {material.justification}
+                                          </p>
+                                          <button
+                                            onClick={() => toggleJustification(idx)}
+                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2 hover:underline inline-flex items-center gap-1"
+                                          >
+                                            ↑ Show less
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <p className="text-sm text-gray-700 leading-relaxed break-words">
+                                            {material.justification.substring(0, 120)}...
+                                          </p>
+                                          <button
+                                            onClick={() => toggleJustification(idx)}
+                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-1 hover:underline inline-flex items-center gap-1"
+                                          >
+                                            See more ↓
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-gray-700 leading-relaxed break-words">
+                                      {material.justification}
+                                    </p>
+                                  )}
+                                </div>
                               ) : (
-                                <span className="text-gray-400">-</span>
+                                <span className="text-gray-400 italic">No justification</span>
                               )}
                             </td>
                             {shouldShowPricing && (() => {
@@ -1428,19 +1424,17 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
           />
         )}
 
-        {/* BOQ Details Modal - View sub-item scope in approved BOQ */}
-        {showBOQModal && changeRequest?.boq_id && (
-          <BOQDetailsModal
+        {/* BOQ Sub-Item Detail Modal - View specific sub-item scope in approved BOQ */}
+        {showBOQModal && changeRequest?.boq_id && selectedSubItemForBOQ && (
+          <BOQSubItemDetailModal
             isOpen={showBOQModal}
             onClose={() => {
               setShowBOQModal(false);
               setSelectedSubItemForBOQ(null);
             }}
-            boq={{
-              boq_id: changeRequest.boq_id,
-              boq_name: changeRequest.boq_name || `BOQ #${changeRequest.boq_id}`,
-              highlightSubItem: selectedSubItemForBOQ
-            }}
+            boqId={changeRequest.boq_id}
+            subItemName={selectedSubItemForBOQ}
+            boqName={changeRequest.boq_name || `BOQ #${changeRequest.boq_id}`}
           />
         )}
       </>

@@ -95,7 +95,7 @@ export interface InternalMaterialRequest {
 }
 
 export type MaterialCondition = 'Good' | 'Damaged' | 'Defective';
-export type DisposalStatus = 'pending_approval' | 'approved' | 'pending_review' | 'approved_disposal' | 'disposed' | 'repaired' | 'rejected' | null;
+export type DisposalStatus = 'in_transit' | 'pending_approval' | 'approved' | 'pending_review' | 'approved_disposal' | 'disposed' | 'repaired' | 'rejected' | 'backup_added' | null;
 
 export interface MaterialReturn {
   return_id?: number;
@@ -967,6 +967,22 @@ class InventoryService {
       throw new Error(
         (axiosError.response?.data as any)?.error || 'Failed to reject return'
       );
+    }
+  }
+
+  /**
+   * Get incoming RDNs (Return Delivery Notes) from Site Engineers
+   */
+  async getIncomingRDNs(): Promise<{ return_delivery_notes: any[]; total: number }> {
+    try {
+      const response = await apiClient.get('/pm-return-delivery-notes', {
+        headers: this.getAuthHeader()
+      });
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching incoming RDNs:', axiosError);
+      return { return_delivery_notes: [], total: 0 };
     }
   }
 

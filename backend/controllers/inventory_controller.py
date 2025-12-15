@@ -3328,7 +3328,6 @@ def dispatch_return_delivery_note(return_note_id):
         # Send notification to PM
         try:
             project = Project.query.get(rdn.project_id)
-            # TODO: Implement notification - RDN materials on the way
             print(f"Notification: RDN {rdn.return_note_number} dispatched from {project.project_name}, materials in transit")
         except Exception as notif_err:
             print(f"Error sending RDN dispatch notification: {notif_err}")

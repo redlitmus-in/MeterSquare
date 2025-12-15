@@ -505,7 +505,15 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             iconSolid: ClipboardDocumentCheckSolid,
             color: 'text-blue-600'
           },
-          // 2. RETURNABLE ASSETS - Ladders, Tables, Tools
+          // 2. RECEIVE RETURNS - RDNs from Site Engineers
+          {
+            name: 'Receive Returns',
+            href: buildPath('/m2-store/receive-returns'),
+            icon: ArrowUturnLeftIcon,
+            iconSolid: ArrowUturnLeftIcon,
+            color: 'text-orange-600'
+          },
+          // 3. RETURNABLE ASSETS - Ladders, Tables, Tools
           {
             name: 'Returnable Assets',
             href: buildPath('/m2-store/returnable-assets'),
@@ -513,7 +521,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             iconSolid: CubeSolid,
             color: 'text-green-600'
           },
-          // 3. REPORTS - Analytics & Reports
+          // 4. REPORTS - Analytics & Reports
           {
             name: 'Reports & Analytics',
             href: buildPath('/m2-store/reports'),

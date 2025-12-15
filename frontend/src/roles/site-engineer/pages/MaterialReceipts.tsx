@@ -374,7 +374,7 @@ const MaterialReceipts: React.FC = () => {
 
   const handleIssueRDN = async (rdnId: number, rdnNumber: string) => {
     try {
-      const response = await apiClient.post(`/return_delivery_note/${rdnId}/issue`);
+      const response = await apiClient.post(`/return_delivery_note/${rdnId}/issue`, {});
       showSuccess('RDN issued successfully! Ready for dispatch.');
       setCreatedRDN(response.data.return_delivery_note);
       setShowRDNSuccessModal(true); // NOW show success modal with download option
@@ -387,7 +387,7 @@ const MaterialReceipts: React.FC = () => {
 
   const handleDispatchRDN = async (rdnId: number) => {
     try {
-      await apiClient.post(`/return_delivery_note/${rdnId}/dispatch`);
+      await apiClient.post(`/return_delivery_note/${rdnId}/dispatch`, {});
       showSuccess('RDN dispatched successfully!');
       fetchReturnDeliveryNotes();
     } catch (err: unknown) {

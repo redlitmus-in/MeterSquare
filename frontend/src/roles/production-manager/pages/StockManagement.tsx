@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Package, CheckCircle, X, Save, RefreshCw,
   ArrowDownCircle, ArrowUpCircle, AlertTriangle,
-  Trash2, Calendar, FileText, RotateCcw, Edit2, Printer, Download, Eye
+  Trash2, Calendar, FileText, RotateCcw, Edit2, Printer, Download, Eye, Truck
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -74,6 +74,7 @@ const StockManagement: React.FC = () => {
   const [transactions, setTransactions] = useState<InventoryTransaction[]>([]);
   const [materials, setMaterials] = useState<InventoryMaterial[]>([]);
   const [returns, setReturns] = useState<MaterialReturn[]>([]);
+  const [incomingRDNs, setIncomingRDNs] = useState<any[]>([]);
   const [projects, setProjects] = useState<ProjectWithManagers[]>([]);
   const [allRequests, setAllRequests] = useState<InternalMaterialRequest[]>([]);
   const [deliveryNotes, setDeliveryNotes] = useState<MaterialDeliveryNote[]>([]);
@@ -215,14 +216,15 @@ const StockManagement: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [txnData, matData, returnsData, projectsData, requestsData, deliveryNotesData, configData] = await Promise.all([
+      const [txnData, matData, returnsData, projectsData, requestsData, deliveryNotesData, configData, rdnData] = await Promise.all([
         inventoryService.getAllTransactions(),
         inventoryService.getAllInventoryItems(),
         inventoryService.getAllMaterialReturns(),
         inventoryService.getAllProjects(),
         inventoryService.getSentInternalRequests(), // Get all sent requests from buyers
         inventoryService.getAllDeliveryNotes(),
-        inventoryService.getInventoryConfig()
+        inventoryService.getInventoryConfig(),
+        inventoryService.getIncomingRDNs() // Get incoming RDNs from Site Engineers
       ]);
 
       // Filter only PURCHASE transactions for Stock In
@@ -232,6 +234,7 @@ const StockManagement: React.FC = () => {
       setTransactions(purchaseTransactions);
       setMaterials(matData || []);
       setReturns(returnsData?.returns || []);
+      setIncomingRDNs(rdnData?.return_delivery_notes || []);
       setProjects(Array.isArray(projectsData) ? projectsData : (projectsData?.projects || []));
       setAllRequests(requestsData || []);
       setDeliveryNotes(deliveryNotesData?.delivery_notes || []);
@@ -464,22 +467,26 @@ const StockManagement: React.FC = () => {
   const getDisposalStatusBadge = (status: DisposalStatus) => {
     if (!status) return null;
     const styles: Record<string, string> = {
+      'in_transit': 'bg-blue-100 text-blue-800',
       'pending_approval': 'bg-yellow-100 text-yellow-800',
       'approved': 'bg-green-100 text-green-800',
       'pending_review': 'bg-yellow-100 text-yellow-800',
       'approved_disposal': 'bg-orange-100 text-orange-800',
       'disposed': 'bg-gray-100 text-gray-600',
       'repaired': 'bg-blue-100 text-blue-800',
-      'rejected': 'bg-red-100 text-red-800'
+      'rejected': 'bg-red-100 text-red-800',
+      'backup_added': 'bg-purple-100 text-purple-800'
     };
     const labels: Record<string, string> = {
+      'in_transit': 'In Transit',
       'pending_approval': 'Pending Approval',
       'approved': 'Approved & Added',
       'pending_review': 'Pending Review',
       'approved_disposal': 'Approved for Disposal',
       'disposed': 'Disposed',
       'repaired': 'Repaired',
-      'rejected': 'Rejected'
+      'rejected': 'Rejected',
+      'backup_added': 'Backup Added'
     };
     return <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray-600'}`}>{labels[status] || status}</span>;
   };
@@ -572,17 +579,7 @@ const StockManagement: React.FC = () => {
 
     const recipients: Array<{ name: string; role: string }> = [];
 
-    // Add Project Managers
-    selectedProject.project_managers?.forEach(pm => {
-      recipients.push({ name: pm.full_name, role: 'Project Manager' });
-    });
-
-    // Add MEP Supervisors
-    selectedProject.mep_supervisors?.forEach(mep => {
-      recipients.push({ name: mep.full_name, role: 'MEP Supervisor' });
-    });
-
-    // Add Site Supervisors/Engineers
+    // Only add Site Supervisors/Engineers - deliveries should always go to SE
     selectedProject.site_supervisors?.forEach(se => {
       recipients.push({ name: se.full_name, role: 'Site Engineer' });
     });
@@ -592,16 +589,29 @@ const StockManagement: React.FC = () => {
 
   // Handler for project selection
   const handleDeliveryNoteProjectSelect = (projectId: number) => {
+    const selectedProject = projects.find(p => p.project_id === projectId);
+
+    // Auto-populate attention_to if only one SE is assigned
+    let attentionTo = '';
+    if (selectedProject?.site_supervisors?.length === 1) {
+      attentionTo = selectedProject.site_supervisors[0].full_name;
+    }
+
     setDnFormData({
       ...dnFormData,
       project_id: projectId,
-      attention_to: ''  // Reset when project changes
+      attention_to: attentionTo
     });
   };
 
   const handleCreateDeliveryNote = async () => {
     if (!dnFormData.project_id || !dnFormData.delivery_date) {
       showWarning('Please select a project and delivery date');
+      return;
+    }
+
+    if (!dnFormData.attention_to) {
+      showWarning('Please select a Site Engineer to receive the delivery');
       return;
     }
 
@@ -657,11 +667,18 @@ const StockManagement: React.FC = () => {
   const handleCreateDNFromRequest = (request: InternalMaterialRequest) => {
     setSelectedRequestForDN(request);
 
-    // Pre-fill form with request data
+    const attentionTo = request.project_details?.site_supervisor?.full_name || '';
+
+    // Warn if no SE is assigned to this project
+    if (!attentionTo) {
+      showWarning('No Site Engineer assigned to this project. Please select one before creating the delivery note.');
+    }
+
+    // Pre-fill form with request data - attention_to defaults to SE only
     setDnFormData({
       project_id: request.project_id || 0,
       delivery_date: new Date().toISOString().split('T')[0],
-      attention_to: request.project_details?.site_supervisor?.full_name || request.project_details?.project_managers?.[0]?.full_name || '',
+      attention_to: attentionTo,
       delivery_from: inventoryConfig.store_name,
       requested_by: request.requester_details?.full_name || '',
       vehicle_number: '',
@@ -1841,7 +1858,44 @@ const StockManagement: React.FC = () => {
 
           {/* Returns Table */}
           {stockInSubTab === 'returns' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="space-y-4">
+              {/* Incoming RDNs Section */}
+              {incomingRDNs.filter(rdn => rdn.status === 'IN_TRANSIT').length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Truck className="w-5 h-5 text-blue-600" />
+                    <h3 className="font-semibold text-blue-900">Incoming Returns (In Transit)</h3>
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-blue-600 text-white">
+                      {incomingRDNs.filter(rdn => rdn.status === 'IN_TRANSIT').length}
+                    </span>
+                  </div>
+                  <p className="text-sm text-blue-700 mb-3">Materials dispatched from site are on their way. Go to "Receive Returns" to confirm receipt.</p>
+                  <div className="space-y-2">
+                    {incomingRDNs.filter(rdn => rdn.status === 'IN_TRANSIT').map((rdn) => (
+                      <div key={rdn.return_note_id} className="bg-white rounded-lg p-3 border border-blue-200 flex justify-between items-center">
+                        <div>
+                          <div className="font-medium text-gray-900">{rdn.return_note_number}</div>
+                          <div className="text-sm text-gray-500">
+                            {rdn.project_name || rdn.project_code} • {rdn.total_items || rdn.items?.length || 0} item(s) • {new Date(rdn.dispatched_at || rdn.return_date).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-700">In Transit</span>
+                          <a
+                            href="/production-manager/m2-store/receive-returns"
+                            className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                          >
+                            Receive
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Existing Returns Table */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
@@ -1943,6 +1997,7 @@ const StockManagement: React.FC = () => {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
@@ -3163,7 +3218,7 @@ const StockManagement: React.FC = () => {
                     ))}
                   </select>
                   {dnFormData.project_id > 0 && getAvailableRecipients().length === 0 && (
-                    <p className="text-xs text-orange-500 mt-1">No PM/MEP/SE assigned to this project</p>
+                    <p className="text-xs text-orange-500 mt-1">No Site Engineer assigned to this project</p>
                   )}
                 </div>
                 <div>
