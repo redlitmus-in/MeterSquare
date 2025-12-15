@@ -252,7 +252,7 @@ def cancel_boq(boq_id):
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
 
-            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
             if td_role:
                 td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
                 for td_user in td_users:

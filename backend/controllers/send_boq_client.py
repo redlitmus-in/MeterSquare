@@ -305,7 +305,7 @@ def send_boq_to_client():
             try:
                 from utils.comprehensive_notification_service import notification_service
                 from models.user import User, Role
-                td_role = Role.query.filter_by(role_name='Technical Director').first()
+                td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
                 if td_role:
                     td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
                     td_user_ids = [td.user_id for td in td_users]

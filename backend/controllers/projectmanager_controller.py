@@ -1539,7 +1539,7 @@ def get_available_site_engineers():
         from models.roles import Role
         from sqlalchemy import func
 
-        se_role = Role.query.filter_by(role_name='siteEngineer').first()
+        se_role = Role.query.filter_by(role='siteEngineer', is_deleted=False).first()
         if not se_role:
             return jsonify({"error": "Site Engineer role not found"}), 404
 

@@ -25,7 +25,7 @@ def notify_purchase_created(boq_id, project_name, created_by_id, created_by_name
     try:
         # Get target users (default to all estimators if not specified)
         if not target_users:
-            estimator_role = Role.query.filter_by(role_name='Estimator').first()
+            estimator_role = Role.query.filter_by(role='Estimator', is_deleted=False).first()
             if estimator_role:
                 users = User.query.filter_by(role_id=estimator_role.role_id).all()
                 target_users = [user.user_id for user in users]
@@ -173,7 +173,7 @@ def notify_purchase_forwarded(boq_id, project_name, forwarded_by_id, forwarded_b
         }
 
         role_name = role_map.get(target_role.lower(), target_role)
-        target_role_obj = Role.query.filter_by(role_name=role_name).first()
+        target_role_obj = Role.query.filter_by(role=role_name, is_deleted=False).first()
 
         if not target_role_obj:
             log.warning(f"Role {role_name} not found")

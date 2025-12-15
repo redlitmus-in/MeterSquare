@@ -282,8 +282,9 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
 
   // Enhanced notification action handler with smart redirects
   const handleNotificationAction = useCallback((notification: NotificationData) => {
-    // Get user role for building proper paths
-    const userRole = user?.role_id || user?.role || '';
+    // Get user role for building proper paths - use role name (string), NOT role_id (number)
+    // role is the string name like "buyer", "technicalDirector", etc.
+    const userRole = user?.role || '';
 
     console.log('[NotificationSystem] Handling notification:', {
       title: notification.title,

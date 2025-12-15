@@ -233,7 +233,7 @@ export const getNotificationRedirectPath = (
     // Vendor Selection Requires Approval (TD receives this)
     if (titleLower.includes('requires approval') || messageLower.includes('requires approval')) {
       return {
-        path: buildPath('/vendor-approval'),
+        path: buildPath('/change-requests'),
         queryParams: {
           ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
         },
@@ -254,7 +254,7 @@ export const getNotificationRedirectPath = (
     // Vendor Selected (goes to TD for approval)
     if (titleLower.includes('selected')) {
       return {
-        path: buildPath('/vendor-approval'),
+        path: buildPath('/change-requests'),
         queryParams: {
           ...(metadata?.vendor_id && { vendor_id: metadata.vendor_id }),
           ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })

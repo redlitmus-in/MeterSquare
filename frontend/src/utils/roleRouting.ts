@@ -84,7 +84,54 @@ export const getRoleName = (role: string | UserRole): string => {
  */
 export const getRoleSlug = (role: string | UserRole): string => {
   const roleName = getRoleName(role);
-  return ROLE_URL_SLUGS[roleName] || ROLE_URL_SLUGS[roleName as UserRole] || 'user';
+
+  // Direct lookup
+  if (ROLE_URL_SLUGS[roleName]) {
+    return ROLE_URL_SLUGS[roleName];
+  }
+
+  // Try lowercase normalization
+  const lowerRole = roleName.toLowerCase();
+  const normalizedMappings: Record<string, string> = {
+    'buyer': 'buyer',
+    'admin': 'admin',
+    'siteengineer': 'site-engineer',
+    'site_engineer': 'site-engineer',
+    'site-engineer': 'site-engineer',
+    'sitesupervisor': 'site-supervisor',
+    'site_supervisor': 'site-supervisor',
+    'site-supervisor': 'site-supervisor',
+    'mepsupervisor': 'mep-supervisor',
+    'mep_supervisor': 'mep-supervisor',
+    'mep-supervisor': 'mep-supervisor',
+    'mep': 'mep',
+    'procurement': 'procurement',
+    'projectmanager': 'project-manager',
+    'project_manager': 'project-manager',
+    'project-manager': 'project-manager',
+    'productionmanager': 'production-manager',
+    'production_manager': 'production-manager',
+    'production-manager': 'production-manager',
+    'design': 'design',
+    'estimation': 'estimator',
+    'estimator': 'estimator',
+    'accounts': 'accounts',
+    'technicaldirector': 'technical-director',
+    'technical_director': 'technical-director',
+    'technical-director': 'technical-director',
+    'td': 'technical-director',
+  };
+
+  if (normalizedMappings[lowerRole]) {
+    return normalizedMappings[lowerRole];
+  }
+
+  // Try enum lookup
+  if (ROLE_URL_SLUGS[roleName as UserRole]) {
+    return ROLE_URL_SLUGS[roleName as UserRole];
+  }
+
+  return 'user';
 };
 
 /**

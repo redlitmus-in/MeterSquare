@@ -221,7 +221,8 @@ class RealtimeNotificationHub {
       metadata: notification.metadata,
       actionUrl: (notification as any).actionUrl,
       actionLabel: (notification as any).actionLabel,
-      senderName: notification.senderName
+      senderName: notification.senderName,
+      category: (notification as any).category || 'system'
     };
 
     // Add to notification store (shows in notification panel + badge count)
@@ -527,7 +528,8 @@ class RealtimeNotificationHub {
             metadata: notification.metadata,
             actionUrl: (notification as any).actionUrl || notification.metadata?.actionUrl,
             actionLabel: (notification as any).actionLabel || notification.metadata?.actionLabel,
-            senderName: notification.senderName
+            senderName: notification.senderName,
+            category: (notification as any).category || notification.metadata?.category || 'system'
           };
 
           // Add to notification store (shows in notification panel + badge count)

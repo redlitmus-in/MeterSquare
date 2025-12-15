@@ -693,7 +693,7 @@ class ComprehensiveNotificationService:
                 priority='urgent',
                 category='change_request',
                 action_required=True,
-                action_url=f'/technical-director/vendor-approval?cr_id={cr_id}',
+                action_url=f'/technical-director/change-requests?cr_id={cr_id}',
                 action_label='Review Vendor',
                 metadata={'cr_id': cr_id, 'vendor_name': vendor_name, 'request_type': request_type, 'target_role': 'technical-director'},
                 sender_id=buyer_id,

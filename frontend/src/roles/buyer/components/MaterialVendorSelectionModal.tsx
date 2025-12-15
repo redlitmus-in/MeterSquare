@@ -318,10 +318,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
               },
               terms: {
                 ...enrichedLpoData.terms,
-                completion_terms: defaultTemplate.template.completion_terms || enrichedLpoData.terms.completion_terms,
-                custom_terms: (defaultTemplate.template.custom_terms?.length || 0) > 0
-                  ? defaultTemplate.template.custom_terms
-                  : enrichedLpoData.terms.custom_terms,
+                // Prefer saved values from API, then fall back to default template
+                payment_terms: enrichedLpoData.terms.payment_terms || defaultTemplate.template.payment_terms,
+                // API returns delivery_terms, so check both completion_terms and delivery_terms
+                completion_terms: enrichedLpoData.terms.completion_terms || enrichedLpoData.terms.delivery_terms || defaultTemplate.template.completion_terms,
+                delivery_terms: enrichedLpoData.terms.delivery_terms || enrichedLpoData.terms.completion_terms || defaultTemplate.template.completion_terms,
+                custom_terms: (enrichedLpoData.terms.custom_terms?.length || 0) > 0
+                  ? enrichedLpoData.terms.custom_terms
+                  : (defaultTemplate.template.custom_terms?.length || 0) > 0
+                    ? defaultTemplate.template.custom_terms
+                    : [],
               }
             };
             setIncludeSignatures(defaultTemplate.template.include_signatures);

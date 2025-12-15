@@ -162,7 +162,8 @@ const SupportManagement: React.FC = () => {
   // Check for new tickets and send notifications
   const checkForNewTickets = useCallback((newTickets: SupportTicket[]) => {
     // Initialize known tickets (uses sessionStorage, preserves existing)
-    initializeKnownTickets(newTickets.map(t => t.ticket_id));
+    // Pass full ticket objects with ticket_id and comments for proper initialization
+    initializeKnownTickets(newTickets.map(t => ({ ticket_id: t.ticket_id, comments: t.comments })));
 
     // Check for new tickets (submitted status only - new tickets)
     newTickets.forEach(ticket => {
@@ -171,7 +172,10 @@ const SupportManagement: React.FC = () => {
         notifyNewTicket(
           ticket.ticket_number,
           ticket.title,
-          ticket.reporter_name
+          ticket.reporter_name,
+          ticket.reporter_role || 'estimator',
+          ticket.reporter_email || '',
+          ticket.ticket_id
         );
 
         // Also show toast notification
@@ -802,11 +806,13 @@ const SupportManagement: React.FC = () => {
                         )}
 
                         {/* Development Team Response History */}
-                        {ticket.response_history && ticket.response_history.length > 0 && (
+                        {ticket.response_history && ticket.response_history.filter((e: any) => e.type !== 'resolution').length > 0 && (
                           <div className="mb-6">
                             <h4 className="text-sm font-medium text-gray-700 mb-3">Development Team Response History</h4>
                             <div className="space-y-3">
-                              {[...ticket.response_history].sort((a: any, b: any) =>
+                              {[...ticket.response_history]
+                                .filter((entry: any) => entry.type !== 'resolution') // Resolution shown separately below
+                                .sort((a: any, b: any) =>
                                 new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
                               ).map((entry: any, index: number) => {
                                 // Determine colors based on response type
@@ -994,8 +1000,8 @@ const SupportManagement: React.FC = () => {
 
                         {/* Actions */}
                         <div className="flex items-center gap-3 pt-4 border-t flex-wrap">
-                          {/* Approve/Reject for submitted tickets */}
-                          {(ticket.status === 'submitted' || ticket.status === 'in_review') && (
+                          {/* Approve/Reject - only for submitted/in_review tickets that have NOT been approved before */}
+                          {(ticket.status === 'submitted' || ticket.status === 'in_review') && !ticket.approval_date && (
                             <>
                               <button
                                 onClick={() => setActionModal({ type: 'approve', ticket })}

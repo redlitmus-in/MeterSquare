@@ -97,11 +97,33 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
     Individual materials show negotiated_price separately
 
     Also enriches unit_price from BOQ for existing materials when stored price is 0
+    Also looks up vendor product prices from vendor catalog when available
     """
+    from models.vendor import VendorProduct
+
     sub_items_data = cr.sub_items_data or cr.materials_data or []
     cr_total = 0
     materials_list = []
     material_vendor_selections = cr.material_vendor_selections or {}
+
+    # Build vendor product price lookup by vendor_id
+    # Get unique vendor IDs from material selections
+    vendor_ids = set()
+    for mat_name, selection in material_vendor_selections.items():
+        if isinstance(selection, dict) and selection.get('vendor_id'):
+            vendor_ids.add(selection.get('vendor_id'))
+
+    # Lookup vendor product prices for all selected vendors
+    vendor_product_prices = {}  # {vendor_id: {material_name.lower(): price}}
+    for vendor_id in vendor_ids:
+        vendor_products = VendorProduct.query.filter_by(
+            vendor_id=vendor_id,
+            is_deleted=False
+        ).all()
+        vendor_product_prices[vendor_id] = {}
+        for vp in vendor_products:
+            if vp.product_name:
+                vendor_product_prices[vendor_id][vp.product_name.lower().strip()] = float(vp.unit_price or 0)
 
     # Build BOQ material price lookup for enrichment
     # Two lookups: by material_id and by material_name (for when IDs don't match)
@@ -150,11 +172,20 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         if (original_unit_price == 0 or not original_unit_price) and material_name:
                             original_unit_price = boq_material_prices_by_name.get(material_name, 0)
 
-                        # Check if there's a negotiated price for this material
+                        # Check if there's a negotiated price or vendor product price for this material
                         vendor_selection = material_vendor_selections.get(material_name, {})
                         negotiated_price = vendor_selection.get('negotiated_price')
+                        vendor_id = vendor_selection.get('vendor_id')
 
-                        # ALWAYS use original price for total calculation
+                        # Lookup vendor product price from catalog
+                        vendor_product_price = 0
+                        if vendor_id and vendor_id in vendor_product_prices:
+                            vendor_product_price = vendor_product_prices[vendor_id].get(material_name.lower().strip(), 0)
+
+                        # Use vendor price if no negotiated price (prefer vendor catalog over BOQ)
+                        effective_price = negotiated_price or vendor_product_price or original_unit_price
+
+                        # ALWAYS use original price for total calculation (for internal tracking)
                         material_total = float(quantity) * float(original_unit_price)
 
                         cr_total += material_total
@@ -163,10 +194,12 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                             "master_material_id": master_material_id,
                             "quantity": quantity,
                             "unit": material.get('unit', ''),
-                            "unit_price": original_unit_price,  # Keep original price (enriched from BOQ if needed)
+                            "unit_price": original_unit_price,  # Keep original/BOQ price
                             "total_price": material_total,  # Based on original price
-                            "negotiated_price": negotiated_price if negotiated_price is not None else None,
-                            "original_unit_price": original_unit_price  # Add original for reference
+                            "negotiated_price": effective_price if effective_price != original_unit_price else None,
+                            "vendor_product_price": vendor_product_price,
+                            "original_unit_price": original_unit_price,  # Add original for reference
+                            "boq_unit_price": original_unit_price  # For PDF comparison
                         })
                 else:
                     material_name = sub_item.get('material_name', '')
@@ -186,11 +219,20 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                     if (original_unit_price == 0 or not original_unit_price) and material_name:
                         original_unit_price = boq_material_prices_by_name.get(material_name, 0)
 
-                    # Check if there's a negotiated price for this material
+                    # Check if there's a negotiated price or vendor product price for this material
                     vendor_selection = material_vendor_selections.get(material_name, {})
                     negotiated_price = vendor_selection.get('negotiated_price')
+                    vendor_id = vendor_selection.get('vendor_id')
 
-                    # ALWAYS use original price for total calculation
+                    # Lookup vendor product price from catalog
+                    vendor_product_price = 0
+                    if vendor_id and vendor_id in vendor_product_prices:
+                        vendor_product_price = vendor_product_prices[vendor_id].get(material_name.lower().strip(), 0)
+
+                    # Use vendor price if no negotiated price (prefer vendor catalog over BOQ)
+                    effective_price = negotiated_price or vendor_product_price or original_unit_price
+
+                    # ALWAYS use original price for total calculation (for internal tracking)
                     sub_total = float(quantity) * float(original_unit_price)
 
                     cr_total += sub_total
@@ -203,10 +245,12 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         "size": sub_item.get('size', ''),
                         "quantity": quantity,
                         "unit": sub_item.get('unit', ''),
-                        "unit_price": original_unit_price,  # Keep original price (enriched from BOQ if needed)
+                        "unit_price": original_unit_price,  # Keep original/BOQ price
                         "total_price": sub_total,  # Based on original price
-                        "negotiated_price": negotiated_price if negotiated_price is not None else None,
-                        "original_unit_price": original_unit_price  # Add original for reference
+                        "negotiated_price": effective_price if effective_price != original_unit_price else None,
+                        "vendor_product_price": vendor_product_price,
+                        "original_unit_price": original_unit_price,  # Add original for reference
+                        "boq_unit_price": original_unit_price  # For PDF comparison
                     })
     else:
         for material in sub_items_data:
@@ -227,11 +271,20 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
             if (original_unit_price == 0 or not original_unit_price) and material_name:
                 original_unit_price = boq_material_prices_by_name.get(material_name, 0)
 
-            # Check if there's a negotiated price for this material
+            # Check if there's a negotiated price or vendor product price for this material
             vendor_selection = material_vendor_selections.get(material_name, {})
             negotiated_price = vendor_selection.get('negotiated_price')
+            vendor_id = vendor_selection.get('vendor_id')
 
-            # ALWAYS use original price for total calculation
+            # Lookup vendor product price from catalog
+            vendor_product_price = 0
+            if vendor_id and vendor_id in vendor_product_prices:
+                vendor_product_price = vendor_product_prices[vendor_id].get(material_name.lower().strip(), 0)
+
+            # Use vendor price if no negotiated price (prefer vendor catalog over BOQ)
+            effective_price = negotiated_price or vendor_product_price or original_unit_price
+
+            # ALWAYS use original price for total calculation (for internal tracking)
             material_total = float(quantity) * float(original_unit_price)
 
             cr_total += material_total
@@ -244,10 +297,12 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                 "size": material.get('size', ''),
                 "quantity": quantity,
                 "unit": material.get('unit', ''),
-                "unit_price": original_unit_price,  # Keep original price (enriched from BOQ if needed)
+                "unit_price": original_unit_price,  # Keep original/BOQ price
                 "total_price": material_total,  # Based on original price
-                "negotiated_price": negotiated_price if negotiated_price is not None else None,
-                "original_unit_price": original_unit_price  # Add original for reference
+                "negotiated_price": effective_price if effective_price != original_unit_price else None,
+                "vendor_product_price": vendor_product_price,
+                "original_unit_price": original_unit_price,  # Add original for reference
+                "boq_unit_price": original_unit_price  # For PDF comparison
             })
 
     return materials_list, cr_total
@@ -2290,26 +2345,57 @@ def select_vendor_for_purchase(cr_id):
         # Send notification when buyer selects vendor (needs TD approval)
         try:
             if not is_td:  # Only notify TD when buyer selects vendor
-                # Get TD users
-                td_role = Role.query.filter_by(role_name='Technical Director').first()
+                # DEBUG: Log all roles to see what's in the database
+                all_roles = Role.query.filter_by(is_deleted=False).all()
+                log.info(f"[TD Notification DEBUG] All roles in database: {[(r.role_id, r.role) for r in all_roles]}")
+
+                # Get TD users - try multiple role name variations
+                td_role = None
+                role_variations = [
+                    'Technical Director', 'technicalDirector', 'technical_director',
+                    'TechnicalDirector', 'TD', 'td'
+                ]
+
+                for role_name in role_variations:
+                    td_role = Role.query.filter_by(role=role_name, is_deleted=False).first()
+                    if td_role:
+                        log.info(f"[TD Notification] Found TD role with name: '{role_name}', role_id={td_role.role_id}")
+                        break
+
                 if not td_role:
-                    td_role = Role.query.filter(Role.role.ilike('%technical%director%')).first()
+                    # Try case-insensitive search
+                    td_role = Role.query.filter(
+                        Role.role.ilike('%technical%director%'),
+                        Role.is_deleted == False
+                    ).first()
+                    if td_role:
+                        log.info(f"[TD Notification] Found TD role via ilike: {td_role.role}")
 
                 if td_role:
                     tds = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                    log.info(f"[TD Notification] Found {len(tds)} TD users for role_id={td_role.role_id}")
+
                     if tds:
-                        td_user_id = tds[0].user_id
                         project_name = cr.project.project_name if cr.project else 'Unknown Project'
-                        notification_service.notify_vendor_selected_for_cr(
-                            cr_id=cr_id,
-                            project_name=project_name,
-                            buyer_id=user_id,
-                            buyer_name=user_name,
-                            td_user_id=td_user_id,
-                            vendor_name=vendor.company_name
-                        )
+                        # Send notification to all TDs
+                        for td_user in tds:
+                            log.info(f"[TD Notification] Sending notification to TD user_id={td_user.user_id}, name={td_user.full_name}")
+                            notification_service.notify_vendor_selected_for_cr(
+                                cr_id=cr_id,
+                                project_name=project_name,
+                                buyer_id=user_id,
+                                buyer_name=user_name,
+                                td_user_id=td_user.user_id,
+                                vendor_name=vendor.company_name
+                            )
+                    else:
+                        log.warning(f"[TD Notification] No active TD users found for role_id={td_role.role_id}")
+                else:
+                    log.warning(f"[TD Notification] Could not find TD role in database")
         except Exception as notif_error:
             log.error(f"Failed to send vendor selection notification: {notif_error}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
 
         # Log and return response based on user role
         if is_td:
@@ -3088,10 +3174,19 @@ def select_vendor_for_material(cr_id):
                 from utils.notification_utils import NotificationManager
                 from socketio_server import send_notification_to_user
 
+                # Try multiple possible TD role names
                 td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
+                if not td_role:
+                    td_role = Role.query.filter_by(role='technicalDirector', is_deleted=False).first()
+                if not td_role:
+                    td_role = Role.query.filter(Role.role.ilike('%technical%director%'), Role.is_deleted == False).first()
+
+                log.info(f"TD notification - Found TD role: {td_role.role if td_role else 'None'}")
+
                 if td_role:
                     from models.user import User
                     td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                    log.info(f"TD notification - Found {len(td_users)} TD users")
                     for td_user in td_users:
                         # Customize notification based on whether all materials are submitted
                         if all_materials_have_vendors:
@@ -4029,13 +4124,16 @@ def td_approve_vendor(cr_id):
         db.session.commit()
 
         # Send notification to buyer about vendor approval
+        # Send to the buyer who selected the vendor, not necessarily the CR creator
         try:
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
 
-            if cr.created_by:
+            # Prefer vendor_selected_by_buyer_id, fall back to created_by
+            buyer_to_notify = cr.vendor_selected_by_buyer_id or cr.created_by
+            if buyer_to_notify:
                 notification = NotificationManager.create_notification(
-                    user_id=cr.created_by,
+                    user_id=buyer_to_notify,
                     type='approval',
                     title='Vendor Selection Approved',
                     message=f'TD approved vendor "{cr.selected_vendor_name}" for materials purchase: {cr.item_name or "Materials Request"}',
@@ -4053,7 +4151,7 @@ def td_approve_vendor(cr_id):
                     sender_name=td_name,
                     target_role='buyer'
                 )
-                send_notification_to_user(cr.created_by, notification.to_dict())
+                send_notification_to_user(buyer_to_notify, notification.to_dict())
         except Exception as notif_error:
             log.error(f"Failed to send vendor approval notification: {notif_error}")
 
@@ -4122,13 +4220,16 @@ def td_reject_vendor(cr_id):
         db.session.commit()
 
         # Send notification to buyer about vendor rejection
+        # Send to the buyer who selected the vendor, not necessarily the CR creator
         try:
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
 
-            if cr.created_by:
+            # Prefer vendor_selected_by_buyer_id, fall back to created_by
+            buyer_to_notify = cr.vendor_selected_by_buyer_id or cr.created_by
+            if buyer_to_notify:
                 notification = NotificationManager.create_notification(
-                    user_id=cr.created_by,
+                    user_id=buyer_to_notify,
                     type='rejection',
                     title='Vendor Selection Rejected',
                     message=f'TD rejected vendor selection for materials purchase: {cr.item_name or "Materials Request"}. Reason: {reason}',
@@ -4146,7 +4247,7 @@ def td_reject_vendor(cr_id):
                     sender_name=td_name,
                     target_role='buyer'
                 )
-                send_notification_to_user(cr.created_by, notification.to_dict())
+                send_notification_to_user(buyer_to_notify, notification.to_dict())
         except Exception as notif_error:
             log.error(f"Failed to send vendor rejection notification: {notif_error}")
 
