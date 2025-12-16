@@ -69,6 +69,13 @@ interface BOQAssignment {
     phone: string;
     phone_code: string;
     category: string;
+    contact_person?: string;
+    street_address?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    pin_code?: string;
+    gst_number?: string;
   } | null;
 }
 
@@ -534,27 +541,103 @@ const TDVendorApproval: React.FC = () => {
 
               {/* Vendor Info */}
               {selectedAssignment.vendor && (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Store className="w-5 h-5 text-gray-600" />
-                    <h3 className="font-semibold text-gray-900">Selected Vendor</h3>
+                <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6 shadow-sm">
+                  <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+                    <div className="flex items-center gap-2">
+                      <Store className="w-5 h-5 text-gray-600" />
+                      <h3 className="font-semibold text-gray-900 text-base">Selected Vendor Details</h3>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <div className="text-gray-600">Company Name</div>
-                      <div className="font-medium text-gray-900">{selectedAssignment.vendor.company_name}</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+                    {/* Company Info */}
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Company Name</p>
+                        <p className="font-semibold text-gray-900">{selectedAssignment.vendor.company_name}</p>
+                      </div>
+
+                      {selectedAssignment.vendor.contact_person && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Contact Person</p>
+                          <p className="text-gray-900">{selectedAssignment.vendor.contact_person}</p>
+                        </div>
+                      )}
+
+                      {selectedAssignment.vendor.email && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Email</p>
+                          <p className="text-gray-900 break-words">{selectedAssignment.vendor.email}</p>
+                        </div>
+                      )}
+
+                      {selectedAssignment.vendor.phone && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Phone</p>
+                          <p className="text-gray-900">
+                            {selectedAssignment.vendor.phone_code ? `${selectedAssignment.vendor.phone_code} ` : ''}
+                            {selectedAssignment.vendor.phone}
+                          </p>
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <div className="text-gray-600">Email</div>
-                      <div className="font-medium text-gray-900">{selectedAssignment.vendor.email}</div>
-                    </div>
-                    <div>
-                      <div className="text-gray-600">Selected By</div>
-                      <div className="font-medium text-gray-900">{selectedAssignment.vendor_selected_by_buyer_name}</div>
-                    </div>
-                    <div>
-                      <div className="text-gray-600">Category</div>
-                      <div className="font-medium text-gray-900">{selectedAssignment.vendor.category || 'N/A'}</div>
+
+                    {/* Additional Info */}
+                    <div className="space-y-4">
+                      {selectedAssignment.vendor.category && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Category</p>
+                          <p className="text-gray-900">{selectedAssignment.vendor.category}</p>
+                        </div>
+                      )}
+
+                      {(selectedAssignment.vendor.street_address || selectedAssignment.vendor.city) && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Address</p>
+                          <p className="text-gray-900">
+                            {[
+                              selectedAssignment.vendor.street_address,
+                              selectedAssignment.vendor.city,
+                              selectedAssignment.vendor.state,
+                              selectedAssignment.vendor.country,
+                              selectedAssignment.vendor.pin_code
+                            ].filter(Boolean).join(', ')}
+                          </p>
+                        </div>
+                      )}
+
+                      {selectedAssignment.vendor.gst_number && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">GST/TRN Number</p>
+                          <p className="text-gray-900">{selectedAssignment.vendor.gst_number}</p>
+                        </div>
+                      )}
+
+                      {selectedAssignment.vendor_selected_by_buyer_name && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Selected By (Buyer)</p>
+                          <p className="text-gray-900">{selectedAssignment.vendor_selected_by_buyer_name}</p>
+                        </div>
+                      )}
+
+                      {selectedAssignment.vendor_selection_status === 'approved' && selectedAssignment.vendor_approved_by_td_name && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Approved By TD</p>
+                          <p className="text-gray-900">{selectedAssignment.vendor_approved_by_td_name}</p>
+                        </div>
+                      )}
+
+                      {selectedAssignment.vendor_selection_status === 'approved' && selectedAssignment.vendor_approval_date && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Approval Date</p>
+                          <p className="text-gray-900">
+                            {new Date(selectedAssignment.vendor_approval_date).toLocaleDateString('en-US', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            })}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

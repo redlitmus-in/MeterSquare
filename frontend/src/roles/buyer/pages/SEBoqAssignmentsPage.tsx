@@ -13,8 +13,6 @@ import {
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-// TODO: Update to use MaterialVendorSelectionModal - requires interface mapping between BOQAssignment and Purchase
-// import MaterialVendorSelectionModal from '../components/MaterialVendorSelectionModal';
 import { BOQAssignment, getSEBoqAssignments, selectVendorForSEBoq, completeSEBoqPurchase } from '@/services/boqAssignmentService';
 
 const SEBoqAssignmentsPage: React.FC = () => {
@@ -22,7 +20,6 @@ const SEBoqAssignmentsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState<BOQAssignment | null>(null);
-  const [showVendorModal, setShowVendorModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'approved' | 'completed'>('all');
 
@@ -54,7 +51,6 @@ const SEBoqAssignmentsPage: React.FC = () => {
     try {
       await selectVendorForSEBoq(selectedAssignment.assignment_id, vendorId);
       showSuccess('Vendor selected. Awaiting TD approval.');
-      setShowVendorModal(false);
       setSelectedAssignment(null);
       // Silent refresh without loading spinner
       fetchAssignments(false);
@@ -337,13 +333,6 @@ const SEBoqAssignmentsPage: React.FC = () => {
 
                   {/* Action Buttons Row */}
                   <div className="flex items-center gap-3">
-                    {/* TODO: Vendor selection temporarily disabled - needs MaterialVendorSelectionModal integration */}
-                    {!assignment.selected_vendor_id && (
-                      <div className="flex-1 px-4 py-2 bg-gray-400 text-white rounded-lg font-medium flex items-center justify-center gap-2 cursor-not-allowed" title="Vendor selection under maintenance">
-                        <TruckIcon className="w-5 h-5" />
-                        Select Vendor (Coming Soon)
-                      </div>
-                    )}
 
                     {assignment.vendor_selection_status === 'approved' && assignment.status !== 'purchase_completed' && (
                       <button
@@ -361,19 +350,6 @@ const SEBoqAssignmentsPage: React.FC = () => {
           ))}
         </div>
       )}
-
-      {/* Vendor Selection Modal - TODO: Integrate MaterialVendorSelectionModal */}
-      {/* {selectedAssignment && (
-        <MaterialVendorSelectionModal
-          isOpen={showVendorModal}
-          onClose={() => {
-            setShowVendorModal(false);
-            setSelectedAssignment(null);
-          }}
-          onSelect={handleVendorSelect}
-          purchaseId={selectedAssignment.assignment_id}
-        />
-      )} */}
 
       {/* BOQ Details Modal */}
       <AnimatePresence>

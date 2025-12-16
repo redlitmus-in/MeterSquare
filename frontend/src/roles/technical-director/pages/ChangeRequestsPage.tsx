@@ -42,7 +42,6 @@ import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsM
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
-import MaterialVendorSelectionModal from '@/roles/buyer/components/MaterialVendorSelectionModal';
 import TDLPOEditorModal from '../components/TDLPOEditorModal';
 import { useAuthStore } from '@/store/authStore';
 import { permissions } from '@/utils/rolePermissions';
@@ -81,12 +80,6 @@ const ChangeRequestsPage: React.FC = () => {
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
   const [approvingVendorId, setApprovingVendorId] = useState<number | null>(null);
-  const [showVendorInfoModal, setShowVendorInfoModal] = useState(false);
-  const [selectedVendorPurchase, setSelectedVendorPurchase] = useState<Purchase | null>(null);
-  const [showVendorSelectionModal, setShowVendorSelectionModal] = useState(false);
-  const [vendorDetails, setVendorDetails] = useState<Vendor | null>(null);
-  const [vendorProducts, setVendorProducts] = useState<VendorProduct[]>([]);
-  const [loadingVendorDetails, setLoadingVendorDetails] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
   const [rejectingPOChildId, setRejectingPOChildId] = useState<number | null>(null);
@@ -316,75 +309,6 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
-  // Handle viewing vendor info for PO child
-  const handleViewPOChildVendorInfo = async (poChild: POChild) => {
-    // Convert POChild to Purchase-like object for the vendor info modal
-    const purchaseLike: Purchase = {
-      cr_id: poChild.parent_cr_id,
-      formatted_cr_id: poChild.formatted_id,
-      project_id: poChild.project_id || 0,
-      project_name: poChild.project_name || 'Unknown Project',
-      client: '',
-      location: '',
-      boq_id: poChild.boq_id || 0,
-      boq_name: '',
-      item_name: poChild.item_name || '',
-      sub_item_name: '',
-      request_type: '',
-      reason: '',
-      materials: poChild.materials || [],
-      materials_count: poChild.materials_count || poChild.materials?.length || 0,
-      total_cost: poChild.materials_total_cost || 0,
-      approved_by: 0,
-      approved_at: null,
-      created_at: poChild.created_at || '',
-      status: 'pending',
-      vendor_id: poChild.vendor_id,
-      vendor_name: poChild.vendor_name,
-      vendor_selection_status: poChild.vendor_selection_status,
-    };
-
-    setSelectedVendorPurchase(purchaseLike);
-    setShowVendorInfoModal(true);
-
-    // Fetch full vendor details
-    if (poChild.vendor_id) {
-      try {
-        setLoadingVendorDetails(true);
-        const [vendor, products] = await Promise.all([
-          buyerVendorService.getVendorById(poChild.vendor_id),
-          buyerVendorService.getVendorProducts(poChild.vendor_id)
-        ]);
-        setVendorDetails(vendor);
-
-        // Filter products to only show those that match materials in this PO child
-        const materialNames = (poChild.materials || []).map(m =>
-          m.material_name?.toLowerCase().trim() || ''
-        );
-
-        const relevantProducts = products.filter(product => {
-          const productName = product.product_name?.toLowerCase().trim() || '';
-          const productCategory = product.category?.toLowerCase().trim() || '';
-
-          return materialNames.some(materialName => {
-            if (!materialName) return false;
-            return productName.includes(materialName) ||
-              materialName.includes(productName) ||
-              productCategory.includes(materialName);
-          });
-        });
-
-        setVendorProducts(relevantProducts.length > 0 ? relevantProducts : products.slice(0, 5));
-      } catch (error) {
-        console.error('Error loading vendor details:', error);
-        setVendorDetails(null);
-        setVendorProducts([]);
-      } finally {
-        setLoadingVendorDetails(false);
-      }
-    }
-  };
-
   // Handle opening LPO editor for a PO child
   const handleOpenLpoEditor = (poChild: POChild, readOnly: boolean = false) => {
     setSelectedPOChildForLpo(poChild);
@@ -394,7 +318,7 @@ const ChangeRequestsPage: React.FC = () => {
   };
 
   // Handle viewing PO child details (shows only PO child's materials, not parent CR)
-  const handleViewPOChildDetails = (poChild: POChild) => {
+  const handleViewPOChildDetails = async (poChild: POChild) => {
     // Convert POChild to ChangeRequestItem format for the details modal
     // Map PO child status to CR status for display
     const mappedStatus = poChild.vendor_selection_status === 'pending_td_approval'
@@ -439,7 +363,17 @@ const ChangeRequestsPage: React.FC = () => {
     // Calculate total from mapped materials (in case backend total is 0)
     const calculatedTotal = mappedMaterials.reduce((sum, m) => sum + (m.total_price || 0), 0);
 
-    const poChildAsChangeRequest: ChangeRequestItem & { po_child_id?: number } = {
+    // Fetch vendor details if vendor is selected
+    let vendorDetailsData = null;
+    if (poChild.vendor_id) {
+      try {
+        vendorDetailsData = await buyerVendorService.getVendorById(poChild.vendor_id);
+      } catch (error) {
+        console.error('Error loading vendor details:', error);
+      }
+    }
+
+    const poChildAsChangeRequest: ChangeRequestItem & { po_child_id?: number; vendor_details?: any } = {
       cr_id: poChild.parent_cr_id,
       formatted_cr_id: poChild.formatted_id,
       project_id: poChild.project_id || 0,
@@ -468,6 +402,8 @@ const ChangeRequestsPage: React.FC = () => {
       vendor_selection_date: poChild.vendor_selection_date,
       // PO Child ID for LPO preview
       po_child_id: poChild.id,
+      // Full vendor details for display in modal
+      vendor_details: vendorDetailsData,
     };
 
     setSelectedChangeRequest(poChildAsChangeRequest);
@@ -562,7 +498,21 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.getChangeRequestDetail(crId);
       if (response.success && response.data) {
-        setSelectedChangeRequest(response.data);
+        const changeRequestData = response.data;
+
+        // Fetch vendor details if vendor is selected
+        if (changeRequestData.selected_vendor_id) {
+          try {
+            const vendorDetails = await buyerVendorService.getVendorById(changeRequestData.selected_vendor_id);
+            // Add vendor details to the change request object
+            (changeRequestData as any).vendor_details = vendorDetails;
+          } catch (error) {
+            console.error('Error loading vendor details:', error);
+            // Continue without vendor details - basic info will still show
+          }
+        }
+
+        setSelectedChangeRequest(changeRequestData);
         setShowDetailsModal(true);
       } else {
         showError(response.message || 'Failed to load details');
@@ -808,7 +758,21 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.getChangeRequestDetail(crId);
       if (response.success && response.data) {
-        setSelectedChangeRequest(response.data);
+        const changeRequestData = response.data;
+
+        // Fetch vendor details if vendor is selected
+        if (changeRequestData.selected_vendor_id) {
+          try {
+            const vendorDetails = await buyerVendorService.getVendorById(changeRequestData.selected_vendor_id);
+            // Add vendor details to the change request object
+            (changeRequestData as any).vendor_details = vendorDetails;
+          } catch (error) {
+            console.error('Error loading vendor details:', error);
+            // Continue without vendor details - basic info will still show
+          }
+        }
+
+        setSelectedChangeRequest(changeRequestData);
         setShowDetailsModal(true);
       } else {
         showError(response.message || 'Failed to load details');
@@ -1984,23 +1948,14 @@ const ChangeRequestsPage: React.FC = () => {
 
                           {/* Actions */}
                           <div className="border-t border-orange-100 p-1.5 flex flex-col gap-1 bg-orange-50/20">
-                            <div className="grid grid-cols-2 gap-1">
-                              <button
-                                onClick={() => handleViewPOChildDetails(poChild)}
-                                className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
-                                style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                              >
-                                <Eye className="h-3 w-3" />
-                                <span>Details</span>
-                              </button>
-                              <button
-                                onClick={() => handleViewPOChildVendorInfo(poChild)}
-                                className="bg-gray-500 hover:bg-gray-600 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
-                              >
-                                <Store className="h-3 w-3" />
-                                <span>Vendor</span>
-                              </button>
-                            </div>
+                            <button
+                              onClick={() => handleViewPOChildDetails(poChild)}
+                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold w-full"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                            >
+                              <Eye className="h-3 w-3" />
+                              <span>Details</span>
+                            </button>
                             <div className="grid grid-cols-2 gap-1">
                               <button
                                 onClick={() => handleApprovePOChild(poChild.id)}
@@ -2420,272 +2375,6 @@ const ChangeRequestsPage: React.FC = () => {
           crId={approvingCrId}
           crName={`PO-${approvingCrId}`}
           onSuccess={handleApprovalSuccess}
-        />
-      )}
-
-      {/* Enhanced Vendor Info Modal */}
-      {showVendorInfoModal && selectedVendorPurchase && (
-        <>
-          <div
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-            onClick={() => {
-              setShowVendorInfoModal(false);
-              setVendorDetails(null);
-              setVendorProducts([]);
-            }}
-          />
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl my-8 overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="bg-gradient-to-r from-purple-50 to-purple-100 px-6 py-5 border-b border-purple-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="p-2 bg-purple-500 rounded-full">
-                        <Store className="w-6 h-6 text-white" />
-                      </div>
-                      <div>
-                        <h3 className="text-2xl font-bold text-gray-900">Vendor Details</h3>
-                        <p className="text-sm text-gray-600 mt-0.5">{selectedVendorPurchase.formatted_cr_id || `PO-${selectedVendorPurchase.cr_id}`} - {selectedVendorPurchase.project_name}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowVendorInfoModal(false);
-                      setVendorDetails(null);
-                      setVendorProducts([]);
-                    }}
-                    className="p-2 hover:bg-purple-200 rounded-lg transition-colors"
-                  >
-                    <X className="w-5 h-5 text-gray-600" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Body */}
-              <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">
-                {loadingVendorDetails ? (
-                  <div className="flex items-center justify-center py-12">
-                    <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                    <span className="ml-3 text-gray-600">Loading vendor details...</span>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {/* Vendor Company Information */}
-                    <div className="bg-purple-50 border border-purple-200 rounded-xl p-5">
-                      <h4 className="text-lg font-bold text-purple-900 mb-4 flex items-center gap-2">
-                        <Store className="w-5 h-5" />
-                        {vendorDetails?.company_name || selectedVendorPurchase.vendor_name}
-                      </h4>
-
-                      {vendorDetails && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                          {vendorDetails.contact_person_name && (
-                            <div>
-                              <span className="text-purple-700 font-medium">Contact Person:</span>
-                              <p className="text-gray-900 mt-1">{vendorDetails.contact_person_name}</p>
-                            </div>
-                          )}
-                          {vendorDetails.email && (
-                            <div>
-                              <span className="text-purple-700 font-medium">Email:</span>
-                              <p className="text-gray-900 mt-1">{vendorDetails.email}</p>
-                            </div>
-                          )}
-                          {vendorDetails.phone && (
-                            <div>
-                              <span className="text-purple-700 font-medium">Phone:</span>
-                              <p className="text-gray-900 mt-1">{vendorDetails.phone_code} {vendorDetails.phone}</p>
-                            </div>
-                          )}
-                          {vendorDetails.category && (
-                            <div>
-                              <span className="text-purple-700 font-medium">Category:</span>
-                              <Badge className="ml-2 bg-purple-200 text-purple-900">{vendorDetails.category}</Badge>
-                            </div>
-                          )}
-                          {(vendorDetails.street_address || vendorDetails.city || vendorDetails.country) && (
-                            <div className="md:col-span-2">
-                              <span className="text-purple-700 font-medium">Address:</span>
-                              <p className="text-gray-900 mt-1">
-                                {[vendorDetails.street_address, vendorDetails.city, vendorDetails.state, vendorDetails.country, vendorDetails.pin_code]
-                                  .filter(Boolean)
-                                  .join(', ')}
-                              </p>
-                            </div>
-                          )}
-                          {vendorDetails.gst_number && (
-                            <div>
-                              <span className="text-purple-700 font-medium">GST Number:</span>
-                              <p className="text-gray-900 mt-1">{vendorDetails.gst_number}</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Requested Materials */}
-                    <div>
-                      <h4 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                        <Package className="w-5 h-5 text-blue-600" />
-                        Requested Materials ({selectedVendorPurchase.materials_count})
-                      </h4>
-                      <div className="bg-blue-50 border border-blue-200 rounded-xl overflow-hidden">
-                        <table className="w-full">
-                          <thead className="bg-blue-100">
-                            <tr>
-                              <th className="px-4 py-3 text-left text-xs font-semibold text-blue-900">Material</th>
-                              <th className="px-4 py-3 text-right text-xs font-semibold text-blue-900">Quantity</th>
-                              <th className="px-4 py-3 text-right text-xs font-semibold text-blue-900">Unit Price</th>
-                              <th className="px-4 py-3 text-right text-xs font-semibold text-blue-900">Total</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-blue-200">
-                            {selectedVendorPurchase.materials?.map((material, idx) => (
-                              <tr key={idx} className="hover:bg-blue-100/50 transition-colors">
-                                <td className="px-4 py-3 text-sm text-gray-900 font-medium">{material.material_name}</td>
-                                <td className="px-4 py-3 text-sm text-gray-700 text-right">{material.quantity} {material.unit}</td>
-                                <td className="px-4 py-3 text-sm text-gray-700 text-right">AED {material.unit_price?.toLocaleString()}</td>
-                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right">AED {material.total_price?.toLocaleString()}</td>
-                              </tr>
-                            ))}
-                            <tr className="bg-blue-100 font-bold">
-                              <td colSpan={3} className="px-4 py-3 text-sm text-blue-900 text-right">Grand Total:</td>
-                              <td className="px-4 py-3 text-lg text-blue-900 text-right">AED {selectedVendorPurchase.total_cost.toLocaleString()}</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    {/* Matching Vendor Products - Only showing products relevant to this purchase */}
-                    {vendorProducts.length > 0 && (
-                      <div>
-                        <h4 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                          <Package className="w-5 h-5 text-green-600" />
-                          Matching Vendor Products ({vendorProducts.length})
-                        </h4>
-                        <p className="text-xs text-gray-500 mb-2">Products from this vendor that match the requested materials</p>
-                        <div className="bg-green-50 border border-green-200 rounded-xl overflow-hidden">
-                          <table className="w-full">
-                            <thead className="bg-green-100">
-                              <tr>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-green-900">Product Name</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-green-900">Category</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-green-900">Description</th>
-                                <th className="px-4 py-3 text-right text-xs font-semibold text-green-900">Price</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-green-200">
-                              {vendorProducts.map((product, idx) => (
-                                <tr key={product.product_id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-green-50/30'} hover:bg-green-100/50 transition-colors`}>
-                                  <td className="px-4 py-3 text-sm text-gray-900 font-medium">{product.product_name}</td>
-                                  <td className="px-4 py-3 text-sm">
-                                    {product.category ? (
-                                      <Badge className="bg-green-200 text-green-900 text-[10px]">{product.category}</Badge>
-                                    ) : (
-                                      <span className="text-gray-400 text-xs">-</span>
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-3 text-sm text-gray-700 max-w-xs">
-                                    {product.description ? (
-                                      <span className="line-clamp-2">{product.description}</span>
-                                    ) : (
-                                      <span className="text-gray-400 text-xs">-</span>
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-3 text-right">
-                                    {product.unit_price ? (
-                                      <div className="text-sm">
-                                        <div className="font-semibold text-green-900">AED {product.unit_price.toLocaleString()}</div>
-                                        <div className="text-xs text-gray-600">per {product.unit || 'unit'}</div>
-                                      </div>
-                                    ) : (
-                                      <span className="text-gray-400 text-xs">-</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Project Information */}
-                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                      <h4 className="text-sm font-semibold text-gray-700 mb-3">Project Information</h4>
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div>
-                          <span className="text-gray-500">Project:</span>
-                          <p className="font-semibold text-gray-900 mt-1">{selectedVendorPurchase.project_name}</p>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">Client:</span>
-                          <p className="font-semibold text-gray-900 mt-1">{selectedVendorPurchase.client}</p>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">Item:</span>
-                          <p className="font-semibold text-gray-900 mt-1">{selectedVendorPurchase.item_name}</p>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">Created:</span>
-                          <p className="font-semibold text-gray-900 mt-1">{new Date(selectedVendorPurchase.created_at).toLocaleDateString()}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-between gap-3">
-                <Button
-                  onClick={() => {
-                    setShowVendorInfoModal(false);
-                    setShowVendorSelectionModal(true);
-                  }}
-                  className="px-6 bg-orange-600 hover:bg-orange-700 text-white"
-                >
-                  <Store className="w-4 h-4 mr-2" />
-                  Change Vendor
-                </Button>
-                <Button
-                  onClick={() => {
-                    setShowVendorInfoModal(false);
-                    setVendorDetails(null);
-                    setVendorProducts([]);
-                  }}
-                  variant="outline"
-                  className="px-6"
-                >
-                  Close
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        </>
-      )}
-
-      {/* Material Vendor Selection Modal - TD Mode for changing vendor */}
-      {selectedVendorPurchase && (
-        <MaterialVendorSelectionModal
-          purchase={selectedVendorPurchase}
-          isOpen={showVendorSelectionModal}
-          onClose={() => setShowVendorSelectionModal(false)}
-          onVendorSelected={() => {
-            setShowVendorSelectionModal(false);
-            loadVendorApprovals();
-            loadChangeRequests();
-            showSuccess('Vendor Changed Successfully!');
-          }}
-          viewMode="td"
         />
       )}
 
