@@ -7,7 +7,7 @@ class User(db.Model):
     
     # Updated schema - removed password, avatar_url, org_uuid, and columns not in DB
     user_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    email = db.Column(db.String(255), nullable=False, unique=True)
+    email = db.Column(db.String(255), nullable=False, unique=False)
     full_name = db.Column(db.String(255), nullable=True)
     phone = db.Column(db.String(255), nullable=True)
     user_status = db.Column(db.String(255), nullable=True) 
