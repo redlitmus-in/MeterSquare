@@ -163,7 +163,7 @@ export const getRoleDisplayName = (role: string | UserRole): string => {
   const roleNames: Record<string, string> = {
     'admin': 'Admin',
     'siteEngineer': 'Site Engineer',
-    'buyer': 'Buyer',
+    'buyer': 'Procurement',
     [UserRole.SITE_SUPERVISOR]: 'Site Supervisor',
     [UserRole.MEP_SUPERVISOR]: 'MEP Supervisor',
     [UserRole.MEP]: 'MEP Supervisor',  // Display as "MEP Supervisor" in UI

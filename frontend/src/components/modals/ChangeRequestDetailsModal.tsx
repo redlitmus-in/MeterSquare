@@ -39,6 +39,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   // BOQ Details Modal state - for viewing sub-item in approved BOQ
   const [showBOQModal, setShowBOQModal] = useState(false);
   const [selectedSubItemForBOQ, setSelectedSubItemForBOQ] = useState<string | null>(null);
+  const [selectedMaterialForBOQ, setSelectedMaterialForBOQ] = useState<string | null>(null);
 
   // State to track edited materials with updated prices
   const [editedMaterials, setEditedMaterials] = useState<any[]>([]);
@@ -57,7 +58,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   };
 
   // Handle clicking on sub-item to view in BOQ
-  const handleViewSubItemInBOQ = (subItemName: string) => {
+  const handleViewSubItemInBOQ = (subItemName: string, materialName?: string) => {
     if (!changeRequest?.boq_id || changeRequest.boq_id <= 0) {
       return; // BOQ ID not available - silently ignore click
     }
@@ -65,6 +66,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       return; // No sub-item name - silently ignore
     }
     setSelectedSubItemForBOQ(subItemName);
+    setSelectedMaterialForBOQ(materialName || null);
     setShowBOQModal(true);
   };
 
@@ -701,7 +703,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                               <span className="text-gray-500">Sub-Item:</span>
                               {material.sub_item_name ? (
                                 <button
-                                  onClick={() => handleViewSubItemInBOQ(material.sub_item_name)}
+                                  onClick={() => handleViewSubItemInBOQ(material.sub_item_name, material.material_name)}
                                   className="ml-1 text-purple-700 hover:text-purple-900 underline underline-offset-2 hover:no-underline truncate"
                                   title={`View "${material.sub_item_name}" in BOQ`}
                                 >
@@ -843,7 +845,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             <td className="px-4 py-3 text-sm">
                               {material.sub_item_name ? (
                                 <button
-                                  onClick={() => handleViewSubItemInBOQ(material.sub_item_name)}
+                                  onClick={() => handleViewSubItemInBOQ(material.sub_item_name, material.material_name)}
                                   className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 hover:text-purple-900 transition-colors cursor-pointer truncate max-w-full group"
                                   title={`Click to view "${material.sub_item_name}" in BOQ scope`}
                                 >
@@ -1431,9 +1433,11 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
             onClose={() => {
               setShowBOQModal(false);
               setSelectedSubItemForBOQ(null);
+              setSelectedMaterialForBOQ(null);
             }}
             boqId={changeRequest.boq_id}
             subItemName={selectedSubItemForBOQ}
+            materialName={selectedMaterialForBOQ || undefined}
             boqName={changeRequest.boq_name || `BOQ #${changeRequest.boq_id}`}
           />
         )}

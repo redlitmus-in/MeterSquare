@@ -13,15 +13,9 @@ import {
   Hash,
   Store,
   AlertCircle,
-  Edit,
-  Save,
-  Mail,
-  Phone,
-  Tag,
   Clock
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -31,42 +25,28 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency } from '@/utils/formatters';
-import { Purchase, buyerService } from '../services/buyerService';
-import { buyerVendorService, Vendor } from '../services/buyerVendorService';
-import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { Purchase } from '../services/buyerService';
 
 interface PurchaseDetailsModalProps {
   purchase: Purchase;
   isOpen: boolean;
   onClose: () => void;
-  onVendorSelected?: () => void;
 }
 
 const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
   purchase,
   isOpen,
-  onClose,
-  onVendorSelected
+  onClose
 }) => {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [selectedVendorId, setSelectedVendorId] = useState<number | null>(purchase.vendor_id || null);
-  const [isSelectingVendor, setIsSelectingVendor] = useState(false);
-  const [loadingVendors, setLoadingVendors] = useState(false);
-
-  // Edit mode state
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [editedMaterials, setEditedMaterials] = useState(purchase.materials);
-  const [isSaving, setIsSaving] = useState(false);
-
   // Local purchase state to hold updated data
   const [localPurchase, setLocalPurchase] = useState<Purchase>(purchase);
 
-  // Reset edited materials and local purchase when purchase changes or modal opens
+  // Update local purchase when purchase changes or modal opens
   useEffect(() => {
     // CRITICAL FIX: When vendor is approved, calculate total_cost from materials' vendor prices
     // instead of using the BOQ total_cost that comes from backend
     let updatedPurchase = { ...purchase };
-    
+
     // If vendor is approved, recalculate total_cost from materials (which have vendor prices)
     if (purchase.vendor_selection_status === 'approved' && purchase.materials && purchase.materials.length > 0) {
       const vendorTotalCost = purchase.materials.reduce((sum, mat) => {
@@ -74,112 +54,9 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
       }, 0);
       updatedPurchase.total_cost = vendorTotalCost;
     }
-    
+
     setLocalPurchase(updatedPurchase);
-    setEditedMaterials(purchase.materials);
-    setIsEditMode(false);
-  }, [purchase.cr_id, isOpen, purchase]);
-
-  useEffect(() => {
-    if (isOpen && purchase.status === 'pending') {
-      loadVendors();
-    }
-  }, [isOpen, purchase.status]);
-
-  // Calculate total cost from edited materials
-  const calculateTotalCost = (materials: any[]) => {
-    return materials.reduce((sum, mat) => sum + (mat.total_price || 0), 0);
-  };
-
-  // Handle material field changes
-  const handleMaterialChange = (index: number, field: string, value: any) => {
-    const updated = [...editedMaterials];
-    updated[index] = { ...updated[index], [field]: value };
-
-    // Auto-calculate total_price when quantity or unit_price changes
-    if (field === 'quantity' || field === 'unit_price') {
-      const quantity = field === 'quantity' ? parseFloat(value) || 0 : updated[index].quantity;
-      const unitPrice = field === 'unit_price' ? parseFloat(value) || 0 : updated[index].unit_price;
-      updated[index].total_price = quantity * unitPrice;
-    }
-
-    setEditedMaterials(updated);
-  };
-
-  // Save edited purchase
-  const handleSavePurchase = async () => {
-    try {
-      setIsSaving(true);
-      const totalCost = calculateTotalCost(editedMaterials);
-
-      await buyerService.updatePurchaseOrder({
-        cr_id: purchase.cr_id,
-        materials: editedMaterials,
-        total_cost: totalCost
-      });
-
-      // Update local purchase state immediately to reflect changes
-      setLocalPurchase({
-        ...localPurchase,
-        materials: editedMaterials,
-        total_cost: totalCost
-      });
-
-      showSuccess('Purchase amounts updated successfully!');
-      setIsEditMode(false);
-      onVendorSelected?.(); // Refresh the purchase list
-    } catch (error: any) {
-      console.error('Error saving purchase:', error);
-      showError(error.message || 'Failed to update purchase amounts');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Cancel edit mode
-  const handleCancelEdit = () => {
-    setEditedMaterials(localPurchase.materials);
-    setIsEditMode(false);
-  };
-
-  const loadVendors = async () => {
-    try {
-      setLoadingVendors(true);
-      const response = await buyerVendorService.getAllVendors({
-        status: 'active',
-        per_page: 100
-      });
-      setVendors(response.vendors);
-    } catch (error: any) {
-      console.error('Error loading vendors:', error);
-      showError('Failed to load vendors');
-    } finally {
-      setLoadingVendors(false);
-    }
-  };
-
-  const handleSelectVendor = async () => {
-    if (!selectedVendorId) {
-      showError('Please select a vendor');
-      return;
-    }
-
-    try {
-      setIsSelectingVendor(true);
-      await buyerService.selectVendor({
-        cr_id: purchase.cr_id,
-        vendor_id: selectedVendorId
-      });
-      showSuccess('Vendor selected successfully! Waiting for TD approval.');
-      onVendorSelected?.();
-      onClose();
-    } catch (error: any) {
-      console.error('Error selecting vendor:', error);
-      showError(error.message || 'Failed to select vendor');
-    } finally {
-      setIsSelectingVendor(false);
-    }
-  };
+  }, [purchase, isOpen]);
 
   const handleClose = () => {
     onClose();
@@ -277,7 +154,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <div>
                         <div className="text-sm text-gray-600">Total Cost</div>
                         <div className="text-2xl font-bold text-green-600">
-                          {formatCurrency(isEditMode ? calculateTotalCost(editedMaterials) : localPurchase.total_cost)}
+                          {formatCurrency(localPurchase.total_cost)}
                         </div>
                       </div>
                     </div>
@@ -500,37 +377,6 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <Package className="w-5 h-5" />
                       Materials Breakdown
                     </h3>
-                    {/* Edit button - only show when NO vendor selected yet (before sending for approval) */}
-                    {/* Hide when pending_td_approval or approved - buyer already submitted */}
-                    {!purchase.vendor_selection_status && !purchase.vendor_id && !isEditMode && (
-                      <Button
-                        onClick={() => setIsEditMode(true)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                        <Edit className="w-4 h-4 mr-2" />
-                        Edit Amounts
-                      </Button>
-                    )}
-                    {/* Save/Cancel buttons when in edit mode */}
-                    {isEditMode && (
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={handleCancelEdit}
-                          variant="outline"
-                          disabled={isSaving}
-                        >
-                          Cancel
-                        </Button>
-                        <Button
-                          onClick={handleSavePurchase}
-                          disabled={isSaving}
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                        >
-                          <Save className="w-4 h-4 mr-2" />
-                          {isSaving ? 'Saving...' : 'Save Changes'}
-                        </Button>
-                      </div>
-                    )}
                   </div>
                   <div className="border rounded-xl overflow-hidden">
                     <Table>
@@ -547,9 +393,9 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(isEditMode ? editedMaterials : localPurchase.materials).map((material, idx) => {
+                        {localPurchase.materials.map((material, idx) => {
                           // Check if material is NEW (only show badge for truly new materials, not BOQ materials)
-                          const isNewMaterial = material.master_material_id === null || material.master_material_id === undefined;
+                          const isNewMaterial = material.master_material_id == null;
                           return (
                           <TableRow key={idx} className="hover:bg-gray-50">
                             <TableCell className="font-medium text-sm">
@@ -570,34 +416,10 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                               )}
                             </TableCell>
                             <TableCell className="text-sm">{(material as any).brand || '-'}</TableCell>
-                            <TableCell className="text-sm">{(material as any).specification || '-'}</TableCell>
-                            <TableCell className="text-sm">
-                              {isEditMode ? (
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  value={material.quantity}
-                                  onChange={(e) => handleMaterialChange(idx, 'quantity', e.target.value)}
-                                  className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                />
-                              ) : (
-                                material.quantity
-                              )}
-                            </TableCell>
+                            <TableCell className="text-sm">{(material as any).size || (material as any).specification || '-'}</TableCell>
+                            <TableCell className="text-sm">{material.quantity}</TableCell>
                             <TableCell className="text-sm">{material.unit}</TableCell>
-                            <TableCell className="text-sm">
-                              {isEditMode ? (
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  value={material.unit_price}
-                                  onChange={(e) => handleMaterialChange(idx, 'unit_price', e.target.value)}
-                                  className="w-24 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                />
-                              ) : (
-                                formatCurrency(material.unit_price)
-                              )}
-                            </TableCell>
+                            <TableCell className="text-sm">{formatCurrency(material.unit_price)}</TableCell>
                             <TableCell className="text-right font-bold text-green-600 text-sm">
                               {formatCurrency(material.total_price)}
                             </TableCell>
@@ -607,7 +429,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         <TableRow className="bg-blue-50 font-bold">
                           <TableCell colSpan={7} className="text-right text-sm">Total Cost:</TableCell>
                           <TableCell className="text-right text-green-700 text-base">
-                            {formatCurrency(isEditMode ? calculateTotalCost(editedMaterials) : localPurchase.total_cost)}
+                            {formatCurrency(localPurchase.total_cost)}
                           </TableCell>
                         </TableRow>
                       </TableBody>
@@ -616,7 +438,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                 </div>
 
                 {/* Negotiable Price Summary - Show if has new materials */}
-                {localPurchase.materials.some(mat => mat.master_material_id === null || mat.master_material_id === undefined) && localPurchase.overhead_analysis && (
+                {localPurchase.materials.some(mat => mat.master_material_id == null) && localPurchase.overhead_analysis && (
                   <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                       <DollarSign className="w-4 h-4 text-gray-600" />
