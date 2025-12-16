@@ -5,6 +5,7 @@ from models.boq import *
 from models.preliminary_master import BOQPreliminary, BOQInternalRevision
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm.attributes import flag_modified
 from utils.boq_email_service import BOQEmailService
 from models.user import User
 from models.role import Role
@@ -2140,6 +2141,7 @@ def update_boq(boq_id):
 
             # Update BOQDetails with the raw payload directly
             boq_details.boq_details = payload_copy
+            flag_modified(boq_details, 'boq_details')
             boq_details.total_cost = total_boq_cost
             boq_details.total_items = total_items
             boq_details.total_materials = total_materials
@@ -2424,6 +2426,7 @@ def update_boq(boq_id):
 
             # Update BOQ details
             boq_details.boq_details = updated_json
+            flag_modified(boq_details, 'boq_details')
             boq_details.total_cost = final_boq_cost
             boq_details.total_items = len(boq_items)
             boq_details.total_materials = total_materials
@@ -2838,6 +2841,7 @@ def revision_boq(boq_id):
 
             # Also update BOQDetails with the raw payload (no recalculation)
             boq_details.boq_details = payload_copy
+            flag_modified(boq_details, 'boq_details')
             boq_details.total_cost = total_cost
             boq_details.total_items = total_items
             boq_details.total_materials = total_materials
@@ -2916,6 +2920,7 @@ def revision_boq(boq_id):
 
             # Update boq_details and history with master IDs
             boq_details.boq_details = payload_copy
+            flag_modified(boq_details, 'boq_details')
             boq_detail_history.boq_details = payload_copy
             # ===== END MASTER TABLES SYNC =====
 
@@ -3534,6 +3539,7 @@ def revision_boq(boq_id):
 
             # Update BOQ details
             boq_details.boq_details = updated_json
+            flag_modified(boq_details, 'boq_details')
             boq_details.total_cost = final_boq_cost
             boq_details.total_items = len(boq_items)
             boq_details.total_materials = total_materials

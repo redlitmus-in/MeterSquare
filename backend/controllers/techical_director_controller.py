@@ -82,6 +82,7 @@ def get_all_td_boqs():
 
             if boq_details and boq_details.boq_details and "items" in boq_details.boq_details:
                 items = boq_details.boq_details["items"]
+                log.info(f"🔍 BOQ {boq.boq_id} ({boq.boq_name}): Processing {len(items)} items for cost calculation")
                 for item in items:
                     item_materials_cost = 0
                     item_labour_cost = 0
@@ -105,8 +106,12 @@ def get_all_td_boqs():
                                 item_materials_cost += mat_cost
                             # Sum up labour cost from sub_item (for internal tracking)
                             labour = sub_item.get("labour", [])
+                            if labour:
+                                log.debug(f"  Sub-item has {len(labour)} labour entries")
                             for lab in labour:
-                                lab_cost = lab.get("total_cost", 0)
+                                lab_cost = lab.get("total_cost") or (lab.get("hours", 0) * lab.get("rate_per_hour", 0))
+                                if lab_cost > 0:
+                                    log.debug(f"    Labour cost: AED {lab_cost}")
                                 total_labour_cost += lab_cost
                                 item_labour_cost += lab_cost
                     else:
@@ -117,8 +122,12 @@ def get_all_td_boqs():
                             total_material_cost += mat_cost
                             item_materials_cost += mat_cost
                         labour = item.get("labour", [])
+                        if labour:
+                            log.debug(f"  Item has {len(labour)} labour entries (old format)")
                         for lab in labour:
-                            lab_cost = lab.get("total_cost", 0)
+                            lab_cost = lab.get("total_cost") or (lab.get("hours", 0) * lab.get("rate_per_hour", 0))
+                            if lab_cost > 0:
+                                log.debug(f"    Labour cost: AED {lab_cost}")
                             total_labour_cost += lab_cost
                             item_labour_cost += lab_cost
 
@@ -151,7 +160,8 @@ def get_all_td_boqs():
 
                     total_selling_price += item_selling_price
 
-                    log.debug(f"Item '{item.get('item_name', 'Unknown')}': client_amount={item_client_amount}, selling_price={item_selling_price}, materials={item_materials_cost}, labour={item_labour_cost}")
+                    # Enhanced logging for labor cost debugging
+                    log.info(f"  Item '{item.get('item_name', 'Unknown')}': materials={item_materials_cost}, labour={item_labour_cost}, selling_price={item_selling_price}")
 
                     # Get overhead and profit percentages (use first item's values)
                     if overhead_percentage == 0:
@@ -188,6 +198,7 @@ def get_all_td_boqs():
             final_total_cost = subtotal_before_discount - discount_amount
 
             log.info(f"BOQ {boq.boq_id}: Items={items_subtotal}, Preliminaries={preliminaries_amount}, Subtotal={subtotal_before_discount}, Discount={discount_amount}, Grand Total={final_total_cost}")
+            log.info(f"💰 BOQ {boq.boq_id} COST SUMMARY: Material={total_material_cost}, Labour={total_labour_cost}, Total={final_total_cost}")
 
             boq_data = {
                 "boq_id": boq.boq_id,

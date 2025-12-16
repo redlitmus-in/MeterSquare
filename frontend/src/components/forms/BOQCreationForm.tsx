@@ -2004,7 +2004,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         work_type: labour.work_type || 'daily_wages',
         hours: labour.hours,
         rate_per_hour: labour.rate_per_hour,
-        total_amount: labour.hours * labour.rate_per_hour,
+        total_cost: labour.hours * labour.rate_per_hour,
         master_labour_id: labour.master_labour_id || null
       })) || []
     };
@@ -2629,7 +2629,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 work_type: labour.work_type || 'daily_wages',
                 hours: labour.hours,
                 rate_per_hour: labour.rate_per_hour,
-                total_amount: labour.hours * labour.rate_per_hour,
+                total_cost: labour.hours * labour.rate_per_hour,
                 master_labour_id: labour.master_labour_id || null
               })) : [],
 
@@ -2822,7 +2822,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               work_type: labour.work_type || 'daily_wages',
               hours: labour.hours,
               rate_per_hour: labour.rate_per_hour,
-              total_amount: labour.hours * labour.rate_per_hour,
+              total_cost: labour.hours * labour.rate_per_hour,
               master_labour_id: labour.master_labour_id || null
             })) : [],
 
@@ -3166,7 +3166,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   work_type: labour.work_type || 'daily_wages',
                   hours: labour.hours,
                   rate_per_hour: labour.rate_per_hour,
-                  total_amount: labour.hours * labour.rate_per_hour,
+                  total_cost: labour.hours * labour.rate_per_hour,
                   master_labour_id: labour.master_labour_id || null
                 })) || []
               })) : [],
@@ -3191,7 +3191,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 work_type: labour.work_type || 'daily_wages',
                 hours: labour.hours,
                 rate_per_hour: labour.rate_per_hour,
-                total_amount: labour.hours * labour.rate_per_hour,
+                total_cost: labour.hours * labour.rate_per_hour,
                 master_labour_id: labour.master_labour_id || null
               })) : [],
 

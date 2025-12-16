@@ -60,7 +60,12 @@
       "Bash(python -m py_compile:*)",
       "Bash(source:*)",
       "Bash(python3 -m py_compile:*)",
-      "Bash(npm run lint:*)"
+      "Bash(npm run lint:*)",
+      "Bash(python fix_labor_cost.py:*)",
+      "Bash(python -m ruff:*)",
+      "Bash(ruff check:*)",
+      "Bash(xargs kill:*)",
+      "Bash(unzip:*)"
     ],
     "deny": [],
     "ask": []
