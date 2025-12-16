@@ -2195,7 +2195,9 @@ def get_purchase_by_id(cr_id):
             "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
             "vendor_email_sent": cr.vendor_email_sent or False,
             "vendor_whatsapp_sent": cr.vendor_whatsapp_sent or False,
-            "vendor_whatsapp_sent_at": cr.vendor_whatsapp_sent_at.isoformat() if cr.vendor_whatsapp_sent_at else None
+            "vendor_whatsapp_sent_at": cr.vendor_whatsapp_sent_at.isoformat() if cr.vendor_whatsapp_sent_at else None,
+            # Include material vendor selections for negotiated prices
+            "material_vendor_selections": cr.material_vendor_selections or {}
         }
 
         # If vendor is selected, add vendor contact details (with overrides)
@@ -3288,8 +3290,12 @@ def select_vendor_for_material(cr_id):
                             notification_title = 'Purchase Order Ready for Approval'
                             notification_message = f'Buyer completed vendor selection for all materials in CR #{cr_id}. Ready for your approval.'
                         else:
+                            # Include material names to make each notification unique (avoid duplicate blocking)
+                            material_names = ', '.join(updated_materials[:3])  # Show first 3 materials
+                            if len(updated_materials) > 3:
+                                material_names += f' and {len(updated_materials) - 3} more'
                             notification_title = 'Vendor Selections Need Approval'
-                            notification_message = f'Buyer selected vendors for {len(updated_materials)} material(s) in CR #{cr_id}'
+                            notification_message = f'Buyer selected vendors for {len(updated_materials)} material(s) in CR #{cr_id}: {material_names}'
 
                         notification = NotificationManager.create_notification(
                             user_id=td_user.user_id,
@@ -3298,7 +3304,7 @@ def select_vendor_for_material(cr_id):
                             message=notification_message,
                             priority='high',
                             category='purchase',
-                            action_url=f'/technical-director/vendor-approval?cr_id={cr_id}',
+                            action_url=f'/technical-director/change-requests?cr_id={cr_id}',  # TD reviews vendor selections in change-requests
                             action_label='Review Selections',
                             metadata={'cr_id': str(cr_id), 'materials_count': len(updated_materials), 'target_role': 'technical-director'},
                             sender_id=user_id,

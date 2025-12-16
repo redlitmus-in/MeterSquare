@@ -294,7 +294,7 @@ export const NOTIFICATION_WORKFLOWS: NotificationWorkflow[] = [
     senderRole: 'buyer',
     recipientRole: 'technical-director',
     notificationType: 'approval',
-    redirectPath: '/vendor-approval',
+    redirectPath: '/change-requests',  // TD reviews vendor selections in change-requests page
     redirectTab: 'pending',
     metadata: { priority: 'urgent', category: 'vendor' }
   },

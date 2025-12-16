@@ -123,10 +123,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const [isSavingLpo, setIsSavingLpo] = useState(false);
   const [lpoLastSaved, setLpoLastSaved] = useState<Date | null>(null);
 
+  // Fresh purchase data fetched when modal opens (to get latest negotiated prices)
+  const [freshPurchaseData, setFreshPurchaseData] = useState<Purchase | null>(null);
+  const [isLoadingFreshData, setIsLoadingFreshData] = useState(false);
+
+  // Track last initialized CR ID to avoid reinitializing with stale prop data
+  const lastInitializedCrId = useRef<number | null>(null);
+
   // Check if current user is Technical Director
   const isTechnicalDirector = user?.role?.toLowerCase().includes('technical') ||
-                               user?.role?.toLowerCase().includes('director') ||
-                               user?.role_name?.toLowerCase().includes('technical');
+    user?.role?.toLowerCase().includes('director') ||
+    user?.role_name?.toLowerCase().includes('technical');
 
   // Check if TD has already approved any PO children
   const hasTdApprovedAnyPO = purchase.po_children && purchase.po_children.length > 0 &&
@@ -144,8 +151,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     return purchase.po_children.some(poChild => {
       // Check if POChild is approved or completed
       const isApproved = poChild.vendor_selection_status === 'approved' ||
-                         poChild.status === 'vendor_approved' ||
-                         poChild.status === 'purchase_completed';
+        poChild.status === 'vendor_approved' ||
+        poChild.status === 'purchase_completed';
       if (!isApproved) return false;
 
       // Check if this material is in the POChild
@@ -157,11 +164,34 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
   // Initialize material vendors state from purchase with auto-selection
   useEffect(() => {
-    if (isOpen && purchase.materials && vendors.length > 0 && vendorProducts.size > 0) {
+    // IMPORTANT: Only initialize when we have FRESH data from backend
+    // This prevents stale prop data from overwriting user's saved negotiated prices
+    // If fresh data is not available yet (isLoadingFreshData=true), wait
+    // If fresh data fetch failed (freshPurchaseData=null after loading complete), use prop as fallback for first init only
+
+    const shouldInitialize = isOpen && vendors.length > 0 && vendorProducts.size > 0 && !isLoadingFreshData;
+
+    if (!shouldInitialize) return;
+
+    // Only initialize with fresh data, or prop data for FIRST time only
+    const purchaseData = freshPurchaseData || purchase;
+    const isFirstInit = lastInitializedCrId.current !== purchase.cr_id;
+    const hasFreshData = freshPurchaseData !== null;
+
+    // Skip initialization if:
+    // - This is NOT the first init for this CR AND
+    // - We don't have fresh data (would use stale prop)
+    if (!isFirstInit && !hasFreshData) {
+      return;
+    }
+
+    if (purchaseData.materials) {
+      // Mark this CR as initialized
+      lastInitializedCrId.current = purchase.cr_id;
       // Auto-expand all vendor groups when modal opens
       const vendorIds = new Set<number>();
-      purchase.materials.forEach(material => {
-        const existingSelection = purchase.material_vendor_selections?.[material.material_name];
+      purchaseData.materials.forEach(material => {
+        const existingSelection = purchaseData.material_vendor_selections?.[material.material_name];
         if (existingSelection?.vendor_id) {
           vendorIds.add(existingSelection.vendor_id);
         }
@@ -170,19 +200,19 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
       // CRITICAL FIX: Filter out materials that are already in approved POChildren
       // This prevents duplicate vendor selection for already-approved materials
-      const availableMaterials = purchase.materials.filter(material => {
+      const availableMaterials = purchaseData.materials.filter(material => {
         const isApproved = isMaterialInApprovedPOChild(material.material_name);
         return !isApproved;
       });
 
       const initialState = availableMaterials.map(material => {
-        const existingSelection = purchase.material_vendor_selections?.[material.material_name];
+        const existingSelection = purchaseData.material_vendor_selections?.[material.material_name];
 
         // PRIORITY 1: If this is a PO child, check if the material is part of this PO child's materials
         // and use the vendor info from the PO child record itself
-        if (purchase.po_child_id && purchase.vendor_id) {
+        if (purchaseData.po_child_id && purchaseData.vendor_id) {
           // This is a PO child view - check if this material has vendor info and negotiated price
-          const matchingMaterial = purchase.materials.find(m => m.material_name === material.material_name);
+          const matchingMaterial = purchaseData.materials.find(m => m.material_name === material.material_name);
           if (matchingMaterial && matchingMaterial.negotiated_price !== undefined) {
             return {
               material_name: material.material_name,
@@ -190,8 +220,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
               quantity: material.quantity,
               unit: material.unit,
               selected_vendors: [{
-                vendor_id: purchase.vendor_id,
-                vendor_name: purchase.vendor_name || 'Selected Vendor',
+                vendor_id: purchaseData.vendor_id,
+                vendor_name: purchaseData.vendor_name || 'Selected Vendor',
                 send_individually: false,
                 negotiated_price: matchingMaterial.negotiated_price,
                 save_price_for_future: false
@@ -252,7 +282,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
         return {
           material_name: material.material_name,
-            sub_item_name: material.sub_item_name,
+          sub_item_name: material.sub_item_name,
           quantity: material.quantity,
           unit: material.unit,
           selected_vendors: selectedVendors,
@@ -262,7 +292,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       });
       setMaterialVendors(initialState);
     }
-  }, [isOpen, purchase, vendors, vendorProducts]);
+  }, [isOpen, purchase, vendors, vendorProducts, freshPurchaseData, isLoadingFreshData]);
 
   useEffect(() => {
     if (isOpen) {
@@ -284,6 +314,35 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       setSentVendorIds(existingSentVendorIds);
     }
   }, [isOpen, purchase.po_children]);
+
+  // Fetch fresh purchase data when modal opens to get latest negotiated prices
+  useEffect(() => {
+    if (isOpen && purchase.cr_id) {
+      // Set loading immediately so initialization waits for fresh data
+      setIsLoadingFreshData(true);
+
+      const fetchFreshData = async () => {
+        try {
+          const freshData = await buyerService.getPurchaseById(purchase.cr_id);
+          setFreshPurchaseData(freshData);
+        } catch (error) {
+          console.error('Failed to fetch fresh purchase data:', error);
+          // Fall back to prop data if fetch fails
+          setFreshPurchaseData(null);
+        } finally {
+          setIsLoadingFreshData(false);
+        }
+      };
+      fetchFreshData();
+    }
+
+    // Cleanup: reset fresh data and init flag when modal closes so it fetches again next time
+    return () => {
+      setFreshPurchaseData(null);
+      setIsLoadingFreshData(false);
+      lastInitializedCrId.current = null; // Reset so we reinitialize with fresh data next time
+    };
+  }, [isOpen, purchase.cr_id]);
 
   // Load LPO data when modal opens (for buyer mode only)
   useEffect(() => {
@@ -459,7 +518,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
       // Also check if material is at start or end of product name
       const startsOrEndsWith = productName.toLowerCase().startsWith(material) ||
-                               productName.toLowerCase().endsWith(material);
+        productName.toLowerCase().endsWith(material);
 
       return exactMatch || startsOrEndsWith;
     }
@@ -572,7 +631,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     const filteredVendors = vendorsToReturn.filter(vendor => {
       if (!searchTerm) return true;
       return vendor.company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-             vendor.category?.toLowerCase().includes(searchTerm.toLowerCase());
+        vendor.category?.toLowerCase().includes(searchTerm.toLowerCase());
     });
 
     return { vendors: filteredVendors, isFallback };
@@ -621,12 +680,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     setMaterialVendors(prev => prev.map(m =>
       m.material_name === materialName
         ? {
-            ...m,
-            selection_mode: m.selection_mode === 'single' ? 'multi' : 'single',
-            selected_vendors: m.selection_mode === 'multi' && m.selected_vendors.length > 0
-              ? [m.selected_vendors[0]] // Keep only first vendor when switching to single
-              : m.selected_vendors
-          }
+          ...m,
+          selection_mode: m.selection_mode === 'single' ? 'multi' : 'single',
+          selected_vendors: m.selection_mode === 'multi' && m.selected_vendors.length > 0
+            ? [m.selected_vendors[0]] // Keep only first vendor when switching to single
+            : m.selected_vendors
+        }
         : m
     ));
   };
@@ -731,10 +790,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
             selected_vendors: m.selected_vendors.map(v =>
               v.vendor_id === vendorId
                 ? {
-                    ...v,
-                    negotiated_price: undefined,
-                    save_price_for_future: undefined
-                  }
+                  ...v,
+                  negotiated_price: undefined,
+                  save_price_for_future: undefined
+                }
                 : v
             )
           };
@@ -751,21 +810,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
             selected_vendors: m.selected_vendors.map(v =>
               v.vendor_id === vendorId
                 ? {
-                    ...v,
-                    negotiated_price: price,
-                    save_price_for_future: false
-                  }
+                  ...v,
+                  negotiated_price: price,
+                  save_price_for_future: false
+                }
                 : v
             )
           };
         }));
 
         toast.success(`Negotiated price saved for this purchase: ${CURRENCY_CODE} ${price.toFixed(2)}`);
-
-        // Trigger refresh of purchase data in parent component so data persists on modal reopen
-        if (onVendorSelected) {
-          onVendorSelected();
-        }
+        // Price is saved to backend and UI is updated - no need to invalidate cache here
       }
 
       setEditingPrice(null);
@@ -897,7 +952,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         );
 
         toast.success(response.message || 'Vendor re-selected! Awaiting TD approval.');
-        onVendorSelected?.();
+        // Wait for parent to refetch data before closing modal
+        await onVendorSelected?.();
         onClose();
         return;
       } catch (error: any) {
@@ -944,23 +1000,23 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           vendor_name: materials[0].selected_vendors[0].vendor_name,
           materials: materials.map(m => {
             const selectedVendor = m.selected_vendors[0];
-            
+
             // CRITICAL FIX: Calculate actual vendor price to send to backend
             // If buyer didn't manually negotiate, use vendor's product price
             let vendorPrice = selectedVendor.negotiated_price;
-            
+
             if (!vendorPrice || vendorPrice === 0) {
               // Find vendor's product price
               const vendorProductsList = vendorProducts.get(vendorId) || [];
               const vendorInfo = vendors.find(v => v.vendor_id === vendorId);
               const vendorCategory = vendorInfo?.category?.toLowerCase().trim() || '';
-              
+
               const matchingProducts = vendorProductsList.filter(p => {
                 const productName = p.product_name?.toLowerCase().trim() || '';
                 const productCategory = p.category?.toLowerCase().trim() || '';
                 return isProductMatchingMaterial(productName, productCategory, vendorCategory, m.material_name.toLowerCase());
               });
-              
+
               if (matchingProducts.length > 0) {
                 const lowestPrice = Math.min(...matchingProducts.map(p => p.unit_price || 0).filter(p => p > 0));
                 if (lowestPrice > 0 && lowestPrice !== Infinity) {
@@ -968,7 +1024,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                 }
               }
             }
-            
+
             return {
               material_name: m.material_name,
               quantity: m.quantity,
@@ -999,7 +1055,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           toast.info(`Purchase Orders Created: ${poChildrenList}`, { duration: 5000 });
         }
 
-        onVendorSelected?.();
+        // Wait for parent to refetch data before closing modal
+        await onVendorSelected?.();
         onClose();
       } catch (error: any) {
         console.error('Error creating PO children:', error);
@@ -1067,7 +1124,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       } else {
         toast.success(response.message || 'Vendor selections sent for approval!');
       }
-      onVendorSelected?.();
+      // Wait for parent to refetch data before closing modal
+      await onVendorSelected?.();
       onClose();
     } catch (error: any) {
       console.error('Error selecting vendors:', error);
@@ -1191,143 +1249,143 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
                 {/* AI-Powered Info Banner - Floating Light Navy & Red Theme - Only for Buyer mode */}
                 {viewMode === 'buyer' && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{
-                    opacity: 1,
-                    y: [0, -3, 0]
-                  }}
-                  transition={{
-                    opacity: { duration: 0.6, ease: "easeOut" },
-                    y: {
-                      duration: 3,
-                      repeat: Infinity,
-                      ease: "easeInOut"
-                    }
-                  }}
-                  className="mb-3 relative overflow-hidden rounded-xl shadow-md hover:shadow-lg transition-shadow duration-300"
-                  style={{
-                    background: 'linear-gradient(135deg, #dbeafe 0%, #fee2e2 100%)',
-                    boxShadow: '0 4px 12px rgba(59, 130, 246, 0.15), 0 2px 6px rgba(220, 38, 38, 0.1)'
-                  }}
-                >
-                  {/* Light border frame - Thicker */}
-                  <div className="absolute inset-0 rounded-xl border-2 border-blue-300"></div>
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{
+                      opacity: 1,
+                      y: [0, -3, 0]
+                    }}
+                    transition={{
+                      opacity: { duration: 0.6, ease: "easeOut" },
+                      y: {
+                        duration: 3,
+                        repeat: Infinity,
+                        ease: "easeInOut"
+                      }
+                    }}
+                    className="mb-3 relative overflow-hidden rounded-xl shadow-md hover:shadow-lg transition-shadow duration-300"
+                    style={{
+                      background: 'linear-gradient(135deg, #dbeafe 0%, #fee2e2 100%)',
+                      boxShadow: '0 4px 12px rgba(59, 130, 246, 0.15), 0 2px 6px rgba(220, 38, 38, 0.1)'
+                    }}
+                  >
+                    {/* Light border frame - Thicker */}
+                    <div className="absolute inset-0 rounded-xl border-2 border-blue-300"></div>
 
-                  {/* Shimmer effect - subtle moving shine */}
-                  <div className="absolute inset-0 overflow-hidden rounded-xl">
+                    {/* Shimmer effect - subtle moving shine */}
+                    <div className="absolute inset-0 overflow-hidden rounded-xl">
+                      <motion.div
+                        animate={{
+                          x: ['-100%', '200%']
+                        }}
+                        transition={{
+                          duration: 3,
+                          repeat: Infinity,
+                          ease: "linear",
+                          repeatDelay: 1
+                        }}
+                        className="h-full w-[30%] opacity-20"
+                        style={{
+                          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent)',
+                          transform: 'skewX(-20deg)',
+                          filter: 'blur(10px)'
+                        }}
+                      />
+                    </div>
+
+                    {/* Content */}
+                    <div className="relative px-4 py-2.5 flex items-center gap-3">
+                      {/* AI Icon with light theme */}
+                      <div className="flex-shrink-0 relative">
+                        {/* Subtle pulsing glow */}
+                        <motion.div
+                          animate={{
+                            opacity: [0.2, 0.4, 0.2],
+                            scale: [1, 1.1, 1]
+                          }}
+                          transition={{
+                            duration: 2,
+                            repeat: Infinity,
+                            ease: "easeInOut"
+                          }}
+                          className="absolute inset-0 rounded-full bg-gradient-to-tr from-blue-300/30 to-red-300/30 blur-lg"
+                        />
+
+                        {/* Icon container */}
+                        <motion.div
+                          animate={{
+                            rotate: [0, 360]
+                          }}
+                          transition={{
+                            duration: 20,
+                            repeat: Infinity,
+                            ease: "linear"
+                          }}
+                          className="relative w-8 h-8 rounded-full flex items-center justify-center bg-white shadow-sm border border-blue-200"
+                        >
+                          <Sparkles className="w-4 h-4 text-red-500" />
+                        </motion.div>
+
+                        {/* Tiny sparkles */}
+                        <motion.div
+                          animate={{
+                            opacity: [0, 0.8, 0],
+                            scale: [0, 1, 0]
+                          }}
+                          transition={{
+                            duration: 2,
+                            repeat: Infinity,
+                            ease: "easeOut"
+                          }}
+                          className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-red-400"
+                        />
+                      </div>
+
+                      {/* Text content - Compact */}
+                      <div className="flex-1">
+                        <h3 className="text-sm font-semibold text-blue-900" style={{ fontFamily: 'system-ui, -apple-system' }}>
+                          AI-Powered Vendor Selection
+                        </h3>
+                        <p className="text-xs text-blue-700/70 font-medium">
+                          Intelligent system auto-matches best vendors based on availability, pricing & compatibility
+                        </p>
+                      </div>
+
+                      {/* Connectivity icon - Compact */}
+                      <div className="flex-shrink-0">
+                        <motion.div
+                          animate={{
+                            opacity: [0.5, 1, 0.5]
+                          }}
+                          transition={{
+                            duration: 2,
+                            repeat: Infinity,
+                            ease: "easeInOut"
+                          }}
+                        >
+                          <div className="flex flex-col items-center gap-0.5">
+                            <div className="w-1 h-1 rounded-full bg-red-400"></div>
+                            <div className="w-1 h-1.5 rounded-full bg-red-400"></div>
+                            <div className="w-1 h-2.5 rounded-full bg-red-500"></div>
+                          </div>
+                        </motion.div>
+                      </div>
+                    </div>
+
+                    {/* Bottom subtle accent line */}
                     <motion.div
                       animate={{
-                        x: ['-100%', '200%']
+                        opacity: [0.3, 0.6, 0.3],
+                        scaleX: [0.8, 1, 0.8]
                       }}
                       transition={{
                         duration: 3,
                         repeat: Infinity,
-                        ease: "linear",
-                        repeatDelay: 1
+                        ease: "easeInOut"
                       }}
-                      className="h-full w-[30%] opacity-20"
-                      style={{
-                        background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent)',
-                        transform: 'skewX(-20deg)',
-                        filter: 'blur(10px)'
-                      }}
+                      className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-red-300/50 to-transparent"
                     />
-                  </div>
-
-                  {/* Content */}
-                  <div className="relative px-4 py-2.5 flex items-center gap-3">
-                    {/* AI Icon with light theme */}
-                    <div className="flex-shrink-0 relative">
-                      {/* Subtle pulsing glow */}
-                      <motion.div
-                        animate={{
-                          opacity: [0.2, 0.4, 0.2],
-                          scale: [1, 1.1, 1]
-                        }}
-                        transition={{
-                          duration: 2,
-                          repeat: Infinity,
-                          ease: "easeInOut"
-                        }}
-                        className="absolute inset-0 rounded-full bg-gradient-to-tr from-blue-300/30 to-red-300/30 blur-lg"
-                      />
-
-                      {/* Icon container */}
-                      <motion.div
-                        animate={{
-                          rotate: [0, 360]
-                        }}
-                        transition={{
-                          duration: 20,
-                          repeat: Infinity,
-                          ease: "linear"
-                        }}
-                        className="relative w-8 h-8 rounded-full flex items-center justify-center bg-white shadow-sm border border-blue-200"
-                      >
-                        <Sparkles className="w-4 h-4 text-red-500" />
-                      </motion.div>
-
-                      {/* Tiny sparkles */}
-                      <motion.div
-                        animate={{
-                          opacity: [0, 0.8, 0],
-                          scale: [0, 1, 0]
-                        }}
-                        transition={{
-                          duration: 2,
-                          repeat: Infinity,
-                          ease: "easeOut"
-                        }}
-                        className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-red-400"
-                      />
-                    </div>
-
-                    {/* Text content - Compact */}
-                    <div className="flex-1">
-                      <h3 className="text-sm font-semibold text-blue-900" style={{ fontFamily: 'system-ui, -apple-system' }}>
-                        AI-Powered Vendor Selection
-                      </h3>
-                      <p className="text-xs text-blue-700/70 font-medium">
-                        Intelligent system auto-matches best vendors based on availability, pricing & compatibility
-                      </p>
-                    </div>
-
-                    {/* Connectivity icon - Compact */}
-                    <div className="flex-shrink-0">
-                      <motion.div
-                        animate={{
-                          opacity: [0.5, 1, 0.5]
-                        }}
-                        transition={{
-                          duration: 2,
-                          repeat: Infinity,
-                          ease: "easeInOut"
-                        }}
-                      >
-                        <div className="flex flex-col items-center gap-0.5">
-                          <div className="w-1 h-1 rounded-full bg-red-400"></div>
-                          <div className="w-1 h-1.5 rounded-full bg-red-400"></div>
-                          <div className="w-1 h-2.5 rounded-full bg-red-500"></div>
-                        </div>
-                      </motion.div>
-                    </div>
-                  </div>
-
-                  {/* Bottom subtle accent line */}
-                  <motion.div
-                    animate={{
-                      opacity: [0.3, 0.6, 0.3],
-                      scaleX: [0.8, 1, 0.8]
-                    }}
-                    transition={{
-                      duration: 3,
-                      repeat: Infinity,
-                      ease: "easeInOut"
-                    }}
-                    className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-red-300/50 to-transparent"
-                  />
-                </motion.div>
+                  </motion.div>
                 )}
 
                 {/* Locked Materials Info Banner - Only show for Buyer mode */}
@@ -1416,24 +1474,22 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       return (
                         <div
                           key={materialIdx}
-                          className={`border-2 rounded-xl overflow-hidden ${
-                            isMaterialApproved
-                              ? 'border-green-300 bg-green-50/30'
-                              : isMaterialLocked
-                                ? 'border-amber-300 bg-amber-50/30'
-                                : 'border-gray-200'
-                          }`}
+                          className={`border-2 rounded-xl overflow-hidden ${isMaterialApproved
+                            ? 'border-green-300 bg-green-50/30'
+                            : isMaterialLocked
+                              ? 'border-amber-300 bg-amber-50/30'
+                              : 'border-gray-200'
+                            }`}
                         >
                           {/* Material Header - Clickable to expand/collapse (disabled if locked) */}
                           <div
                             onClick={() => !isMaterialLocked && handleToggleMaterialExpand(material.material_name)}
-                            className={`px-4 py-3 border-b transition-colors ${
-                              isMaterialApproved
-                                ? 'bg-green-50 border-green-200 cursor-not-allowed'
-                                : isMaterialLocked
-                                  ? 'bg-amber-50 border-amber-200 cursor-not-allowed'
-                                  : 'bg-gray-50 border-gray-200 cursor-pointer hover:bg-gray-100'
-                            }`}
+                            className={`px-4 py-3 border-b transition-colors ${isMaterialApproved
+                              ? 'bg-green-50 border-green-200 cursor-not-allowed'
+                              : isMaterialLocked
+                                ? 'bg-amber-50 border-amber-200 cursor-not-allowed'
+                                : 'bg-gray-50 border-gray-200 cursor-pointer hover:bg-gray-100'
+                              }`}
                           >
                             <div className="flex items-center justify-between gap-3">
                               <div className="flex-1 min-w-0">
@@ -1538,10 +1594,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                         poChild.vendor_selection_status === 'approved' &&
                                         poChild.materials?.some(m => m.material_name === material.material_name)
                                       ) && (
-                                        <Badge className="bg-green-100 text-green-800 text-xs">
-                                          Approved
-                                        </Badge>
-                                      )}
+                                          <Badge className="bg-green-100 text-green-800 text-xs">
+                                            Approved
+                                          </Badge>
+                                        )}
                                     </>
                                   ) : (
                                     <Badge className="bg-red-100 text-red-800">
@@ -1624,423 +1680,419 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                           <div className="w-5"></div>
                                         </div>
 
-                                      {matchingVendors.map(vendor => {
-                                        const selectedVendorInfo = material.selected_vendors.find(v => v.vendor_id === vendor.vendor_id);
-                                        const isSelected = !!selectedVendorInfo;
-                                        const vendorProductsList = vendorProducts.get(vendor.vendor_id!) || [];
-                                        const vendorCategory = vendor.category?.toLowerCase().trim() || '';
+                                        {matchingVendors.map(vendor => {
+                                          const selectedVendorInfo = material.selected_vendors.find(v => v.vendor_id === vendor.vendor_id);
+                                          const isSelected = !!selectedVendorInfo;
+                                          const vendorProductsList = vendorProducts.get(vendor.vendor_id!) || [];
+                                          const vendorCategory = vendor.category?.toLowerCase().trim() || '';
 
-                                        // Check if this vendor has a negotiated price saved in the database
-                                        const savedVendorSelection = existingSelection?.vendor_id === vendor.vendor_id ? existingSelection : null;
-                                        const negotiatedPrice = selectedVendorInfo?.negotiated_price || savedVendorSelection?.negotiated_price;
+                                          // Check if this vendor has a negotiated price saved in the database
+                                          const savedVendorSelection = existingSelection?.vendor_id === vendor.vendor_id ? existingSelection : null;
+                                          const negotiatedPrice = selectedVendorInfo?.negotiated_price || savedVendorSelection?.negotiated_price;
 
-                                        const matchingProducts = vendorProductsList.filter(p => {
-                                          const productName = p.product_name?.toLowerCase().trim() || '';
-                                          const productCategory = p.category?.toLowerCase().trim() || '';
-                                          return isProductMatchingMaterial(
-                                            productName,
-                                            productCategory,
-                                            vendorCategory,
-                                            material.material_name.toLowerCase()
-                                          );
-                                        });
+                                          const matchingProducts = vendorProductsList.filter(p => {
+                                            const productName = p.product_name?.toLowerCase().trim() || '';
+                                            const productCategory = p.category?.toLowerCase().trim() || '';
+                                            return isProductMatchingMaterial(
+                                              productName,
+                                              productCategory,
+                                              vendorCategory,
+                                              material.material_name.toLowerCase()
+                                            );
+                                          });
 
-                                        // Calculate lowest price for display
-                                        const lowestPrice = matchingProducts.length > 0
-                                          ? Math.min(...matchingProducts.map(p => p.unit_price || 0).filter(p => p > 0))
-                                          : 0;
-                                        const totalEstimate = lowestPrice > 0 ? lowestPrice * material.quantity : 0;
+                                          // Calculate lowest price for display
+                                          const lowestPrice = matchingProducts.length > 0
+                                            ? Math.min(...matchingProducts.map(p => p.unit_price || 0).filter(p => p > 0))
+                                            : 0;
+                                          const totalEstimate = lowestPrice > 0 ? lowestPrice * material.quantity : 0;
 
-                                        const isExpanded = expandedVendorRow?.materialName === material.material_name &&
-                                                          expandedVendorRow?.vendorId === vendor.vendor_id;
+                                          const isExpanded = expandedVendorRow?.materialName === material.material_name &&
+                                            expandedVendorRow?.vendorId === vendor.vendor_id;
 
-                                        // Check if this vendor is already in a pending PO child (sent to TD)
-                                        const isVendorSentToTD = purchase.po_children?.some(poChild =>
-                                          poChild.vendor_id === vendor.vendor_id &&
-                                          poChild.vendor_selection_status === 'pending_td_approval'
-                                        ) || false;
+                                          // Check if this vendor is already in a pending PO child (sent to TD)
+                                          const isVendorSentToTD = purchase.po_children?.some(poChild =>
+                                            poChild.vendor_id === vendor.vendor_id &&
+                                            poChild.vendor_selection_status === 'pending_td_approval'
+                                          ) || false;
 
-                                        return (
-                                          <div key={vendor.vendor_id}>
-                                            {/* Vendor Row */}
-                                            <div
-                                              onClick={() => {
-                                                if (isVendorSentToTD) {
-                                                  toast.error('This vendor is already sent for TD approval. You cannot assign more materials to it.');
-                                                  return;
-                                                }
-                                                handleSelectVendorForMaterial(
-                                                  material.material_name,
-                                                  vendor.vendor_id!,
-                                                  vendor.company_name,
-                                                  lowestPrice > 0 ? lowestPrice : undefined
-                                                );
-                                              }}
-                                              onDoubleClick={(e) => {
-                                                e.stopPropagation();
-                                                setExpandedVendorRow(isExpanded
-                                                  ? null
-                                                  : { materialName: material.material_name, vendorId: vendor.vendor_id! }
-                                                );
-                                              }}
-                                              className={`flex items-center gap-3 px-3 py-2 border-b border-gray-100 transition-colors ${
-                                                isVendorSentToTD
+                                          return (
+                                            <div key={vendor.vendor_id}>
+                                              {/* Vendor Row */}
+                                              <div
+                                                onClick={() => {
+                                                  if (isVendorSentToTD) {
+                                                    toast.error('This vendor is already sent for TD approval. You cannot assign more materials to it.');
+                                                    return;
+                                                  }
+                                                  handleSelectVendorForMaterial(
+                                                    material.material_name,
+                                                    vendor.vendor_id!,
+                                                    vendor.company_name,
+                                                    lowestPrice > 0 ? lowestPrice : undefined
+                                                  );
+                                                }}
+                                                onDoubleClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setExpandedVendorRow(isExpanded
+                                                    ? null
+                                                    : { materialName: material.material_name, vendorId: vendor.vendor_id! }
+                                                  );
+                                                }}
+                                                className={`flex items-center gap-3 px-3 py-2 border-b border-gray-100 transition-colors ${isVendorSentToTD
                                                   ? 'bg-amber-50 cursor-not-allowed opacity-70'
                                                   : isSelected
                                                     ? 'bg-blue-50 hover:bg-blue-100 cursor-pointer'
                                                     : 'bg-white hover:bg-gray-50 cursor-pointer'
-                                              }`}
-                                            >
-                                              {/* Edit Button - Moved to left */}
-                                              {isSelected && (
-                                                <div className="flex-shrink-0">
-                                                  <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      const currentPrice = negotiatedPrice ||
-                                                                         (matchingProducts.length > 0 ? matchingProducts[0].unit_price : undefined);
-                                                      handleStartEditPrice(material.material_name, vendor.vendor_id!, currentPrice);
-                                                    }}
-                                                    className="h-8 w-8 p-0 border-2 border-amber-400 bg-amber-50 hover:bg-amber-100"
-                                                    title="Edit price"
-                                                  >
-                                                    <Edit className="w-4 h-4 text-amber-600" />
-                                                  </Button>
-                                                </div>
-                                              )}
-
-                                              {/* Checkbox/Radio */}
-                                              <div className="flex-shrink-0">
-                                                {isVendorSentToTD ? (
-                                                  <div className="w-4 h-4 rounded-full border-2 border-amber-400 bg-amber-100 flex items-center justify-center">
-                                                    <AlertCircle className="w-3 h-3 text-amber-600" />
-                                                  </div>
-                                                ) : material.selection_mode === 'multi' ? (
-                                                  <input
-                                                    type="checkbox"
-                                                    checked={isSelected}
-                                                    readOnly
-                                                    className="w-4 h-4 text-blue-600 rounded cursor-pointer"
-                                                  />
-                                                ) : (
-                                                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                                                    isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
-                                                  }`}>
-                                                    {isSelected && <div className="w-2 h-2 bg-white rounded-full" />}
+                                                  }`}
+                                              >
+                                                {/* Edit Button - Moved to left */}
+                                                {isSelected && (
+                                                  <div className="flex-shrink-0">
+                                                    <Button
+                                                      size="sm"
+                                                      variant="outline"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        const currentPrice = negotiatedPrice ||
+                                                          (matchingProducts.length > 0 ? matchingProducts[0].unit_price : undefined);
+                                                        handleStartEditPrice(material.material_name, vendor.vendor_id!, currentPrice);
+                                                      }}
+                                                      className="h-8 w-8 p-0 border-2 border-amber-400 bg-amber-50 hover:bg-amber-100"
+                                                      title="Edit price"
+                                                    >
+                                                      <Edit className="w-4 h-4 text-amber-600" />
+                                                    </Button>
                                                   </div>
                                                 )}
-                                              </div>
 
-                                              {/* Vendor Name & Category */}
-                                              <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2">
-                                                  <span className={`font-medium text-sm truncate ${isVendorSentToTD ? 'text-amber-700' : 'text-gray-900'}`}>
-                                                    {vendor.company_name}
-                                                  </span>
-                                                  {isVendorSentToTD && (
-                                                    <Badge className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0">
-                                                      Sent to TD
-                                                    </Badge>
+                                                {/* Checkbox/Radio */}
+                                                <div className="flex-shrink-0">
+                                                  {isVendorSentToTD ? (
+                                                    <div className="w-4 h-4 rounded-full border-2 border-amber-400 bg-amber-100 flex items-center justify-center">
+                                                      <AlertCircle className="w-3 h-3 text-amber-600" />
+                                                    </div>
+                                                  ) : material.selection_mode === 'multi' ? (
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={isSelected}
+                                                      readOnly
+                                                      className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                                                    />
+                                                  ) : (
+                                                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
+                                                      }`}>
+                                                      {isSelected && <div className="w-2 h-2 bg-white rounded-full" />}
+                                                    </div>
                                                   )}
                                                 </div>
-                                                {vendor.category && (
-                                                  <div className="text-xs text-gray-500 truncate">{vendor.category}</div>
-                                                )}
-                                              </div>
 
-                                              {/* Products Count */}
-                                              <div className="flex-shrink-0 text-center min-w-[60px]">
-                                                <div className="text-xs font-medium text-green-700">{matchingProducts.length}</div>
-                                                <div className="text-[10px] text-gray-500">product{matchingProducts.length !== 1 ? 's' : ''}</div>
-                                              </div>
-
-                                              {/* Price */}
-                                              <div className="flex-shrink-0 text-right min-w-[80px]">
-                                                {negotiatedPrice ? (
-                                                  <>
-                                                    <div className="text-sm font-semibold text-blue-700">{CURRENCY_CODE} {negotiatedPrice.toFixed(2)}</div>
-                                                    {lowestPrice > 0 && (
-                                                      <div className="text-[10px] text-gray-400 line-through">{CURRENCY_CODE} {lowestPrice.toFixed(2)}</div>
+                                                {/* Vendor Name & Category */}
+                                                <div className="flex-1 min-w-0">
+                                                  <div className="flex items-center gap-2">
+                                                    <span className={`font-medium text-sm truncate ${isVendorSentToTD ? 'text-amber-700' : 'text-gray-900'}`}>
+                                                      {vendor.company_name}
+                                                    </span>
+                                                    {isVendorSentToTD && (
+                                                      <Badge className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0">
+                                                        Sent to TD
+                                                      </Badge>
                                                     )}
-                                                    <div className="text-[10px] text-purple-600">negotiated</div>
-                                                  </>
-                                                ) : lowestPrice > 0 ? (
-                                                  <>
-                                                    <div className="text-sm font-semibold text-blue-700">{CURRENCY_CODE} {lowestPrice.toFixed(2)}</div>
-                                                    <div className="text-[10px] text-gray-500">/{material.unit}</div>
-                                                  </>
-                                                ) : (
-                                                  <div className="text-xs text-gray-400">No price</div>
-                                                )}
-                                              </div>
+                                                  </div>
+                                                  {vendor.category && (
+                                                    <div className="text-xs text-gray-500 truncate">{vendor.category}</div>
+                                                  )}
+                                                </div>
 
-                                              {/* Total Estimate with BOQ Comparison */}
-                                              <div className="flex-shrink-0 text-right min-w-[90px]">
-                                                {(negotiatedPrice ? negotiatedPrice * material.quantity : totalEstimate) > 0 ? (
-                                                  <>
-                                                    <div className="text-sm font-bold text-gray-900">
-                                                      {CURRENCY_CODE} {(negotiatedPrice
-                                                        ? negotiatedPrice * material.quantity
-                                                        : totalEstimate).toFixed(2)}
-                                                    </div>
-                                                    {negotiatedPrice && totalEstimate > 0 && (
-                                                      <div className="text-[10px] text-gray-400 line-through">{CURRENCY_CODE} {totalEstimate.toFixed(2)}</div>
-                                                    )}
-                                                    {/* BOQ Comparison - Below the amount */}
-                                                    {(() => {
-                                                      const boqMaterial = purchase.materials?.find(m => m.material_name === material.material_name);
-                                                      const boqTotal = (boqMaterial?.unit_price || 0) * material.quantity;
-                                                      const vendorTotal = negotiatedPrice ? negotiatedPrice * material.quantity : totalEstimate;
+                                                {/* Products Count */}
+                                                <div className="flex-shrink-0 text-center min-w-[60px]">
+                                                  <div className="text-xs font-medium text-green-700">{matchingProducts.length}</div>
+                                                  <div className="text-[10px] text-gray-500">product{matchingProducts.length !== 1 ? 's' : ''}</div>
+                                                </div>
 
-                                                      if (boqTotal > 0 && vendorTotal > 0) {
-                                                        const diff = vendorTotal - boqTotal;
-                                                        const isOver = diff > 0;
-                                                        const isUnder = diff < 0;
+                                                {/* Price */}
+                                                <div className="flex-shrink-0 text-right min-w-[80px]">
+                                                  {negotiatedPrice ? (
+                                                    <>
+                                                      <div className="text-sm font-semibold text-blue-700">{CURRENCY_CODE} {negotiatedPrice.toFixed(2)}</div>
+                                                      {lowestPrice > 0 && (
+                                                        <div className="text-[10px] text-gray-400 line-through">{CURRENCY_CODE} {lowestPrice.toFixed(2)}</div>
+                                                      )}
+                                                      <div className="text-[10px] text-purple-600">negotiated</div>
+                                                    </>
+                                                  ) : lowestPrice > 0 ? (
+                                                    <>
+                                                      <div className="text-sm font-semibold text-blue-700">{CURRENCY_CODE} {lowestPrice.toFixed(2)}</div>
+                                                      <div className="text-[10px] text-gray-500">/{material.unit}</div>
+                                                    </>
+                                                  ) : (
+                                                    <div className="text-xs text-gray-400">No price</div>
+                                                  )}
+                                                </div>
 
-                                                        return (
-                                                          <div className={`text-[10px] font-semibold mt-0.5 ${
-                                                            isOver
+                                                {/* Total Estimate with BOQ Comparison */}
+                                                <div className="flex-shrink-0 text-right min-w-[90px]">
+                                                  {(negotiatedPrice ? negotiatedPrice * material.quantity : totalEstimate) > 0 ? (
+                                                    <>
+                                                      <div className="text-sm font-bold text-gray-900">
+                                                        {CURRENCY_CODE} {(negotiatedPrice
+                                                          ? negotiatedPrice * material.quantity
+                                                          : totalEstimate).toFixed(2)}
+                                                      </div>
+                                                      {negotiatedPrice && totalEstimate > 0 && (
+                                                        <div className="text-[10px] text-gray-400 line-through">{CURRENCY_CODE} {totalEstimate.toFixed(2)}</div>
+                                                      )}
+                                                      {/* BOQ Comparison - Below the amount */}
+                                                      {(() => {
+                                                        const boqMaterial = purchase.materials?.find(m => m.material_name === material.material_name);
+                                                        const boqTotal = (boqMaterial?.unit_price || 0) * material.quantity;
+                                                        const vendorTotal = negotiatedPrice ? negotiatedPrice * material.quantity : totalEstimate;
+
+                                                        if (boqTotal > 0 && vendorTotal > 0) {
+                                                          const diff = vendorTotal - boqTotal;
+                                                          const isOver = diff > 0;
+                                                          const isUnder = diff < 0;
+
+                                                          return (
+                                                            <div className={`text-[10px] font-semibold mt-0.5 ${isOver
                                                               ? 'text-red-600'
                                                               : isUnder
                                                                 ? 'text-green-600'
                                                                 : 'text-gray-500'
-                                                          }`}>
-                                                            {isOver ? (
-                                                              <span>+{diff.toFixed(0)} over</span>
-                                                            ) : isUnder ? (
-                                                              <span>{diff.toFixed(0)} under</span>
-                                                            ) : (
-                                                              <span>on budget</span>
-                                                            )}
-                                                          </div>
-                                                        );
-                                                      }
-                                                      return <div className="text-[10px] text-gray-500">total</div>;
-                                                    })()}
-                                                  </>
-                                                ) : (
-                                                  <div className="text-xs text-gray-400">-</div>
-                                                )}
-                                              </div>
-                                            </div>
-
-                                            {/* Expanded Details Section */}
-                                            <AnimatePresence>
-                                              {isExpanded && isSelected && (
-                                                <motion.div
-                                                  initial={{ height: 0, opacity: 0 }}
-                                                  animate={{ height: 'auto', opacity: 1 }}
-                                                  exit={{ height: 0, opacity: 0 }}
-                                                  className="overflow-hidden bg-gray-50"
-                                                >
-                                                  <div className="px-3 py-3 space-y-3">
-                                                    {/* Price Editing Section */}
-                                                    {editingPrice?.materialName === material.material_name &&
-                                                     editingPrice?.vendorId === vendor.vendor_id ? (
-                                                      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-2.5 rounded-lg border-2 border-blue-300">
-                                                        <div className="flex items-center gap-2">
-                                                          <Edit className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
-                                                          <span className="text-[10px] font-semibold text-gray-600 flex-shrink-0">{CURRENCY_CODE}</span>
-                                                          <Input
-                                                            type="number"
-                                                            step="0.01"
-                                                            min="0"
-                                                            value={tempPrice}
-                                                            onChange={(e) => setTempPrice(e.target.value)}
-                                                            placeholder="0.00"
-                                                            className="text-xs h-7 w-20 font-medium"
-                                                            autoFocus
-                                                          />
-                                                          <span className="text-[10px] text-gray-600 flex-shrink-0">/{material.unit}</span>
-                                                          <Button
-                                                            size="sm"
-                                                            onClick={(e) => {
-                                                              e.stopPropagation();
-                                                              handleSavePrice(material.material_name, vendor.vendor_id!, false);
-                                                            }}
-                                                            className="text-[10px] h-7 px-2 bg-blue-600 hover:bg-blue-700 text-white flex-shrink-0"
-                                                            title="One-time price for current BOQ"
-                                                          >
-                                                            This BOQ
-                                                          </Button>
-                                                          <Button
-                                                            size="sm"
-                                                            onClick={(e) => {
-                                                              e.stopPropagation();
-                                                              handleSavePrice(material.material_name, vendor.vendor_id!, true);
-                                                            }}
-                                                            className="text-[10px] h-7 px-2 bg-green-600 hover:bg-green-700 text-white flex-shrink-0"
-                                                            title="Updates vendor's product price permanently"
-                                                          >
-                                                            All Future
-                                                          </Button>
-                                                          <Button
-                                                            size="sm"
-                                                            variant="ghost"
-                                                            onClick={(e) => {
-                                                              e.stopPropagation();
-                                                              handleCancelEditPrice();
-                                                            }}
-                                                            className="h-7 w-7 p-0 hover:bg-blue-100 flex-shrink-0"
-                                                            title="Cancel"
-                                                          >
-                                                            ✕
-                                                          </Button>
-                                                        </div>
-                                                      </div>
-                                                    ) : (
-                                                      <>
-                                                        {/* Vendor Contact Details */}
-                                                        <div className="bg-white p-3 rounded border border-gray-200">
-                                                          <div className="text-xs font-medium text-gray-700 mb-2">
-                                                            Vendor Details
-                                                          </div>
-                                                          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                                                            {vendor.contact_person_name && (
-                                                              <div className="flex items-center gap-2 text-xs">
-                                                                <User className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
-                                                                <span className="text-gray-700 truncate">{vendor.contact_person_name}</span>
-                                                              </div>
-                                                            )}
-                                                            {vendor.email && (
-                                                              <div className="flex items-center gap-2 text-xs">
-                                                                <Mail className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
-                                                                <span className="text-gray-700 truncate">{vendor.email}</span>
-                                                              </div>
-                                                            )}
-                                                            {vendor.phone && (
-                                                              <div className="flex items-center gap-2 text-xs">
-                                                                <Phone className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
-                                                                <span className="text-gray-700">
-                                                                  {vendor.phone_code ? `+${vendor.phone_code} ` : ''}{vendor.phone}
-                                                                </span>
-                                                              </div>
-                                                            )}
-                                                            {(vendor.street_address || vendor.city || vendor.country) && (
-                                                              <div className="flex items-start gap-2 text-xs">
-                                                                <MapPin className="w-3.5 h-3.5 text-gray-500 flex-shrink-0 mt-0.5" />
-                                                                <span className="text-gray-700">
-                                                                  {[vendor.street_address, vendor.city, vendor.state, vendor.country].filter(Boolean).join(', ')}
-                                                                </span>
-                                                              </div>
-                                                            )}
-                                                          </div>
-                                                        </div>
-
-                                                        {/* Price Comparison Section */}
-                                                        {(() => {
-                                                          const boqMaterial = purchase.materials?.find(m => m.material_name === material.material_name);
-                                                          const boqUnitPrice = boqMaterial?.unit_price || 0;
-                                                          const boqTotalAmount = boqUnitPrice * material.quantity;
-                                                          const vendorUnitPrice = negotiatedPrice || lowestPrice;
-                                                          const vendorTotalAmount = vendorUnitPrice * material.quantity;
-                                                          const priceDiff = vendorTotalAmount - boqTotalAmount;
-                                                          const isOverBudget = priceDiff > 0;
-
-                                                          return (
-                                                            <div className="bg-gradient-to-r from-blue-50 to-green-50 p-3 rounded border border-blue-200">
-                                                              <div className="text-xs font-medium text-gray-700 mb-2">
-                                                                Price Comparison
-                                                              </div>
-                                                              <div className="grid grid-cols-2 gap-4">
-                                                                {/* BOQ Price */}
-                                                                <div className="bg-white p-2 rounded border border-gray-200">
-                                                                  <div className="text-[10px] text-gray-500 mb-1">BOQ Estimate</div>
-                                                                  <div className="text-xs">
-                                                                    <span className="text-gray-600">Unit: </span>
-                                                                    <span className="font-semibold text-gray-800">{CURRENCY_CODE} {boqUnitPrice.toFixed(2)}</span>
-                                                                  </div>
-                                                                  <div className="text-xs mt-1">
-                                                                    <span className="text-gray-600">Total: </span>
-                                                                    <span className="font-bold text-gray-800">{CURRENCY_CODE} {boqTotalAmount.toFixed(2)}</span>
-                                                                  </div>
-                                                                </div>
-                                                                {/* Vendor Price */}
-                                                                <div className="bg-white p-2 rounded border border-blue-200">
-                                                                  <div className="text-[10px] text-blue-600 mb-1">Vendor Price</div>
-                                                                  <div className="text-xs">
-                                                                    <span className="text-gray-600">Unit: </span>
-                                                                    <span className="font-semibold text-blue-700">{CURRENCY_CODE} {vendorUnitPrice.toFixed(2)}</span>
-                                                                  </div>
-                                                                  <div className="text-xs mt-1">
-                                                                    <span className="text-gray-600">Total: </span>
-                                                                    <span className="font-bold text-blue-700">{CURRENCY_CODE} {vendorTotalAmount.toFixed(2)}</span>
-                                                                  </div>
-                                                                </div>
-                                                              </div>
-                                                              {/* Difference */}
-                                                              {boqTotalAmount > 0 && vendorTotalAmount > 0 && (
-                                                                <div className={`mt-2 text-xs text-center py-1 rounded ${
-                                                                  isOverBudget ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                                                                }`}>
-                                                                  {isOverBudget ? (
-                                                                    <span>Over Budget: +{CURRENCY_CODE} {priceDiff.toFixed(2)}</span>
-                                                                  ) : priceDiff < 0 ? (
-                                                                    <span>Under Budget: {CURRENCY_CODE} {Math.abs(priceDiff).toFixed(2)} saved</span>
-                                                                  ) : (
-                                                                    <span>On Budget</span>
-                                                                  )}
-                                                                </div>
+                                                              }`}>
+                                                              {isOver ? (
+                                                                <span>+{diff.toFixed(0)} over</span>
+                                                              ) : isUnder ? (
+                                                                <span>{diff.toFixed(0)} under</span>
+                                                              ) : (
+                                                                <span>on budget</span>
                                                               )}
                                                             </div>
                                                           );
-                                                        })()}
+                                                        }
+                                                        return <div className="text-[10px] text-gray-500">total</div>;
+                                                      })()}
+                                                    </>
+                                                  ) : (
+                                                    <div className="text-xs text-gray-400">-</div>
+                                                  )}
+                                                </div>
+                                              </div>
 
-                                                        {/* Matching Products List */}
-                                                        <div className="bg-white p-3 rounded border border-gray-200">
-                                                          <div className="text-xs font-medium text-gray-700 mb-2">
-                                                            Matching Products ({matchingProducts.length})
-                                                          </div>
-                                                          <div className="space-y-1">
-                                                            {matchingProducts.slice(0, MAX_VISIBLE_PRODUCTS).map((product, idx) => (
-                                                              <div key={idx} className="flex justify-between items-center text-xs py-1">
-                                                                <span className="text-gray-700 flex-1 truncate">{product.product_name}</span>
-                                                                {product.unit_price && (
-                                                                  <span className="text-blue-600 font-medium ml-2">
-                                                                    {CURRENCY_CODE} {product.unit_price}/{product.unit || material.unit}
-                                                                  </span>
-                                                                )}
-                                                              </div>
-                                                            ))}
-                                                            {matchingProducts.length > MAX_VISIBLE_PRODUCTS && (
-                                                              <div className="text-[10px] text-gray-500 italic pt-1">
-                                                                +{matchingProducts.length - MAX_VISIBLE_PRODUCTS} more products...
-                                                              </div>
-                                                            )}
-                                                          </div>
-                                                        </div>
-
-                                                        {/* Send Separately Option (Multi-select only) */}
-                                                        {material.selection_mode === 'multi' && (
-                                                          <div className="bg-white p-3 rounded border border-gray-200">
-                                                            <label
-                                                              className="flex items-center gap-2 cursor-pointer"
+                                              {/* Expanded Details Section */}
+                                              <AnimatePresence>
+                                                {isExpanded && isSelected && (
+                                                  <motion.div
+                                                    initial={{ height: 0, opacity: 0 }}
+                                                    animate={{ height: 'auto', opacity: 1 }}
+                                                    exit={{ height: 0, opacity: 0 }}
+                                                    className="overflow-hidden bg-gray-50"
+                                                  >
+                                                    <div className="px-3 py-3 space-y-3">
+                                                      {/* Price Editing Section */}
+                                                      {editingPrice?.materialName === material.material_name &&
+                                                        editingPrice?.vendorId === vendor.vendor_id ? (
+                                                        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-2.5 rounded-lg border-2 border-blue-300">
+                                                          <div className="flex items-center gap-2">
+                                                            <Edit className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                                                            <span className="text-[10px] font-semibold text-gray-600 flex-shrink-0">{CURRENCY_CODE}</span>
+                                                            <Input
+                                                              type="number"
+                                                              step="0.01"
+                                                              min="0"
+                                                              value={tempPrice}
+                                                              onChange={(e) => setTempPrice(e.target.value)}
+                                                              placeholder="0.00"
+                                                              className="text-xs h-7 w-20 font-medium"
+                                                              autoFocus
+                                                            />
+                                                            <span className="text-[10px] text-gray-600 flex-shrink-0">/{material.unit}</span>
+                                                            <Button
+                                                              size="sm"
                                                               onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                handleToggleSendIndividually(material.material_name, vendor.vendor_id!);
+                                                                handleSavePrice(material.material_name, vendor.vendor_id!, false);
                                                               }}
+                                                              className="text-[10px] h-7 px-2 bg-blue-600 hover:bg-blue-700 text-white flex-shrink-0"
+                                                              title="One-time price for current BOQ"
                                                             >
-                                                              <input
-                                                                type="checkbox"
-                                                                checked={selectedVendorInfo?.send_individually || false}
-                                                                readOnly
-                                                                className="w-4 h-4 text-purple-600 rounded cursor-pointer"
-                                                              />
-                                                              <span className="text-xs text-gray-700">Send separate PO with project details</span>
-                                                            </label>
+                                                              This BOQ
+                                                            </Button>
+                                                            <Button
+                                                              size="sm"
+                                                              onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleSavePrice(material.material_name, vendor.vendor_id!, true);
+                                                              }}
+                                                              className="text-[10px] h-7 px-2 bg-green-600 hover:bg-green-700 text-white flex-shrink-0"
+                                                              title="Updates vendor's product price permanently"
+                                                            >
+                                                              All Future
+                                                            </Button>
+                                                            <Button
+                                                              size="sm"
+                                                              variant="ghost"
+                                                              onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleCancelEditPrice();
+                                                              }}
+                                                              className="h-7 w-7 p-0 hover:bg-blue-100 flex-shrink-0"
+                                                              title="Cancel"
+                                                            >
+                                                              ✕
+                                                            </Button>
                                                           </div>
-                                                        )}
-                                                      </>
-                                                    )}
-                                                  </div>
-                                                </motion.div>
-                                              )}
-                                            </AnimatePresence>
-                                          </div>
-                                        );
-                                      })}
+                                                        </div>
+                                                      ) : (
+                                                        <>
+                                                          {/* Vendor Contact Details */}
+                                                          <div className="bg-white p-3 rounded border border-gray-200">
+                                                            <div className="text-xs font-medium text-gray-700 mb-2">
+                                                              Vendor Details
+                                                            </div>
+                                                            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                                              {vendor.contact_person_name && (
+                                                                <div className="flex items-center gap-2 text-xs">
+                                                                  <User className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                                                                  <span className="text-gray-700 truncate">{vendor.contact_person_name}</span>
+                                                                </div>
+                                                              )}
+                                                              {vendor.email && (
+                                                                <div className="flex items-center gap-2 text-xs">
+                                                                  <Mail className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                                                                  <span className="text-gray-700 truncate">{vendor.email}</span>
+                                                                </div>
+                                                              )}
+                                                              {vendor.phone && (
+                                                                <div className="flex items-center gap-2 text-xs">
+                                                                  <Phone className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                                                                  <span className="text-gray-700">
+                                                                    {vendor.phone_code ? `+${vendor.phone_code} ` : ''}{vendor.phone}
+                                                                  </span>
+                                                                </div>
+                                                              )}
+                                                              {(vendor.street_address || vendor.city || vendor.country) && (
+                                                                <div className="flex items-start gap-2 text-xs">
+                                                                  <MapPin className="w-3.5 h-3.5 text-gray-500 flex-shrink-0 mt-0.5" />
+                                                                  <span className="text-gray-700">
+                                                                    {[vendor.street_address, vendor.city, vendor.state, vendor.country].filter(Boolean).join(', ')}
+                                                                  </span>
+                                                                </div>
+                                                              )}
+                                                            </div>
+                                                          </div>
+
+                                                          {/* Price Comparison Section */}
+                                                          {(() => {
+                                                            const boqMaterial = purchase.materials?.find(m => m.material_name === material.material_name);
+                                                            const boqUnitPrice = boqMaterial?.unit_price || 0;
+                                                            const boqTotalAmount = boqUnitPrice * material.quantity;
+                                                            const vendorUnitPrice = negotiatedPrice || lowestPrice;
+                                                            const vendorTotalAmount = vendorUnitPrice * material.quantity;
+                                                            const priceDiff = vendorTotalAmount - boqTotalAmount;
+                                                            const isOverBudget = priceDiff > 0;
+
+                                                            return (
+                                                              <div className="bg-gradient-to-r from-blue-50 to-green-50 p-3 rounded border border-blue-200">
+                                                                <div className="text-xs font-medium text-gray-700 mb-2">
+                                                                  Price Comparison
+                                                                </div>
+                                                                <div className="grid grid-cols-2 gap-4">
+                                                                  {/* BOQ Price */}
+                                                                  <div className="bg-white p-2 rounded border border-gray-200">
+                                                                    <div className="text-[10px] text-gray-500 mb-1">BOQ Estimate</div>
+                                                                    <div className="text-xs">
+                                                                      <span className="text-gray-600">Unit: </span>
+                                                                      <span className="font-semibold text-gray-800">{CURRENCY_CODE} {boqUnitPrice.toFixed(2)}</span>
+                                                                    </div>
+                                                                    <div className="text-xs mt-1">
+                                                                      <span className="text-gray-600">Total: </span>
+                                                                      <span className="font-bold text-gray-800">{CURRENCY_CODE} {boqTotalAmount.toFixed(2)}</span>
+                                                                    </div>
+                                                                  </div>
+                                                                  {/* Vendor Price */}
+                                                                  <div className="bg-white p-2 rounded border border-blue-200">
+                                                                    <div className="text-[10px] text-blue-600 mb-1">Vendor Price</div>
+                                                                    <div className="text-xs">
+                                                                      <span className="text-gray-600">Unit: </span>
+                                                                      <span className="font-semibold text-blue-700">{CURRENCY_CODE} {vendorUnitPrice.toFixed(2)}</span>
+                                                                    </div>
+                                                                    <div className="text-xs mt-1">
+                                                                      <span className="text-gray-600">Total: </span>
+                                                                      <span className="font-bold text-blue-700">{CURRENCY_CODE} {vendorTotalAmount.toFixed(2)}</span>
+                                                                    </div>
+                                                                  </div>
+                                                                </div>
+                                                                {/* Difference */}
+                                                                {boqTotalAmount > 0 && vendorTotalAmount > 0 && (
+                                                                  <div className={`mt-2 text-xs text-center py-1 rounded ${isOverBudget ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                                                                    }`}>
+                                                                    {isOverBudget ? (
+                                                                      <span>Over Budget: +{CURRENCY_CODE} {priceDiff.toFixed(2)}</span>
+                                                                    ) : priceDiff < 0 ? (
+                                                                      <span>Under Budget: {CURRENCY_CODE} {Math.abs(priceDiff).toFixed(2)} saved</span>
+                                                                    ) : (
+                                                                      <span>On Budget</span>
+                                                                    )}
+                                                                  </div>
+                                                                )}
+                                                              </div>
+                                                            );
+                                                          })()}
+
+                                                          {/* Matching Products List */}
+                                                          <div className="bg-white p-3 rounded border border-gray-200">
+                                                            <div className="text-xs font-medium text-gray-700 mb-2">
+                                                              Matching Products ({matchingProducts.length})
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                              {matchingProducts.slice(0, MAX_VISIBLE_PRODUCTS).map((product, idx) => (
+                                                                <div key={idx} className="flex justify-between items-center text-xs py-1">
+                                                                  <span className="text-gray-700 flex-1 truncate">{product.product_name}</span>
+                                                                  {product.unit_price && (
+                                                                    <span className="text-blue-600 font-medium ml-2">
+                                                                      {CURRENCY_CODE} {product.unit_price}/{product.unit || material.unit}
+                                                                    </span>
+                                                                  )}
+                                                                </div>
+                                                              ))}
+                                                              {matchingProducts.length > MAX_VISIBLE_PRODUCTS && (
+                                                                <div className="text-[10px] text-gray-500 italic pt-1">
+                                                                  +{matchingProducts.length - MAX_VISIBLE_PRODUCTS} more products...
+                                                                </div>
+                                                              )}
+                                                            </div>
+                                                          </div>
+
+                                                          {/* Send Separately Option (Multi-select only) */}
+                                                          {material.selection_mode === 'multi' && (
+                                                            <div className="bg-white p-3 rounded border border-gray-200">
+                                                              <label
+                                                                className="flex items-center gap-2 cursor-pointer"
+                                                                onClick={(e) => {
+                                                                  e.stopPropagation();
+                                                                  handleToggleSendIndividually(material.material_name, vendor.vendor_id!);
+                                                                }}
+                                                              >
+                                                                <input
+                                                                  type="checkbox"
+                                                                  checked={selectedVendorInfo?.send_individually || false}
+                                                                  readOnly
+                                                                  className="w-4 h-4 text-purple-600 rounded cursor-pointer"
+                                                                />
+                                                                <span className="text-xs text-gray-700">Send separate PO with project details</span>
+                                                              </label>
+                                                            </div>
+                                                          )}
+                                                        </>
+                                                      )}
+                                                    </div>
+                                                  </motion.div>
+                                                )}
+                                              </AnimatePresence>
+                                            </div>
+                                          );
+                                        })}
                                       </div>
                                     </>
                                   )}
@@ -2411,193 +2463,214 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   </div>
                 )}
 
-              {/* LPO PDF Section - Only for Buyer mode */}
-              {viewMode === 'buyer' && (
-                <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <FileText className="w-5 h-5 text-blue-600" />
-                        <div>
-                          <span className="text-sm font-medium text-gray-900">LPO PDF (Mandatory)</span>
-                          <p className="text-xs text-gray-500">Local Purchase Order PDF will be automatically generated and attached</p>
+                {/* LPO PDF Section - Only for Buyer mode */}
+                {viewMode === 'buyer' && (
+                  <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <FileText className="w-5 h-5 text-blue-600" />
+                          <div>
+                            <span className="text-sm font-medium text-gray-900">LPO PDF (Mandatory)</span>
+                            <p className="text-xs text-gray-500">Local Purchase Order PDF will be automatically generated and attached</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              if (!lpoData && !isLoadingLpo) {
+                                loadLpoData();
+                              }
+                              setShowLpoEditor(!showLpoEditor);
+                            }}
+                            className="text-xs"
+                            disabled={isLoadingLpo || hasTdApprovedAnyPO}
+                            title={hasTdApprovedAnyPO ? "Cannot edit - TD has already approved this purchase order" : "Edit LPO details"}
+                          >
+                            {isLoadingLpo ? (
+                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            ) : (
+                              <Edit3 className="w-3 h-3 mr-1" />
+                            )}
+                            {showLpoEditor ? 'Hide' : 'Edit'}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleDownloadLpoPdf}
+                            className="text-xs"
+                            disabled={!lpoData || isLoadingLpo}
+                          >
+                            <Download className="w-3 h-3 mr-1" />
+                            Preview
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            if (!lpoData && !isLoadingLpo) {
-                              loadLpoData();
-                            }
-                            setShowLpoEditor(!showLpoEditor);
-                          }}
-                          className="text-xs"
-                          disabled={isLoadingLpo || hasTdApprovedAnyPO}
-                          title={hasTdApprovedAnyPO ? "Cannot edit - TD has already approved this purchase order" : "Edit LPO details"}
-                        >
-                          {isLoadingLpo ? (
-                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                          ) : (
-                            <Edit3 className="w-3 h-3 mr-1" />
-                          )}
-                          {showLpoEditor ? 'Hide' : 'Edit'}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={handleDownloadLpoPdf}
-                          className="text-xs"
-                          disabled={!lpoData || isLoadingLpo}
-                        >
-                          <Download className="w-3 h-3 mr-1" />
-                          Preview
-                        </Button>
-                      </div>
-                    </div>
-                    {isLoadingLpo && (
-                      <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Loading LPO data...
-                      </div>
-                    )}
+                      {isLoadingLpo && (
+                        <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Loading LPO data...
+                        </div>
+                      )}
 
-                    {/* LPO Editor Section */}
-                    {showLpoEditor && !lpoData && !isLoadingLpo && (
-                      <div className="mt-4 p-4 border-t border-blue-200 text-center">
-                        <p className="text-sm text-gray-500">Failed to load LPO data. Please try again.</p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={loadLpoData}
-                          className="mt-2"
-                        >
-                          Retry
-                        </Button>
-                      </div>
-                    )}
-                    {lpoData && showLpoEditor && (
-                      <div className="mt-4 space-y-4 border-t border-blue-200 pt-4">
-                        <div className="flex items-center justify-between">
-                          <div className="text-sm font-medium text-gray-700">Edit LPO Details</div>
-                          <div className="flex items-center gap-2">
-                            {/* Auto-save indicator */}
-                            <div className="text-xs text-gray-500 flex items-center gap-1 bg-gray-50 px-2 py-1 rounded">
-                              {isSavingLpo ? (
-                                <>
-                                  <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
-                                  <span>Auto-saving...</span>
-                                </>
-                              ) : lpoLastSaved ? (
-                                <>
-                                  <CheckCircle className="w-3 h-3 text-green-500" />
-                                  <span>Auto-saved</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Edit3 className="w-3 h-3 text-gray-400" />
-                                  <span>Changes auto-save</span>
-                                </>
-                              )}
+                      {/* LPO Editor Section */}
+                      {showLpoEditor && !lpoData && !isLoadingLpo && (
+                        <div className="mt-4 p-4 border-t border-blue-200 text-center">
+                          <p className="text-sm text-gray-500">Failed to load LPO data. Please try again.</p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={loadLpoData}
+                            className="mt-2"
+                          >
+                            Retry
+                          </Button>
+                        </div>
+                      )}
+                      {lpoData && showLpoEditor && (
+                        <div className="mt-4 space-y-4 border-t border-blue-200 pt-4">
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-medium text-gray-700">Edit LPO Details</div>
+                            <div className="flex items-center gap-2">
+                              {/* Auto-save indicator */}
+                              <div className="text-xs text-gray-500 flex items-center gap-1 bg-gray-50 px-2 py-1 rounded">
+                                {isSavingLpo ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
+                                    <span>Auto-saving...</span>
+                                  </>
+                                ) : lpoLastSaved ? (
+                                  <>
+                                    <CheckCircle className="w-3 h-3 text-green-500" />
+                                    <span>Auto-saved</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Edit3 className="w-3 h-3 text-gray-400" />
+                                    <span>Changes auto-save</span>
+                                  </>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        {/* Quotation Ref and Subject */}
-                        <div className="grid grid-cols-2 gap-4">
+                          {/* Quotation Ref and Subject */}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-xs font-medium text-gray-600">Quotation Ref#</label>
+                              <Input
+                                value={lpoData.lpo_info.quotation_ref || ''}
+                                onChange={(e) => setLpoData({
+                                  ...lpoData,
+                                  lpo_info: { ...lpoData.lpo_info, quotation_ref: e.target.value }
+                                })}
+                                className="mt-1 text-sm"
+                                placeholder="Vendor quotation reference"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs font-medium text-gray-600">Subject</label>
+                              <Input
+                                value={lpoData.vendor.subject || ''}
+                                onChange={(e) => setLpoData({
+                                  ...lpoData,
+                                  vendor: { ...lpoData.vendor, subject: e.target.value }
+                                })}
+                                className="mt-1 text-sm"
+                                placeholder="LPO subject"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Custom Message for PDF */}
                           <div>
-                            <label className="text-xs font-medium text-gray-600">Quotation Ref#</label>
-                            <Input
-                              value={lpoData.lpo_info.quotation_ref || ''}
+                            <label className="text-xs font-medium text-gray-600">LPO Message (shown in PDF)</label>
+                            <textarea
+                              value={lpoData.lpo_info.custom_message || ''}
                               onChange={(e) => setLpoData({
                                 ...lpoData,
-                                lpo_info: { ...lpoData.lpo_info, quotation_ref: e.target.value }
+                                lpo_info: { ...lpoData.lpo_info, custom_message: e.target.value }
                               })}
-                              className="mt-1 text-sm"
-                              placeholder="Vendor quotation reference"
+                              className="mt-1 w-full p-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
                             />
-                          </div>
-                          <div>
-                            <label className="text-xs font-medium text-gray-600">Subject</label>
-                            <Input
-                              value={lpoData.vendor.subject || ''}
-                              onChange={(e) => setLpoData({
-                                ...lpoData,
-                                vendor: { ...lpoData.vendor, subject: e.target.value }
-                              })}
-                              className="mt-1 text-sm"
-                              placeholder="LPO subject"
-                            />
-                          </div>
-                        </div>
-
-                        {/* Custom Message for PDF */}
-                        <div>
-                          <label className="text-xs font-medium text-gray-600">LPO Message (shown in PDF)</label>
-                          <textarea
-                            value={lpoData.lpo_info.custom_message || ''}
-                            onChange={(e) => setLpoData({
-                              ...lpoData,
-                              lpo_info: { ...lpoData.lpo_info, custom_message: e.target.value }
-                            })}
-                            className="mt-1 w-full p-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
-                          />
-                          <p className="text-xs text-gray-400 mt-1">Edit the message that appears in the LPO PDF</p>
-                        </div>
-
-                        {/* Terms Section */}
-                        <div className="border-t border-blue-200 pt-4">
-                          <div className="text-sm font-medium text-gray-700 mb-3">Terms & Conditions</div>
-
-                          {/* Delivery Terms */}
-                          <div className="mb-4">
-                            <label className="text-xs font-medium text-gray-600">Delivery Terms</label>
-                            <Input
-                              value={lpoData.terms.completion_terms || lpoData.terms.delivery_terms || ''}
-                              onChange={(e) => setLpoData({
-                                ...lpoData,
-                                terms: { ...lpoData.terms, completion_terms: e.target.value, delivery_terms: e.target.value }
-                              })}
-                              className="mt-1 text-sm"
-                              placeholder="e.g., 04.12.25"
-                            />
+                            <p className="text-xs text-gray-400 mt-1">Edit the message that appears in the LPO PDF</p>
                           </div>
 
-                          {/* Payment Terms with Checkboxes */}
-                          <div className="bg-gray-50 rounded-lg p-3">
-                            <div className="text-xs font-medium text-gray-600 mb-2">Payment Terms (select to include in PDF)</div>
+                          {/* Terms Section */}
+                          <div className="border-t border-blue-200 pt-4">
+                            <div className="text-sm font-medium text-gray-700 mb-3">Terms & Conditions</div>
 
-                            {/* Payment terms list */}
-                            <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
-                              {(lpoData.terms.custom_terms || []).map((term: {text: string, selected: boolean}, index: number) => (
-                                <div key={index} className="flex items-center gap-2 bg-white p-2 rounded border border-gray-200">
-                                  <input
-                                    type="checkbox"
-                                    checked={term.selected}
-                                    onChange={(e) => {
-                                      const updatedTerms = [...(lpoData.terms.custom_terms || [])];
-                                      updatedTerms[index] = { ...term, selected: e.target.checked };
-                                      setLpoData({
-                                        ...lpoData,
-                                        terms: { ...lpoData.terms, custom_terms: updatedTerms }
-                                      });
-                                    }}
-                                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                                  />
-                                  {editingTermIndex === index ? (
-                                    <div className="flex-1 flex gap-2">
-                                      <Input
-                                        value={editingTermText}
-                                        onChange={(e) => setEditingTermText(e.target.value)}
-                                        className="flex-1 text-xs"
-                                        autoFocus
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') {
-                                            e.preventDefault();
+                            {/* Delivery Terms */}
+                            <div className="mb-4">
+                              <label className="text-xs font-medium text-gray-600">Delivery Terms</label>
+                              <Input
+                                value={lpoData.terms.completion_terms || lpoData.terms.delivery_terms || ''}
+                                onChange={(e) => setLpoData({
+                                  ...lpoData,
+                                  terms: { ...lpoData.terms, completion_terms: e.target.value, delivery_terms: e.target.value }
+                                })}
+                                className="mt-1 text-sm"
+                                placeholder="e.g., 04.12.25"
+                              />
+                            </div>
+
+                            {/* Payment Terms with Checkboxes */}
+                            <div className="bg-gray-50 rounded-lg p-3">
+                              <div className="text-xs font-medium text-gray-600 mb-2">Payment Terms (select to include in PDF)</div>
+
+                              {/* Payment terms list */}
+                              <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
+                                {(lpoData.terms.custom_terms || []).map((term: { text: string, selected: boolean }, index: number) => (
+                                  <div key={index} className="flex items-center gap-2 bg-white p-2 rounded border border-gray-200">
+                                    <input
+                                      type="checkbox"
+                                      checked={term.selected}
+                                      onChange={(e) => {
+                                        const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                        updatedTerms[index] = { ...term, selected: e.target.checked };
+                                        setLpoData({
+                                          ...lpoData,
+                                          terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                        });
+                                      }}
+                                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                    />
+                                    {editingTermIndex === index ? (
+                                      <div className="flex-1 flex gap-2">
+                                        <Input
+                                          value={editingTermText}
+                                          onChange={(e) => setEditingTermText(e.target.value)}
+                                          className="flex-1 text-xs"
+                                          autoFocus
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              e.preventDefault();
+                                              if (editingTermText.trim()) {
+                                                const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                                updatedTerms[index] = { ...term, text: editingTermText.trim() };
+                                                setLpoData({
+                                                  ...lpoData,
+                                                  terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                                });
+                                              }
+                                              setEditingTermIndex(null);
+                                              setEditingTermText('');
+                                            } else if (e.key === 'Escape') {
+                                              setEditingTermIndex(null);
+                                              setEditingTermText('');
+                                            }
+                                          }}
+                                        />
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => {
                                             if (editingTermText.trim()) {
                                               const updatedTerms = [...(lpoData.terms.custom_terms || [])];
                                               updatedTerms[index] = { ...term, text: editingTermText.trim() };
@@ -2608,77 +2681,75 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                             }
                                             setEditingTermIndex(null);
                                             setEditingTermText('');
-                                          } else if (e.key === 'Escape') {
-                                            setEditingTermIndex(null);
-                                            setEditingTermText('');
-                                          }
-                                        }}
-                                      />
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => {
-                                          if (editingTermText.trim()) {
-                                            const updatedTerms = [...(lpoData.terms.custom_terms || [])];
-                                            updatedTerms[index] = { ...term, text: editingTermText.trim() };
+                                          }}
+                                        >
+                                          <Save className="w-3 h-3" />
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <span className="flex-1 text-xs text-gray-700">{term.text}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingTermIndex(index);
+                                            setEditingTermText(term.text);
+                                          }}
+                                          className="text-blue-500 hover:text-blue-700 p-1"
+                                        >
+                                          <Edit3 className="w-3 h-3" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const updatedTerms = (lpoData.terms.custom_terms || []).filter((_: any, i: number) => i !== index);
                                             setLpoData({
                                               ...lpoData,
                                               terms: { ...lpoData.terms, custom_terms: updatedTerms }
                                             });
-                                          }
-                                          setEditingTermIndex(null);
-                                          setEditingTermText('');
-                                        }}
-                                      >
-                                        <Save className="w-3 h-3" />
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <span className="flex-1 text-xs text-gray-700">{term.text}</span>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setEditingTermIndex(index);
-                                          setEditingTermText(term.text);
-                                        }}
-                                        className="text-blue-500 hover:text-blue-700 p-1"
-                                      >
-                                        <Edit3 className="w-3 h-3" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const updatedTerms = (lpoData.terms.custom_terms || []).filter((_: any, i: number) => i !== index);
-                                          setLpoData({
-                                            ...lpoData,
-                                            terms: { ...lpoData.terms, custom_terms: updatedTerms }
-                                          });
-                                        }}
-                                        className="text-red-500 hover:text-red-700 p-1"
-                                      >
-                                        <Trash2 className="w-3 h-3" />
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-                              ))}
-                              {(!lpoData.terms.custom_terms || lpoData.terms.custom_terms.length === 0) && (
-                                <div className="text-xs text-gray-400 italic py-2">No payment terms added yet.</div>
-                              )}
-                            </div>
+                                          }}
+                                          className="text-red-500 hover:text-red-700 p-1"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                ))}
+                                {(!lpoData.terms.custom_terms || lpoData.terms.custom_terms.length === 0) && (
+                                  <div className="text-xs text-gray-400 italic py-2">No payment terms added yet.</div>
+                                )}
+                              </div>
 
-                            {/* Add new payment term */}
-                            <div className="flex gap-2">
-                              <Input
-                                value={newCustomTerm}
-                                onChange={(e) => setNewCustomTerm(e.target.value)}
-                                placeholder="e.g., 50% Advance, 100% CDC after delivery..."
-                                className="flex-1 text-sm"
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
+                              {/* Add new payment term */}
+                              <div className="flex gap-2">
+                                <Input
+                                  value={newCustomTerm}
+                                  onChange={(e) => setNewCustomTerm(e.target.value)}
+                                  placeholder="e.g., 50% Advance, 100% CDC after delivery..."
+                                  className="flex-1 text-sm"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      if (newCustomTerm.trim()) {
+                                        const currentTerms = lpoData.terms.custom_terms || [];
+                                        setLpoData({
+                                          ...lpoData,
+                                          terms: {
+                                            ...lpoData.terms,
+                                            custom_terms: [...currentTerms, { text: newCustomTerm.trim(), selected: true }]
+                                          }
+                                        });
+                                        setNewCustomTerm('');
+                                      }
+                                    }
+                                  }}
+                                />
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
                                     if (newCustomTerm.trim()) {
                                       const currentTerms = lpoData.terms.custom_terms || [];
                                       setLpoData({
@@ -2690,86 +2761,67 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                       });
                                       setNewCustomTerm('');
                                     }
-                                  }
-                                }}
-                              />
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  if (newCustomTerm.trim()) {
-                                    const currentTerms = lpoData.terms.custom_terms || [];
-                                    setLpoData({
-                                      ...lpoData,
-                                      terms: {
-                                        ...lpoData.terms,
-                                        custom_terms: [...currentTerms, { text: newCustomTerm.trim(), selected: true }]
-                                      }
-                                    });
-                                    setNewCustomTerm('');
-                                  }
-                                }}
-                              >
-                                <Plus className="w-3 h-3 mr-1" /> Add
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Signature Selection */}
-                        <div className="border-t border-blue-200 pt-4">
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="checkbox"
-                              id="include-signatures-vendor"
-                              checked={includeSignatures}
-                              onChange={(e) => setIncludeSignatures(e.target.checked)}
-                              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                            />
-                            <label htmlFor="include-signatures-vendor" className="text-sm font-medium text-gray-700">
-                              Include Signatures in LPO PDF
-                            </label>
-                          </div>
-
-                          {includeSignatures && (
-                            <div className="mt-3 bg-gray-50 p-3 rounded border border-gray-200">
-                              <div className="text-xs text-gray-500 mb-2">Signatures from Admin Settings:</div>
-                              <div className="grid grid-cols-3 gap-4">
-                                <div className="text-center">
-                                  <div className="text-xs text-gray-500 mb-1">MD Signature</div>
-                                  {lpoData.signatures.md_signature ? (
-                                    <img src={lpoData.signatures.md_signature} alt="MD" className="h-10 mx-auto object-contain" />
-                                  ) : (
-                                    <div className="text-xs text-orange-500">Not uploaded</div>
-                                  )}
-                                </div>
-                                <div className="text-center">
-                                  <div className="text-xs text-gray-500 mb-1">Stamp</div>
-                                  {lpoData.signatures.stamp_image ? (
-                                    <img src={lpoData.signatures.stamp_image} alt="Stamp" className="h-10 mx-auto object-contain" />
-                                  ) : (
-                                    <div className="text-xs text-orange-500">Not uploaded</div>
-                                  )}
-                                </div>
-                                <div className="text-center">
-                                  <div className="text-xs text-gray-500 mb-1">TD Signature</div>
-                                  {lpoData.signatures.td_signature ? (
-                                    <img src={lpoData.signatures.td_signature} alt="TD" className="h-10 mx-auto object-contain" />
-                                  ) : (
-                                    <div className="text-xs text-orange-500">Not uploaded</div>
-                                  )}
-                                </div>
+                                  }}
+                                >
+                                  <Plus className="w-3 h-3 mr-1" /> Add
+                                </Button>
                               </div>
                             </div>
-                          )}
-                        </div>
+                          </div>
 
-                      </div>
-                    )}
+                          {/* Signature Selection */}
+                          <div className="border-t border-blue-200 pt-4">
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                id="include-signatures-vendor"
+                                checked={includeSignatures}
+                                onChange={(e) => setIncludeSignatures(e.target.checked)}
+                                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                              />
+                              <label htmlFor="include-signatures-vendor" className="text-sm font-medium text-gray-700">
+                                Include Signatures in LPO PDF
+                              </label>
+                            </div>
+
+                            {includeSignatures && (
+                              <div className="mt-3 bg-gray-50 p-3 rounded border border-gray-200">
+                                <div className="text-xs text-gray-500 mb-2">Signatures from Admin Settings:</div>
+                                <div className="grid grid-cols-3 gap-4">
+                                  <div className="text-center">
+                                    <div className="text-xs text-gray-500 mb-1">MD Signature</div>
+                                    {lpoData.signatures.md_signature ? (
+                                      <img src={lpoData.signatures.md_signature} alt="MD" className="h-10 mx-auto object-contain" />
+                                    ) : (
+                                      <div className="text-xs text-orange-500">Not uploaded</div>
+                                    )}
+                                  </div>
+                                  <div className="text-center">
+                                    <div className="text-xs text-gray-500 mb-1">Stamp</div>
+                                    {lpoData.signatures.stamp_image ? (
+                                      <img src={lpoData.signatures.stamp_image} alt="Stamp" className="h-10 mx-auto object-contain" />
+                                    ) : (
+                                      <div className="text-xs text-orange-500">Not uploaded</div>
+                                    )}
+                                  </div>
+                                  <div className="text-center">
+                                    <div className="text-xs text-gray-500 mb-1">TD Signature</div>
+                                    {lpoData.signatures.td_signature ? (
+                                      <img src={lpoData.signatures.td_signature} alt="TD" className="h-10 mx-auto object-contain" />
+                                    ) : (
+                                      <div className="text-xs text-orange-500">Not uploaded</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
               </div>
 
               {/* Footer */}
