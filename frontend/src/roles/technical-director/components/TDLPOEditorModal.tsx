@@ -44,6 +44,7 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
   const [editingTermText, setEditingTermText] = useState('');
   const [isSavingDefault, setIsSavingDefault] = useState(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [includeVAT, setIncludeVAT] = useState(true);
 
   // Load LPO data when modal opens
   useEffect(() => {
@@ -51,6 +52,35 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
       loadLpoData();
     }
   }, [isOpen, crId]);
+
+  // Set initial VAT checkbox state based on loaded data
+  useEffect(() => {
+    if (lpoData) {
+      setIncludeVAT(lpoData.totals.vat_percent > 0);
+    }
+  }, [lpoData?.totals.vat_percent]);
+
+  // Auto-save when lpoData changes (debounced)
+  useEffect(() => {
+    if (!lpoData || !isOpen) return;
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set new timeout for auto-save (1 second debounce)
+    saveTimeoutRef.current = setTimeout(() => {
+      autoSaveLpoCustomization();
+    }, 1000);
+
+    // Cleanup on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [lpoData, isOpen, autoSaveLpoCustomization]);
 
   const loadLpoData = async () => {
     try {
@@ -384,6 +414,107 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
                   </div>
                 </div>
 
+                {/* VAT Configuration */}
+                <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900">VAT Configuration</h3>
+
+                  {/* VAT Checkbox */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="include-vat"
+                      checked={includeVAT}
+                      onChange={(e) => {
+                        if (isReadOnly) return;
+                        const isChecked = e.target.checked;
+                        setIncludeVAT(isChecked);
+
+                        if (!isChecked) {
+                          // Disable VAT - set to 0%
+                          setLpoData({
+                            ...lpoData,
+                            totals: {
+                              ...lpoData.totals,
+                              vat_percent: 0,
+                              vat_amount: 0,
+                              grand_total: lpoData.totals.subtotal
+                            }
+                          });
+                        } else {
+                          // Enable VAT - set to default 5%
+                          const defaultVatPercent = 5;
+                          const newVatAmount = (lpoData.totals.subtotal * defaultVatPercent) / 100;
+                          const newGrandTotal = lpoData.totals.subtotal + newVatAmount;
+
+                          setLpoData({
+                            ...lpoData,
+                            totals: {
+                              ...lpoData.totals,
+                              vat_percent: defaultVatPercent,
+                              vat_amount: parseFloat(newVatAmount.toFixed(2)),
+                              grand_total: parseFloat(newGrandTotal.toFixed(2))
+                            }
+                          });
+                        }
+                      }}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                      disabled={isReadOnly}
+                    />
+                    <label htmlFor="include-vat" className="text-sm font-medium text-gray-700">
+                      {isReadOnly ? 'VAT Included in LPO' : 'Include VAT in LPO'}
+                    </label>
+                  </div>
+
+                  {/* VAT Percentage Input - Only show when VAT is enabled */}
+                  {includeVAT && (
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <label className="text-sm font-medium text-gray-700 mb-2 block">VAT Percentage</label>
+                      <div className="flex items-center gap-3">
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.5"
+                          value={lpoData.totals.vat_percent}
+                          onChange={(e) => {
+                            if (isReadOnly) return;
+                            const newVatPercent = parseFloat(e.target.value) || 0;
+                            const newVatAmount = (lpoData.totals.subtotal * newVatPercent) / 100;
+                            const newGrandTotal = lpoData.totals.subtotal + newVatAmount;
+
+                            setLpoData({
+                              ...lpoData,
+                              totals: {
+                                ...lpoData.totals,
+                                vat_percent: newVatPercent,
+                                vat_amount: parseFloat(newVatAmount.toFixed(2)),
+                                grand_total: parseFloat(newGrandTotal.toFixed(2))
+                              }
+                            });
+                          }}
+                          className={`w-32 ${isReadOnly ? 'bg-gray-100' : ''}`}
+                          placeholder="5"
+                          disabled={isReadOnly}
+                        />
+                        <span className="text-sm text-gray-600">%</span>
+                        <div className="ml-auto text-right">
+                          <div className="text-xs text-gray-500">VAT Amount</div>
+                          <div className="text-lg font-bold text-gray-900">AED {lpoData.totals.vat_amount.toLocaleString()}</div>
+                        </div>
+                      </div>
+                      {!isReadOnly && (
+                        <p className="text-xs text-gray-500 mt-2">Enter custom VAT percentage. Changes will auto-save and update the PDF.</p>
+                      )}
+                    </div>
+                  )}
+
+                  {!includeVAT && (
+                    <div className="bg-gray-50 rounded-lg p-4 text-center">
+                      <p className="text-sm text-gray-600">VAT is disabled for this LPO. Check the box above to add VAT.</p>
+                    </div>
+                  )}
+                </div>
+
                 {/* Terms & Conditions */}
                 <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-4">
                   <h3 className="text-lg font-semibold text-gray-900">Terms & Conditions</h3>
@@ -630,7 +761,7 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
                       <div className="text-lg font-bold text-gray-900">AED {lpoData.totals.subtotal.toLocaleString()}</div>
                     </div>
                     <div className="bg-white rounded-lg p-3 border border-blue-100">
-                      <span className="text-xs text-gray-500">VAT ({lpoData.totals.vat_percent}%)</span>
+                      <span className="text-xs text-gray-500">VAT {includeVAT ? `(${lpoData.totals.vat_percent}%)` : '(Not Applied)'}</span>
                       <div className="text-lg font-bold text-gray-900">AED {lpoData.totals.vat_amount.toLocaleString()}</div>
                     </div>
                     <div className="bg-white rounded-lg p-3 border border-blue-100">

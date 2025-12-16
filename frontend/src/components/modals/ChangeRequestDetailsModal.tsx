@@ -33,6 +33,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const { user } = useAuthStore();
   const [showEditModal, setShowEditModal] = useState(false);
   const [expandedJustifications, setExpandedJustifications] = useState<Set<number>>(new Set());
+  const [expandedDescriptions, setExpandedDescriptions] = useState<Set<number>>(new Set());
+  const [expandedSpecs, setExpandedSpecs] = useState<Set<number>>(new Set());
   const [lpoData, setLpoData] = useState<any>(null);
   const [loadingLPO, setLoadingLPO] = useState(false);
   const [downloadingLPO, setDownloadingLPO] = useState(false);
@@ -54,6 +56,32 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   // Toggle justification expansion
   const toggleJustification = (idx: number) => {
     setExpandedJustifications(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(idx)) {
+        newSet.delete(idx);
+      } else {
+        newSet.add(idx);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle description expansion
+  const toggleDescription = (idx: number) => {
+    setExpandedDescriptions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(idx)) {
+        newSet.delete(idx);
+      } else {
+        newSet.add(idx);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle specification expansion
+  const toggleSpec = (idx: number) => {
+    setExpandedSpecs(prev => {
       const newSet = new Set(prev);
       if (newSet.has(idx)) {
         newSet.delete(idx);
@@ -308,18 +336,25 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       );
     }
 
-    // Check for vendor negotiated price from material_vendor_selections
+    // Check for vendor negotiated price and vendor's material name from material_vendor_selections
     const materialName = mat.material_name || mat.sub_item_name || '';
-    const vendorSelectionPrice = materialVendorSelectionsForEnrich[materialName]?.negotiated_price;
+    const vendorSelection = materialVendorSelectionsForEnrich[materialName] || {};
+    const vendorSelectionPrice = vendorSelection.negotiated_price;
+    const vendorMaterialName = vendorSelection.vendor_material_name;
 
     // Get BOQ price from material or LPO item (don't use unit_price as it might be vendor price)
     const boqUnitPrice = mat.boq_unit_price || mat.original_unit_price || lpoItem?.boq_rate || 0;
     const boqTotalPrice = mat.boq_total_price || mat.original_total_price || (mat.quantity * boqUnitPrice) || 0;
 
+    // Determine which material name to display (vendor's name if available, otherwise BOQ name)
+    const displayMaterialName = vendorMaterialName || materialName;
+
     // PRIORITY 1: Use vendor negotiated price from material_vendor_selections
     if (vendorSelectionPrice != null && vendorSelectionPrice > 0) {
       return {
         ...mat,
+        material_name: displayMaterialName,  // Use vendor's material name
+        boq_material_name: materialName,  // Keep original BOQ name for reference
         unit_price: vendorSelectionPrice,
         total_price: vendorSelectionPrice * mat.quantity,
         negotiated_price: vendorSelectionPrice,
@@ -332,6 +367,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     if (mat.negotiated_price != null && mat.negotiated_price > 0) {
       return {
         ...mat,
+        material_name: displayMaterialName,  // Use vendor's material name
+        boq_material_name: materialName,  // Keep original BOQ name for reference
         unit_price: mat.negotiated_price,
         total_price: mat.negotiated_price * mat.quantity,
         boq_unit_price: boqUnitPrice,
@@ -343,6 +380,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     if (mat.unit_price && mat.unit_price > 0) {
       return {
         ...mat,
+        material_name: displayMaterialName,  // Use vendor's material name
+        boq_material_name: materialName,  // Keep original BOQ name for reference
         boq_unit_price: boqUnitPrice,
         boq_total_price: boqTotalPrice
       };
@@ -352,6 +391,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     if (lpoItem && lpoItem.rate > 0) {
       return {
         ...mat,
+        material_name: displayMaterialName,  // Use vendor's material name
+        boq_material_name: materialName,  // Keep original BOQ name for reference
         unit_price: lpoItem.rate,
         total_price: lpoItem.amount || (mat.quantity * lpoItem.rate),
         boq_unit_price: boqUnitPrice,
@@ -359,9 +400,11 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       };
     }
 
-    // No vendor price available, just add BOQ prices
+    // No vendor price available, just add BOQ prices and vendor material name if available
     return {
       ...mat,
+      material_name: displayMaterialName,  // Use vendor's material name if available
+      boq_material_name: materialName,  // Keep original BOQ name for reference
       boq_unit_price: boqUnitPrice,
       boq_total_price: boqTotalPrice
     };
@@ -983,32 +1026,98 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           </div>
 
                           {/* Details Grid */}
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div className="truncate">
-                              <span className="text-gray-500">Brand:</span>
-                              <span className="ml-1 text-gray-900" title={material.brand || ''}>{material.brand || '-'}</span>
+                          <div className="space-y-2 text-xs">
+                            {/* Description */}
+                            {material.description && material.description.trim() && (
+                              <div>
+                                <span className="text-gray-500">Description:</span>
+                                <div className="ml-1 text-gray-900">
+                                  {material.description.length > 80 && !expandedDescriptions.has(idx) ? (
+                                    <>
+                                      <span>{material.description.substring(0, 80)}...</span>
+                                      <button
+                                        onClick={() => toggleDescription(idx)}
+                                        className="ml-1 text-purple-600 hover:text-purple-800 font-medium"
+                                      >
+                                        See More
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>{material.description}</span>
+                                      {material.description.length > 80 && (
+                                        <button
+                                          onClick={() => toggleDescription(idx)}
+                                          className="ml-1 text-purple-600 hover:text-purple-800 font-medium"
+                                        >
+                                          See Less
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="truncate">
+                                <span className="text-gray-500">Brand:</span>
+                                <span className="ml-1 text-gray-900" title={material.brand || ''}>{material.brand || '-'}</span>
+                              </div>
+                              <div className="truncate">
+                                <span className="text-gray-500">Size:</span>
+                                <span className="ml-1 text-gray-900" title={material.size || ''}>{material.size || '-'}</span>
+                              </div>
                             </div>
-                            <div className="truncate">
-                              <span className="text-gray-500">Size:</span>
-                              <span className="ml-1 text-gray-900" title={material.size || material.specification || ''}>{material.size || material.specification || '-'}</span>
-                            </div>
-                            <div className="truncate">
-                              <span className="text-gray-500">Sub-Item:</span>
-                              {material.sub_item_name ? (
-                                <button
-                                  onClick={() => handleViewSubItemInBOQ(material.sub_item_name, material.material_name)}
-                                  className="ml-1 text-purple-700 hover:text-purple-900 underline underline-offset-2 hover:no-underline truncate"
-                                  title={`View "${material.sub_item_name}" in BOQ`}
-                                >
-                                  {material.sub_item_name}
-                                </button>
-                              ) : (
-                                <span className="ml-1 text-gray-900">-</span>
-                              )}
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Qty:</span>
-                              <span className="ml-1 font-medium text-gray-900">{material.quantity} {material.unit}</span>
+                            {/* Specification */}
+                            {material.specification && material.specification.trim() && (
+                              <div>
+                                <span className="text-gray-500">Specification:</span>
+                                <div className="ml-1 text-gray-900">
+                                  {material.specification.length > 80 && !expandedSpecs.has(idx) ? (
+                                    <>
+                                      <span>{material.specification.substring(0, 80)}...</span>
+                                      <button
+                                        onClick={() => toggleSpec(idx)}
+                                        className="ml-1 text-purple-600 hover:text-purple-800 font-medium"
+                                      >
+                                        See More
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>{material.specification}</span>
+                                      {material.specification.length > 80 && (
+                                        <button
+                                          onClick={() => toggleSpec(idx)}
+                                          className="ml-1 text-purple-600 hover:text-purple-800 font-medium"
+                                        >
+                                          See Less
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="truncate">
+                                <span className="text-gray-500">Sub-Item:</span>
+                                {material.sub_item_name ? (
+                                  <button
+                                    onClick={() => handleViewSubItemInBOQ(material.sub_item_name, material.material_name)}
+                                    className="ml-1 text-purple-700 hover:text-purple-900 underline underline-offset-2 hover:no-underline truncate"
+                                    title={`View "${material.sub_item_name}" in BOQ`}
+                                  >
+                                    {material.sub_item_name}
+                                  </button>
+                                ) : (
+                                  <span className="ml-1 text-gray-900">-</span>
+                                )}
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Qty:</span>
+                                <span className="ml-1 font-medium text-gray-900">{material.quantity} {material.unit}</span>
+                              </div>
                             </div>
                           </div>
 
@@ -1088,21 +1197,23 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       (mat.is_new_material === undefined && mat.master_material_id === null)
                     );
                     return (
-                  <table className="w-full table-fixed">
+                  <table className="w-full">
                     <thead className="bg-gray-100 border-b border-gray-200">
                       <tr>
-                        <th className={`px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[18%]' : 'w-[22%]'}`}>Material</th>
-                        <th className={`px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[12%]' : 'w-[15%]'}`}>Brand</th>
-                        <th className={`px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[12%]' : 'w-[15%]'}`}>Size/Spec</th>
-                        <th className={`px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[10%]' : 'w-[12%]'}`}>Sub-Item</th>
-                        <th className={`px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[8%]' : 'w-[10%]'}`}>Qty</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Material</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Description</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Brand</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Size</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Specification</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Sub-Item</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Qty</th>
                         {hasNewMaterials && (
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-[18%]">Notes</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Notes</th>
                         )}
                         {shouldShowPricing && (
                           <>
-                            <th className={`px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[11%]' : 'w-[13%]'}`}>Unit Price</th>
-                            <th className={`px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider ${hasNewMaterials ? 'w-[11%]' : 'w-[13%]'}`}>Total</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Unit Price</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Total</th>
                           </>
                         )}
                       </tr>
@@ -1118,7 +1229,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             {/* Material Name */}
                             <td className="px-4 py-3 text-sm text-gray-900">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-medium truncate" title={material.material_name}>{material.material_name}</span>
+                                <span className="font-medium" title={material.material_name}>{material.material_name}</span>
                                 {isNewMaterial && (
                                   <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-300 flex-shrink-0">
                                     NEW
@@ -1126,13 +1237,77 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                                 )}
                               </div>
                             </td>
+                            {/* Description */}
+                            <td className="px-4 py-3 text-sm text-gray-600" style={{ maxWidth: '250px' }}>
+                              {material.description && material.description.trim() ? (
+                                <div>
+                                  {material.description.length > 100 && !expandedDescriptions.has(idx) ? (
+                                    <div>
+                                      <span>{material.description.substring(0, 100)}...</span>
+                                      <button
+                                        onClick={() => toggleDescription(idx)}
+                                        className="ml-1 text-purple-600 hover:text-purple-800 font-medium text-xs whitespace-nowrap"
+                                      >
+                                        See More
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <span>{material.description}</span>
+                                      {material.description.length > 100 && (
+                                        <button
+                                          onClick={() => toggleDescription(idx)}
+                                          className="ml-1 text-purple-600 hover:text-purple-800 font-medium text-xs whitespace-nowrap"
+                                        >
+                                          See Less
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </td>
                             {/* Brand */}
-                            <td className="px-4 py-3 text-sm text-gray-600 truncate" title={material.brand || ''}>
+                            <td className="px-4 py-3 text-sm text-gray-600" title={material.brand || ''}>
                               {material.brand || <span className="text-gray-400">-</span>}
                             </td>
-                            {/* Size/Spec */}
-                            <td className="px-4 py-3 text-sm text-gray-600 truncate" title={material.size || material.specification || ''}>
-                              {material.size || material.specification || <span className="text-gray-400">-</span>}
+                            {/* Size */}
+                            <td className="px-4 py-3 text-sm text-gray-600" title={material.size || ''}>
+                              {material.size || <span className="text-gray-400">-</span>}
+                            </td>
+                            {/* Specification */}
+                            <td className="px-4 py-3 text-sm text-gray-600" style={{ maxWidth: '250px' }}>
+                              {material.specification && material.specification.trim() ? (
+                                <div>
+                                  {material.specification.length > 100 && !expandedSpecs.has(idx) ? (
+                                    <div>
+                                      <span>{material.specification.substring(0, 100)}...</span>
+                                      <button
+                                        onClick={() => toggleSpec(idx)}
+                                        className="ml-1 text-purple-600 hover:text-purple-800 font-medium text-xs whitespace-nowrap"
+                                      >
+                                        See More
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <span>{material.specification}</span>
+                                      {material.specification.length > 100 && (
+                                        <button
+                                          onClick={() => toggleSpec(idx)}
+                                          className="ml-1 text-purple-600 hover:text-purple-800 font-medium text-xs whitespace-nowrap"
+                                        >
+                                          See Less
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
                             </td>
                             {/* Sub-Item - Clickable to view in BOQ */}
                             <td className="px-4 py-3 text-sm">
@@ -1227,7 +1402,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       })}
                       {shouldShowPricing && (
                         <tr className="bg-gray-100 border-t-2 border-gray-300">
-                          <td colSpan={hasNewMaterials ? 7 : 6} className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
+                          <td colSpan={hasNewMaterials ? 9 : 8} className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
                             Total Cost:
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">

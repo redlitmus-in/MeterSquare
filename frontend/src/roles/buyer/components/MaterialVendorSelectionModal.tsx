@@ -54,6 +54,7 @@ const SUBMISSION_ID_LENGTH = 9;
 interface SelectedVendorInfo {
   vendor_id: number;
   vendor_name: string;
+  vendor_material_name?: string; // Vendor's name for this material (from their catalog)
   send_individually: boolean; // Whether to send PO to this vendor separately
   negotiated_price?: number | null; // Custom price for this purchase
   save_price_for_future?: boolean; // Whether to update vendor's product price
@@ -610,22 +611,20 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const getVendorsForMaterialWithFallbackInfo = (materialName: string): { vendors: Vendor[], isFallback: boolean } => {
     const materialLower = materialName.toLowerCase().trim();
 
-    // First try to find vendors with matching products
+    // EXACT MATCH ONLY: Find vendors with products that exactly match the material name
     const matchedVendors = vendors.filter(vendor => {
       if (!vendor.vendor_id) return false;
       const products = vendorProducts.get(vendor.vendor_id) || [];
-      const vendorCategory = vendor.category?.toLowerCase().trim() || '';
 
       return products.some(product => {
         const productName = product.product_name?.toLowerCase().trim() || '';
-        const productCategory = product.category?.toLowerCase().trim() || '';
-        return isProductMatchingMaterial(productName, productCategory, vendorCategory, materialLower);
+        return productName === materialLower;  // EXACT MATCH ONLY
       });
     });
 
-    // If no matches found, return ALL vendors (fallback for manual selection)
+    // If no exact matches found, return empty array (no fallback - only exact matches allowed)
     const isFallback = matchedVendors.length === 0;
-    const vendorsToReturn = isFallback ? vendors.filter(v => v.vendor_id) : matchedVendors;
+    const vendorsToReturn = matchedVendors;  // Only exact matches, no fallback
 
     // Apply search filter
     const filteredVendors = vendorsToReturn.filter(vendor => {
@@ -638,40 +637,35 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   };
 
   // Get vendors with cost information for auto-selection
-  const getVendorsForMaterialWithCost = (materialName: string): (Vendor & { lowestPrice?: number })[] => {
+  const getVendorsForMaterialWithCost = (materialName: string): (Vendor & { lowestPrice?: number; exactProductName?: string })[] => {
     const materialLower = materialName.toLowerCase().trim();
 
     return vendors
       .filter(vendor => {
         if (!vendor.vendor_id) return false;
         const products = vendorProducts.get(vendor.vendor_id) || [];
-        const vendorCategory = vendor.category?.toLowerCase().trim() || '';
 
+        // EXACT MATCH ONLY: Check if vendor has product with exact name (case-insensitive)
         return products.some(product => {
           const productName = product.product_name?.toLowerCase().trim() || '';
-          const productCategory = product.category?.toLowerCase().trim() || '';
-          return isProductMatchingMaterial(productName, productCategory, vendorCategory, materialLower);
+          return productName === materialLower;
         });
       })
       .map(vendor => {
-        // Find lowest price among matching products
+        // Find exact matching product and get its price
         const products = vendorProducts.get(vendor.vendor_id!) || [];
-        const vendorCategory = vendor.category?.toLowerCase().trim() || '';
 
-        const matchingProducts = products.filter(product => {
+        const exactMatchProduct = products.find(product => {
           const productName = product.product_name?.toLowerCase().trim() || '';
-          const productCategory = product.category?.toLowerCase().trim() || '';
-          return isProductMatchingMaterial(productName, productCategory, vendorCategory, materialLower);
+          return productName === materialLower;
         });
 
-        const lowestPrice = matchingProducts.reduce((min, product) => {
-          const price = product.unit_price ?? Infinity;
-          return price < min ? price : min;
-        }, Infinity);
+        const lowestPrice = exactMatchProduct?.unit_price || undefined;
 
         return {
           ...vendor,
-          lowestPrice: lowestPrice === Infinity ? undefined : lowestPrice
+          lowestPrice: lowestPrice,
+          exactProductName: exactMatchProduct?.product_name // Store exact product name as vendor has it
         };
       });
   };
@@ -690,7 +684,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     ));
   };
 
-  const handleSelectVendorForMaterial = (materialName: string, vendorId: number, vendorName: string, vendorLowestPrice?: number) => {
+  const handleSelectVendorForMaterial = (materialName: string, vendorId: number, vendorName: string, vendorLowestPrice?: number, vendorMaterialName?: string) => {
     // TD mode with sub-POs: allow different vendors - backend will split the sub-PO if needed
     // No longer auto-selecting same vendor for all materials
 
@@ -706,6 +700,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           selected_vendors: [{
             vendor_id: vendorId,
             vendor_name: vendorName,
+            vendor_material_name: vendorMaterialName,
             send_individually: false,
             negotiated_price: vendorLowestPrice && vendorLowestPrice > 0 ? vendorLowestPrice : undefined
           }]
@@ -723,6 +718,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
             selected_vendors: [...m.selected_vendors, {
               vendor_id: vendorId,
               vendor_name: vendorName,
+              vendor_material_name: vendorMaterialName,
               send_individually: false,
               negotiated_price: vendorLowestPrice && vendorLowestPrice > 0 ? vendorLowestPrice : undefined
             }]
@@ -866,6 +862,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           all_selected_vendors: m.selected_vendors.map(v => ({
             vendor_id: v.vendor_id,
             vendor_name: v.vendor_name,
+            vendor_material_name: v.vendor_material_name,
             send_individually: v.send_individually,
             negotiated_price: v.negotiated_price,
             save_price_for_future: v.save_price_for_future
@@ -1090,6 +1087,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           all_selected_vendors: m.selected_vendors.map(v => ({
             vendor_id: v.vendor_id,
             vendor_name: v.vendor_name,
+            vendor_material_name: v.vendor_material_name,
             send_individually: v.send_individually,
             negotiated_price: v.negotiated_price,
             save_price_for_future: v.save_price_for_future
@@ -1652,7 +1650,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                   {matchingVendors.length === 0 ? (
                                     <div className="text-center py-8">
                                       <Store className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                                      <p className="text-gray-500 text-sm">No vendors found for this material</p>
+                                      <p className="text-gray-700 text-sm font-medium">No vendors with exact match found</p>
+                                      <p className="text-gray-500 text-xs mt-1">
+                                        Vendors must have a product with exact name: "{material.material_name}"
+                                      </p>
                                     </div>
                                   ) : (
                                     <>
@@ -1707,6 +1708,14 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                             : 0;
                                           const totalEstimate = lowestPrice > 0 ? lowestPrice * material.quantity : 0;
 
+                                          // Get vendor's EXACT product name (exact match only)
+                                          const materialNameLower = material.material_name.toLowerCase().trim();
+                                          const exactMatchProduct = vendorProductsList.find(p =>
+                                            p.product_name?.toLowerCase().trim() === materialNameLower
+                                          );
+                                          // Always use vendor's product name if there's an exact match
+                                          const vendorMaterialName = exactMatchProduct?.product_name;
+
                                           const isExpanded = expandedVendorRow?.materialName === material.material_name &&
                                             expandedVendorRow?.vendorId === vendor.vendor_id;
 
@@ -1725,15 +1734,20 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                     toast.error('This vendor is already sent for TD approval. You cannot assign more materials to it.');
                                                     return;
                                                   }
+                                                  // Select the vendor
                                                   handleSelectVendorForMaterial(
                                                     material.material_name,
                                                     vendor.vendor_id!,
                                                     vendor.company_name,
-                                                    lowestPrice > 0 ? lowestPrice : undefined
+                                                    lowestPrice > 0 ? lowestPrice : undefined,
+                                                    vendorMaterialName
                                                   );
+                                                  // Also expand vendor details when clicked
+                                                  setExpandedVendorRow({ materialName: material.material_name, vendorId: vendor.vendor_id! });
                                                 }}
                                                 onDoubleClick={(e) => {
                                                   e.stopPropagation();
+                                                  // Double-click toggles expansion
                                                   setExpandedVendorRow(isExpanded
                                                     ? null
                                                     : { materialName: material.material_name, vendorId: vendor.vendor_id! }
@@ -1799,6 +1813,13 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                                       </Badge>
                                                     )}
                                                   </div>
+                                                  {/* Show vendor's product name */}
+                                                  {vendorMaterialName && (
+                                                    <div className="text-xs font-semibold text-green-600 flex items-center gap-1" title={vendorMaterialName}>
+                                                      <CheckCircle className="w-3 h-3" />
+                                                      <span className="truncate">{vendorMaterialName}</span>
+                                                    </div>
+                                                  )}
                                                   {vendor.category && (
                                                     <div className="text-xs text-gray-500 truncate">{vendor.category}</div>
                                                   )}

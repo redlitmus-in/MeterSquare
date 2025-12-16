@@ -310,48 +310,7 @@ const BOQSubItemDetailModal: React.FC<BOQSubItemDetailModalProps> = ({
                     </div>
                   )}
 
-                  {/* Materials in this Sub-Item */}
-                  {matchedSubItem.materials && matchedSubItem.materials.length > 0 && (() => {
-                    // Filter materials if materialName is provided
-                    const filteredMaterials = materialName
-                      ? matchedSubItem.materials.filter(m => m.material_name === materialName)
-                      : matchedSubItem.materials;
-
-                    if (filteredMaterials.length === 0) return null;
-
-                    return (
-                    <div className="bg-slate-50 rounded-lg p-4 border border-slate-200 mb-4">
-                      <h5 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
-                        <Package className="w-4 h-4 text-slate-600" />
-                        Material Details {materialName && `- ${materialName}`}
-                      </h5>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm border border-slate-200">
-                          <thead>
-                            <tr className="bg-slate-100 text-slate-700 border-b border-slate-200">
-                              <th className="py-3 px-4 text-left font-semibold">Material</th>
-                              <th className="py-3 px-4 text-left font-semibold">Brand</th>
-                              <th className="py-3 px-4 text-left font-semibold">Size/Spec</th>
-                              <th className="py-3 px-4 text-center font-semibold">Quantity</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-200 bg-white">
-                            {filteredMaterials.map((material, idx) => (
-                              <tr key={idx} className="hover:bg-slate-50">
-                                <td className="py-3 px-4 font-medium text-slate-900">{material.material_name}</td>
-                                <td className="py-3 px-4 text-slate-700">{material.brand || '-'}</td>
-                                <td className="py-3 px-4 text-slate-700">{material.size || material.specification || '-'}</td>
-                                <td className="py-3 px-4 text-center text-slate-700">
-                                  {material.quantity || 0} {material.unit || ''}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                    );
-                  })()}
+                  {/* Material Details Section - Hidden as materials are already shown in the main table */}
                 </div>
 
                 {/* Footer info */}

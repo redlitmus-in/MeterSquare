@@ -3150,6 +3150,15 @@ def select_vendor_for_material(cr_id):
             negotiated_price = selection.get('negotiated_price')
             save_price_for_future = selection.get('save_price_for_future', False)
 
+            # Get vendor's material name from their catalog/product list
+            vendor_material_name = None
+            all_selected_vendors = selection.get('all_selected_vendors', [])
+            if all_selected_vendors:
+                for vendor_info in all_selected_vendors:
+                    if vendor_info.get('vendor_id') == vendor_id:
+                        vendor_material_name = vendor_info.get('vendor_material_name')
+                        break
+
             if not material_name or not vendor_id:
                 continue
 
@@ -3206,10 +3215,11 @@ def select_vendor_for_material(cr_id):
                 approved_by_td_name = None
                 approval_date = None
 
-            # Store vendor selection for this material (including negotiated price)
+            # Store vendor selection for this material (including negotiated price and vendor's material name)
             vendor_selection_data = {
                 'vendor_id': vendor_id,
                 'vendor_name': vendor.company_name,
+                'vendor_material_name': vendor_material_name,
                 'vendor_email': vendor.email,
                 'vendor_phone': vendor.phone,
                 'vendor_phone_code': vendor.phone_code,
@@ -8004,13 +8014,20 @@ def preview_lpo_pdf(cr_id):
             material_name = material.get('material_name', '') or material.get('sub_item_name', '')
             brand = material.get('brand', '')
             specification = material.get('specification', '')
-            
+
+            # Get vendor's material name from material_vendor_selections if available
+            vendor_material_name = material_name  # Default to BOQ name
+            if cr and cr.material_vendor_selections:
+                vendor_selection = cr.material_vendor_selections.get(material_name, {})
+                if isinstance(vendor_selection, dict) and vendor_selection.get('vendor_material_name'):
+                    vendor_material_name = vendor_selection['vendor_material_name']
+
             items.append({
                 "sl_no": i,
-                "material_name": material_name,
+                "material_name": vendor_material_name,  # Use vendor's material name
                 "brand": brand,
                 "specification": specification,
-                "description": material_name,  # Keep for backward compatibility
+                "description": vendor_material_name,  # Use vendor's material name for LPO
                 "qty": qty,
                 "unit": material.get('unit', 'Nos'),
                 "rate": round(rate, 2),
