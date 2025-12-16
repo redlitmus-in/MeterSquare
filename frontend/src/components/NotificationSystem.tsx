@@ -385,6 +385,58 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
           return;
         }
 
+        // SPECIAL CASE: TD receiving vendor approval notifications
+        // Old notifications may have /vendor-approval URL, should go to /change-requests
+        const isTD = userRole && (
+          userRole.toString().toLowerCase().includes('technical') ||
+          userRole.toString().toLowerCase().includes('director') ||
+          userRole === '2' || userRole === 2
+        );
+
+        const isOldVendorApprovalUrl = backendActionUrl.includes('/vendor-approval');
+
+        if (isTD && isOldVendorApprovalUrl) {
+          // Redirect TD to their change-requests page instead
+          const redirectPath = buildRolePath(userRole, '/change-requests');
+          const queryParams = new URLSearchParams();
+
+          // Extract cr_id from the original URL or metadata
+          if (notification.metadata?.cr_id) {
+            queryParams.set('cr_id', String(notification.metadata.cr_id));
+          } else {
+            // Try to extract from URL query params
+            try {
+              const urlObj = new URL(backendActionUrl, window.location.origin);
+              const crId = urlObj.searchParams.get('cr_id');
+              if (crId) {
+                queryParams.set('cr_id', crId);
+              }
+            } catch {
+              // Invalid URL, ignore
+            }
+          }
+
+          const fullPath = queryParams.toString()
+            ? `${redirectPath}?${queryParams.toString()}`
+            : redirectPath;
+
+          if (onNavigate) {
+            onNavigate(fullPath);
+          } else {
+            navigate(fullPath, {
+              replace: false,
+              state: {
+                from: location.pathname,
+                notification: notification.id,
+                autoFocus: true
+              }
+            });
+          }
+          setShowPanel(false);
+          markAsRead(notification.id);
+          return;
+        }
+
         // Normal backend URL handling
         const knownRolePrefixes = [
           '/technical-director', '/estimator', '/project-manager',
