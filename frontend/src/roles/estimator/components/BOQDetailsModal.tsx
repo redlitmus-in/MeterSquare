@@ -1801,7 +1801,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                         </div>
                                       </div>
                                       <div className="flex justify-between items-center pt-3 border-t-2 border-blue-300">
-                                        <span className="text-gray-900 font-bold">Total Margin:</span>
+                                        <span className="text-gray-900 font-bold">Negotiable Margin:</span>
                                         <div className="text-right">
                                           <div className={`text-xl font-bold ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                             {formatCurrency(projectMargin)}
@@ -1826,7 +1826,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                         <span className="text-base font-semibold text-blue-600">{formatCurrency(totalPlannedProfit)}</span>
                                       </div>
                                       <div className="flex justify-between items-center">
-                                        <span className="text-gray-700 font-medium">Total Margin:</span>
+                                        <span className="text-gray-700 font-medium">Negotiable Margin:</span>
                                         <span className={`text-xl font-bold ${totalActualProfit >= totalPlannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
                                           {formatCurrency(totalActualProfit)}
                                         </span>
@@ -1976,7 +1976,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             </span>
                                           </div>
                                           <div className="flex justify-between items-center pt-2 border-t border-gray-300">
-                                            <span className="text-gray-700 font-medium">Total Margin:</span>
+                                            <span className="text-gray-700 font-medium">Negotiable Margin:</span>
                                             <div className="flex items-center gap-2">
                                               <span className="text-gray-500 line-through">
                                                 {formatCurrency(totalActualProfit)}
