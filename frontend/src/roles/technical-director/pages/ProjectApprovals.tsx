@@ -5294,20 +5294,177 @@ const ProjectApprovals: React.FC = () => {
                     })}
                   </div>
 
+                  {/* Cost Analysis Summary - BOQ Items + Preliminaries */}
+                  <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-lg p-4 border-2 border-amber-300 mb-4">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="p-2 bg-gradient-to-br from-amber-100 to-amber-200 rounded-lg">
+                        <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                      <h3 className="text-lg font-bold text-amber-900">Cost Analysis Summary</h3>
+                    </div>
+
+                    {(() => {
+                      const materialCost = selectedEstimation.materialCost || 0;
+                      const labourCost = selectedEstimation.laborCost || 0;
+
+                      // Calculate BOQ Items totals
+                      let boqItemsClientCost = 0;
+                      let boqItemsPlannedProfit = 0;
+                      let boqItemsNegotiableMargin = 0;
+                      let boqItemsMiscCost = 0;
+                      let boqItemsTransportCost = 0;
+
+                      (selectedEstimation.boqItems || []).forEach((item: any) => {
+                        if (item.sub_items && item.sub_items.length > 0) {
+                          item.sub_items.forEach((si: any) => {
+                            const clientAmt = (si.quantity || 0) * (si.rate || 0);
+                            const matCost = (si.materials || []).reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price || 0), 0);
+                            const labCost = (si.labour || []).reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour || 0), 0);
+                            const miscAmt = clientAmt * ((si.misc_percentage || 10) / 100);
+                            const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
+                            const opAmt = clientAmt * ((si.overhead_profit_percentage || 25) / 100);
+                            const internalCost = matCost + labCost + miscAmt + opAmt + transportAmt;
+
+                            boqItemsClientCost += clientAmt;
+                            boqItemsPlannedProfit += opAmt;
+                            boqItemsMiscCost += miscAmt;
+                            boqItemsTransportCost += transportAmt;
+                            boqItemsNegotiableMargin += (clientAmt - internalCost);
+                          });
+                        }
+                      });
+
+                      const boqItemsInternalCost = materialCost + labourCost + boqItemsMiscCost + boqItemsPlannedProfit + boqItemsTransportCost;
+
+                      // Calculate Preliminaries totals
+                      const preliminaryAmount = (selectedEstimation as any).preliminaries?.cost_details?.amount || 0;
+                      let preliminaryInternalCost = 0;
+                      let preliminaryPlannedProfit = 0;
+                      let preliminaryNegotiableMargin = 0;
+
+                      if (preliminaryAmount > 0) {
+                        // Get percentages from preliminaries cost details or use defaults
+                        const miscPct = (selectedEstimation as any).preliminaries?.cost_details?.misc_percentage || 10;
+                        const overheadPct = (selectedEstimation as any).preliminaries?.cost_details?.overhead_profit_percentage || 25;
+                        const transportPct = (selectedEstimation as any).preliminaries?.cost_details?.transport_percentage || 5;
+
+                        const miscAmount = (preliminaryAmount * miscPct) / 100;
+                        const overheadAmount = (preliminaryAmount * overheadPct) / 100;
+                        const transportAmount = (preliminaryAmount * transportPct) / 100;
+
+                        preliminaryInternalCost = miscAmount + overheadAmount + transportAmount;
+                        preliminaryPlannedProfit = overheadAmount;
+                        preliminaryNegotiableMargin = preliminaryAmount - preliminaryInternalCost;
+                      }
+
+                      // Combined totals
+                      const combinedClientCost = boqItemsClientCost + preliminaryAmount;
+                      const combinedInternalCost = boqItemsInternalCost + preliminaryInternalCost;
+                      const combinedPlannedProfit = boqItemsPlannedProfit + preliminaryPlannedProfit;
+                      const combinedNegotiableMargin = boqItemsNegotiableMargin + preliminaryNegotiableMargin;
+
+                      return (
+                        <>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* BOQ Items */}
+                            {boqItemsClientCost > 0 && (
+                              <div className="bg-white rounded-lg p-3 border border-amber-200">
+                                <h4 className="text-xs font-bold text-gray-800 mb-2 pb-2 border-b">BOQ Items</h4>
+                                <div className="space-y-1.5 text-xs">
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">Client Cost:</span>
+                                    <span className="font-semibold text-blue-700">{formatCurrency(boqItemsClientCost)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">Internal Cost:</span>
+                                    <span className="font-semibold text-red-600">{formatCurrency(boqItemsInternalCost)}</span>
+                                  </div>
+                                  <div className="flex justify-between pt-1.5 border-t">
+                                    <span className="text-gray-600">Planned Profit:</span>
+                                    <span className="font-semibold text-indigo-600">{formatCurrency(boqItemsPlannedProfit)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">Total Margin:</span>
+                                    <span className={`font-semibold ${boqItemsNegotiableMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                      {formatCurrency(boqItemsNegotiableMargin)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Preliminaries & Approvals */}
+                            {preliminaryAmount > 0 && (
+                              <div className="bg-white rounded-lg p-3 border border-purple-200">
+                                <h4 className="text-xs font-bold text-gray-800 mb-2 pb-2 border-b">Preliminaries & Approvals</h4>
+                                <div className="space-y-1.5 text-xs">
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">Client Amount:</span>
+                                    <span className="font-semibold text-blue-700">{formatCurrency(preliminaryAmount)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">Internal Cost:</span>
+                                    <span className="font-semibold text-red-600">{formatCurrency(preliminaryInternalCost)}</span>
+                                  </div>
+                                  <div className="flex justify-between pt-1.5 border-t">
+                                    <span className="text-gray-600">Planned Profit:</span>
+                                    <span className="font-semibold text-indigo-600">{formatCurrency(preliminaryPlannedProfit)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">Total Margin:</span>
+                                    <span className={`font-semibold ${preliminaryNegotiableMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                      {formatCurrency(preliminaryNegotiableMargin)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Combined Totals */}
+                          <div className="mt-4 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-3 border-2 border-green-300">
+                            <h4 className="text-sm font-bold text-gray-900 mb-3">Combined Totals (BOQ + Preliminaries)</h4>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                              <div className="text-center">
+                                <div className="text-gray-600 mb-1">Total Client</div>
+                                <div className="font-bold text-blue-700 text-base">{formatCurrency(combinedClientCost)}</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-gray-600 mb-1">Total Internal</div>
+                                <div className="font-bold text-red-600 text-base">{formatCurrency(combinedInternalCost)}</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-gray-600 mb-1">Planned Profit</div>
+                                <div className="font-bold text-indigo-600 text-base">{formatCurrency(combinedPlannedProfit)}</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-gray-600 mb-1">Total Margin</div>
+                                <div className={`font-bold text-base ${combinedNegotiableMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                  {formatCurrency(combinedNegotiableMargin)}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+
                   {/* Cost Summary - Internal (NEW FORMAT - Option C) */}
                   <div className="bg-white rounded-lg shadow-sm border border-orange-300 border-2 p-4 mb-4">
                     <h3 className="font-bold text-gray-900 mb-3">Overall Cost Summary</h3>
                     <div className="space-y-3">
                       {(() => {
-                        const materialCost = selectedEstimation.materialCost || 0;
-                        const labourCost = selectedEstimation.laborCost || 0;
-
-                        // Calculate totals from all sub-items
+                        // Calculate totals from all sub-items (including materials and labour)
                         let totalClientAmount = 0;
                         let totalPlannedProfit = 0;
-                        let totalActualProfit = 0;
+                        let totalNegotiableMargin = 0;
                         let totalMiscCost = 0;
                         let totalTransportCost = 0;
+                        let materialCost = 0;
+                        let labourCost = 0;
 
                         (selectedEstimation.boqItems || []).forEach((item: any) => {
                           if (item.sub_items && item.sub_items.length > 0) {
@@ -5325,37 +5482,42 @@ const ProjectApprovals: React.FC = () => {
                               totalPlannedProfit += opAmt;
                               totalMiscCost += miscAmt;
                               totalTransportCost += transportAmt;
-                              // CORRECTED: Actual Profit = Client Amount - Internal Cost Total
-                              totalActualProfit += (clientAmt - internalCost);
+                              materialCost += matCost;
+                              labourCost += labCost;
+                              // CORRECTED: Negotiable Margin = Client Amount - Internal Cost Total
+                              totalNegotiableMargin += (clientAmt - internalCost);
                             });
                           }
                         });
 
-                        // Add Preliminaries amount to totalClientAmount (to match client version)
+                        // Store preliminary amount separately (DON'T add to totalClientAmount for BOQ Financials)
                         const preliminaryAmount = (selectedEstimation as any).preliminaries?.cost_details?.amount || 0;
-                        totalClientAmount += preliminaryAmount;
+                        // totalClientAmount now represents ONLY BOQ items (not including preliminaries)
+
+                        // Calculate combined subtotal (items + preliminaries)
+                        const combinedSubtotal = totalClientAmount + preliminaryAmount;
 
                         // BOQ-level discount (overall discount applied to entire BOQ)
                         const overallDiscountAmount = (selectedEstimation as any).discount_amount || 0;
                         const overallDiscountPct = selectedEstimation.discountPercentage || 0;
 
-                        // Calculate discount amount from percentage if amount is not provided
+                        // Calculate discount amount from percentage if amount is not provided (apply to combined subtotal)
                         let totalDiscount = overallDiscountAmount;
-                        if (totalDiscount === 0 && overallDiscountPct > 0 && totalClientAmount > 0) {
-                          totalDiscount = totalClientAmount * (overallDiscountPct / 100);
+                        if (totalDiscount === 0 && overallDiscountPct > 0 && combinedSubtotal > 0) {
+                          totalDiscount = combinedSubtotal * (overallDiscountPct / 100);
                         }
 
                         const totalInternalCost = materialCost + labourCost + totalMiscCost + totalPlannedProfit + totalTransportCost;
                         const projectMargin = totalClientAmount - totalInternalCost;
                         const marginPercentage = totalClientAmount > 0 ? ((projectMargin / totalClientAmount) * 100) : 0;
-                        const profitVariance = totalActualProfit - totalPlannedProfit;
+                        const profitVariance = totalNegotiableMargin - totalPlannedProfit;
                         const profitVariancePercentage = totalPlannedProfit > 0 ? ((profitVariance / totalPlannedProfit) * 100) : 0;
-                        const discountPercentage = totalClientAmount > 0 ? ((totalDiscount / totalClientAmount) * 100) : overallDiscountPct;
-                        const grandTotalAfterDiscount = totalClientAmount - totalDiscount;
+                        const discountPercentage = combinedSubtotal > 0 ? ((totalDiscount / combinedSubtotal) * 100) : overallDiscountPct;
+                        const grandTotalAfterDiscount = combinedSubtotal - totalDiscount;
 
                         // Calculate profit after discount
                         const actualProfitAfterDiscount = grandTotalAfterDiscount - totalInternalCost;
-                        const profitMarginPercentage = totalClientAmount > 0 ? (totalActualProfit / totalClientAmount) * 100 : 0;
+                        const profitMarginPercentage = totalClientAmount > 0 ? (totalNegotiableMargin / totalClientAmount) * 100 : 0;
                         const profitMarginAfterDiscount = grandTotalAfterDiscount > 0 ? (actualProfitAfterDiscount / grandTotalAfterDiscount) * 100 : 0;
 
                         return (
@@ -5415,9 +5577,9 @@ const ProjectApprovals: React.FC = () => {
                                   <span className="font-semibold text-blue-600">{formatCurrency(totalPlannedProfit)}</span>
                                 </div>
                                 <div className="flex justify-between">
-                                  <span className="text-gray-700">Actual Profit:</span>
-                                  <span className={`font-bold ${totalActualProfit >= totalPlannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
-                                    {formatCurrency(totalActualProfit)}
+                                  <span className="text-gray-700">Negotiable Margin:</span>
+                                  <span className={`font-bold ${totalNegotiableMargin >= totalPlannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                    {formatCurrency(totalNegotiableMargin)}
                                   </span>
                                 </div>
                                 {/* Variance Section - Commented out as per user request */}
@@ -5437,16 +5599,31 @@ const ProjectApprovals: React.FC = () => {
                             <div className="bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-3 border-2 border-green-300">
                               <div className="space-y-2">
                                 <div className="flex justify-between text-sm font-medium">
-                                  <span className="text-gray-800">Subtotal:</span>
+                                  <span className="text-gray-800">Items Subtotal:</span>
                                   <span className="font-semibold">{formatCurrency(totalClientAmount)}</span>
                                 </div>
+
+                                {/* Show preliminary amount if it exists */}
+                                {preliminaryAmount > 0 && (
+                                  <>
+                                    <div className="flex justify-between text-sm font-medium">
+                                      <span className="text-gray-800">Preliminary Amount:</span>
+                                      <span className="font-semibold">{formatCurrency(preliminaryAmount)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm font-bold pt-2 border-t border-green-200">
+                                      <span className="text-gray-900">Combined Subtotal:</span>
+                                      <span className="text-gray-900">{formatCurrency(combinedSubtotal)}</span>
+                                    </div>
+                                  </>
+                                )}
+
                                 {totalDiscount > 0 && (
                                   <div className="flex justify-between text-xs text-red-600">
                                     <span>Discount ({discountPercentage.toFixed(1)}%):</span>
                                     <span className="font-semibold">- {formatCurrency(totalDiscount)}</span>
                                   </div>
                                 )}
-                                <div className="flex justify-between text-base font-bold pt-2 border-t border-green-400">
+                                <div className="flex justify-between text-base font-bold pt-2 border-t-2 border-green-400">
                                   <span className="text-green-900">
                                     Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
                                   </span>
@@ -5465,7 +5642,7 @@ const ProjectApprovals: React.FC = () => {
                                         <span className="text-gray-600">Client Cost:</span>
                                         <div className="flex items-center gap-2">
                                           <span className="text-gray-500 line-through">
-                                            {formatCurrency(totalClientAmount)}
+                                            {formatCurrency(combinedSubtotal)}
                                           </span>
                                           <span className="text-blue-700 font-bold">
                                             → {formatCurrency(grandTotalAfterDiscount)}
@@ -5479,10 +5656,10 @@ const ProjectApprovals: React.FC = () => {
                                         </span>
                                       </div>
                                       <div className="flex justify-between items-center pt-2 border-t border-gray-300">
-                                        <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                        <span className="text-gray-700 font-medium">Negotiable Margin:</span>
                                         <div className="flex items-center gap-2">
                                           <span className="text-gray-500 line-through">
-                                            {formatCurrency(totalActualProfit)}
+                                            {formatCurrency(totalNegotiableMargin)}
                                           </span>
                                           <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
                                             → {formatCurrency(actualProfitAfterDiscount)}
