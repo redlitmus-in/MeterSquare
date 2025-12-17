@@ -177,6 +177,14 @@ class ChangeRequest(db.Model):
     project = db.relationship("Project", backref=db.backref("change_requests", lazy=True))
     vendor = db.relationship("Vendor", backref=db.backref("change_requests", lazy=True))
 
+    # ✅ PERFORMANCE: Add relationship for eager loading internal material requests
+    store_requests = db.relationship(
+        "InternalMaterialRequest",
+        primaryjoin="ChangeRequest.cr_id == foreign(InternalMaterialRequest.cr_id)",
+        backref=db.backref("change_request", lazy=True),
+        lazy=True
+    )
+
     # Self-referential relationship for parent-child CRs (DEPRECATED - use po_children instead)
     parent_cr_ref = db.relationship("ChangeRequest", remote_side=[cr_id], backref="sub_crs", foreign_keys=[parent_cr_id])
     # NOTE: po_children relationship is defined in POChild model with backref

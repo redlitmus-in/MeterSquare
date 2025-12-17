@@ -386,6 +386,15 @@ export interface PurchaseListResponse {
   // TD rejected PO children (can re-select vendor)
   td_rejected_po_children?: TDRejectedPOChild[];
   td_rejected_count?: number;
+  // ✅ PERFORMANCE: Pagination metadata
+  pagination?: {
+    page: number;
+    per_page: number;
+    total: number;
+    pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  };
 }
 
 export interface CompletePurchaseRequest {
@@ -410,10 +419,14 @@ class BuyerService {
   }
 
   // Get pending purchases (assigned to buyer)
-  async getPendingPurchases(): Promise<PurchaseListResponse> {
+  // ✅ PERFORMANCE: Added pagination parameters
+  async getPendingPurchases(page: number = 1, perPage: number = 50): Promise<PurchaseListResponse> {
     try {
       const response = await apiClient.get<PurchaseListResponse>(
-        `/buyer/new-purchases`
+        `/buyer/new-purchases`,
+        {
+          params: { page, per_page: perPage }
+        }
       );
 
       if (response.data.success) {
@@ -430,10 +443,14 @@ class BuyerService {
   }
 
   // Get completed purchases
-  async getCompletedPurchases(): Promise<PurchaseListResponse> {
+  // ✅ PERFORMANCE: Added pagination parameters
+  async getCompletedPurchases(page: number = 1, perPage: number = 50): Promise<PurchaseListResponse> {
     try {
       const response = await apiClient.get<PurchaseListResponse>(
-        `/buyer/completed-purchases`
+        `/buyer/completed-purchases`,
+        {
+          params: { page, per_page: perPage }
+        }
       );
 
       if (response.data.success) {
@@ -449,10 +466,15 @@ class BuyerService {
     }
   }
 
-  async getRejectedPurchases(): Promise<PurchaseListResponse> {
+  // Get rejected purchases
+  // ✅ PERFORMANCE: Added pagination parameters
+  async getRejectedPurchases(page: number = 1, perPage: number = 50): Promise<PurchaseListResponse> {
     try {
       const response = await apiClient.get<PurchaseListResponse>(
-        `/buyer/rejected-purchases`
+        `/buyer/rejected-purchases`,
+        {
+          params: { page, per_page: perPage }
+        }
       );
 
       if (response.data.success) {

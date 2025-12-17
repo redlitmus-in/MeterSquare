@@ -1829,6 +1829,10 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
             subItemName={selectedSubItemForBOQ}
             materialName={selectedMaterialForBOQ || undefined}
             boqName={changeRequest.boq_name || `BOQ #${changeRequest.boq_id}`}
+            projectId={changeRequest.project_id}
+            projectName={changeRequest.project_name}
+            boqStatus={changeRequest.boq_status}
+            pmAssigned={changeRequest.pm_assigned}
           />
         )}
 

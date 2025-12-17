@@ -295,6 +295,9 @@ const ProjectApprovals: React.FC = () => {
   // State to trigger BOQ detail refresh after approval/rejection actions
   const [boqDetailsRefreshTrigger, setBoqDetailsRefreshTrigger] = useState(0);
 
+  // Ref to track if we've attempted auto-open (to prevent multiple attempts)
+  const autoOpenAttemptedRef = useRef<boolean>(false);
+
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
 
@@ -371,6 +374,83 @@ const ProjectApprovals: React.FC = () => {
       loadRevisionProjects(selectedRevisionNumber);
     }
   }, [selectedRevisionNumber]);
+
+  // Auto-open project details when navigating from external link with projectId and viewDetails
+  useEffect(() => {
+    const projectIdParam = searchParams.get('projectId');
+    const viewDetailsParam = searchParams.get('viewDetails');
+
+    // Only attempt auto-open once and when BOQs are loaded
+    if (projectIdParam && viewDetailsParam === 'true' && boqs.length > 0 && !autoOpenAttemptedRef.current) {
+      const projectId = parseInt(projectIdParam, 10);
+
+      // Mark as attempted to prevent multiple executions
+      autoOpenAttemptedRef.current = true;
+
+      // Find the BOQ with matching projectId from all loaded BOQs
+      // Try multiple property names
+      const matchingBoq = boqs.find((boq: EstimationItem) =>
+        boq.projectId === projectId ||
+        (boq as any).project_id === projectId
+      );
+
+      if (matchingBoq) {
+        // Extract correct property names (backend uses snake_case, frontend expects camelCase)
+        const boqId = (matchingBoq as any).boq_id || matchingBoq.id;
+        const pmAssigned = (matchingBoq as any).pm_assigned ?? matchingBoq.pmAssigned;
+
+        // Determine which tab this BOQ belongs to - MUST MATCH the exact filtering logic in tabCounts
+        // Note: The URL should already have the tab parameter set by the navigation source,
+        // but we set it here as a fallback to ensure correct tab selection
+        let targetTab: 'pending' | 'revisions' | 'approved' | 'sent' | 'assigned' | 'rejected' = 'pending';
+
+        // Check in order - EXACT same logic as tabCounts filtering
+        if (pmAssigned === true && matchingBoq.status !== 'rejected' && matchingBoq.status !== 'completed' && matchingBoq.status !== 'cancelled') {
+          // Assigned tab: pmAssigned === true (except rejected/completed/cancelled)
+          targetTab = 'assigned';
+        } else if (matchingBoq.status === 'rejected') {
+          // Rejected tab
+          targetTab = 'rejected';
+        } else if ((matchingBoq.status === 'client_confirmed' || matchingBoq.status === 'client_rejected') && !pmAssigned) {
+          // Sent tab: (client_confirmed OR client_rejected) AND NOT assigned
+          targetTab = 'sent';
+        } else if ((matchingBoq.status === 'approved' || matchingBoq.status === 'revision_approved' || matchingBoq.status === 'sent_for_confirmation') && !pmAssigned) {
+          // Approved tab: (approved OR revision_approved OR sent_for_confirmation) AND NOT assigned
+          targetTab = 'approved';
+        } else if ((matchingBoq as any).revision_number != null && (matchingBoq as any).revision_number !== 0) {
+          // Revisions tab: has revision number
+          targetTab = 'revisions';
+        } else if (matchingBoq.status === 'pending' && !pmAssigned) {
+          // Pending tab: status === 'pending' AND NOT assigned
+          targetTab = 'pending';
+        }
+
+        // Switch to the correct tab first (fallback - URL sync should handle this)
+        setFilterStatus(targetTab);
+
+        // Load BOQ details and open full screen view
+        setTimeout(() => {
+          loadBOQDetails(boqId, matchingBoq).then(() => {
+            setFullScreenBoqMode('view');
+            setShowFullScreenBOQ(true);
+
+            // Clear the query params from URL after successful open
+            const newSearchParams = new URLSearchParams(searchParams);
+            newSearchParams.delete('projectId');
+            newSearchParams.delete('viewDetails');
+            window.history.replaceState({}, '', `${window.location.pathname}${newSearchParams.toString() ? '?' + newSearchParams.toString() : ''}`);
+          }).catch((err) => {
+            console.error('[ProjectApprovals] Error loading BOQ details:', err);
+            // Reset the flag on error so user can try again
+            autoOpenAttemptedRef.current = false;
+          });
+        }, 100); // Small delay to ensure tab switch completes
+      } else {
+        // Reset the flag so user can try again
+        autoOpenAttemptedRef.current = false;
+      }
+    }
+  }, [boqs, searchParams]);
 
   const loadBOQs = async (showLoadingSpinner = true) => {
     if (showLoadingSpinner) {

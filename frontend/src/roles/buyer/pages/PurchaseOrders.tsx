@@ -67,12 +67,19 @@ const PurchaseOrders: React.FC = () => {
   const [isEditPricesModalOpen, setIsEditPricesModalOpen] = useState(false);
   const [selectedPurchaseForPriceEdit, setSelectedPurchaseForPriceEdit] = useState<Purchase | null>(null);
 
+  // ✅ PERFORMANCE: Add pagination state
+  const [pendingPage, setPendingPage] = useState(1);
+  const [completedPage, setCompletedPage] = useState(1);
+  const [rejectedPage, setRejectedPage] = useState(1);
+  const perPage = 50; // Items per page
+
   // ✅ OPTIMIZED: Fetch pending purchases - Real-time updates via Supabase (NO POLLING)
   // BEFORE: Polling every 2 seconds = 30 requests/minute per user
   // AFTER: Real-time subscriptions only = ~1-2 requests/minute per user (97% reduction)
+  // ✅ PERFORMANCE: Now with pagination support
   const { data: pendingData, isLoading: isPendingLoading, refetch: refetchPending } = useAutoSync<PurchaseListResponse>({
-    queryKey: ['buyer-pending-purchases'],
-    fetchFn: () => buyerService.getPendingPurchases(),
+    queryKey: ['buyer-pending-purchases', pendingPage],
+    fetchFn: () => buyerService.getPendingPurchases(pendingPage, perPage),
     realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL], // ✅ Real-time subscriptions from constants
     staleTime: STALE_TIMES.STANDARD, // ✅ 30 seconds from constants
     // ❌ REMOVED: refetchInterval - No more polling!
@@ -80,18 +87,20 @@ const PurchaseOrders: React.FC = () => {
 
   // ✅ OPTIMIZED: Fetch completed purchases - Real-time updates via Supabase (NO POLLING)
   // Completed purchases are less time-sensitive, so use longer cache time
+  // ✅ PERFORMANCE: Now with pagination support
   const { data: completedData, isLoading: isCompletedLoading, refetch: refetchCompleted } = useAutoSync<PurchaseListResponse>({
-    queryKey: ['buyer-completed-purchases'],
-    fetchFn: () => buyerService.getCompletedPurchases(),
+    queryKey: ['buyer-completed-purchases', completedPage],
+    fetchFn: () => buyerService.getCompletedPurchases(completedPage, perPage),
     realtimeTables: [...REALTIME_TABLES.PURCHASES], // ✅ Real-time subscriptions from constants
     staleTime: STALE_TIMES.DASHBOARD, // ✅ 60 seconds from constants (completed data is less time-sensitive)
     // ❌ REMOVED: refetchInterval - No more polling!
   });
 
   // ✅ OPTIMIZED: Fetch rejected purchases - Real-time updates via Supabase
+  // ✅ PERFORMANCE: Now with pagination support
   const { data: rejectedData, isLoading: isRejectedLoading, refetch: refetchRejected } = useAutoSync<PurchaseListResponse>({
-    queryKey: ['buyer-rejected-purchases'],
-    fetchFn: () => buyerService.getRejectedPurchases(),
+    queryKey: ['buyer-rejected-purchases', rejectedPage],
+    fetchFn: () => buyerService.getRejectedPurchases(rejectedPage, perPage),
     realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL], // ✅ Real-time subscriptions from constants
     staleTime: STALE_TIMES.DASHBOARD, // ✅ 60 seconds from constants
   });
@@ -2533,6 +2542,101 @@ const PurchaseOrders: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* ✅ PERFORMANCE: Pagination Controls */}
+          {(() => {
+            // Get the current pagination data based on active tab
+            let currentPagination = null;
+            let currentPage = 1;
+            let setCurrentPage = setPendingPage;
+
+            if (activeTab === 'ongoing' || activeTab === 'pending_approval') {
+              currentPagination = pendingData?.pagination;
+              currentPage = pendingPage;
+              setCurrentPage = setPendingPage;
+            } else if (activeTab === 'completed') {
+              currentPagination = completedData?.pagination;
+              currentPage = completedPage;
+              setCurrentPage = setCompletedPage;
+            } else if (activeTab === 'rejected') {
+              currentPagination = rejectedData?.pagination;
+              currentPage = rejectedPage;
+              setCurrentPage = setRejectedPage;
+            }
+
+            // Only show pagination if we have pagination data
+            if (!currentPagination || currentPagination.pages <= 1) return null;
+
+            const { total, pages, has_next, has_prev } = currentPagination;
+            const start = (currentPage - 1) * perPage + 1;
+            const end = Math.min(currentPage * perPage, total);
+
+            return (
+              <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 sm:px-6">
+                {/* Results info */}
+                <div className="flex-1 flex justify-between sm:hidden">
+                  <Button
+                    onClick={() => setCurrentPage(currentPage - 1)}
+                    disabled={!has_prev}
+                    variant="outline"
+                    size="sm"
+                    className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    onClick={() => setCurrentPage(currentPage + 1)}
+                    disabled={!has_next}
+                    variant="outline"
+                    size="sm"
+                    className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </Button>
+                </div>
+                <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm text-gray-700">
+                      Showing <span className="font-medium">{start}</span> to{' '}
+                      <span className="font-medium">{end}</span> of{' '}
+                      <span className="font-medium">{total}</span> results
+                    </p>
+                  </div>
+                  <div>
+                    <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                      <Button
+                        onClick={() => setCurrentPage(currentPage - 1)}
+                        disabled={!has_prev}
+                        variant="outline"
+                        size="sm"
+                        className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <span className="sr-only">Previous</span>
+                        <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                          <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                      </Button>
+                      <span className="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">
+                        Page {currentPage} of {pages}
+                      </span>
+                      <Button
+                        onClick={() => setCurrentPage(currentPage + 1)}
+                        disabled={!has_next}
+                        variant="outline"
+                        size="sm"
+                        className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <span className="sr-only">Next</span>
+                        <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                          <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                        </svg>
+                      </Button>
+                    </nav>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
 

@@ -847,6 +847,14 @@ def get_buyer_dashboard():
             for p in projects:
                 all_projects[p.project_id] = p
 
+        # PERFORMANCE: Batch load all Vendors (was: 1 query per CR with vendor, now: 1 query total)
+        vendor_ids = list(set([cr.selected_vendor_id for cr in change_requests if cr.selected_vendor_id]))
+        all_vendors = {}
+        if vendor_ids:
+            vendors = Vendor.query.filter(Vendor.vendor_id.in_(vendor_ids), Vendor.is_deleted == False).all()
+            for v in vendors:
+                all_vendors[v.vendor_id] = v
+
         for cr in change_requests:
             # Get BOQ and project info from pre-loaded data (NO QUERY)
             boq = all_boqs.get(cr.boq_id)  # ✅ Uses pre-loaded dict instead of query
@@ -950,9 +958,9 @@ def get_buyer_dashboard():
                 "vendor_name": None
             }
 
-            # Get vendor info if available
+            # PERFORMANCE: Get vendor info from pre-loaded dict (NO QUERY)
             if cr.selected_vendor_id:
-                vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id).first()
+                vendor = all_vendors.get(cr.selected_vendor_id)
                 if vendor:
                     purchase_info['vendor_name'] = vendor.company_name
 
@@ -964,15 +972,19 @@ def get_buyer_dashboard():
             if len(recent_purchases) < 10:
                 recent_purchases.append(purchase_info)
 
-        # Also count POChild records (split vendor orders like PO-400.1, PO-400.2)
-        po_children = POChild.query.filter(
+        # PERFORMANCE: Also count POChild records (split vendor orders like PO-400.1, PO-400.2)
+        # Use eager loading to prevent N+1 queries
+        from sqlalchemy.orm import joinedload
+        po_children = POChild.query.options(
+            joinedload(POChild.parent_cr)
+        ).filter(
             POChild.is_deleted == False
         ).all()
 
         for po_child in po_children:
-            # Get parent CR to check if it's buyer-related
-            parent_cr = ChangeRequest.query.filter_by(cr_id=po_child.parent_cr_id, is_deleted=False).first()
-            if not parent_cr or not parent_cr.assigned_to_buyer_user_id:
+            # PERFORMANCE: Use preloaded parent CR (NO QUERY)
+            parent_cr = po_child.parent_cr
+            if not parent_cr or parent_cr.is_deleted or not parent_cr.assigned_to_buyer_user_id:
                 continue
 
             # For non-admin, check if assigned to current buyer
@@ -1137,13 +1149,27 @@ def get_buyer_pending_purchases():
         # Convert buyer_id to int for safe comparison
         buyer_id_int = int(buyer_id)
 
+        # ✅ PERFORMANCE OPTIMIZATION: Import eager loading functions
+        from sqlalchemy.orm import selectinload, joinedload
+
+        # ✅ PERFORMANCE: Add pagination support
+        page = flask_request.args.get('page', 1, type=int)
+        per_page = min(flask_request.args.get('per_page', 50, type=int), 100)  # Max 100 per page
+
         # If admin is viewing as buyer, show ALL purchases (no buyer filtering)
         # If regular buyer, show only purchases assigned to them
         if is_admin_viewing:
             # SIMPLIFIED QUERY: Show ALL CRs assigned to any buyer (for admin viewing)
             # Exclude purchase_completed status - those should go to completed tab
             # Exclude rejected items - those should only show in rejected tab
-            change_requests = ChangeRequest.query.filter(
+            # ✅ PERFORMANCE: Add eager loading to prevent N+1 queries + pagination
+            paginated_result = ChangeRequest.query.options(
+                joinedload(ChangeRequest.project),  # 1-to-1: Use joinedload
+                selectinload(ChangeRequest.boq).selectinload(BOQ.details),  # 1-to-many chain
+                joinedload(ChangeRequest.vendor),  # 1-to-1: Use joinedload
+                selectinload(ChangeRequest.store_requests),  # 1-to-many
+                selectinload(ChangeRequest.po_children)  # 1-to-many
+            ).filter(
                 ChangeRequest.assigned_to_buyer_user_id.isnot(None),
                 ChangeRequest.is_deleted == False,
                 func.trim(ChangeRequest.status) != 'purchase_completed',
@@ -1151,10 +1177,19 @@ def get_buyer_pending_purchases():
                     ChangeRequest.vendor_selection_status.is_(None),
                     ChangeRequest.vendor_selection_status != 'rejected'
                 )
-            ).all()
+            ).paginate(page=page, per_page=per_page, error_out=False)
+
+            change_requests = paginated_result.items
 
         else:
-            change_requests = ChangeRequest.query.filter(
+            # ✅ PERFORMANCE: Add eager loading to prevent N+1 queries + pagination
+            paginated_result = ChangeRequest.query.options(
+                joinedload(ChangeRequest.project),
+                selectinload(ChangeRequest.boq).selectinload(BOQ.details),
+                joinedload(ChangeRequest.vendor),
+                selectinload(ChangeRequest.store_requests),
+                selectinload(ChangeRequest.po_children)
+            ).filter(
                 or_(
                     # Under review AND approval_required_from='buyer' AND assigned to this buyer
                     and_(
@@ -1185,24 +1220,27 @@ def get_buyer_pending_purchases():
                     ChangeRequest.vendor_selection_status.is_(None),
                     ChangeRequest.vendor_selection_status != 'rejected'
                 )
-            ).all()
+            ).paginate(page=page, per_page=per_page, error_out=False)
+
+            change_requests = paginated_result.items
 
         pending_purchases = []
         total_cost = 0
 
         for cr in change_requests:
-            # Get project details
-            project = Project.query.get(cr.project_id)
+            # ✅ PERFORMANCE: Use preloaded relationships instead of separate queries
+            # Get project details (already loaded via joinedload)
+            project = cr.project
             if not project:
                 continue
 
-            # Get BOQ details
-            boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
+            # Get BOQ details (already loaded via selectinload)
+            boq = cr.boq
             if not boq:
                 continue
 
-            # Use the helper function to process materials with BOQ price enrichment
-            boq_details = BOQDetails.query.filter_by(boq_id=cr.boq_id, is_deleted=False).first()
+            # Get BOQ details (already loaded via selectinload chain)
+            boq_details = boq.details[0] if boq.details else None
             materials_list, cr_total = process_materials_with_negotiated_prices(cr, boq_details)
 
             total_cost += cr_total
@@ -1233,9 +1271,9 @@ def get_buyer_pending_purchases():
             vendor_trn = ""
             vendor_email = ""
             if cr.selected_vendor_id:
-                from models.vendor import Vendor
-                vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
-                if vendor:
+                # ✅ PERFORMANCE: Use preloaded vendor relationship
+                vendor = cr.vendor
+                if vendor and not vendor.is_deleted:
                     vendor_details['phone'] = vendor.phone
                     vendor_details['phone_code'] = vendor.phone_code
                     vendor_details['contact_person'] = vendor.contact_person_name
@@ -1256,8 +1294,8 @@ def get_buyer_pending_purchases():
                     if selector:
                         vendor_details['selected_by_name'] = selector.full_name
 
-            # Check if materials have been requested from store
-            store_requests = InternalMaterialRequest.query.filter_by(cr_id=cr.cr_id).all()
+            # ✅ PERFORMANCE: Use preloaded store_requests relationship
+            store_requests = cr.store_requests if cr.store_requests else []
             has_store_requests = len(store_requests) > 0
 
             # Check store request statuses
@@ -1274,13 +1312,12 @@ def get_buyer_pending_purchases():
                 any_store_request_rejected = rejected_count > 0
                 store_requests_pending = pending_count > 0
 
+            # ✅ PERFORMANCE: Use preloaded po_children relationship
             # Get POChild records for this CR (if any exist)
             # This allows the frontend to know which materials have already been sent to TD
             po_children_data = []
-            po_children_for_parent = POChild.query.filter_by(
-                parent_cr_id=cr.cr_id,
-                is_deleted=False
-            ).all()
+            # Filter out deleted po_children in Python (they're already loaded)
+            po_children_for_parent = [pc for pc in (cr.po_children or []) if not pc.is_deleted]
 
             for po_child in po_children_for_parent:
                 po_children_data.append({
@@ -1391,7 +1428,16 @@ def get_buyer_pending_purchases():
             "ongoing_total_cost": round(ongoing_total, 2),
             "pending_approval_purchases": pending_approval_purchases,
             "pending_approval_count": len(pending_approval_purchases),
-            "pending_approval_total_cost": round(pending_approval_total, 2)
+            "pending_approval_total_cost": round(pending_approval_total, 2),
+            # ✅ PERFORMANCE: Add pagination metadata
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": paginated_result.total,
+                "pages": paginated_result.pages,
+                "has_next": paginated_result.has_next,
+                "has_prev": paginated_result.has_prev
+            }
         }), 200
 
     except Exception as e:
@@ -1414,23 +1460,47 @@ def get_buyer_completed_purchases():
         context = get_effective_user_context()
         is_admin_viewing = context['is_admin_viewing']
 
+        # ✅ PERFORMANCE: Import eager loading functions
+        from sqlalchemy.orm import selectinload, joinedload
+        from flask import request as flask_request
+
+        # ✅ PERFORMANCE: Add pagination support
+        page = flask_request.args.get('page', 1, type=int)
+        per_page = min(flask_request.args.get('per_page', 50, type=int), 100)  # Max 100 per page
+
         # FORCE admin to see all data
         if user_role == 'admin':
             is_admin_viewing = True
         # If admin is viewing as buyer, show ALL completed purchases
         # If regular buyer, show only purchases assigned to them (not just completed by them)
         if is_admin_viewing:
-            change_requests = ChangeRequest.query.filter(
+            # ✅ PERFORMANCE: Add eager loading + pagination
+            paginated_result = ChangeRequest.query.options(
+                joinedload(ChangeRequest.project),
+                selectinload(ChangeRequest.boq).selectinload(BOQ.details),
+                joinedload(ChangeRequest.vendor),
+                selectinload(ChangeRequest.po_children)
+            ).filter(
                 ChangeRequest.status == 'purchase_completed',
                 ChangeRequest.is_deleted == False
-            ).all()
+            ).paginate(page=page, per_page=per_page, error_out=False)
+
+            change_requests = paginated_result.items
         else:
+            # ✅ PERFORMANCE: Add eager loading + pagination
             # Show completed purchases where assigned_to_buyer_user_id matches current buyer
-            change_requests = ChangeRequest.query.filter(
+            paginated_result = ChangeRequest.query.options(
+                joinedload(ChangeRequest.project),
+                selectinload(ChangeRequest.boq).selectinload(BOQ.details),
+                joinedload(ChangeRequest.vendor),
+                selectinload(ChangeRequest.po_children)
+            ).filter(
                 ChangeRequest.status == 'purchase_completed',
                 ChangeRequest.assigned_to_buyer_user_id == buyer_id,
                 ChangeRequest.is_deleted == False
-            ).all()
+            ).paginate(page=page, per_page=per_page, error_out=False)
+
+            change_requests = paginated_result.items
 
         # Import POChild for checking if parent has completed children
         from models.po_child import POChild
@@ -1439,22 +1509,21 @@ def get_buyer_completed_purchases():
         total_cost = 0
 
         for cr in change_requests:
-            # Get project details
-            project = Project.query.get(cr.project_id)
+            # ✅ PERFORMANCE: Use preloaded relationships
+            # Get project details (already loaded via joinedload)
+            project = cr.project
             if not project:
                 continue
 
-            # Get BOQ details
-            boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
+            # Get BOQ details (already loaded via selectinload)
+            boq = cr.boq
             if not boq:
                 continue
 
+            # ✅ PERFORMANCE: Use preloaded po_children
             # BUYER VIEW: Skip parent CRs that have POChildren (all completed)
             # Parents should be hidden when they have children - only show children cards
-            po_children_for_cr = POChild.query.filter_by(
-                parent_cr_id=cr.cr_id,
-                is_deleted=False
-            ).all()
+            po_children_for_cr = [pc for pc in (cr.po_children or []) if not pc.is_deleted]
 
             if po_children_for_cr:
                 # Parent has children - check if all are completed
@@ -1543,9 +1612,9 @@ def get_buyer_completed_purchases():
             vendor_trn = ""
             vendor_email = ""
             if cr.selected_vendor_id:
-                from models.vendor import Vendor
-                vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
-                if vendor:
+                # ✅ PERFORMANCE: Use preloaded vendor relationship
+                vendor = cr.vendor
+                if vendor and not vendor.is_deleted:
                     vendor_details['phone'] = vendor.phone
                     vendor_details['phone_code'] = vendor.phone_code
                     vendor_details['contact_person'] = vendor.contact_person_name
@@ -1666,7 +1735,16 @@ def get_buyer_completed_purchases():
             "total_cost": round(total_cost, 2),
             "completed_purchases": completed_purchases,
             "completed_po_children": completed_po_children_list,
-            "completed_po_children_count": len(completed_po_children_list)
+            "completed_po_children_count": len(completed_po_children_list),
+            # ✅ PERFORMANCE: Add pagination metadata
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": paginated_result.total,
+                "pages": paginated_result.pages,
+                "has_next": paginated_result.has_next,
+                "has_prev": paginated_result.has_prev
+            }
         }), 200
 
     except Exception as e:
@@ -1690,6 +1768,14 @@ def get_buyer_rejected_purchases():
         context = get_effective_user_context()
         is_admin_viewing = context['is_admin_viewing']
 
+        # ✅ PERFORMANCE: Import eager loading functions
+        from sqlalchemy.orm import selectinload, joinedload
+        from flask import request as flask_request
+
+        # ✅ PERFORMANCE: Add pagination support
+        page = flask_request.args.get('page', 1, type=int)
+        per_page = min(flask_request.args.get('per_page', 50, type=int), 100)  # Max 100 per page
+
         # FORCE admin to see all data
         if user_role == 'admin':
             is_admin_viewing = True
@@ -1698,33 +1784,48 @@ def get_buyer_rejected_purchases():
         # 1. status='rejected' (rejected by TD)
         # 2. vendor_selection_status='rejected' (vendor rejected by TD)
         if is_admin_viewing:
-            change_requests = ChangeRequest.query.filter(
+            # ✅ PERFORMANCE: Add eager loading + pagination
+            paginated_result = ChangeRequest.query.options(
+                joinedload(ChangeRequest.project),
+                selectinload(ChangeRequest.boq).selectinload(BOQ.details),
+                joinedload(ChangeRequest.vendor)
+            ).filter(
                 or_(
                     ChangeRequest.status == 'rejected',
                     ChangeRequest.vendor_selection_status == 'rejected'
                 ),
                 ChangeRequest.is_deleted == False
-            ).all()
+            ).paginate(page=page, per_page=per_page, error_out=False)
+
+            change_requests = paginated_result.items
         else:
-            change_requests = ChangeRequest.query.filter(
+            # ✅ PERFORMANCE: Add eager loading + pagination
+            paginated_result = ChangeRequest.query.options(
+                joinedload(ChangeRequest.project),
+                selectinload(ChangeRequest.boq).selectinload(BOQ.details),
+                joinedload(ChangeRequest.vendor)
+            ).filter(
                 or_(
                     ChangeRequest.status == 'rejected',
                     ChangeRequest.vendor_selection_status == 'rejected'
                 ),
                 ChangeRequest.assigned_to_buyer_user_id == buyer_id,
                 ChangeRequest.is_deleted == False
-            ).all()
+            ).paginate(page=page, per_page=per_page, error_out=False)
+
+            change_requests = paginated_result.items
 
         rejected_purchases = []
 
         for cr in change_requests:
-            # Get project details
-            project = Project.query.get(cr.project_id)
+            # ✅ PERFORMANCE: Use preloaded relationships
+            # Get project details (already loaded via joinedload)
+            project = cr.project
             if not project:
                 continue
 
-            # Get BOQ details
-            boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
+            # Get BOQ details (already loaded via selectinload)
+            boq = cr.boq
             if not boq:
                 continue
 
@@ -1793,8 +1894,9 @@ def get_buyer_rejected_purchases():
             vendor_gst_number = None
             vendor_selected_by_name = None
             if cr.selected_vendor_id:
-                vendor = Vendor.query.get(cr.selected_vendor_id)
-                if vendor:
+                # ✅ PERFORMANCE: Use preloaded vendor relationship
+                vendor = cr.vendor
+                if vendor and not vendor.is_deleted:
                     vendor_phone = vendor.phone
                     vendor_phone_code = vendor.phone_code
                     vendor_contact_person = vendor.contact_person_name
@@ -1807,7 +1909,7 @@ def get_buyer_rejected_purchases():
                     vendor_gst_number = vendor.gst_number
                 # Get who selected the vendor
                 if cr.vendor_selected_by_buyer_user_id:
-                    from models.users import User
+                    from models.user import User
                     selector = User.query.filter_by(user_id=cr.vendor_selected_by_buyer_user_id).first()
                     if selector:
                         vendor_selected_by_name = selector.full_name
@@ -1922,7 +2024,16 @@ def get_buyer_rejected_purchases():
             "rejected_purchases_count": len(rejected_purchases),
             "rejected_purchases": rejected_purchases,
             "td_rejected_po_children": td_rejected_po_children,
-            "td_rejected_count": len(td_rejected_po_children)
+            "td_rejected_count": len(td_rejected_po_children),
+            # ✅ PERFORMANCE: Add pagination metadata
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": paginated_result.total,
+                "pages": paginated_result.pages,
+                "has_next": paginated_result.has_next,
+                "has_prev": paginated_result.has_prev
+            }
         }), 200
 
     except Exception as e:

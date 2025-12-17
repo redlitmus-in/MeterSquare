@@ -85,7 +85,8 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
 };
 
 // Polling interval for checking new tickets (60 seconds to avoid rate limiting)
-const POLLING_INTERVAL = 60000;
+// ✅ PERFORMANCE: Removed polling - using real-time subscriptions instead
+// const POLLING_INTERVAL = 60000; // DEPRECATED - replaced with real-time updates
 
 const SupportManagement: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -106,7 +107,8 @@ const SupportManagement: React.FC = () => {
 
   // Notification state
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>('default');
-  const [isPolling] = useState(true); // Polling is always on, could add toggle later
+  // ✅ PERFORMANCE: Disabled polling - using real-time subscriptions instead
+  const [isPolling] = useState(false); // Polling disabled - using real-time updates
 
   // Modal state
   const [actionModal, setActionModal] = useState<{

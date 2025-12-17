@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Package, FileText, Eye, Loader2, MapPin, Ruler, Tag, Hash, DollarSign, Image as ImageIcon, AlertCircle, CheckCircle } from 'lucide-react';
+import { X, Package, FileText, Eye, Loader2, MapPin, Ruler, Tag, Hash, DollarSign, Image as ImageIcon, AlertCircle, CheckCircle, ExternalLink } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { formatCurrency } from '@/utils/formatters';
 
@@ -11,6 +12,10 @@ interface BOQSubItemDetailModalProps {
   subItemName: string;
   boqName?: string;
   materialName?: string; // Filter to show only this material
+  projectId?: number; // Project ID for navigation to project details
+  projectName?: string; // Project name for display
+  boqStatus?: string; // BOQ status for tab detection
+  pmAssigned?: boolean; // PM assignment status for tab detection
 }
 
 interface LabourData {
@@ -75,13 +80,66 @@ const BOQSubItemDetailModal: React.FC<BOQSubItemDetailModalProps> = ({
   boqId,
   subItemName,
   boqName,
-  materialName
+  materialName,
+  projectId,
+  projectName,
+  boqStatus: propBoqStatus,
+  pmAssigned: propPmAssigned
 }) => {
+  const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [matchedItem, setMatchedItem] = useState<ItemData | null>(null);
   const [matchedSubItem, setMatchedSubItem] = useState<SubItemData | null>(null);
   const [boqData, setBoqData] = useState<any>(null);
+
+  // Handler to navigate to project details page
+  const handleViewInProject = async () => {
+    if (projectId) {
+      // Use provided props if available, otherwise fetch BOQ data
+      let boqStatusToUse = propBoqStatus;
+      let pmAssignedToUse = propPmAssigned;
+
+      // If props not provided, fetch BOQ data
+      if (boqStatusToUse === undefined || pmAssignedToUse === undefined) {
+        try {
+          const result = await estimatorService.getBOQById(boqId);
+          if (result.success && result.data) {
+            const boq = result.data;
+            boqStatusToUse = boq.status;
+            // Handle both snake_case (from API) and camelCase (frontend) property names
+            pmAssignedToUse = boq.pm_assigned ?? boq.pmAssigned;
+          }
+        } catch (err) {
+          console.error('Error fetching BOQ for navigation:', err);
+          // Fallback: navigate without tab parameter
+          navigate(`/technical-director/project-approvals?projectId=${projectId}&viewDetails=true`);
+          onClose();
+          return;
+        }
+      }
+
+      // Determine the correct tab based on status and pmAssigned - match ProjectApprovals logic
+      let tab = 'pending';
+      if (pmAssignedToUse === true && boqStatusToUse !== 'rejected' && boqStatusToUse !== 'completed' && boqStatusToUse !== 'cancelled') {
+        tab = 'assigned';
+      } else if (boqStatusToUse === 'rejected') {
+        tab = 'rejected';
+      } else if ((boqStatusToUse === 'client_confirmed' || boqStatusToUse === 'client_rejected') && !pmAssignedToUse) {
+        tab = 'sent';
+      } else if ((boqStatusToUse === 'approved' || boqStatusToUse === 'revision_approved' || boqStatusToUse === 'sent_for_confirmation') && !pmAssignedToUse) {
+        tab = 'approved';
+      } else if (boqStatusToUse && boqStatusToUse.includes('revision')) {
+        // Fallback for revision detection if revision_number not available
+        tab = 'revisions';
+      } else if (boqStatusToUse === 'pending' && !pmAssignedToUse) {
+        tab = 'pending';
+      }
+
+      navigate(`/technical-director/project-approvals?tab=${tab}&projectId=${projectId}&viewDetails=true`);
+      onClose(); // Close modal after navigation
+    }
+  };
 
   useEffect(() => {
     if (isOpen && boqId && subItemName) {
@@ -318,6 +376,22 @@ const BOQSubItemDetailModal: React.FC<BOQSubItemDetailModalProps> = ({
                   <CheckCircle className="w-4 h-4 text-green-600" />
                   <span>This item is part of the approved BOQ scope</span>
                 </div>
+
+                {/* View BOQ in Project Button */}
+                {projectId && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <button
+                      onClick={handleViewInProject}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm hover:shadow-md"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      <span>View BOQ in Project</span>
+                      {projectName && (
+                        <span className="text-xs opacity-80 ml-1">({projectName})</span>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-12">

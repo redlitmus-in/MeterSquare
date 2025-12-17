@@ -1449,6 +1449,8 @@ def get_all_change_requests():
                 cr_dict['project_location'] = cr.project.location
                 cr_dict['project_client'] = cr.project.client
                 cr_dict['area'] = cr.project.area
+                # Add PM assignment status (user_id indicates PM is assigned to project)
+                cr_dict['pm_assigned'] = bool(cr.project.user_id)
 
             # Add BOQ name and status (no query - data already loaded via joinedload)
             if cr.boq:

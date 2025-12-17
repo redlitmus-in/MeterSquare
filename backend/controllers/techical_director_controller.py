@@ -606,34 +606,40 @@ def get_td_se_boq_vendor_requests():
         from models.boq import BOQ
         from models.vendor import Vendor
         from datetime import datetime
+        # PERFORMANCE: Import eager loading functions
+        from sqlalchemy.orm import selectinload, joinedload
 
         current_user = g.user
         td_id = current_user['user_id']
 
-        # Get all assignments with pending TD approval or already approved/rejected
-        assignments = BOQMaterialAssignment.query.filter(
+        # PERFORMANCE: Get all assignments with eager loading to prevent N+1 queries
+        assignments = BOQMaterialAssignment.query.options(
+            joinedload(BOQMaterialAssignment.boq).selectinload(BOQ.details),
+            joinedload(BOQMaterialAssignment.project),
+            joinedload(BOQMaterialAssignment.vendor)
+        ).filter(
             BOQMaterialAssignment.is_deleted == False,
             BOQMaterialAssignment.selected_vendor_id != None
         ).order_by(BOQMaterialAssignment.vendor_selection_date.desc()).all()
 
         assignments_list = []
         for assignment in assignments:
-            # Get BOQ
-            boq = BOQ.query.filter_by(boq_id=assignment.boq_id, is_deleted=False).first()
-            if not boq:
+            # PERFORMANCE: Use preloaded relationships instead of queries
+            boq = assignment.boq
+            if not boq or boq.is_deleted:
                 continue
 
-            # Get project
-            project = Project.query.filter_by(project_id=assignment.project_id, is_deleted=False).first()
-            if not project:
+            # PERFORMANCE: Use preloaded project
+            project = assignment.project
+            if not project or project.is_deleted:
                 continue
 
-            # Get vendor
+            # PERFORMANCE: Use preloaded vendor
             vendor = None
             vendor_info = None
             if assignment.selected_vendor_id:
-                vendor = Vendor.query.filter_by(vendor_id=assignment.selected_vendor_id, is_deleted=False).first()
-                if vendor:
+                vendor = assignment.vendor
+                if vendor and not vendor.is_deleted:
                     vendor_info = {
                         'vendor_id': vendor.vendor_id,
                         'company_name': vendor.company_name,
@@ -650,8 +656,8 @@ def get_td_se_boq_vendor_requests():
             total_cost = 0
 
             if boq:
-                # Get BOQ details which contains materials as JSON
-                boq_detail = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+                # PERFORMANCE: Use preloaded BOQ details
+                boq_detail = next((d for d in boq.details if not d.is_deleted), None)
 
                 if boq_detail and boq_detail.boq_details:
                     items = boq_detail.boq_details.get('items', [])

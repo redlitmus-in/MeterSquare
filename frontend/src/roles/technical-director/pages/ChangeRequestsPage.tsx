@@ -75,6 +75,16 @@ const ChangeRequestsPage: React.FC = () => {
   const [rejectedPOChildren, setRejectedPOChildren] = useState<POChild[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
+
+  // ✅ PERFORMANCE: Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<{
+    total_count: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  } | null>(null);
+  const perPage = 50;
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -120,15 +130,24 @@ const ChangeRequestsPage: React.FC = () => {
     loadRejectedPOChildren(); // Also reload rejected PO children
   }, [changeRequestUpdateTimestamp]); // Reload whenever timestamp changes
 
+  // ✅ PERFORMANCE: Reload when page changes
+  useEffect(() => {
+    loadChangeRequests(false);
+  }, [currentPage]);
+
   const loadChangeRequests = async (showLoadingSpinner = false) => {
     // Only show loading spinner on initial load, not on auto-refresh
     if (showLoadingSpinner) {
       setLoading(true);
     }
     try {
-      const response = await changeRequestService.getChangeRequests();
+      // ✅ PERFORMANCE: Use pagination to reduce data load
+      const response = await changeRequestService.getChangeRequests(currentPage, perPage);
       if (response.success) {
         setChangeRequests(response.data);
+        if (response.pagination) {
+          setPagination(response.pagination);
+        }
       } else {
         // Only show error toast on initial load to avoid spam
         if (showLoadingSpinner) {
@@ -2259,7 +2278,44 @@ const ChangeRequestsPage: React.FC = () => {
               </div>
             </TabsContent>
 
-                     </Tabs>
+          </Tabs>
+
+          {/* ✅ PERFORMANCE: Pagination Controls */}
+          {pagination && pagination.total_pages > 1 && (
+            <div className="mt-6 flex items-center justify-between border-t border-gray-200 dark:border-gray-700 pt-4">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                Showing {Math.min((currentPage - 1) * perPage + 1, pagination.total_count)}-
+                {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={!pagination.has_prev}
+                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                    pagination.has_prev
+                      ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  Previous
+                </button>
+                <span className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 flex items-center">
+                  Page {currentPage} of {pagination.total_pages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
+                  disabled={!pagination.has_next}
+                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                    pagination.has_next
+                      ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

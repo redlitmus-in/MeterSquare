@@ -13,6 +13,7 @@ export interface ChangeRequestItem {
   area?: string;
   boq_name?: string;
   boq_status?: string;
+  pm_assigned?: boolean; // Whether PM is assigned to this project
   item_id?: string | null;
   item_name?: string | null;
   requested_by_user_id: number;
@@ -207,15 +208,36 @@ class ChangeRequestService {
    * Get all change requests (role-filtered by backend)
    * GET /api/change-requests
    */
-  async getChangeRequests(): Promise<{ success: boolean; data: ChangeRequestItem[]; message?: string; count?: number }> {
+  // ✅ PERFORMANCE: Added pagination parameters
+  async getChangeRequests(page?: number, pageSize: number = 50): Promise<{
+    success: boolean;
+    data: ChangeRequestItem[];
+    message?: string;
+    count?: number;
+    pagination?: {
+      page: number;
+      page_size: number;
+      total_count: number;
+      total_pages: number;
+      has_next: boolean;
+      has_prev: boolean;
+    };
+  }> {
     try {
-      const response = await apiClient.get('/change-requests');
+      const params: any = {};
+      if (page !== undefined) {
+        params.page = page;
+        params.page_size = pageSize;
+      }
+
+      const response = await apiClient.get('/change-requests', { params });
 
       if (response.data.success) {
         return {
           success: true,
           data: response.data.data || [],
-          count: response.data.count || 0
+          count: response.data.count || 0,
+          pagination: response.data.pagination
         };
       }
 
