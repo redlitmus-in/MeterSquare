@@ -2586,7 +2586,6 @@ def update_boq(boq_id):
             existing_history.action = current_actions
 
             # Mark JSONB field as modified for SQLAlchemy
-            from sqlalchemy.orm.attributes import flag_modified
             flag_modified(existing_history, "action")
 
             existing_history.action_by = user_name
@@ -3706,7 +3705,6 @@ def revision_boq(boq_id):
             existing_history.action = current_actions
 
             # Mark JSONB field as modified for SQLAlchemy
-            from sqlalchemy.orm.attributes import flag_modified
             flag_modified(existing_history, "action")
 
             existing_history.action_by = user_name
@@ -4076,7 +4074,6 @@ def send_boq_email(boq_id):
                     current_actions.append(new_action)
                     existing_history.action = current_actions
                     # Mark JSONB field as modified for SQLAlchemy
-                    from sqlalchemy.orm.attributes import flag_modified
                     flag_modified(existing_history, "action")
 
                 existing_history.action_by = user_name
@@ -4244,7 +4241,6 @@ def send_boq_email(boq_id):
                     current_actions.append(new_action)
                     existing_history.action = current_actions
                     # Mark JSONB field as modified for SQLAlchemy
-                    from sqlalchemy.orm.attributes import flag_modified
                     flag_modified(existing_history, "action")
 
                 existing_history.action_by = user_name

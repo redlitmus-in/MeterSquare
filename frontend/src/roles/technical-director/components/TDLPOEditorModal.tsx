@@ -60,28 +60,6 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
     }
   }, [lpoData?.totals.vat_percent]);
 
-  // Auto-save when lpoData changes (debounced)
-  useEffect(() => {
-    if (!lpoData || !isOpen) return;
-
-    // Clear existing timeout
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    // Set new timeout for auto-save (1 second debounce)
-    saveTimeoutRef.current = setTimeout(() => {
-      autoSaveLpoCustomization();
-    }, 1000);
-
-    // Cleanup on unmount
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-    };
-  }, [lpoData, isOpen, autoSaveLpoCustomization]);
-
   const loadLpoData = async () => {
     try {
       setIsLoading(true);
