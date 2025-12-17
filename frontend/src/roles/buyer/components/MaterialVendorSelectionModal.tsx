@@ -118,6 +118,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const [isLoadingLpo, setIsLoadingLpo] = useState(false);
   const [showLpoEditor, setShowLpoEditor] = useState(false);
   const [includeSignatures, setIncludeSignatures] = useState(true);
+  const [includeVAT, setIncludeVAT] = useState(true);
   const [newCustomTerm, setNewCustomTerm] = useState('');
   const [editingTermIndex, setEditingTermIndex] = useState<number | null>(null);
   const [editingTermText, setEditingTermText] = useState('');
@@ -402,6 +403,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       }
 
       setLpoData(enrichedLpoData);
+      // Set initial VAT checkbox state based on loaded data
+      setIncludeVAT((enrichedLpoData.totals?.vat_percent || 0) > 0);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to load LPO data';
       toast.error(errorMessage);
@@ -2622,6 +2625,101 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             <p className="text-xs text-gray-400 mt-1">Edit the message that appears in the LPO PDF</p>
                           </div>
 
+                          {/* VAT Configuration */}
+                          <div className="border-t border-blue-200 pt-4">
+                            <div className="text-sm font-medium text-gray-700 mb-3">VAT Configuration</div>
+
+                            {/* VAT Checkbox */}
+                            <div className="flex items-center gap-2 mb-3">
+                              <input
+                                type="checkbox"
+                                id="include-vat"
+                                checked={includeVAT}
+                                onChange={(e) => {
+                                  const isChecked = e.target.checked;
+                                  setIncludeVAT(isChecked);
+
+                                  if (!isChecked) {
+                                    // Disable VAT - set to 0%
+                                    setLpoData({
+                                      ...lpoData,
+                                      totals: {
+                                        ...lpoData.totals,
+                                        vat_percent: 0,
+                                        vat_amount: 0,
+                                        grand_total: lpoData.totals.subtotal
+                                      }
+                                    });
+                                  } else {
+                                    // Enable VAT - set to default 5%
+                                    const defaultVatPercent = 5;
+                                    const newVatAmount = (lpoData.totals.subtotal * defaultVatPercent) / 100;
+                                    const newGrandTotal = lpoData.totals.subtotal + newVatAmount;
+
+                                    setLpoData({
+                                      ...lpoData,
+                                      totals: {
+                                        ...lpoData.totals,
+                                        vat_percent: defaultVatPercent,
+                                        vat_amount: parseFloat(newVatAmount.toFixed(2)),
+                                        grand_total: parseFloat(newGrandTotal.toFixed(2))
+                                      }
+                                    });
+                                  }
+                                }}
+                                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                              />
+                              <label htmlFor="include-vat" className="text-xs font-medium text-gray-600">
+                                Include VAT in LPO
+                              </label>
+                            </div>
+
+                            {/* VAT Percentage Input - Only show when VAT is enabled */}
+                            {includeVAT && (
+                              <div className="bg-gray-50 rounded-lg p-3">
+                                <label className="text-xs font-medium text-gray-600 mb-2 block">VAT Percentage</label>
+                                <div className="flex items-center gap-3">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="0.5"
+                                    value={lpoData.totals.vat_percent}
+                                    onChange={(e) => {
+                                      const newVatPercent = parseFloat(e.target.value) || 0;
+                                      const newVatAmount = (lpoData.totals.subtotal * newVatPercent) / 100;
+                                      const newGrandTotal = lpoData.totals.subtotal + newVatAmount;
+
+                                      setLpoData({
+                                        ...lpoData,
+                                        totals: {
+                                          ...lpoData.totals,
+                                          vat_percent: newVatPercent,
+                                          vat_amount: parseFloat(newVatAmount.toFixed(2)),
+                                          grand_total: parseFloat(newGrandTotal.toFixed(2))
+                                        }
+                                      });
+                                    }}
+                                    className="w-24 text-sm"
+                                    placeholder="5"
+                                  />
+                                  <span className="text-xs text-gray-600">%</span>
+                                  <div className="ml-auto text-right">
+                                    <div className="text-xs text-gray-500">VAT Amount</div>
+                                    <div className="text-sm font-bold text-gray-900">AED {lpoData.totals.vat_amount.toLocaleString()}</div>
+                                  </div>
+                                </div>
+                                <p className="text-xs text-gray-400 mt-2">Enter custom VAT percentage. Changes will be saved when you submit.</p>
+                              </div>
+                            )}
+
+                            {!includeVAT && (
+                              <div className="bg-gray-50 rounded-lg p-3 text-center">
+                                <p className="text-xs text-gray-500">VAT is disabled for this LPO. Check the box above to add VAT.</p>
+                              </div>
+                            )}
+                          </div>
+
                           {/* Terms Section */}
                           <div className="border-t border-blue-200 pt-4">
                             <div className="text-sm font-medium text-gray-700 mb-3">Terms & Conditions</div>
@@ -2816,6 +2914,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                     ) : (
                                       <div className="text-xs text-orange-500">Not uploaded</div>
                                     )}
+                                    <div className="text-xs font-medium mt-1">{lpoData.signatures.md_name}</div>
+                                    <div className="text-xs text-gray-500">Managing Director</div>
                                   </div>
                                   <div className="text-center">
                                     <div className="text-xs text-gray-500 mb-1">Stamp</div>
@@ -2832,6 +2932,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                     ) : (
                                       <div className="text-xs text-orange-500">Not uploaded</div>
                                     )}
+                                    <div className="text-xs font-medium mt-1">{lpoData.signatures.td_name}</div>
+                                    <div className="text-xs text-gray-500">Technical Director</div>
                                   </div>
                                 </div>
                               </div>
