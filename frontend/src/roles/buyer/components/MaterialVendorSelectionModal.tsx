@@ -1187,7 +1187,6 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const totalVendorSelections = unlockedMaterials.reduce((sum, m) => sum + m.selected_vendors.length, 0);
 
   // Count unique vendors selected across all materials
-  // If more than 1 unique vendor is selected, hide the main "Submit for TD Approval" button
   const uniqueSelectedVendorIds = new Set<number>();
   unlockedMaterials.forEach(m => {
     if (m.selected_vendors.length > 0) {
@@ -1195,6 +1194,15 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     }
   });
   const hasMultipleUniqueVendors = uniqueSelectedVendorIds.size > 1;
+
+  // Blue button logic: Show ONLY when ALL materials have vendors AND all have SAME vendor
+  // - 1 material with vendor → Blue
+  // - 5 materials, ALL 5 have same vendor → Blue
+  // Green button logic: Show in ALL other cases
+  // - 5 materials, 1 has vendor, 4 don't → Green (partial selection)
+  // - 5 materials, different vendors → Green (multiple vendors)
+  // - Already split PO → Green (always)
+  const canShowBlueButton = allMaterialsHaveVendors && !hasMultipleUniqueVendors && !isPurchaseAlreadySplit && selectedCount > 0;
 
   if (!isOpen) return null;
 
@@ -2239,10 +2247,9 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         group.total_amount += vendorMaterialAmount;
                       });
 
-                      // Show individual send buttons if:
-                      // 1. Multiple vendors are selected, OR
-                      // 2. Purchase is already split (has pending PO children) - so we continue the split pattern
-                      const hasMultipleVendors = vendorGroups.size > 1 || isPurchaseAlreadySplit;
+                      // Show individual send buttons (green) if blue button conditions are NOT met
+                      // Green shows when: partial selection, multiple vendors, or already split
+                      const showIndividualVendorButtons = !canShowBlueButton && selectedCount > 0;
 
                       return (
                         <div className="space-y-3">
@@ -2282,9 +2289,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                   </div>
 
                                   {/* Right Column: Send Button - Show when:
-                                      1. Multiple vendors are selected (hasMultipleVendors), OR
-                                      2. Purchase is already split (isPurchaseAlreadySplit) - always use individual buttons */}
-                                  {(hasMultipleVendors || isPurchaseAlreadySplit) && (
+                                      1. PO has more than 1 material (multi-material PO), OR
+                                      2. Multiple vendors are selected, OR
+                                      3. Purchase is already split (isPurchaseAlreadySplit) - always use individual buttons */}
+                                  {showIndividualVendorButtons && (
                                     <div className="flex items-center px-3 bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200">
                                       <Button
                                         onClick={(e) => {
@@ -3041,10 +3049,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       )}
                     </Button>
                   ) : (
-                    /* Buyer Mode: Submit All Together - Single Purchase Indicator */
-                    /* Hide this button if: 1) purchase is already split, OR 2) multiple unique vendors are selected */
-                    /* User should use individual "Send This Vendor to TD" buttons when there are multiple vendors */
-                    !isPurchaseAlreadySplit && !hasMultipleUniqueVendors && selectedCount > 0 && (
+                    /* Buyer Mode: Submit All Together */
+                    /* Show blue button ONLY when: ALL materials have vendors AND all have SAME vendor */
+                    /* - 1 material with vendor → Blue */
+                    /* - 5 materials, ALL 5 have same vendor → Blue */
+                    /* - 5 materials, 1 has vendor, 4 don't → Green (partial = use green) */
+                    canShowBlueButton && (
                       <div className="flex flex-col items-end gap-1">
                         <span className="text-xs text-gray-500 italic">
                           Send all materials as one purchase
