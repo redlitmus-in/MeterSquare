@@ -1303,14 +1303,31 @@ def get_buyer_pending_purchases():
             any_store_request_rejected = False
             store_requests_pending = False
 
+            # Track which specific materials have been sent to store (for partial store requests)
+            store_requested_material_names = []
+
             if has_store_requests:
                 approved_count = sum(1 for r in store_requests if r.status and r.status.lower() in ['approved', 'dispatched', 'fulfilled'])
                 rejected_count = sum(1 for r in store_requests if r.status and r.status.lower() == 'rejected')
                 pending_count = sum(1 for r in store_requests if r.status and r.status.lower() in ['pending', 'send_request'])
 
+                # Get list of material names that have ACTIVE store requests (exclude rejected)
+                # Rejected materials should become available for vendor selection again
+                store_requested_material_names = [
+                    r.material_name for r in store_requests
+                    if r.material_name and r.status and r.status.lower() not in ['rejected']
+                ]
+
                 all_store_requests_approved = approved_count == len(store_requests) and len(store_requests) > 0
                 any_store_request_rejected = rejected_count > 0
-                store_requests_pending = pending_count > 0
+
+                # IMPORTANT: Only mark as "store_requests_pending" if ALL materials are sent to store
+                # If only some materials are sent, keep PO in "Pending Purchase" so remaining can go to vendor
+                total_materials = len(materials_list)
+                store_requested_count = len(store_requested_material_names)
+
+                # store_requests_pending = True only when ALL materials have pending store requests
+                store_requests_pending = pending_count > 0 and store_requested_count >= total_materials
 
             # ✅ PERFORMANCE: Use preloaded po_children relationship
             # Get POChild records for this CR (if any exist)
@@ -1400,6 +1417,7 @@ def get_buyer_pending_purchases():
                 "material_vendor_selections": cr.material_vendor_selections or {},
                 "has_store_requests": has_store_requests,
                 "store_request_count": len(store_requests),
+                "store_requested_materials": store_requested_material_names,  # List of material names sent to store
                 "all_store_requests_approved": all_store_requests_approved,
                 "any_store_request_rejected": any_store_request_rejected,
                 "store_requests_pending": store_requests_pending
@@ -2278,6 +2296,14 @@ def get_purchase_by_id(cr_id):
             cr.vendor_selection_status == 'pending_td_approval'
         )
 
+        # Get store requests for this CR to know which materials are sent to store
+        # Exclude rejected requests - those materials should be available for vendor selection again
+        store_requests = InternalMaterialRequest.query.filter_by(cr_id=cr_id).all()
+        store_requested_material_names = [
+            r.material_name for r in store_requests
+            if r.material_name and r.status and r.status.lower() not in ['rejected']
+        ]
+
         purchase = {
             "cr_id": cr.cr_id,
             "project_id": project.project_id,
@@ -2308,7 +2334,11 @@ def get_purchase_by_id(cr_id):
             "vendor_whatsapp_sent": cr.vendor_whatsapp_sent or False,
             "vendor_whatsapp_sent_at": cr.vendor_whatsapp_sent_at.isoformat() if cr.vendor_whatsapp_sent_at else None,
             # Include material vendor selections for negotiated prices
-            "material_vendor_selections": cr.material_vendor_selections or {}
+            "material_vendor_selections": cr.material_vendor_selections or {},
+            # Include store requested materials for filtering in vendor selection
+            "store_requested_materials": store_requested_material_names,
+            "has_store_requests": len(store_requested_material_names) > 0,
+            "store_request_count": len(store_requested_material_names)
         }
 
         # If vendor is selected, add vendor contact details (with overrides)
@@ -7530,12 +7560,29 @@ def check_store_availability(cr_id):
         if not isinstance(materials, list):
             materials = []
 
+        # Get materials that have already been sent to store (to exclude them)
+        existing_store_requests = InternalMaterialRequest.query.filter_by(cr_id=cr_id).all()
+        already_requested_materials = {req.material_name for req in existing_store_requests}
+
         available_materials = []
         unavailable_materials = []
+        already_sent_materials = []  # Materials already sent to store
 
         for mat in materials:
             mat_name = mat.get('material_name') or mat.get('name') or ''
             mat_qty = mat.get('quantity', 0)
+
+            # Skip materials that have already been sent to store
+            if mat_name in already_requested_materials:
+                # Find the existing request to get status
+                existing_req = next((r for r in existing_store_requests if r.material_name == mat_name), None)
+                already_sent_materials.append({
+                    'material_name': mat_name,
+                    'required_quantity': mat_qty,
+                    'status': existing_req.status if existing_req else 'pending',
+                    'already_sent': True
+                })
+                continue
 
             # Search in inventory by name
             inventory_item = InventoryMaterial.query.filter(
@@ -7560,15 +7607,17 @@ def check_store_availability(cr_id):
                     'inventory_material_id': inventory_item.inventory_material_id if inventory_item else None
                 })
 
-        all_available = len(unavailable_materials) == 0 and len(available_materials) > 0
+        # Can complete if there are available materials (even if some are unavailable or already sent)
+        can_complete = len(available_materials) > 0
 
         return jsonify({
             'success': True,
             'cr_id': cr_id,
-            'all_available_in_store': all_available,
+            'all_available_in_store': len(unavailable_materials) == 0 and len(available_materials) > 0,
             'available_materials': available_materials,
             'unavailable_materials': unavailable_materials,
-            'can_complete_from_store': all_available
+            'already_sent_materials': already_sent_materials,  # Materials already requested from store
+            'can_complete_from_store': can_complete
         }), 200
 
     except Exception as e:
@@ -7577,22 +7626,44 @@ def check_store_availability(cr_id):
 
 
 def complete_from_store(cr_id):
-    """Request materials from M2 Store - creates internal requests without completing the purchase"""
+    """Request materials from M2 Store - creates internal requests without completing the purchase
+
+    Accepts optional 'selected_materials' in request body to request only specific materials.
+    If not provided, requests all materials in the CR.
+    """
     try:
         current_user = g.user
+        data = request.get_json() or {}
+        selected_materials = data.get('selected_materials')  # Optional: list of material names to request
+
         cr = ChangeRequest.query.get(cr_id)
         if not cr:
             return jsonify({"error": "Change request not found"}), 404
-
-        # Check if already requested from store
-        existing_requests = InternalMaterialRequest.query.filter_by(cr_id=cr_id).count()
-        if existing_requests > 0:
-            return jsonify({"error": "Materials already requested from store for this CR"}), 400
 
         # Get materials from CR
         materials = cr.materials_data or cr.sub_items_data or []
         if not isinstance(materials, list):
             return jsonify({"error": "No materials found in this CR"}), 400
+
+        # Filter to selected materials if provided
+        if selected_materials and isinstance(selected_materials, list):
+            # Only include materials whose name is in selected_materials list
+            materials = [
+                mat for mat in materials
+                if (mat.get('material_name') or mat.get('name') or '') in selected_materials
+            ]
+            if not materials:
+                return jsonify({"error": "No matching materials found in selection"}), 400
+
+        # Check if any of the selected materials were already requested from store
+        for mat in materials:
+            mat_name = mat.get('material_name') or mat.get('name') or ''
+            existing_request = InternalMaterialRequest.query.filter_by(
+                cr_id=cr_id,
+                material_name=mat_name
+            ).first()
+            if existing_request:
+                return jsonify({"error": f"Material '{mat_name}' was already requested from store"}), 400
 
         requests_created = 0
         # Check availability and create internal requests

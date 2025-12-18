@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -13,7 +13,9 @@ import {
   Hash,
   Store,
   AlertCircle,
-  Clock
+  Clock,
+  Truck,
+  Hourglass
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -61,6 +63,29 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
   const handleClose = () => {
     onClose();
   };
+
+  // Pre-compute store requested materials array
+  const storeRequestedMaterials = useMemo(() =>
+    localPurchase.store_requested_materials || [],
+    [localPurchase.store_requested_materials]
+  );
+
+  // Pre-compute POChild lookup map for O(1) material status lookup (vs O(n²))
+  const materialToPOChildMap = useMemo(() => {
+    const map = new Map<string, any>();
+    const poChildren = localPurchase.po_children || [];
+
+    poChildren.forEach(poChild => {
+      poChild.materials?.forEach((m: any) => {
+        if (m.material_name) {
+          const key = m.material_name.toLowerCase().trim();
+          map.set(key, poChild);
+        }
+      });
+    });
+
+    return map;
+  }, [localPurchase.po_children]);
 
   if (!isOpen) return null;
 
@@ -377,6 +402,15 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <Package className="w-5 h-5" />
                       Materials Breakdown
                     </h3>
+                    {/* Store-sent materials indicator */}
+                    {localPurchase.store_requested_materials && localPurchase.store_requested_materials.length > 0 && (
+                      <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg">
+                        <Store className="w-4 h-4 text-purple-600" />
+                        <span className="text-xs font-medium text-purple-800">
+                          {localPurchase.store_requested_materials.length} material(s) sent to M2 Store
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="border rounded-xl overflow-hidden">
                     <Table>
@@ -396,42 +430,117 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         {localPurchase.materials.map((material, idx) => {
                           // Check if material is NEW (only show badge for truly new materials, not BOQ materials)
                           const isNewMaterial = material.master_material_id == null;
+                          // Check if material is sent to store (using pre-computed array)
+                          const isSentToStore = storeRequestedMaterials.includes(material.material_name);
+
+                          // Use pre-computed POChild lookup map for O(1) lookup
+                          const materialNameLower = material.material_name.toLowerCase().trim();
+                          const poChildWithMaterial = materialToPOChildMap.get(materialNameLower);
+
+                          const isPendingTD = poChildWithMaterial?.vendor_selection_status === 'pending_td_approval';
+                          const isApprovedByTD = poChildWithMaterial?.vendor_selection_status === 'approved' ||
+                                                 poChildWithMaterial?.status === 'vendor_approved' ||
+                                                 poChildWithMaterial?.status === 'purchase_completed';
+                          const vendorName = poChildWithMaterial?.vendor_name;
+
+                          // Determine row background color
+                          const rowBgClass = isSentToStore ? 'bg-purple-50' :
+                                            isPendingTD ? 'bg-amber-50' :
+                                            isApprovedByTD ? 'bg-green-50' : '';
+
                           return (
-                          <TableRow key={idx} className="hover:bg-gray-50">
-                            <TableCell className="font-medium text-sm">
-                              <div className="flex items-center gap-2">
-                                <span>{material.material_name}</span>
-                                {isNewMaterial && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
-                                    NEW
+                            <TableRow key={idx} className={`hover:bg-gray-50 ${rowBgClass}`}>
+                              <TableCell className="font-medium text-sm">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={isSentToStore ? 'text-purple-700' : isPendingTD ? 'text-amber-700' : isApprovedByTD ? 'text-green-700' : ''}>
+                                    {material.material_name}
+                                  </span>
+                                  {isNewMaterial && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
+                                      NEW
+                                    </span>
+                                  )}
+                                  {isSentToStore && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-purple-100 text-purple-800 border border-purple-300">
+                                      <Store className="w-3 h-3" />
+                                      STORE
+                                    </span>
+                                  )}
+                                  {isPendingTD && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                                      <Hourglass className="w-3 h-3" />
+                                      PENDING TD
+                                    </span>
+                                  )}
+                                  {isApprovedByTD && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
+                                      <Truck className="w-3 h-3" />
+                                      VENDOR
+                                    </span>
+                                  )}
+                                  {vendorName && (isPendingTD || isApprovedByTD) && (
+                                    <span className="text-[10px] text-gray-500">
+                                      ({vendorName})
+                                    </span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                {material.sub_item_name && (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    {material.sub_item_name}
                                   </span>
                                 )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {material.sub_item_name && (
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                  {material.sub_item_name}
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-sm">{(material as any).brand || '-'}</TableCell>
-                            <TableCell className="text-sm">{(material as any).size || (material as any).specification || '-'}</TableCell>
-                            <TableCell className="text-sm">{material.quantity}</TableCell>
-                            <TableCell className="text-sm">{material.unit}</TableCell>
-                            <TableCell className="text-sm">{formatCurrency(material.unit_price)}</TableCell>
-                            <TableCell className="text-right font-bold text-green-600 text-sm">
-                              {formatCurrency(material.total_price)}
-                            </TableCell>
-                          </TableRow>
+                              </TableCell>
+                              <TableCell className="text-sm">{(material as any).brand || '-'}</TableCell>
+                              <TableCell className="text-sm">{(material as any).size || (material as any).specification || '-'}</TableCell>
+                              <TableCell className="text-sm">{material.quantity}</TableCell>
+                              <TableCell className="text-sm">{material.unit}</TableCell>
+                              <TableCell className={`text-sm ${isSentToStore ? 'text-purple-600' : ''}`}>
+                                {isSentToStore ? 'From Store' : formatCurrency(material.unit_price)}
+                              </TableCell>
+                              <TableCell className={`text-right font-bold text-sm ${isSentToStore ? 'text-purple-600' : 'text-green-600'}`}>
+                                {isSentToStore ? '-' : formatCurrency(material.total_price)}
+                              </TableCell>
+                            </TableRow>
                           );
                         })}
-                        <TableRow className="bg-blue-50 font-bold">
-                          <TableCell colSpan={7} className="text-right text-sm">Total Cost:</TableCell>
-                          <TableCell className="text-right text-green-700 text-base">
-                            {formatCurrency(localPurchase.total_cost)}
-                          </TableCell>
-                        </TableRow>
+                        {/* Show separate totals if there are store materials */}
+                        {(() => {
+                          // Using pre-computed storeRequestedMaterials
+                          const vendorMaterials = localPurchase.materials.filter(m => !storeRequestedMaterials.includes(m.material_name));
+                          const vendorTotal = vendorMaterials.reduce((sum, mat) => sum + (mat.total_price || 0), 0);
+                          const storeMaterialsCount = storeRequestedMaterials.length;
+
+                          if (storeMaterialsCount > 0) {
+                            return (
+                              <>
+                                <TableRow className="bg-purple-50">
+                                  <TableCell colSpan={7} className="text-right text-sm text-purple-700">
+                                    Store Materials ({storeMaterialsCount}):
+                                  </TableCell>
+                                  <TableCell className="text-right text-purple-700 text-sm font-medium">
+                                    From M2 Store
+                                  </TableCell>
+                                </TableRow>
+                                <TableRow className="bg-blue-50 font-bold">
+                                  <TableCell colSpan={7} className="text-right text-sm">Vendor Total ({vendorMaterials.length} items):</TableCell>
+                                  <TableCell className="text-right text-green-700 text-base">
+                                    {formatCurrency(vendorTotal)}
+                                  </TableCell>
+                                </TableRow>
+                              </>
+                            );
+                          }
+                          return (
+                            <TableRow className="bg-blue-50 font-bold">
+                              <TableCell colSpan={7} className="text-right text-sm">Total Cost:</TableCell>
+                              <TableCell className="text-right text-green-700 text-base">
+                                {formatCurrency(localPurchase.total_cost)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })()}
                       </TableBody>
                     </Table>
                   </div>

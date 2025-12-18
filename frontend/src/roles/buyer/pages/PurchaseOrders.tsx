@@ -63,6 +63,8 @@ const PurchaseOrders: React.FC = () => {
   const [storeAvailability, setStoreAvailability] = useState<StoreAvailabilityResponse | null>(null);
   const [checkingStoreAvailability, setCheckingStoreAvailability] = useState(false);
   const [completingFromStore, setCompletingFromStore] = useState(false);
+  // Track which materials are selected for store request (by material_name)
+  const [selectedStoreMaterials, setSelectedStoreMaterials] = useState<Set<string>>(new Set());
   const [sendingWhatsAppId, setSendingWhatsAppId] = useState<number | null>(null);
   const [isEditPricesModalOpen, setIsEditPricesModalOpen] = useState(false);
   const [selectedPurchaseForPriceEdit, setSelectedPurchaseForPriceEdit] = useState<Purchase | null>(null);
@@ -432,9 +434,16 @@ const PurchaseOrders: React.FC = () => {
       setSelectedPurchase(purchase);
       setCheckingStoreAvailability(true);
       setIsStoreModalOpen(true);
+      setSelectedStoreMaterials(new Set()); // Reset selection
 
       const availability = await buyerService.checkStoreAvailability(purchase.cr_id);
       setStoreAvailability(availability);
+
+      // Auto-select all available materials by default
+      if (availability.available_materials.length > 0) {
+        const availableNames = new Set(availability.available_materials.map(m => m.material_name));
+        setSelectedStoreMaterials(availableNames);
+      }
     } catch (error: any) {
       showError(error.message || 'Failed to check store availability');
       setIsStoreModalOpen(false);
@@ -443,17 +452,37 @@ const PurchaseOrders: React.FC = () => {
     }
   };
 
+  // Toggle material selection for store request
+  const toggleStoreMaterialSelection = (materialName: string) => {
+    setSelectedStoreMaterials(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(materialName)) {
+        newSet.delete(materialName);
+      } else {
+        newSet.add(materialName);
+      }
+      return newSet;
+    });
+  };
+
   const handleConfirmGetFromStore = async () => {
     if (!selectedPurchase) return;
+    if (selectedStoreMaterials.size === 0) {
+      showWarning('Please select at least one material to request from store');
+      return;
+    }
 
     try {
       setCompletingFromStore(true);
-      const result = await buyerService.completeFromStore(selectedPurchase.cr_id);
+      // Convert Set to Array and pass selected materials
+      const selectedMaterialsList = Array.from(selectedStoreMaterials);
+      const result = await buyerService.completeFromStore(selectedPurchase.cr_id, '', selectedMaterialsList);
 
-      showSuccess(result.message || 'Material requests sent to M2 Store!');
+      showSuccess(result.message || `${selectedMaterialsList.length} material(s) requested from M2 Store!`);
       setIsStoreModalOpen(false);
       setStoreAvailability(null);
       setSelectedPurchase(null);
+      setSelectedStoreMaterials(new Set());
 
       // Remove cache completely and refetch fresh data
       removeQueries(['purchases']);
@@ -467,8 +496,13 @@ const PurchaseOrders: React.FC = () => {
       await new Promise(resolve => setTimeout(resolve, 500));
       await refetchPending();
       await refetchCompleted();
-      // Switch to completed tab to show the item
-      setActiveTab('completed');
+      // Switch to pending approval tab if partial selection, completed if all selected
+      if (storeAvailability && selectedMaterialsList.length < storeAvailability.available_materials.length) {
+        // Partial selection - stay on ongoing tab
+        showInfo('Remaining materials can be ordered from vendor or requested from store later');
+      } else {
+        setActiveTab('completed');
+      }
     } catch (error: any) {
       showError(error.message || 'Failed to request from store');
     } finally {
@@ -1112,7 +1146,16 @@ const PurchaseOrders: React.FC = () => {
                           <div className="text-xs text-gray-500 mb-0.5">Materials</div>
                           <div className="text-sm font-medium flex items-center gap-1">
                             <Package className="w-3 h-3" />
-                            {purchase.materials_count} items
+                            {/* Show remaining materials count (excluding store-sent) */}
+                            {(() => {
+                              const storeCount = purchase.store_requested_materials?.length || 0;
+                              const totalCount = purchase.materials_count || 0;
+                              const remainingCount = totalCount - storeCount;
+                              if (storeCount > 0) {
+                                return <span>{remainingCount} items <span className="text-purple-600 text-xs">({storeCount} in store)</span></span>;
+                              }
+                              return <span>{totalCount} items</span>;
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -1121,7 +1164,11 @@ const PurchaseOrders: React.FC = () => {
                       <div className="pt-2 border-t border-gray-100">
                         {(() => {
                           // Check if any materials have negotiated prices
-                          const materials = purchase.materials || [];
+                          // Exclude store-sent materials from calculation
+                          const storeRequestedMaterials = purchase.store_requested_materials || [];
+                          const materials = (purchase.materials || []).filter((m: any) =>
+                            !storeRequestedMaterials.includes(m.material_name)
+                          );
                           const hasNegotiatedPrices = materials.some((m: any) =>
                             m.negotiated_price !== undefined && m.negotiated_price !== null
                           );
@@ -1129,7 +1176,11 @@ const PurchaseOrders: React.FC = () => {
                             const originalPrice = m.original_unit_price || m.unit_price || 0;
                             return sum + (originalPrice * (m.quantity || 0));
                           }, 0);
-                          const currentTotal = purchase.total_cost || 0;
+                          // Recalculate current total excluding store materials
+                          const currentTotal = materials.reduce((sum: number, m: any) => {
+                            const price = m.negotiated_price ?? m.unit_price ?? 0;
+                            return sum + (price * (m.quantity || 0));
+                          }, 0);
                           const priceDiff = hasNegotiatedPrices ? currentTotal - originalTotal : 0;
                           const diffPercentage = originalTotal > 0 ? (priceDiff / originalTotal) * 100 : 0;
 
@@ -1219,8 +1270,25 @@ const PurchaseOrders: React.FC = () => {
                         </div>
                       )}
 
-                      {/* First Row: Select Vendor OR Get from Store - Show if no vendor, no pending approval, AND (no store requests OR store request rejected) */}
-                      {purchase.status === 'pending' && !purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (!purchase.has_store_requests || purchase.any_store_request_rejected) && (
+                      {/* Partial Store Request - Some materials sent to store, others pending vendor selection */}
+                      {purchase.status === 'pending' && purchase.has_store_requests && !purchase.store_requests_pending && !purchase.all_store_requests_approved && purchase.store_requested_materials && purchase.store_requested_materials.length > 0 && purchase.store_requested_materials.length < (purchase.materials_count || 0) && (
+                        <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 mb-1">
+                          <div className="flex items-center gap-2">
+                            <Store className="w-4 h-4 text-purple-600" />
+                            <div>
+                              <div className="text-xs font-semibold text-purple-900">
+                                {purchase.store_requested_materials.length} material(s) sent to store
+                              </div>
+                              <div className="text-xs text-purple-700">
+                                {(purchase.materials_count || 0) - purchase.store_requested_materials.length} remaining for vendor
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* First Row: Select Vendor OR Get from Store - Show if no vendor, no pending approval, AND (no store requests OR store request rejected OR partial store request) */}
+                      {purchase.status === 'pending' && !purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (!purchase.has_store_requests || purchase.any_store_request_rejected || (purchase.store_requested_materials && purchase.store_requested_materials.length < (purchase.materials_count || 0))) && (
                         <div className="flex flex-col gap-1.5">
                           <div className="flex gap-1.5">
                             <Button
@@ -2828,19 +2896,74 @@ const PurchaseOrders: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Available Materials */}
+                    {/* Available Materials - Clickable/Selectable */}
                     {storeAvailability.available_materials.length > 0 && (
                       <div>
-                        <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                          <CheckCircle className="w-4 h-4 text-green-600" />
-                          Available ({storeAvailability.available_materials.length})
-                        </h3>
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                            Available ({storeAvailability.available_materials.length})
+                          </h3>
+                          <span className="text-xs text-gray-500">
+                            {selectedStoreMaterials.size} selected
+                          </span>
+                        </div>
                         <div className="space-y-2">
-                          {storeAvailability.available_materials.map((mat, idx) => (
-                            <div key={idx} className="bg-green-50 border border-green-200 rounded-lg p-3">
-                              <div className="font-medium text-gray-900 text-sm">{mat.material_name}</div>
+                          {storeAvailability.available_materials.map((mat, idx) => {
+                            const isSelected = selectedStoreMaterials.has(mat.material_name);
+                            return (
+                              <div
+                                key={idx}
+                                onClick={() => toggleStoreMaterialSelection(mat.material_name)}
+                                className={`rounded-lg p-3 cursor-pointer transition-all border-2 ${
+                                  isSelected
+                                    ? 'bg-green-100 border-green-500 shadow-sm'
+                                    : 'bg-green-50 border-green-200 hover:border-green-400'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  {/* Checkbox */}
+                                  <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                                    isSelected
+                                      ? 'bg-green-600 border-green-600'
+                                      : 'bg-white border-gray-300'
+                                  }`}>
+                                    {isSelected && <Check className="w-3 h-3 text-white" />}
+                                  </div>
+                                  {/* Material Info */}
+                                  <div className="flex-1">
+                                    <div className="font-medium text-gray-900 text-sm">{mat.material_name}</div>
+                                    <div className="text-xs text-gray-600 mt-1">
+                                      Required: {mat.required_quantity} | In Store: {mat.available_quantity}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Already Sent Materials - Show with status */}
+                    {storeAvailability.already_sent_materials && storeAvailability.already_sent_materials.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                          <Store className="w-4 h-4 text-purple-600" />
+                          Already Sent to Store ({storeAvailability.already_sent_materials.length})
+                        </h3>
+                        <p className="text-xs text-gray-500 mb-2">These materials have already been requested</p>
+                        <div className="space-y-2">
+                          {storeAvailability.already_sent_materials.map((mat: any, idx: number) => (
+                            <div key={idx} className="bg-purple-50 border border-purple-200 rounded-lg p-3 opacity-80">
+                              <div className="flex items-center justify-between">
+                                <div className="font-medium text-gray-900 text-sm">{mat.material_name}</div>
+                                <span className="text-xs px-2 py-0.5 rounded bg-purple-200 text-purple-800 capitalize">
+                                  {mat.status}
+                                </span>
+                              </div>
                               <div className="text-xs text-gray-600 mt-1">
-                                Required: {mat.required_quantity} | In Store: {mat.available_quantity}
+                                Required: {mat.required_quantity}
                               </div>
                             </div>
                           ))}
@@ -2848,16 +2971,17 @@ const PurchaseOrders: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Unavailable Materials */}
+                    {/* Unavailable Materials - Not selectable */}
                     {storeAvailability.unavailable_materials.length > 0 && (
                       <div>
                         <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                           <XCircleIcon className="w-4 h-4 text-red-600" />
                           Not Available ({storeAvailability.unavailable_materials.length})
                         </h3>
+                        <p className="text-xs text-gray-500 mb-2">These materials need to be ordered from vendor</p>
                         <div className="space-y-2">
                           {storeAvailability.unavailable_materials.map((mat, idx) => (
-                            <div key={idx} className="bg-red-50 border border-red-200 rounded-lg p-3">
+                            <div key={idx} className="bg-red-50 border border-red-200 rounded-lg p-3 opacity-70">
                               <div className="font-medium text-gray-900 text-sm">{mat.material_name}</div>
                               <div className="text-xs text-gray-600 mt-1">
                                 Required: {mat.required_quantity} | In Store: {mat.available_quantity}
@@ -2873,36 +2997,50 @@ const PurchaseOrders: React.FC = () => {
 
               {/* Modal Footer */}
               <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-                <div className="flex items-center justify-end gap-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setIsStoreModalOpen(false);
-                      setStoreAvailability(null);
-                    }}
-                    disabled={completingFromStore}
-                  >
-                    Cancel
-                  </Button>
-                  {storeAvailability?.can_complete_from_store && (
+                <div className="flex items-center justify-between">
+                  {/* Selection info */}
+                  <div className="text-sm text-gray-600">
+                    {selectedStoreMaterials.size > 0 ? (
+                      <span className="text-green-700 font-medium">
+                        {selectedStoreMaterials.size} material{selectedStoreMaterials.size !== 1 ? 's' : ''} selected for store
+                      </span>
+                    ) : (
+                      <span className="text-gray-500">Select materials to request from store</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
                     <Button
-                      onClick={handleConfirmGetFromStore}
+                      variant="outline"
+                      onClick={() => {
+                        setIsStoreModalOpen(false);
+                        setStoreAvailability(null);
+                        setSelectedStoreMaterials(new Set());
+                      }}
                       disabled={completingFromStore}
-                      className="bg-purple-500 hover:bg-purple-600 text-white"
                     >
-                      {completingFromStore ? (
-                        <>
-                          <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          Sending Request...
-                        </>
-                      ) : (
-                        <>
-                          <Package className="w-4 h-4 mr-2" />
-                          Request from Store
-                        </>
-                      )}
+                      Cancel
                     </Button>
-                  )}
+                    {/* Show button when there are available materials (even if some unavailable) */}
+                    {storeAvailability && storeAvailability.available_materials.length > 0 && (
+                      <Button
+                        onClick={handleConfirmGetFromStore}
+                        disabled={completingFromStore || selectedStoreMaterials.size === 0}
+                        className="bg-purple-500 hover:bg-purple-600 text-white disabled:opacity-50"
+                      >
+                        {completingFromStore ? (
+                          <>
+                            <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            Sending Request...
+                          </>
+                        ) : (
+                          <>
+                            <Package className="w-4 h-4 mr-2" />
+                            Request Selected ({selectedStoreMaterials.size})
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
             </motion.div>

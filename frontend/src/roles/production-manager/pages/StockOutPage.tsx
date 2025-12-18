@@ -79,6 +79,17 @@ const StockOutPage: React.FC = () => {
     confirmColor: 'CONFIRM'
   });
 
+  // Rejection modal state
+  const [rejectionModal, setRejectionModal] = useState<{
+    show: boolean;
+    requestId: number | null;
+    reason: string;
+  }>({
+    show: false,
+    requestId: null,
+    reason: ''
+  });
+
   // Form state for new Delivery Note
   const [dnFormData, setDnFormData] = useState<CreateDeliveryNoteData>({
     project_id: 0,
@@ -105,8 +116,10 @@ const StockOutPage: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
+      // Use getSentInternalRequests() to get ALL requests with request_send=True
+      // This includes requests from Buyers, not just the current user's requests
       const [requestsData, deliveryNotesResult, projectsData, materialsData, configData] = await Promise.all([
-        inventoryService.getAllInternalRequests(),
+        inventoryService.getSentInternalRequests(),
         inventoryService.getAllDeliveryNotes(),
         inventoryService.getAllProjects(),
         inventoryService.getAllInventoryItems(),
@@ -168,7 +181,12 @@ const StockOutPage: React.FC = () => {
   const handleApproveRequest = async (requestId: number) => {
     try {
       await inventoryService.approveInternalRequest(requestId);
-      fetchData();
+      // Update local state smoothly instead of full page reload
+      setAllRequests(prev => prev.map(req =>
+        req.request_id === requestId
+          ? { ...req, status: 'APPROVED' as const }
+          : req
+      ));
       showSuccess('Request approved successfully');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to approve request';
@@ -176,27 +194,56 @@ const StockOutPage: React.FC = () => {
     }
   };
 
-  const handleRejectRequest = async (requestId: number) => {
-    const reason = prompt('Enter rejection reason:');
-    if (!reason) return;
+  // Open rejection modal
+  const handleRejectRequest = (requestId: number) => {
+    setRejectionModal({
+      show: true,
+      requestId,
+      reason: ''
+    });
+  };
+
+  // Confirm rejection with reason
+  const confirmRejectRequest = async () => {
+    if (!rejectionModal.requestId || !rejectionModal.reason.trim()) {
+      showError('Please enter a rejection reason');
+      return;
+    }
 
     try {
-      await inventoryService.rejectInternalRequest(requestId, reason);
-      fetchData();
+      await inventoryService.rejectInternalRequest(rejectionModal.requestId, rejectionModal.reason);
+      // Update local state smoothly instead of full page reload
+      setAllRequests(prev => prev.map(req =>
+        req.request_id === rejectionModal.requestId
+          ? { ...req, status: 'REJECTED' as const, rejection_reason: rejectionModal.reason }
+          : req
+      ));
       showSuccess('Request rejected');
+      setRejectionModal({ show: false, requestId: null, reason: '' });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to reject request';
       showError(errorMessage);
     }
   };
 
+  // Close rejection modal
+  const closeRejectionModal = () => {
+    setRejectionModal({ show: false, requestId: null, reason: '' });
+  };
+
   const handleCreateDNFromRequest = (request: InternalMaterialRequest) => {
     setSelectedRequestForDN(request);
 
-    const attentionTo = request.project_details?.site_supervisor?.full_name || '';
+    // Check if project has site engineers from the projects list
+    const projectData = projects.find(p => p.project_id === request.project_id);
+    const siteEngineers = projectData?.site_supervisors || [];
 
-    if (!attentionTo) {
-      showWarning('No Site Engineer assigned to this project. Please select one before creating the delivery note.');
+    // Auto-select if only one site engineer, otherwise leave blank for user to select
+    let attentionTo = '';
+    if (siteEngineers.length === 1) {
+      attentionTo = siteEngineers[0].full_name;
+    } else if (siteEngineers.length === 0) {
+      showWarning('No Site Engineer assigned to this project. Please assign one before creating the delivery note.');
     }
 
     setDnFormData({
@@ -487,6 +534,8 @@ const StockOutPage: React.FC = () => {
         matchesStatus = normalized === 'APPROVED' || normalized === 'DN_PENDING';
       } else if (statusFilter === 'COMPLETED') {
         matchesStatus = normalized === 'DISPATCHED' || normalized === 'FULFILLED';
+      } else if (statusFilter === 'REJECTED') {
+        matchesStatus = normalized === 'REJECTED' || req.status?.toLowerCase() === 'rejected';
       }
 
       const matchesSearch = searchTerm === '' ||
@@ -593,14 +642,18 @@ const StockOutPage: React.FC = () => {
           {/* Filters */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <div className="flex gap-2 flex-wrap">
-              {['PENDING', 'APPROVED', 'COMPLETED'].map(status => (
+              {['PENDING', 'APPROVED', 'COMPLETED', 'REJECTED'].map(status => (
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     statusFilter === status
-                      ? 'bg-cyan-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      ? status === 'REJECTED'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-cyan-600 text-white'
+                      : status === 'REJECTED'
+                        ? 'bg-red-50 text-red-700 hover:bg-red-100'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                   aria-label={`Filter by ${status}`}
                 >
@@ -729,6 +782,19 @@ const StockOutPage: React.FC = () => {
                               <CheckCircle className="w-3 h-3" />
                               Delivered
                             </span>
+                          )}
+                          {(req.status === 'REJECTED' || req.status === 'rejected') && (
+                            <div className="flex flex-col gap-1">
+                              <span className="px-3 py-1.5 text-xs bg-red-100 text-red-600 rounded-lg font-medium flex items-center gap-1">
+                                <X className="w-3 h-3" />
+                                Rejected
+                              </span>
+                              {req.rejection_reason && (
+                                <span className="text-xs text-red-600 italic max-w-[200px] truncate" title={req.rejection_reason}>
+                                  "{req.rejection_reason}"
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
                       </td>
@@ -951,20 +1017,27 @@ const StockOutPage: React.FC = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Attention To (Site Engineer) *</label>
-                      <select
-                        value={dnFormData.attention_to}
-                        onChange={(e) => setDnFormData({ ...dnFormData, attention_to: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                        required
-                        aria-label="Select site engineer"
-                      >
-                        <option value="">Select Site Engineer</option>
-                        {getAvailableRecipients().map((recipient, idx) => (
-                          <option key={idx} value={recipient.name}>
-                            {recipient.name} ({recipient.role})
-                          </option>
-                        ))}
-                      </select>
+                      {getAvailableRecipients().length > 0 ? (
+                        <select
+                          value={dnFormData.attention_to}
+                          onChange={(e) => setDnFormData({ ...dnFormData, attention_to: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                          required
+                          aria-label="Select site engineer"
+                        >
+                          <option value="">Select Site Engineer</option>
+                          {getAvailableRecipients().map((recipient, idx) => (
+                            <option key={idx} value={recipient.name}>
+                              {recipient.name} ({recipient.role})
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="w-full px-3 py-2 border border-red-300 bg-red-50 rounded-lg text-red-700 text-sm">
+                          <span className="font-medium">⚠️ No Site Engineer assigned</span>
+                          <p className="text-xs mt-1 text-red-600">Please assign a Site Engineer to this project first.</p>
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Requested By</label>
@@ -1101,8 +1174,9 @@ const StockOutPage: React.FC = () => {
                 </button>
                 <button
                   onClick={handleCreateDeliveryNote}
-                  className="px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50 flex items-center gap-2"
-                  disabled={saving}
+                  className="px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  disabled={saving || !dnFormData.attention_to}
+                  title={!dnFormData.attention_to ? 'Please select a Site Engineer first' : ''}
                 >
                   {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   {saving ? 'Creating...' : 'Create Delivery Note'}
@@ -1123,6 +1197,58 @@ const StockOutPage: React.FC = () => {
         confirmText={confirmModal.confirmText}
         confirmColor={confirmModal.confirmColor}
       />
+
+      {/* Rejection Reason Modal */}
+      {rejectionModal.show && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-red-50 to-red-100 px-6 py-4 border-b border-red-200">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-100 rounded-lg">
+                  <X className="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Reject Request</h3>
+                  <p className="text-sm text-gray-600">Please provide a reason for rejection</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="p-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Rejection Reason <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={rejectionModal.reason}
+                onChange={(e) => setRejectionModal(prev => ({ ...prev, reason: e.target.value }))}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-none"
+                rows={4}
+                placeholder="Enter the reason for rejecting this request..."
+                autoFocus
+              />
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-end gap-3">
+              <button
+                onClick={closeRejectionModal}
+                className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRejectRequest}
+                disabled={!rejectionModal.reason.trim()}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Reject Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

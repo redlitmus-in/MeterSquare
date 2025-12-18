@@ -202,9 +202,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
       // CRITICAL FIX: Filter out materials that are already in approved POChildren
       // This prevents duplicate vendor selection for already-approved materials
+      // Also filter out materials that have been sent to store (store_requested_materials)
+      const storeRequestedMaterials = purchaseData.store_requested_materials || [];
       const availableMaterials = purchaseData.materials.filter(material => {
         const isApproved = isMaterialInApprovedPOChild(material.material_name);
-        return !isApproved;
+        const isSentToStore = storeRequestedMaterials.includes(material.material_name);
+        return !isApproved && !isSentToStore;
       });
 
       const initialState = availableMaterials.map(material => {
@@ -1238,6 +1241,18 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         : `Select vendor for each material (${selectedCount}/${materialVendors.length} selected)`
                       }
                     </div>
+                    {/* Store-sent materials indicator */}
+                    {purchase.store_requested_materials && purchase.store_requested_materials.length > 0 && (
+                      <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg">
+                        <Store className="w-4 h-4 text-purple-600" />
+                        <span className="text-xs font-medium text-purple-800">
+                          {purchase.store_requested_materials.length} material(s) sent to M2 Store
+                        </span>
+                        <span className="text-xs text-purple-600">
+                          (not shown below)
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <button
                     onClick={onClose}

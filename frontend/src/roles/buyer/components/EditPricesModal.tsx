@@ -11,7 +11,10 @@ import {
   AlertCircle,
   CheckCircle,
   Loader2,
-  RotateCcw
+  RotateCcw,
+  Store,
+  Truck,
+  Hourglass
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -54,10 +57,46 @@ const EditPricesModal: React.FC<EditPricesModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Initialize material prices from purchase
+  // Get store-sent materials count for display
+  const storeRequestedMaterials = purchase.store_requested_materials || [];
+  const storeRequestedCount = storeRequestedMaterials.length;
+
+  // Pre-compute POChild lookup map for O(1) material status lookup
+  const materialToPOChildMap = useMemo(() => {
+    const map = new Map<string, any>();
+    const poChildren = purchase.po_children || [];
+
+    poChildren.forEach(poChild => {
+      poChild.materials?.forEach((m: any) => {
+        if (m.material_name) {
+          const key = m.material_name.toLowerCase().trim();
+          map.set(key, poChild);
+        }
+      });
+    });
+
+    return map;
+  }, [purchase.po_children]);
+
+  // Count vendor-sent materials for indicator
+  const vendorSentCount = useMemo(() => {
+    return purchase.materials?.filter(m => {
+      const key = m.material_name.toLowerCase().trim();
+      return materialToPOChildMap.has(key);
+    }).length || 0;
+  }, [purchase.materials, materialToPOChildMap]);
+
+  // Initialize material prices from purchase (excluding store-sent and vendor-sent materials)
   useEffect(() => {
     if (isOpen && purchase.materials) {
-      const initialPrices = purchase.materials.map(material => ({
+      // Filter out materials that have been sent to store OR sent to vendor
+      const availableMaterials = purchase.materials.filter(material => {
+        const isSentToStore = storeRequestedMaterials.includes(material.material_name);
+        const isSentToVendor = materialToPOChildMap.has(material.material_name.toLowerCase().trim());
+        return !isSentToStore && !isSentToVendor;
+      });
+
+      const initialPrices = availableMaterials.map(material => ({
         material_name: material.material_name,
         quantity: material.quantity,
         unit: material.unit,
@@ -69,7 +108,7 @@ const EditPricesModal: React.FC<EditPricesModalProps> = ({
       setMaterialPrices(initialPrices);
       setHasChanges(false);
     }
-  }, [isOpen, purchase]);
+  }, [isOpen, purchase, storeRequestedMaterials, materialToPOChildMap]);
 
   // Calculate totals
   const totals = useMemo(() => {
@@ -221,6 +260,31 @@ const EditPricesModal: React.FC<EditPricesModalProps> = ({
                     <p className="text-xs text-gray-500 mt-1">
                       Update prices based on vendor negotiation before sending for approval.
                     </p>
+                    {/* Store-sent and vendor-sent materials indicators */}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {storeRequestedCount > 0 && (
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg">
+                          <Store className="w-4 h-4 text-purple-600" />
+                          <span className="text-xs font-medium text-purple-800">
+                            {storeRequestedCount} material(s) sent to M2 Store
+                          </span>
+                          <span className="text-xs text-purple-600">
+                            (not shown below)
+                          </span>
+                        </div>
+                      )}
+                      {vendorSentCount > 0 && (
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-100 border border-amber-300 rounded-lg">
+                          <Truck className="w-4 h-4 text-amber-600" />
+                          <span className="text-xs font-medium text-amber-800">
+                            {vendorSentCount} material(s) sent to vendor
+                          </span>
+                          <span className="text-xs text-amber-600">
+                            (not shown below)
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <button
                     onClick={onClose}

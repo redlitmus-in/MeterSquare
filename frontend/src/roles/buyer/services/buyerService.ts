@@ -145,6 +145,7 @@ export interface Purchase {
   material_vendor_selections?: Record<string, MaterialVendorSelection>;
   has_store_requests?: boolean;
   store_request_count?: number;
+  store_requested_materials?: string[];  // List of material names sent to store
   all_store_requests_approved?: boolean;
   any_store_request_rejected?: boolean;
   store_requests_pending?: boolean;
@@ -1115,11 +1116,15 @@ class BuyerService {
   }
 
   // Complete purchase from M2 Store
-  async completeFromStore(crId: number, notes?: string): Promise<CompleteFromStoreResponse> {
+  // selectedMaterials: optional array of material names to request (if not provided, requests all available)
+  async completeFromStore(crId: number, notes?: string, selectedMaterials?: string[]): Promise<CompleteFromStoreResponse> {
     try {
       const response = await apiClient.post<CompleteFromStoreResponse>(
         `/buyer/purchase/${crId}/complete-from-store`,
-        { notes: notes || '' }
+        {
+          notes: notes || '',
+          selected_materials: selectedMaterials // Pass selected materials to backend
+        }
       );
 
       if (response.data.success) {

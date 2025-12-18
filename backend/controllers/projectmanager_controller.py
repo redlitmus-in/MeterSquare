@@ -2066,12 +2066,14 @@ def get_project_completion_details(project_id):
         from sqlalchemy import func
 
         # Get all unique PM-SE assignment pairs with aggregated data
+        # Use bool_or for completion_requested: True if ANY record shows SE requested
+        # Use bool_or for pm_confirmed: True if ANY record is confirmed (PM confirms all at once)
         assignment_pairs = db.session.query(
             PMAssignSS.assigned_by_pm_id,
             PMAssignSS.assigned_to_se_id,
             func.array_agg(PMAssignSS.item_indices).label('all_item_indices'),
-            func.bool_and(PMAssignSS.se_completion_requested).label('completion_requested'),
-            func.bool_and(PMAssignSS.pm_confirmed_completion).label('pm_confirmed'),
+            func.coalesce(func.bool_or(PMAssignSS.se_completion_requested), False).label('completion_requested'),
+            func.coalesce(func.bool_or(PMAssignSS.pm_confirmed_completion), False).label('pm_confirmed'),
             func.max(PMAssignSS.se_completion_request_date).label('request_date'),
             func.max(PMAssignSS.pm_confirmation_date).label('confirmation_date')
         ).filter(
@@ -2083,9 +2085,6 @@ def get_project_completion_details(project_id):
             PMAssignSS.assigned_by_pm_id,
             PMAssignSS.assigned_to_se_id
         ).all()
-
-        # Log for debugging
-        log.info(f"Project {project_id} completion details: Found {len(assignment_pairs)} PM-SE pairs")
 
         # Build detailed response
         details = []

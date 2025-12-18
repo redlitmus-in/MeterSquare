@@ -120,6 +120,13 @@ def get_all_sitesupervisor_boqs():
 
         log.info(f"=== Found {len(item_assignments)} item assignments for SE {effective_user_id if is_admin_viewing else user_id} ===")
 
+        # DEBUG: Log all SE assignments to help troubleshoot
+        if len(item_assignments) == 0:
+            all_assignments = PMAssignSS.query.filter(PMAssignSS.is_deleted == False).limit(20).all()
+            log.info(f"=== DEBUG: No assignments found for user_id={user_id}. Sample of all assignments: ===")
+            for a in all_assignments:
+                log.info(f"    Assignment {a.pm_assign_id}: project={a.project_id}, boq={a.boq_id}, assigned_to_se_id={a.assigned_to_se_id}, assigned_by_pm_id={a.assigned_by_pm_id}")
+
         # Get unique project IDs from assignments
         project_ids_from_assignments = list(set([a.project_id for a in item_assignments if a.project_id]))
 
@@ -169,10 +176,13 @@ def get_all_sitesupervisor_boqs():
 
         # ✅ PERFORMANCE OPTIMIZATION: Batch load all related data before the loop
         # Collect all BOQ IDs from all projects for batch queries
+        # FIX: Include BOQs with item assignments regardless of email_sent status
+        boq_ids_with_assignments = set([a.boq_id for a in item_assignments if a.boq_id])
         all_boq_ids = []
         all_project_ids = [p.project_id for p in projects]
         for project in projects:
-            boqs = [boq for boq in project.boqs if not boq.is_deleted and boq.email_sent] if hasattr(project, 'boqs') and project.boqs else []
+            # Include BOQs that are either email_sent OR have item assignments to this SE
+            boqs = [boq for boq in project.boqs if not boq.is_deleted and (boq.email_sent or boq.boq_id in boq_ids_with_assignments)] if hasattr(project, 'boqs') and project.boqs else []
             all_boq_ids.extend([boq.boq_id for boq in boqs])
 
         # Batch load BOQ History (was: N queries per project, now: 1 query total)
@@ -218,7 +228,8 @@ def get_all_sitesupervisor_boqs():
         projects_list = []
         for project in projects:
             # Use pre-loaded relationship instead of querying
-            boqs = [boq for boq in project.boqs if not boq.is_deleted and boq.email_sent] if hasattr(project, 'boqs') and project.boqs else []
+            # FIX: Include BOQs that are either email_sent OR have item assignments to this SE
+            boqs = [boq for boq in project.boqs if not boq.is_deleted and (boq.email_sent or boq.boq_id in boq_ids_with_assignments)] if hasattr(project, 'boqs') and project.boqs else []
 
             # Collect BOQ IDs for this project
             boq_ids = [boq.boq_id for boq in boqs]
@@ -260,6 +271,10 @@ def get_all_sitesupervisor_boqs():
             assigned_items_details = []
             boqs_with_items = []
 
+            # FIX: Define target_se_id at project loop level for consistency
+            # Use effective_user_id when admin is viewing as SE, otherwise use user_id
+            target_se_id = effective_user_id if is_admin_viewing and effective_user_id else user_id
+
             if boq_ids:
                 # Get ALL assignments for these BOQs from pre-loaded data (NO QUERY)
                 boq_assignments_list = []
@@ -276,16 +291,27 @@ def get_all_sitesupervisor_boqs():
 
                         # Get assignments from pre-loaded data (NO QUERY)
                         assignments = [pa for pa in all_pm_assign_ss.get(boq_id, [])
-                                      if pa.assigned_to_se_id == user_id]  # ✅ Filter from pre-loaded data
+                                      if pa.assigned_to_se_id == target_se_id]  # Filter from pre-loaded data
 
                         # Collect items assigned to this SE for this BOQ
                         boq_assigned_items = []
 
                         # Get all assigned item indices for this SE from pm_assign_ss
+                        # Build a map of index -> assignment for PM info lookup
                         assigned_indices = set()
+                        index_to_assignment = {}
                         for assignment in assignments:
                             if assignment.item_indices:
-                                assigned_indices.update(assignment.item_indices)
+                                for idx in assignment.item_indices:
+                                    assigned_indices.add(idx)
+                                    index_to_assignment[idx] = assignment
+
+                        # Pre-load PM names for assignments
+                        pm_ids = set(a.assigned_by_pm_id for a in assignments if a.assigned_by_pm_id)
+                        pm_names_map = {}
+                        if pm_ids:
+                            pm_users = User.query.filter(User.user_id.in_(pm_ids)).all()
+                            pm_names_map = {u.user_id: u.full_name for u in pm_users}
 
                         # Process assigned items
                         for idx in assigned_indices:
@@ -293,12 +319,18 @@ def get_all_sitesupervisor_boqs():
                                 item = items[idx]
                                 items_assigned_to_me += 1
 
+                                # Get PM info from the assignment record, not the item
+                                assignment_for_idx = index_to_assignment.get(idx)
+                                pm_user_id = assignment_for_idx.assigned_by_pm_id if assignment_for_idx else None
+                                pm_name = pm_names_map.get(pm_user_id, 'Unknown') if pm_user_id else 'Unknown'
+                                assignment_date = assignment_for_idx.assignment_date if assignment_for_idx else None
+                                assignment_status = assignment_for_idx.assignment_status if assignment_for_idx else 'assigned'
+
                                 # Group by PM
-                                pm_name = item.get('assigned_by_pm_name', 'Unknown')
                                 if pm_name not in items_by_pm:
                                     items_by_pm[pm_name] = {
                                         "pm_name": pm_name,
-                                        "pm_user_id": item.get('assigned_by_pm_user_id'),
+                                        "pm_user_id": pm_user_id,
                                         "items_count": 0
                                     }
                                 items_by_pm[pm_name]["items_count"] += 1
@@ -334,12 +366,15 @@ def get_all_sitesupervisor_boqs():
                                                         for field in price_fields + ['wage_per_day', 'total_wage']:
                                                             labour.pop(field, None)
 
-                                # Add assignment metadata
+                                # Add assignment metadata from pm_assign_ss record
                                 item_detail["item_index"] = idx
                                 item_detail["assigned_by_pm_name"] = pm_name
-                                item_detail["assigned_by_pm_user_id"] = item.get('assigned_by_pm_user_id')
-                                item_detail["assignment_date"] = item.get('assignment_date')
-                                item_detail["assignment_status"] = item.get('assignment_status', 'assigned')
+                                item_detail["assigned_by_pm_user_id"] = pm_user_id
+                                item_detail["assigned_to_se_name"] = current_user.get('full_name', 'Site Engineer')
+                                item_detail["assigned_to_se_user_id"] = target_se_id
+                                item_detail["assigned_by_role"] = 'projectManager'
+                                item_detail["assignment_date"] = assignment_date.isoformat() if assignment_date else None
+                                item_detail["assignment_status"] = assignment_status or 'assigned'
 
                                 assigned_items_details.append(item_detail)
                                 boq_assigned_items.append(item_detail)
@@ -376,16 +411,17 @@ def get_all_sitesupervisor_boqs():
 
             # Check if all SE's work has been PM-confirmed using pre-loaded data (NO QUERY)
             # Filter from pre-loaded data instead of querying
+            # FIX: Use target_se_id for consistency with admin-viewing-as-SE feature
             project_assignments = all_pm_assign_ss_by_project.get(project.project_id, [])
             se_assignments = [a for a in project_assignments
-                            if a.assigned_to_se_id == user_id and a.se_completion_requested]  # ✅ Uses pre-loaded dict
+                            if a.assigned_to_se_id == target_se_id and a.se_completion_requested]
 
             # SE's work is confirmed if ALL their requested assignments are PM-confirmed
             all_my_work_confirmed = all(a.pm_confirmed_completion for a in se_assignments) if se_assignments else False
 
             # Check if THIS SE has requested completion using pre-loaded data (NO QUERY)
             # Filter from pre-loaded data instead of querying
-            my_se_assignments = [a for a in project_assignments if a.assigned_to_se_id == user_id]  # ✅ Uses pre-loaded dict
+            my_se_assignments = [a for a in project_assignments if a.assigned_to_se_id == target_se_id]
             my_completion_requested = any(a.se_completion_requested for a in my_se_assignments)
 
             projects_list.append({
@@ -1314,16 +1350,14 @@ def request_project_completion(project_id):
                 "error": "Project is already completed"
             }), 400
 
-        # Get BOQ and BOQ history
+        # Get BOQ
         boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
-        boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
-        boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).first()
-
         if not boq:
             return jsonify({
                 "error": "BOQ not found for this project"
             }), 404
 
+        # Get latest BOQ history
         boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).first()
 
         # Get Project Manager details (user_id is now JSONB array)
@@ -1401,14 +1435,35 @@ def request_project_completion(project_id):
         from models.pm_assign_ss import PMAssignSS
 
         # Find all assignments for this SE in this project
-        se_assignments = PMAssignSS.query.filter_by(
-            project_id=project_id,
-            assigned_to_se_id=user_id,
-            is_deleted=False
+        # Only include records with valid assigned_by_pm_id (these are the ones PM can confirm)
+        se_assignments = PMAssignSS.query.filter(
+            PMAssignSS.project_id == project_id,
+            PMAssignSS.assigned_to_se_id == user_id,
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.assigned_by_pm_id.isnot(None)
         ).all()
 
+        # Check if SE is assigned at project level but has no item assignments
+        is_project_level_se = project.site_supervisor_id == user_id
+
+        if not se_assignments:
+            if is_project_level_se:
+                # SE is assigned to project but no specific items assigned yet
+                return jsonify({
+                    "error": "No items have been assigned to you for this project yet",
+                    "details": "The Project Manager needs to assign specific BOQ items to you before you can request completion. Please contact your PM.",
+                    "assignment_type": "project_level_only"
+                }), 400
+            else:
+                return jsonify({
+                    "error": "No items have been assigned to you for this project yet"
+                }), 400
+
         # Mark all SE assignments as completion requested
+        log.info(f"SE {user_id} requesting completion for project {project_id}. Found {len(se_assignments)} assignments to update.")
         for assignment in se_assignments:
+            log.info(f"  - Updating assignment {assignment.pm_assign_id}: PM {assignment.assigned_by_pm_id} -> SE {assignment.assigned_to_se_id}, "
+                    f"was se_completion_requested={assignment.se_completion_requested}, setting to True")
             assignment.se_completion_requested = True
             assignment.se_completion_request_date = datetime.utcnow()
             assignment.last_modified_by = se_name
@@ -1443,6 +1498,16 @@ def request_project_completion(project_id):
         # boq_history.boq_status = "completed"  # REMOVED - premature completion
 
         db.session.commit()
+
+        # Verify the update was successful
+        verification = PMAssignSS.query.filter(
+            PMAssignSS.project_id == project_id,
+            PMAssignSS.assigned_to_se_id == user_id,
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.assigned_by_pm_id.isnot(None)
+        ).all()
+        for v in verification:
+            log.info(f"  VERIFICATION: Assignment {v.pm_assign_id} - se_completion_requested = {v.se_completion_requested}")
 
         # Send notification to PM about completion request
         try:

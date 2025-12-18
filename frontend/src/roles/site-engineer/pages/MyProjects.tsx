@@ -90,6 +90,8 @@ interface Project {
   completion_requested?: boolean;  // PROJECT-LEVEL: true if ANY SE requested
   my_completion_requested?: boolean;  // SE-SPECIFIC: true if THIS SE requested
   my_work_confirmed?: boolean;  // SE-specific: true if all SE's work is PM-confirmed
+  items_assigned_to_me?: number;  // Count of items assigned to this SE by PM
+  total_items?: number;  // Total items in project
   existingPurchaseItems?: BOQItem[];
   newPurchaseItems?: BOQItem[];
   boq_assigned_to_buyer?: boolean;
@@ -277,7 +279,8 @@ const MyProjects: React.FC = () => {
       statusMatch = statusLower === 'in_progress' ||
                    statusLower === 'active' ||
                    statusLower === 'assigned' ||
-                   statusLower === 'pending';
+                   statusLower === 'pending' ||
+                   statusLower === 'items_assigned';
     }
     if (filterStatus === 'completed') {
       statusMatch = statusLower === 'completed';
@@ -302,7 +305,8 @@ const MyProjects: React.FC = () => {
       return statusLower === 'in_progress' ||
              statusLower === 'active' ||
              statusLower === 'assigned' ||
-             statusLower === 'pending';
+             statusLower === 'pending' ||
+             statusLower === 'items_assigned';
     }).length,
     completed: projects.filter(p => p.status?.toLowerCase() === 'completed').length
   });
@@ -331,7 +335,7 @@ const MyProjects: React.FC = () => {
         </span>
       );
     }
-    if (statusLower === 'in_progress' || statusLower === 'active') {
+    if (statusLower === 'in_progress' || statusLower === 'active' || statusLower === 'items_assigned') {
       return (
         <span className="px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium bg-indigo-100 text-indigo-700 flex items-center gap-0.5 sm:gap-1">
           <ClockIcon className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
@@ -476,7 +480,7 @@ const MyProjects: React.FC = () => {
                         >
                           <EyeIcon className="w-5 h-5" />
                         </button>
-                        {!project.my_completion_requested && project.status?.toLowerCase() !== 'completed' && (
+                        {!project.my_completion_requested && project.status?.toLowerCase() !== 'completed' && (project.items_assigned_to_me || 0) > 0 && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -489,6 +493,16 @@ const MyProjects: React.FC = () => {
                             <CheckCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />
                             <span className="hidden sm:inline">Request</span> Completion
                           </button>
+                        )}
+                        {!project.my_completion_requested && project.status?.toLowerCase() !== 'completed' && (project.items_assigned_to_me || 0) === 0 && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-gray-100 border border-gray-300 rounded-md flex items-center gap-1"
+                            title="No items assigned yet - PM needs to assign items first"
+                          >
+                            <ClockIcon className="w-3 sm:w-4 h-3 sm:h-4 text-gray-500 flex-shrink-0" />
+                            <span className="text-[10px] sm:text-xs font-medium text-gray-600">Awaiting Items</span>
+                          </div>
                         )}
                         {project.my_completion_requested && !project.my_work_confirmed && project.status?.toLowerCase() !== 'completed' && (
                           <div onClick={(e) => e.stopPropagation()} className="px-2 sm:px-3 py-1 sm:py-1.5 bg-yellow-100 border border-yellow-400 rounded-md flex items-center gap-1">
@@ -1063,7 +1077,9 @@ const MyProjects: React.FC = () => {
                     refetch();
                   } catch (error: any) {
                     console.error('Error requesting completion:', error);
-                    showError(error?.response?.data?.error || 'Failed to send request');
+                    const errorMsg = error?.response?.data?.error || 'Failed to send request';
+                    const details = error?.response?.data?.details;
+                    showError(details ? `${errorMsg}. ${details}` : errorMsg);
                   } finally {
                     setRequesting(false);
                   }
