@@ -12,6 +12,8 @@ import {
   UserCircleIcon,
   ArrowRightOnRectangleIcon,
   ArrowUturnLeftIcon,
+  ArrowUpTrayIcon,
+  ArrowDownTrayIcon,
   ShoppingCartIcon,
   ChevronRightIcon,
   ChevronDownIcon,
@@ -22,10 +24,7 @@ import {
   DocumentPlusIcon,
   DocumentTextIcon,
   CubeIcon,
-  ExclamationTriangleIcon,
-  ClockIcon,
   UserGroupIcon,
-  Cog6ToothIcon as Settings,
   PencilSquareIcon as PencilIcon,
   BugAntIcon
 } from '@heroicons/react/24/outline';
@@ -40,9 +39,6 @@ import {
   BuildingOfficeIcon as BuildingOfficeSolid,
   ClipboardDocumentCheckIcon as ClipboardDocumentCheckSolid,
   CubeIcon as CubeSolid,
-  ExclamationTriangleIcon as ExclamationTriangleSolid,
-  UserIcon as UserCheck,
-  CheckCircleIcon as CheckCircleSolid,
   PencilSquareIcon as PencilSolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
@@ -56,6 +52,8 @@ import { apiClient } from '@/api/config';
 import { useAdminViewStore } from '@/store/adminViewStore';
 import { adminApi } from '@/api/admin';
 import { API_BASE_URL } from '@/api/config';
+import { useSidebarResize } from '@/hooks/useSidebarResize';
+import { SidebarResizeHandle } from './SidebarResizeHandle';
 
 interface NavigationItem {
   name: string;
@@ -75,12 +73,12 @@ interface SidebarProps {
 const NavigationItemComponent = memo<{
   item: NavigationItem;
   isActive: boolean;
-  isCollapsed: boolean;
+  isIconOnlyMode: boolean;
   isExpanded: boolean;
   hasChildren: boolean;
   onToggleSection: (name: string) => void;
   onNavigate: () => void;
-}>(({ item, isActive, isCollapsed, isExpanded, hasChildren, onToggleSection, onNavigate }) => {
+}>(({ item, isActive, isIconOnlyMode, isExpanded, hasChildren, onToggleSection, onNavigate }) => {
   const IconComponent = isActive ? item.iconSolid : item.icon;
 
   if (hasChildren) {
@@ -94,10 +92,10 @@ const NavigationItemComponent = memo<{
               onToggleSection(item.name.toLowerCase());
             }
           }}
-          title={isCollapsed ? item.name : ''}
+          title={isIconOnlyMode ? item.name : ''}
           className={clsx(
             'flex-1 group flex items-center transition-colors duration-150 text-sm md:text-xs font-medium rounded-lg',
-            isCollapsed ? 'px-2 py-2 justify-center' : 'px-3 py-3 md:px-2.5 md:py-2',
+            isIconOnlyMode ? 'px-2 py-2 justify-center' : 'px-3 py-3 md:px-2.5 md:py-2',
             isActive
               ? item.name === 'Procurement'
                 ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 shadow-md border border-red-200'
@@ -110,7 +108,7 @@ const NavigationItemComponent = memo<{
           <div className="flex items-center">
             <div className={clsx(
               'rounded-md transition-colors duration-150',
-              isCollapsed ? 'p-1.5' : 'p-2 mr-2.5 md:p-1.5 md:mr-2',
+              isIconOnlyMode ? 'p-1.5' : 'p-2 mr-2.5 md:p-1.5 md:mr-2',
               isActive
                 ? item.name === 'Procurement'
                   ? 'bg-red-500 shadow-lg'
@@ -124,10 +122,10 @@ const NavigationItemComponent = memo<{
                 isActive ? 'text-white' : item.color || 'text-gray-500'
               )} />
             </div>
-            {!isCollapsed && <span className="font-semibold">{item.name}</span>}
+            {!isIconOnlyMode && <span className="font-semibold">{item.name}</span>}
           </div>
         </Link>
-        {!isCollapsed && (
+        {!isIconOnlyMode && (
           <button
             onClick={() => onToggleSection(item.name.toLowerCase())}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -151,10 +149,10 @@ const NavigationItemComponent = memo<{
     <Link
       to={item.href}
       onClick={onNavigate}
-      title={isCollapsed ? item.name : ''}
+      title={isIconOnlyMode ? item.name : ''}
       className={clsx(
         'group flex items-center transition-colors duration-150 text-sm md:text-xs font-medium rounded-lg relative overflow-hidden',
-        isCollapsed ? 'px-2 py-2 justify-center' : 'px-3 py-3 md:px-2.5 md:py-2',
+        isIconOnlyMode ? 'px-2 py-2 justify-center' : 'px-3 py-3 md:px-2.5 md:py-2',
         isActive
           ? item.name === 'Procurement'
             ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 shadow-md border border-red-200'
@@ -173,7 +171,7 @@ const NavigationItemComponent = memo<{
       )}
       <div className={clsx(
         'rounded-md transition-colors duration-150',
-        isCollapsed ? 'p-1.5' : 'p-2 mr-2.5 md:p-1.5 md:mr-2',
+        isIconOnlyMode ? 'p-1.5' : 'p-2 mr-2.5 md:p-1.5 md:mr-2',
         isActive
           ? item.name === 'Procurement'
             ? 'bg-red-500 shadow-lg'
@@ -187,7 +185,7 @@ const NavigationItemComponent = memo<{
           isActive ? 'text-white' : item.color || 'text-gray-500'
         )} />
       </div>
-      {!isCollapsed && <span className="font-semibold">{item.name}</span>}
+      {!isIconOnlyMode && <span className="font-semibold">{item.name}</span>}
       <div className={clsx(
         "absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded-xl",
         item.name === 'Procurement'
@@ -211,10 +209,15 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
   const roleColor = getRoleThemeColor(user?.role || user?.role_id || '');
   const dashboardPath = getRoleDashboard();
   const [expandedSections, setExpandedSections] = useState<string[]>(['vendor management']);
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    const saved = localStorage.getItem('sidebarCollapsed');
-    return saved === 'true';
-  });
+  const {
+    sidebarWidth,
+    isResizing,
+    isIconOnlyMode,
+    isMobile,
+    startResize,
+    resetWidth,
+    sidebarRef,
+  } = useSidebarResize();
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(user?.user_status === 'online');
   const [updatingStatus, setUpdatingStatus] = useState(false);
@@ -226,22 +229,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     }
   }, [user?.user_status]);
 
-  // Listen for storage changes to sync collapsed state across components
-  React.useEffect(() => {
-    const handleStorageChange = () => {
-      const saved = localStorage.getItem('sidebarCollapsed');
-      setIsCollapsed(saved === 'true');
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('sidebarToggle', handleStorageChange);
-    
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('sidebarToggle', handleStorageChange);
-    };
-  }, []);
-
   const toggleSection = useCallback((sectionName: string) => {
     setExpandedSections(prev =>
       prev.includes(sectionName)
@@ -249,14 +236,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         : [...prev, sectionName]
     );
   }, []);
-
-  const toggleSidebar = useCallback(() => {
-    const newState = !isCollapsed;
-    setIsCollapsed(newState);
-    localStorage.setItem('sidebarCollapsed', String(newState));
-    // Dispatch event for same-tab updates
-    window.dispatchEvent(new Event('sidebarToggle'));
-  }, [isCollapsed]);
 
   // Handle admin role category clicks
   const handleRoleCategoryClick = useCallback((roleName: string) => {
@@ -487,25 +466,43 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
-    // Production Manager specific navigation items - M2 Store Management
-    // Combined: Inventory Management (Materials + Stock In/Out) → Reports
+    // Production Manager specific navigation items - Inventory Management
     const productionManagerItems: NavigationItem[] = [
       {
-        name: 'M2 Store',
-        href: buildPath('/m2-store'),
-        icon: BuildingOfficeIcon,
-        iconSolid: BuildingOfficeSolid,
-        color: 'text-amber-600',
+        name: 'Inventory Management',
+        href: buildPath('/m2-store/materials-catalog'),
+        icon: ClipboardDocumentCheckIcon,
+        iconSolid: ClipboardDocumentCheckSolid,
+        color: 'text-blue-600',
         children: [
-          // 1. INVENTORY - Combined Materials + Stock Management
           {
-            name: 'Inventory Management',
-            href: buildPath('/m2-store/stock'),
+            name: 'Materials Catalog',
+            href: buildPath('/m2-store/materials-catalog'),
+            icon: CubeIcon,
+            iconSolid: CubeSolid,
+            color: 'text-blue-500'
+          },
+          {
+            name: 'Stock In',
+            href: buildPath('/m2-store/stock-in'),
+            icon: ArrowDownTrayIcon,
+            iconSolid: ArrowDownTrayIcon,
+            color: 'text-green-500'
+          },
+          {
+            name: 'Stock Out',
+            href: buildPath('/m2-store/stock-out'),
+            icon: ArrowUpTrayIcon,
+            iconSolid: ArrowUpTrayIcon,
+            color: 'text-red-500'
+          },
+          {
+            name: 'Stock Take',
+            href: buildPath('/m2-store/stock-take'),
             icon: ClipboardDocumentCheckIcon,
             iconSolid: ClipboardDocumentCheckSolid,
-            color: 'text-blue-600'
+            color: 'text-orange-500'
           },
-          // 2. RECEIVE RETURNS - RDNs from Site Engineers
           {
             name: 'Receive Returns',
             href: buildPath('/m2-store/receive-returns'),
@@ -513,23 +510,21 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             iconSolid: ArrowUturnLeftIcon,
             color: 'text-orange-600'
           },
-          // 3. RETURNABLE ASSETS - Ladders, Tables, Tools
           {
             name: 'Returnable Assets',
             href: buildPath('/m2-store/returnable-assets'),
             icon: CubeIcon,
             iconSolid: CubeSolid,
             color: 'text-green-600'
-          },
-          // 4. REPORTS - Analytics & Reports
-          {
-            name: 'Reports & Analytics',
-            href: buildPath('/m2-store/reports'),
-            icon: DocumentTextIcon,
-            iconSolid: DocumentTextSolid,
-            color: 'text-indigo-600'
           }
         ]
+      },
+      {
+        name: 'Reports & Analytics',
+        href: buildPath('/m2-store/reports'),
+        icon: DocumentTextIcon,
+        iconSolid: DocumentTextSolid,
+        color: 'text-indigo-600'
       }
     ];
 
@@ -813,13 +808,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       {/* Logo Section with Toggle Button */}
       <div className={clsx(
         "border-b border-gray-100 transition-all duration-300",
-        isCollapsed ? "px-2 py-3" : "px-3 py-3 md:px-4 md:py-4"
+        isIconOnlyMode ? "px-2 py-3" : "px-3 py-3 md:px-4 md:py-4"
       )}>
         <div className="flex items-center justify-between">
           {/* MeterSquare Logo */}
           <div className={clsx(
             "relative transition-all duration-300",
-            isCollapsed ? "hidden" : "block"
+            isIconOnlyMode ? "hidden" : "block"
           )}>
             <img
               src="/assets/logo.png"
@@ -839,21 +834,21 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
           {/* Collapsed Logo */}
           <div className={clsx(
             "transition-all duration-300",
-            isCollapsed ? "block mx-auto" : "hidden"
+            isIconOnlyMode ? "block mx-auto" : "hidden"
           )}>
             <div className="w-8 h-8 bg-gradient-to-br from-red-600 to-red-700 rounded-lg shadow-md flex items-center justify-center">
               <span className="text-white font-bold text-sm">M</span>
             </div>
           </div>
           
-          {/* Toggle Button - Hidden on mobile */}
+          {/* Toggle Button - Hidden on mobile - Now resets to default width */}
           <button
-            onClick={toggleSidebar}
+            onClick={resetWidth}
             className="hidden md:block p-1.5 hover:bg-gray-100 rounded-lg transition-colors duration-200"
-            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title="Reset sidebar width"
+            aria-label="Reset sidebar width"
           >
-            {isCollapsed ? (
+            {isIconOnlyMode ? (
               <ChevronRightIcon className="w-4 h-4 text-gray-600" />
             ) : (
               <ChevronLeftIcon className="w-4 h-4 text-gray-600" />
@@ -863,14 +858,14 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         {/* Decorative element */}
         <div className={clsx(
           "mt-3 h-0.5 bg-gradient-to-r from-red-400 to-red-600 rounded-full transition-all duration-300",
-          isCollapsed ? "hidden" : "block"
+          isIconOnlyMode ? "hidden" : "block"
         )}></div>
       </div>
 
       {/* Navigation */}
       <div className={clsx(
         "flex-1 flex flex-col overflow-y-auto transition-[padding] duration-200",
-        isCollapsed ? "py-2 px-1" : "py-4 px-3 md:py-3 md:px-2"
+        isIconOnlyMode ? "py-2 px-1" : "py-4 px-3 md:py-3 md:px-2"
       )}>
         <nav className="flex-1 space-y-1.5 md:space-y-1">
           {navigation.map((item) => {
@@ -890,12 +885,12 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                       onClick={() => handleRoleCategoryClick(item.name)}
                       className={clsx(
                         'w-full flex items-center gap-3 px-3 py-3 md:py-2.5 text-sm font-medium rounded-lg transition-colors',
-                        isCollapsed ? 'justify-center' : '',
+                        isIconOnlyMode ? 'justify-center' : '',
                         'text-gray-700 hover:bg-gradient-to-r hover:from-gray-50 hover:to-gray-100 hover:text-gray-900'
                       )}
                     >
                       <item.icon className={clsx('w-5 h-5', item.color || 'text-gray-500')} />
-                      {!isCollapsed && <span>{item.name}</span>}
+                      {!isIconOnlyMode && <span>{item.name}</span>}
                     </button>
                   ) : isBackButton ? (
                     // Back to admin button
@@ -908,18 +903,18 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                       }}
                       className={clsx(
                         'w-full flex items-center gap-3 px-3 py-3 md:py-2.5 text-sm font-bold rounded-lg transition-colors',
-                        isCollapsed ? 'justify-center' : '',
+                        isIconOnlyMode ? 'justify-center' : '',
                         'bg-gradient-to-r from-red-50 to-orange-50 text-red-700 hover:from-red-100 hover:to-orange-100 border border-red-200'
                       )}
                     >
                       <item.icon className="w-5 h-5 text-red-600" />
-                      {!isCollapsed && <span>{item.name}</span>}
+                      {!isIconOnlyMode && <span>{item.name}</span>}
                     </button>
                   ) : (
                     <NavigationItemComponent
                       item={item}
                       isActive={isActive}
-                      isCollapsed={isCollapsed}
+                      isIconOnlyMode={isIconOnlyMode}
                       isExpanded={isExpanded}
                       hasChildren={hasChildren || false}
                       onToggleSection={toggleSection}
@@ -928,9 +923,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                   )}
                 </div>
 
-                {/* Submenu - Hide when collapsed */}
+                {/* Submenu - Different behavior for icon-only vs expanded mode */}
                 <AnimatePresence mode="wait">
-                  {hasChildren && isExpanded && !isCollapsed && (
+                  {hasChildren && !isIconOnlyMode && isExpanded && (
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
@@ -946,7 +941,12 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                           <Link
                             key={child.name}
                             to={child.href}
-                            onClick={() => setSidebarOpen(false)}
+                            onClick={() => {
+                              // Only close sidebar on mobile devices
+                              if (window.innerWidth < 768) {
+                                setSidebarOpen(false);
+                              }
+                            }}
                             className={clsx(
                               'group flex items-center px-3 py-2.5 md:py-2 text-sm md:text-xs font-medium rounded-lg transition-all duration-200 relative',
                               isChildActive
@@ -963,7 +963,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                               isChildActive ? 'text-red-600' : 'text-gray-400 group-hover:text-gray-600'
                             )} />
                             <span className="truncate">{child.name}</span>
-                            
+
                             {/* Hover effect for submenu items */}
                             <div className={clsx(
                               "absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-lg",
@@ -975,6 +975,57 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {/* Popover menu for child items in icon-only mode */}
+                {hasChildren && isIconOnlyMode && (
+                  <div className="group/submenu relative hidden md:block">
+                    {/* Hover trigger area - invisible but extends the hover zone */}
+                    <div className="absolute left-0 top-0 w-full h-full"></div>
+
+                    {/* Popover that appears on hover */}
+                    <div className="invisible opacity-0 group-hover/submenu:visible group-hover/submenu:opacity-100 absolute left-full top-0 ml-2 z-50 transition-all duration-200">
+                      <div className="bg-white rounded-lg shadow-xl border border-gray-200 py-2 min-w-[200px]">
+                        {/* Parent item name as header */}
+                        <div className="px-4 py-2 border-b border-gray-100">
+                          <p className="text-xs font-bold text-gray-700">{item.name}</p>
+                        </div>
+
+                        {/* Child items */}
+                        <div className="py-1">
+                          {item.children?.map((child) => {
+                            const isChildActive = isPathActive(child.href);
+                            const ChildIcon = isChildActive ? child.iconSolid : child.icon;
+
+                            return (
+                              <Link
+                                key={child.name}
+                                to={child.href}
+                                onClick={() => {
+                                  // Only close sidebar on mobile devices
+                                  if (window.innerWidth < 768) {
+                                    setSidebarOpen(false);
+                                  }
+                                }}
+                                className={clsx(
+                                  'group/item flex items-center px-4 py-2 text-sm font-medium transition-all duration-150',
+                                  isChildActive
+                                    ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-800 border-l-2 border-red-500'
+                                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800 border-l-2 border-transparent'
+                                )}
+                              >
+                                <ChildIcon className={clsx(
+                                  'w-4 h-4 mr-3 transition-colors duration-150',
+                                  isChildActive ? 'text-red-600' : 'text-gray-400 group-hover/item:text-gray-600'
+                                )} />
+                                <span className="truncate">{child.name}</span>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1008,7 +1059,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                       </p>
                     </div>
                   </div>
-                  {!isCollapsed && (
+                  {!isIconOnlyMode && (
                     <ChevronDownIcon
                       className={clsx(
                         "w-5 h-5 md:w-4 md:h-4 text-gray-400 transition-transform duration-200",
@@ -1106,7 +1157,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       </div>
       </div>
     );
-  }, [navigation, isCollapsed, expandedSections, user, userDropdownOpen, toggleSection, toggleSidebar, isPathActive, setSidebarOpen]);
+  }, [navigation, isIconOnlyMode, expandedSections, user, userDropdownOpen, toggleSection, isPathActive, setSidebarOpen, resetWidth]);
 
   return (
     <>
@@ -1165,13 +1216,23 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       </Transition.Root>
 
       {/* Static sidebar for desktop */}
-      <div className={clsx(
-        "hidden md:flex md:flex-col md:fixed md:inset-y-0 z-40 transition-[width] duration-200 ease-in-out",
-        isCollapsed ? "md:w-16" : "md:w-56"
-      )}>
+      <div
+        ref={sidebarRef}
+        className={clsx(
+          "hidden md:flex md:flex-col md:fixed md:inset-y-0 z-40 relative",
+          !isResizing && "transition-[width] duration-200 ease-in-out"
+        )}
+        style={{ width: `${sidebarWidth}px` }}
+      >
         <div className="flex-1 flex flex-col min-h-0">
           <SidebarContent />
         </div>
+        <SidebarResizeHandle
+          onResizeStart={startResize}
+          onDoubleClick={resetWidth}
+          isResizing={isResizing}
+          isMobile={isMobile}
+        />
       </div>
     </>
   );

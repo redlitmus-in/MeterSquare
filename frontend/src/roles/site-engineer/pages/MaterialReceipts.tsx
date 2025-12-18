@@ -547,6 +547,10 @@ const MaterialReceipts: React.FC = () => {
                   </div>
                   {returnableProjects.map((project) => {
                     const isExpanded = expandedReturnProjects.has(project.project_id);
+                    // Filter selected materials count for THIS project only
+                    const projectSelectedCount = selectedMaterialsCart.filter(
+                      m => m.project_id === project.project_id
+                    ).length;
                     return (
                       <motion.div
                         key={project.project_id}
@@ -578,10 +582,10 @@ const MaterialReceipts: React.FC = () => {
 
                           {/* Action Buttons in Header */}
                           <div className="flex items-center gap-2 ml-4">
-                            {selectedMaterialsCart.length > 0 ? (
+                            {projectSelectedCount > 0 ? (
                               <>
                                 <span className="text-xs text-purple-700 font-medium px-2 py-1 bg-purple-50 rounded">
-                                  {selectedMaterialsCart.length} selected
+                                  {projectSelectedCount} selected
                                 </span>
                                 <button
                                   onClick={(e) => {

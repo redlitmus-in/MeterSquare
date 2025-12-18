@@ -13,9 +13,22 @@ import { throttle } from '@/utils/performanceOptimizer';
 
 const DashboardLayout: React.FC = React.memo(() => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('sidebarCollapsed');
-    return saved === 'true';
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const saved = localStorage.getItem('sidebarWidth');
+      if (saved) {
+        const width = parseInt(saved, 10);
+        return isNaN(width) ? 224 : width;
+      }
+      // Backward compatibility: migrate old sidebarCollapsed
+      const oldCollapsed = localStorage.getItem('sidebarCollapsed');
+      if (oldCollapsed !== null) {
+        return oldCollapsed === 'true' ? 64 : 224;
+      }
+    } catch (error) {
+      console.warn('Failed to read sidebar width from localStorage:', error);
+    }
+    return 224;
   });
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showHeader, setShowHeader] = useState(true);
@@ -89,20 +102,30 @@ const DashboardLayout: React.FC = React.memo(() => {
     document.title = sanitizedTitle;
   }, [user, getPageName, unreadCount, viewingAsRoleName]);
 
-  // Listen for storage changes to sync sidebar state
+  // Listen for storage changes to sync sidebar width across tabs
   useEffect(() => {
-    const handleStorageChange = () => {
-      const saved = localStorage.getItem('sidebarCollapsed');
-      setSidebarCollapsed(saved === 'true');
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'sidebarWidth' && e.newValue) {
+        const width = parseInt(e.newValue, 10);
+        if (!isNaN(width)) {
+          setSidebarWidth(width);
+        }
+      }
+    };
+
+    const handleCustomEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ width: number }>;
+      if (customEvent.detail?.width) {
+        setSidebarWidth(customEvent.detail.width);
+      }
     };
 
     window.addEventListener('storage', handleStorageChange);
-    // Also listen for custom event for same-tab updates
-    window.addEventListener('sidebarToggle', handleStorageChange);
+    window.addEventListener('sidebarWidthChange', handleCustomEvent);
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('sidebarToggle', handleStorageChange);
+      window.removeEventListener('sidebarWidthChange', handleCustomEvent);
     };
   }, []);
 
@@ -162,9 +185,12 @@ const DashboardLayout: React.FC = React.memo(() => {
       <ModernSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
       {/* Main content */}
-      <div className={`flex-1 overflow-hidden flex flex-col transition-[padding-left] duration-200 ease-in-out ${
-        sidebarCollapsed ? 'md:pl-16' : 'md:pl-56'
-      }`}>
+      <div
+        className="flex-1 overflow-hidden flex flex-col transition-[padding-left] duration-200 ease-in-out"
+        style={{
+          paddingLeft: typeof window !== 'undefined' && window.innerWidth >= 768 ? `${sidebarWidth}px` : 0
+        }}
+      >
         {/* Page content */}
         <main className="flex-1 relative overflow-y-auto overflow-x-hidden focus:outline-none bg-gradient-to-br from-gray-50/50 to-white">
           <div className="min-h-full w-full">

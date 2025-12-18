@@ -272,12 +272,87 @@ export interface ProjectWithManagers {
   site_supervisors?: ProjectManager[];  // Enriched site supervisor/engineer details
 }
 
+// Simple in-memory cache for frequently accessed data
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+  ttl: number;
+}
+
+class SimpleCache {
+  private cache: Map<string, CacheEntry<unknown>> = new Map();
+  private defaultTTL = 5 * 60 * 1000; // 5 minutes default TTL
+  private maxSize = 100; // Max cache entries to prevent memory issues
+
+  get<T>(key: string): T | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+
+    // Check TTL using stored TTL value
+    if (Date.now() - entry.timestamp > entry.ttl) {
+      this.cache.delete(key);
+      return null;
+    }
+
+    return entry.data as T;
+  }
+
+  set<T>(key: string, data: T, ttl?: number): void {
+    // Enforce size limit - remove oldest entry if at capacity
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) this.cache.delete(firstKey);
+    }
+
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+      ttl: ttl || this.defaultTTL
+    });
+  }
+
+  invalidate(key: string): void {
+    this.cache.delete(key);
+  }
+
+  invalidatePattern(pattern: string): void {
+    const regex = new RegExp(pattern);
+    const keysToDelete: string[] = [];
+    this.cache.forEach((_, key) => {
+      if (regex.test(key)) {
+        keysToDelete.push(key);
+      }
+    });
+    keysToDelete.forEach(key => this.cache.delete(key));
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
 class InventoryService {
+  private cache = new SimpleCache();
+
   private getAuthHeader() {
     return {
       'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
       'Content-Type': 'application/json'
     };
+  }
+
+  /**
+   * Clear all cached data - call when user logs out or when data should be refreshed
+   */
+  clearCache(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * Invalidate specific cache entries after mutations
+   */
+  invalidateCache(patterns: string[]): void {
+    patterns.forEach(pattern => this.cache.invalidatePattern(pattern));
   }
 
   // ==================== INVENTORY MATERIAL METHODS ====================
@@ -304,12 +379,27 @@ class InventoryService {
   }
 
   /**
-   * Get all inventory materials
+   * Get all inventory materials (with optional pagination)
    */
-  async getAllInventoryItems(): Promise<InventoryMaterial[]> {
+  async getAllInventoryItems(params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    category?: string;
+    is_active?: boolean;
+    low_stock?: boolean;
+  }): Promise<InventoryMaterial[]> {
     try {
+      const queryParams = new URLSearchParams();
+      if (params?.page) queryParams.append('page', params.page.toString());
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      if (params?.search) queryParams.append('search', params.search);
+      if (params?.category) queryParams.append('category', params.category);
+      if (params?.is_active !== undefined) queryParams.append('is_active', params.is_active.toString());
+      if (params?.low_stock !== undefined) queryParams.append('low_stock', params.low_stock.toString());
+
       const response = await apiClient.get(
-        `/all_item_inventory`,
+        `/all_item_inventory${queryParams.toString() ? '?' + queryParams.toString() : ''}`,
         { headers: this.getAuthHeader() }
       );
       // Backend returns { materials: [...], total: number }
@@ -317,6 +407,48 @@ class InventoryService {
     } catch (error) {
       const axiosError = error as AxiosError;
       console.error('Error fetching inventory items:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to fetch inventory items'
+      );
+    }
+  }
+
+  /**
+   * Get paginated inventory materials with metadata
+   */
+  async getInventoryItemsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    category?: string;
+    is_active?: boolean;
+    low_stock?: boolean;
+  }): Promise<{
+    materials: InventoryMaterial[];
+    total: number;
+    page: number;
+    limit: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  }> {
+    try {
+      const queryParams = new URLSearchParams();
+      queryParams.append('page', params.page.toString());
+      queryParams.append('limit', params.limit.toString());
+      if (params.search) queryParams.append('search', params.search);
+      if (params.category) queryParams.append('category', params.category);
+      if (params.is_active !== undefined) queryParams.append('is_active', params.is_active.toString());
+      if (params.low_stock !== undefined) queryParams.append('low_stock', params.low_stock.toString());
+
+      const response = await apiClient.get(
+        `/all_item_inventory?${queryParams.toString()}`,
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching paginated inventory items:', axiosError);
       throw new Error(
         (axiosError.response?.data as any)?.error || 'Failed to fetch inventory items'
       );
@@ -442,6 +574,51 @@ class InventoryService {
         (axiosError.response?.data as any)?.error || 'Failed to fetch transactions'
       );
     }
+  }
+
+  /**
+   * Get inventory transactions with filters (alias method for StockInPage compatibility)
+   */
+  async getAllInventoryTransactions(params?: {
+    transaction_type?: 'PURCHASE' | 'WITHDRAWAL';
+    inventory_material_id?: number;
+    project_id?: number;
+  }): Promise<{ transactions: InventoryTransaction[], total: number }> {
+    try {
+      const queryParams = new URLSearchParams();
+      if (params?.transaction_type) {
+        queryParams.append('transaction_type', params.transaction_type);
+      }
+      if (params?.inventory_material_id) {
+        queryParams.append('inventory_material_id', params.inventory_material_id.toString());
+      }
+      if (params?.project_id) {
+        queryParams.append('project_id', params.project_id.toString());
+      }
+
+      const response = await apiClient.get(
+        `/transactions${queryParams.toString() ? '?' + queryParams.toString() : ''}`,
+        { headers: this.getAuthHeader() }
+      );
+      // Backend returns { transactions: [...], total: number }
+      return {
+        transactions: response.data.transactions || response.data || [],
+        total: response.data.total || response.data.transactions?.length || 0
+      };
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching inventory transactions:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to fetch inventory transactions'
+      );
+    }
+  }
+
+  /**
+   * Create inventory transaction (alias method for StockInPage compatibility)
+   */
+  async createInventoryTransaction(transaction: Omit<InventoryTransaction, 'inventory_transaction_id'>): Promise<InventoryTransaction> {
+    return this.createTransaction(transaction);
   }
 
   /**
@@ -986,19 +1163,63 @@ class InventoryService {
     }
   }
 
+  /**
+   * Process all RDN items in a single request (batch operation)
+   * This reduces N API calls to 1 for better performance
+   */
+  async processAllRDNItems(returnNoteId: number, items: Array<{
+    item_id: number;
+    action: 'approve' | 'backup' | 'reject';
+    notes?: string;
+    usable_quantity?: number;
+  }>): Promise<{
+    message: string;
+    processed_items: Array<{ item_id: number; action: string; material_return_id: number }>;
+    errors: string[];
+    rdn_status: string;
+  }> {
+    try {
+      const response = await apiClient.post(
+        `/return_delivery_note/${returnNoteId}/process_all_items`,
+        { items },
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error processing RDN items:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to process RDN items'
+      );
+    }
+  }
+
   // ==================== PROJECT METHODS ====================
 
   /**
    * Get all projects with full details (for dropdown selections and manager lookup)
    */
-  async getAllProjects(): Promise<ProjectWithManagers[]> {
+  async getAllProjects(forceRefresh = false): Promise<ProjectWithManagers[]> {
+    const cacheKey = 'projects:all';
+
+    // Return cached data if available and not forcing refresh
+    if (!forceRefresh) {
+      const cached = this.cache.get<ProjectWithManagers[]>(cacheKey);
+      if (cached) return cached;
+    }
+
     try {
       const response = await apiClient.get(
         `/all_project`,
         { headers: this.getAuthHeader() }
       );
       // Backend returns { projects: [...] } or array directly
-      return response.data.projects || response.data || [];
+      const projects = response.data.projects || response.data || [];
+
+      // Cache the result
+      this.cache.set(cacheKey, projects);
+
+      return projects;
     } catch (error) {
       const axiosError = error as AxiosError;
       console.error('Error fetching projects:', axiosError);
@@ -1011,14 +1232,28 @@ class InventoryService {
 
   /**
    * Get inventory configuration (store name, currency, etc.)
+   * Cached for 5 minutes as this data rarely changes
    */
-  async getInventoryConfig(): Promise<InventoryConfig> {
+  async getInventoryConfig(forceRefresh = false): Promise<InventoryConfig> {
+    const cacheKey = 'inventory:config';
+
+    // Return cached data if available and not forcing refresh
+    if (!forceRefresh) {
+      const cached = this.cache.get<InventoryConfig>(cacheKey);
+      if (cached) return cached;
+    }
+
     try {
       const response = await apiClient.get(
         `/inventory/config`,
         { headers: this.getAuthHeader() }
       );
-      return response.data;
+      const config = response.data;
+
+      // Cache the result
+      this.cache.set(cacheKey, config);
+
+      return config;
     } catch (error) {
       const axiosError = error as AxiosError;
       console.error('Error fetching inventory config:', axiosError);
@@ -1166,6 +1401,32 @@ class InventoryService {
   }
 
   /**
+   * Add multiple items to a delivery note in a single request (batch operation)
+   * This reduces N API calls to 1 for better performance
+   */
+  async addDeliveryNoteItemsBulk(deliveryNoteId: number, items: AddDeliveryNoteItemData[]): Promise<{
+    message: string;
+    added_items: DeliveryNoteItem[];
+    errors: string[];
+    delivery_note: MaterialDeliveryNote;
+  }> {
+    try {
+      const response = await apiClient.post(
+        `/delivery_note/${deliveryNoteId}/items/bulk`,
+        { items },
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error adding items to delivery note:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to add items to delivery note'
+      );
+    }
+  }
+
+  /**
    * Update an item in a delivery note
    */
   async updateDeliveryNoteItem(deliveryNoteId: number, itemId: number, data: {
@@ -1294,6 +1555,49 @@ class InventoryService {
       );
     }
   }
+
+  // ==================== STOCK UPDATE METHODS ====================
+
+  /**
+   * Update inventory stock quantity (increase or decrease)
+   * Used for manual stock adjustments, GRN receiving, etc.
+   */
+  async updateInventoryStock(
+    materialId: number,
+    quantity: number,
+    operation: 'increase' | 'decrease'
+  ): Promise<{ success: boolean; new_stock: number; message: string }> {
+    try {
+      // TODO: Replace with actual backend API endpoint when available
+      // Expected endpoint: PUT /inventory/{id}/stock
+      // Expected payload: { quantity, operation }
+
+      // For now, we'll fetch current material and calculate new stock
+      const material = await this.getInventoryItemById(materialId);
+      const currentStock = material.current_stock || 0;
+      const newStock = operation === 'increase'
+        ? currentStock + quantity
+        : currentStock - quantity;
+
+      // Update the material with new stock
+      await this.updateInventoryItem(materialId, {
+        current_stock: newStock
+      });
+
+      return {
+        success: true,
+        new_stock: newStock,
+        message: `Stock ${operation}d by ${quantity}. New stock: ${newStock}`
+      };
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error updating stock:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to update stock'
+      );
+    }
+  }
+
 }
 
 export const inventoryService = new InventoryService();

@@ -8,59 +8,39 @@ from datetime import datetime
 from utils.comprehensive_notification_service import ComprehensiveNotificationService
 from utils.rdn_pdf_generator import RDNPDFGenerator
 
+# Import shared helpers (these can also be used by other controllers)
+from controllers.inventory_helpers import (
+    DELIVERY_NOTE_PREFIX,
+    MAX_STOCK_ALERTS,
+    MAX_PAGINATION_LIMIT,
+    MAX_BATCH_SIZE,
+    MATERIAL_CONDITIONS,
+    RETURNABLE_DN_STATUSES,
+    DISPOSAL_PENDING_APPROVAL,
+    DISPOSAL_APPROVED,
+    DISPOSAL_PENDING_REVIEW,
+    DISPOSAL_APPROVED_DISPOSAL,
+    DISPOSAL_DISPOSED,
+    DISPOSAL_REPAIRED,
+    DISPOSAL_REJECTED,
+    generate_material_code,
+    sanitize_search_term,
+    validate_pagination_params,
+    validate_quantity,
+    get_store_name,
+    get_inventory_config,
+    get_project_managers,
+    get_mep_supervisors,
+    get_site_supervisor,
+    enrich_project_details,
+    build_returnable_material_item,
+)
 
-# ==================== HELPER FUNCTIONS ====================
-
-def generate_material_code():
-    """Auto-generate sequential material code (MAT001, MAT002, ...)"""
-    try:
-        # Get the last material ordered by ID
-        last_material = InventoryMaterial.query.order_by(
-            InventoryMaterial.inventory_material_id.desc()
-        ).first()
-
-        if last_material and last_material.material_code:
-            # Extract number from last code (e.g., "MAT005" -> 5)
-            last_code = last_material.material_code
-            if last_code.startswith('MAT'):
-                last_number = int(last_code.replace('MAT', ''))
-                new_number = last_number + 1
-            else:
-                # Fallback if format is unexpected
-                new_number = 1
-        else:
-            # First material ever
-            new_number = 1
-
-        # Format as MAT001, MAT002, etc. (zero-padded to 3 digits)
-        return f"MAT{new_number:03d}"
-
-    except Exception as e:
-        # Fallback to timestamp-based code if something goes wrong
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        return f"MAT{timestamp}"
-
-
-# ==================== CONSTANTS ====================
-
-DELIVERY_NOTE_PREFIX = 'MDN'
-MAX_STOCK_ALERTS = 10
-
-# Material return constants
-MATERIAL_CONDITIONS = ['Good', 'Damaged', 'Defective']
-RETURNABLE_DN_STATUSES = ['DELIVERED']  # Only delivered materials can be returned
-
-# Disposal status constants
-DISPOSAL_PENDING_APPROVAL = 'pending_approval'
-DISPOSAL_APPROVED = 'approved'
-DISPOSAL_PENDING_REVIEW = 'pending_review'
-DISPOSAL_APPROVED_DISPOSAL = 'approved_disposal'
-DISPOSAL_DISPOSED = 'disposed'
-DISPOSAL_REPAIRED = 'repaired'
-DISPOSAL_REJECTED = 'rejected'
+# Note: Constants and helper functions are now imported from inventory_helpers.py
+# This file contains the main API endpoint functions
 
 
-def build_returnable_material_item(delivery_note, item, material):
+def _build_returnable_material_item_local(delivery_note, item, material):
     """Build returnable material dictionary for a delivery note item.
 
     Args:
@@ -71,11 +51,26 @@ def build_returnable_material_item(delivery_note, item, material):
     Returns:
         dict with returnable material info, or None if nothing to return
     """
+    # Check MaterialReturn table (legacy returns)
     returns = MaterialReturn.query.filter_by(
         delivery_note_item_id=item.item_id
     ).all()
+    total_returned_legacy = sum(r.quantity for r in returns)
 
-    total_returned = sum(r.quantity for r in returns)
+    # Check ReturnDeliveryNoteItem table (new RDN-based returns)
+    # Only count items in RDNs that are not yet RECEIVED (to avoid double counting)
+    rdn_items_quantity = db.session.query(
+        db.func.coalesce(db.func.sum(ReturnDeliveryNoteItem.quantity), 0)
+    ).join(
+        ReturnDeliveryNote,
+        ReturnDeliveryNoteItem.return_note_id == ReturnDeliveryNote.return_note_id
+    ).filter(
+        ReturnDeliveryNoteItem.original_delivery_note_item_id == item.item_id,
+        # Exclude RECEIVED status as those are processed and would be in MaterialReturn
+        ReturnDeliveryNote.status.notin_(['RECEIVED', 'PARTIAL'])
+    ).scalar() or 0
+
+    total_returned = total_returned_legacy + float(rdn_items_quantity)
     returnable_quantity = max(0, item.quantity - total_returned)
 
     if returnable_quantity <= 0:
@@ -260,12 +255,22 @@ def create_inventory_item():
 
 
 def get_all_inventory_items():
-    """Get all materials in inventory with optional filters"""
+    """Get all materials in inventory with optional filters and pagination"""
     try:
         # Get query parameters
         category = request.args.get('category')
         is_active = request.args.get('is_active')
         low_stock = request.args.get('low_stock')
+        search = request.args.get('search')
+
+        # Pagination parameters
+        page = request.args.get('page', type=int)
+        limit = request.args.get('limit', type=int)
+
+        # Validate pagination parameters
+        validation_error = validate_pagination_params(page, limit)
+        if validation_error:
+            return jsonify(validation_error[0]), validation_error[1]
 
         query = InventoryMaterial.query
 
@@ -276,13 +281,46 @@ def get_all_inventory_items():
             query = query.filter_by(is_active=is_active.lower() == 'true')
         if low_stock and low_stock.lower() == 'true':
             query = query.filter(InventoryMaterial.current_stock <= InventoryMaterial.min_stock_level)
+        if search:
+            # Sanitize search term to prevent SQL wildcard injection
+            search_term = f"%{sanitize_search_term(search)}%"
+            query = query.filter(
+                db.or_(
+                    InventoryMaterial.material_name.ilike(search_term),
+                    InventoryMaterial.material_code.ilike(search_term),
+                    InventoryMaterial.brand.ilike(search_term),
+                    InventoryMaterial.category.ilike(search_term)
+                )
+            )
 
-        materials = query.all()
+        # Order by latest first
+        query = query.order_by(InventoryMaterial.inventory_material_id.desc())
 
-        return jsonify({
-            'materials': [material.to_dict() for material in materials],
-            'total': len(materials)
-        }), 200
+        # Get total count before pagination
+        total = query.count()
+
+        # Apply pagination if requested
+        if page is not None and limit is not None:
+            offset = (page - 1) * limit
+            materials = query.offset(offset).limit(limit).all()
+            total_pages = (total + limit - 1) // limit
+
+            return jsonify({
+                'materials': [material.to_dict() for material in materials],
+                'total': total,
+                'page': page,
+                'limit': limit,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1
+            }), 200
+        else:
+            # Return all (backward compatible)
+            materials = query.all()
+            return jsonify({
+                'materials': [material.to_dict() for material in materials],
+                'total': total
+            }), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -455,7 +493,7 @@ def create_inventory_transaction():
 
 
 def get_all_inventory_transactions():
-    """Get all material transactions with optional filters"""
+    """Get all material transactions with optional filters and pagination"""
     try:
         # Get query parameters
         inventory_material_id = request.args.get('inventory_material_id')
@@ -463,6 +501,16 @@ def get_all_inventory_transactions():
         project_id = request.args.get('project_id')
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
+        search = request.args.get('search')
+
+        # Pagination parameters
+        page = request.args.get('page', type=int)
+        limit = request.args.get('limit', type=int)
+
+        # Validate pagination parameters
+        validation_error = validate_pagination_params(page, limit)
+        if validation_error:
+            return jsonify(validation_error[0]), validation_error[1]
 
         query = InventoryTransaction.query
 
@@ -478,8 +526,32 @@ def get_all_inventory_transactions():
         if end_date:
             query = query.filter(InventoryTransaction.created_at <= end_date)
 
+        # Search across joined material data
+        if search:
+            # Sanitize search term to prevent SQL wildcard injection
+            search_term = f"%{sanitize_search_term(search)}%"
+            query = query.join(InventoryMaterial).filter(
+                db.or_(
+                    InventoryMaterial.material_name.ilike(search_term),
+                    InventoryMaterial.material_code.ilike(search_term),
+                    InventoryTransaction.reference_number.ilike(search_term)
+                )
+            )
+
         # Order by latest first
-        transactions = query.order_by(InventoryTransaction.created_at.desc()).all()
+        query = query.order_by(InventoryTransaction.created_at.desc())
+
+        # Get total count before pagination
+        total = query.count()
+
+        # Apply pagination if requested
+        if page is not None and limit is not None:
+            offset = (page - 1) * limit
+            transactions = query.offset(offset).limit(limit).all()
+            total_pages = (total + limit - 1) // limit
+        else:
+            transactions = query.all()
+            total_pages = 1
 
         # Enrich with material details
         result = []
@@ -494,10 +566,22 @@ def get_all_inventory_transactions():
                 txn_data['unit'] = txn.material.unit
             result.append(txn_data)
 
-        return jsonify({
+        response_data = {
             'transactions': result,
-            'total': len(result)
-        }), 200
+            'total': total
+        }
+
+        # Include pagination info if pagination was requested
+        if page is not None and limit is not None:
+            response_data.update({
+                'page': page,
+                'limit': limit,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1
+            })
+
+        return jsonify(response_data), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2196,12 +2280,22 @@ def create_delivery_note():
 
 
 def get_all_delivery_notes():
-    """Get all delivery notes with optional filters"""
+    """Get all delivery notes with optional filters and pagination"""
     try:
         project_id = request.args.get('project_id')
         status = request.args.get('status')
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
+        search = request.args.get('search')
+
+        # Pagination parameters
+        page = request.args.get('page', type=int)
+        limit = request.args.get('limit', type=int)
+
+        # Validate pagination parameters
+        validation_error = validate_pagination_params(page, limit)
+        if validation_error:
+            return jsonify(validation_error[0]), validation_error[1]
 
         query = MaterialDeliveryNote.query
 
@@ -2213,8 +2307,30 @@ def get_all_delivery_notes():
             query = query.filter(MaterialDeliveryNote.delivery_date >= start_date)
         if end_date:
             query = query.filter(MaterialDeliveryNote.delivery_date <= end_date)
+        if search:
+            # Sanitize search term to prevent SQL wildcard injection
+            search_term = f"%{sanitize_search_term(search)}%"
+            query = query.outerjoin(Project).filter(
+                db.or_(
+                    MaterialDeliveryNote.delivery_note_number.ilike(search_term),
+                    Project.project_name.ilike(search_term),
+                    Project.project_code.ilike(search_term)
+                )
+            )
 
-        notes = query.order_by(MaterialDeliveryNote.created_at.desc()).all()
+        query = query.order_by(MaterialDeliveryNote.created_at.desc())
+
+        # Get total count before pagination
+        total = query.count()
+
+        # Apply pagination if requested
+        if page is not None and limit is not None:
+            offset = (page - 1) * limit
+            notes = query.offset(offset).limit(limit).all()
+            total_pages = (total + limit - 1) // limit
+        else:
+            notes = query.all()
+            total_pages = 1
 
         result = []
         for note in notes:
@@ -2229,10 +2345,21 @@ def get_all_delivery_notes():
                 }
             result.append(note_data)
 
-        return jsonify({
+        response_data = {
             'delivery_notes': result,
-            'total': len(result)
-        }), 200
+            'total': total
+        }
+
+        if page is not None and limit is not None:
+            response_data.update({
+                'page': page,
+                'limit': limit,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1
+            })
+
+        return jsonify(response_data), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2370,6 +2497,96 @@ def add_item_to_delivery_note(delivery_note_id):
             'item': new_item.to_dict(),
             'delivery_note': note.to_dict()
         }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def add_items_to_delivery_note_bulk(delivery_note_id):
+    """Add multiple items to a delivery note in a single request (batch operation)"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status != 'DRAFT':
+            return jsonify({'error': f'Cannot add items to delivery note with status {note.status}.'}), 400
+
+        data = request.get_json()
+        items = data.get('items', [])
+
+        if not items:
+            return jsonify({'error': 'No items provided'}), 400
+
+        if len(items) > MAX_BATCH_SIZE:
+            return jsonify({'error': f'Cannot process more than {MAX_BATCH_SIZE} items at once'}), 400
+
+        added_items = []
+        errors = []
+
+        for idx, item_data in enumerate(items):
+            try:
+                if not item_data.get('inventory_material_id'):
+                    errors.append(f"Item {idx + 1}: inventory_material_id is required")
+                    continue
+
+                try:
+                    quantity = float(item_data.get('quantity', 0))
+                    if quantity <= 0:
+                        errors.append(f"Item {idx + 1}: Quantity must be greater than zero")
+                        continue
+                except (TypeError, ValueError):
+                    errors.append(f"Item {idx + 1}: Quantity must be a valid number")
+                    continue
+
+                material = InventoryMaterial.query.get(item_data['inventory_material_id'])
+                if not material:
+                    errors.append(f"Item {idx + 1}: Material not found in inventory")
+                    continue
+
+                existing_item = DeliveryNoteItem.query.filter_by(
+                    delivery_note_id=delivery_note_id,
+                    inventory_material_id=item_data['inventory_material_id']
+                ).first()
+
+                if existing_item:
+                    errors.append(f"Item {idx + 1}: Material '{material.material_name}' already in delivery note")
+                    continue
+
+                new_item = DeliveryNoteItem(
+                    delivery_note_id=delivery_note_id,
+                    inventory_material_id=item_data['inventory_material_id'],
+                    internal_request_id=item_data.get('internal_request_id'),
+                    quantity=quantity,
+                    unit_price=material.unit_price,
+                    notes=item_data.get('notes'),
+                    use_backup=item_data.get('use_backup', False)
+                )
+
+                db.session.add(new_item)
+                added_items.append(new_item)
+
+                # If linked to a request, update the request status
+                if item_data.get('internal_request_id'):
+                    internal_req = InternalMaterialRequest.query.get(item_data['internal_request_id'])
+                    if internal_req and internal_req.status in ['APPROVED', 'approved']:
+                        internal_req.status = 'DN_PENDING'
+                        internal_req.last_modified_by = g.user.get('email', 'system')
+
+            except Exception as item_error:
+                errors.append(f"Item {idx + 1}: {str(item_error)}")
+
+        if added_items:
+            db.session.commit()
+
+        return jsonify({
+            'message': f'{len(added_items)} items added to delivery note',
+            'added_items': [item.to_dict() for item in added_items],
+            'errors': errors,
+            'delivery_note': note.to_dict()
+        }), 201 if added_items else 400
 
     except Exception as e:
         db.session.rollback()
@@ -3546,6 +3763,167 @@ def process_return_delivery_item(return_note_id, item_id):
             'new_stock_level': material.current_stock if pm_action == 'approve' else None,
             'rdn_status': rdn.status
         }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def process_all_return_delivery_items(return_note_id):
+    """STEP 6 (Batch): PM processes all RDN items in a single request"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status not in ['RECEIVED', 'PARTIAL']:
+            return jsonify({'error': f'Cannot process items for RDN with status {rdn.status}. Must be RECEIVED first.'}), 400
+
+        data = request.get_json()
+        items_data = data.get('items', [])
+        current_user = g.user.get('email', 'system')
+
+        if not items_data:
+            return jsonify({'error': 'No items provided'}), 400
+
+        if len(items_data) > MAX_BATCH_SIZE:
+            return jsonify({'error': f'Cannot process more than {MAX_BATCH_SIZE} items at once'}), 400
+
+        processed_items = []
+        errors = []
+
+        for item_action in items_data:
+            item_id = item_action.get('item_id')
+            pm_action = item_action.get('action')
+
+            try:
+                item = ReturnDeliveryNoteItem.query.get(item_id)
+
+                if not item or item.return_note_id != return_note_id:
+                    errors.append(f"Item {item_id}: not found in this RDN")
+                    continue
+
+                if item.material_return_id:
+                    errors.append(f"Item {item_id}: already processed")
+                    continue
+
+                material = InventoryMaterial.query.get(item.inventory_material_id)
+                if not material:
+                    errors.append(f"Item {item_id}: material not found")
+                    continue
+
+                # Create MaterialReturn record
+                material_return = MaterialReturn(
+                    delivery_note_item_id=item.original_delivery_note_item_id,
+                    return_delivery_note_id=rdn.return_note_id,
+                    inventory_material_id=item.inventory_material_id,
+                    project_id=rdn.project_id,
+                    quantity=item.quantity_accepted or item.quantity,
+                    condition=item.condition,
+                    add_to_stock=False,
+                    return_reason=item.return_reason,
+                    reference_number=rdn.return_note_number,
+                    notes=item.notes,
+                    disposal_status='pending_approval',
+                    created_by=rdn.created_by
+                )
+
+                db.session.add(material_return)
+                db.session.flush()
+
+                item.material_return_id = material_return.return_id
+
+                if pm_action == 'approve' and item.condition == 'Good':
+                    total_amount = material_return.quantity * material.unit_price
+
+                    new_transaction = InventoryTransaction(
+                        inventory_material_id=item.inventory_material_id,
+                        transaction_type='RETURN',
+                        quantity=material_return.quantity,
+                        unit_price=material.unit_price,
+                        total_amount=total_amount,
+                        reference_number=rdn.return_note_number,
+                        project_id=rdn.project_id,
+                        notes=f'Return from RDN {rdn.return_note_number} - {item.return_reason or "Material returned"}',
+                        created_by=current_user
+                    )
+                    db.session.add(new_transaction)
+                    db.session.flush()
+
+                    material.current_stock += material_return.quantity
+                    material.last_modified_at = datetime.utcnow()
+                    material.last_modified_by = current_user
+
+                    material_return.add_to_stock = True
+                    material_return.disposal_status = 'approved'
+                    material_return.disposal_reviewed_by = current_user
+                    material_return.disposal_reviewed_at = datetime.utcnow()
+                    material_return.disposal_notes = item_action.get('notes', 'Approved and added to stock')
+                    material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
+                    item.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+                elif pm_action == 'backup' and item.condition in ['Damaged', 'Defective']:
+                    usable_quantity = item_action.get('usable_quantity', material_return.quantity)
+                    total_amount = usable_quantity * material.unit_price
+
+                    new_transaction = InventoryTransaction(
+                        inventory_material_id=item.inventory_material_id,
+                        transaction_type='RETURN',
+                        quantity=usable_quantity,
+                        unit_price=material.unit_price,
+                        total_amount=total_amount,
+                        reference_number=rdn.return_note_number,
+                        project_id=rdn.project_id,
+                        notes=f'Return to backup stock from RDN {rdn.return_note_number} - {item.condition} condition',
+                        created_by=current_user
+                    )
+                    db.session.add(new_transaction)
+                    db.session.flush()
+
+                    material.backup_stock = (material.backup_stock or 0) + usable_quantity
+                    material.last_modified_at = datetime.utcnow()
+                    material.last_modified_by = current_user
+
+                    material_return.add_to_stock = True
+                    material_return.disposal_status = 'approved_disposal'
+                    material_return.disposal_reviewed_by = current_user
+                    material_return.disposal_reviewed_at = datetime.utcnow()
+                    material_return.disposal_notes = item_action.get('notes', f'Added {usable_quantity} to backup stock')
+                    material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
+                    item.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+                elif pm_action == 'reject':
+                    material_return.disposal_status = 'rejected'
+                    material_return.disposal_reviewed_by = current_user
+                    material_return.disposal_reviewed_at = datetime.utcnow()
+                    material_return.disposal_notes = item_action.get('notes', 'Return rejected by PM')
+
+                processed_items.append({
+                    'item_id': item_id,
+                    'action': pm_action,
+                    'material_return_id': material_return.return_id
+                })
+
+            except Exception as item_error:
+                errors.append(f"Item {item_id}: {str(item_error)}")
+
+        if processed_items:
+            # Check if all items processed - update RDN to APPROVED (before commit for atomicity)
+            all_processed = all(item.material_return_id is not None for item in rdn.items)
+            if all_processed:
+                rdn.status = 'APPROVED'
+                rdn.last_modified_by = current_user
+
+            # Single commit for all changes (atomic transaction)
+            db.session.commit()
+
+        return jsonify({
+            'message': f'{len(processed_items)} items processed successfully',
+            'processed_items': processed_items,
+            'errors': errors,
+            'rdn_status': rdn.status
+        }), 200 if processed_items else 400
 
     except Exception as e:
         db.session.rollback()

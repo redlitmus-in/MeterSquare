@@ -65,7 +65,12 @@
       "Bash(python -m ruff:*)",
       "Bash(ruff check:*)",
       "Bash(xargs kill:*)",
-      "Bash(unzip:*)"
+      "Bash(unzip:*)",
+      "Bash(pip3 install:*)",
+      "Bash(python socketio_server.py:*)",
+      "Bash(bash -c \"source venv/bin/activate && nohup python socketio_server.py > /tmp/backend_server.log 2>&1 & echo $!\")",
+      "Bash(bash -c \"source venv/bin/activate && nohup python app.py > /tmp/backend_app.log 2>&1 & echo $!\")",
+      "Bash(npx eslint --quiet src/roles/production-manager/pages/StockInPage.tsx)"
     ],
     "deny": [],
     "ask": []

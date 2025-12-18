@@ -694,10 +694,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     setMaterialVendors(prev => prev.map(m => {
       if (m.material_name !== materialName) return m;
 
-      const isAlreadySelected = m.selected_vendors.some(v => v.vendor_id === vendorId);
+      const existingVendorSelection = m.selected_vendors.find(v => v.vendor_id === vendorId);
+      const isAlreadySelected = !!existingVendorSelection;
 
       if (m.selection_mode === 'single') {
-        // Single select mode - replace existing selection
+        // Single select mode
+        if (isAlreadySelected) {
+          // IMPORTANT: If vendor is already selected, preserve all existing values including negotiated_price
+          // This prevents the user's edited price from being reset when clicking the vendor row
+          return m;
+        }
+        // New selection - use vendor's lowest price as initial negotiated price
         return {
           ...m,
           selected_vendors: [{

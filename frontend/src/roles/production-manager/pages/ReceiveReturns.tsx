@@ -12,8 +12,14 @@ import {
 } from '@heroicons/react/24/outline';
 import { motion, AnimatePresence } from 'framer-motion';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import { showError, showSuccess, showInfo } from '@/utils/toastHelper';
+import { showError, showSuccess } from '@/utils/toastHelper';
 import { apiClient } from '@/api/config';
+import {
+  CONDITION_COLORS,
+  RETURN_ACTIONS,
+  RETURN_ACTION_LABELS,
+  RDN_STATUS_BADGES
+} from '@/lib/inventoryConstants';
 
 interface RDNItem {
   item_id: number;
@@ -22,12 +28,9 @@ interface RDNItem {
   material_code: string;
   unit: string;
   quantity: number;
-  quantity_accepted?: number;
   condition: 'Good' | 'Damaged' | 'Defective';
   return_reason: string;
-  acceptance_status?: string;
   material_return_id?: number;
-  notes?: string;
 }
 
 interface ReturnDeliveryNote {
@@ -46,34 +49,33 @@ interface ReturnDeliveryNote {
   created_by: string;
   created_at: string;
   issued_at?: string;
-  issued_by?: string;
   dispatched_at?: string;
-  dispatched_by?: string;
   accepted_at?: string;
-  accepted_by?: string;
   acceptance_notes?: string;
   items: RDNItem[];
   total_items: number;
 }
 
+interface ItemAction {
+  item_id: number;
+  action: string;
+  notes?: string;
+}
+
+type TabType = 'pending' | 'received' | 'all';
+
 const ReceiveReturns: React.FC = () => {
   const [returnDeliveryNotes, setReturnDeliveryNotes] = useState<ReturnDeliveryNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedRDNs, setExpandedRDNs] = useState<Set<number>>(new Set());
-  const [activeTab, setActiveTab] = useState<'pending' | 'received' | 'all'>('pending');
+  const [activeTab, setActiveTab] = useState<TabType>('pending');
 
-  // Confirm Receipt Modal
+  // Improved Confirm Receipt Modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [selectedRDN, setSelectedRDN] = useState<ReturnDeliveryNote | null>(null);
+  const [itemActions, setItemActions] = useState<Map<number, ItemAction>>(new Map());
   const [acceptanceNotes, setAcceptanceNotes] = useState('');
   const [confirming, setConfirming] = useState(false);
-
-  // Process Item Modal
-  const [showProcessModal, setShowProcessModal] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<RDNItem | null>(null);
-  const [processAction, setProcessAction] = useState<'add_to_stock' | 'disposal' | 'repair'>('add_to_stock');
-  const [disposalNotes, setDisposalNotes] = useState('');
-  const [processing, setProcessing] = useState(false);
 
   const fetchReturnDeliveryNotes = useCallback(async () => {
     try {
@@ -102,26 +104,54 @@ const ReceiveReturns: React.FC = () => {
     setExpandedRDNs(newExpanded);
   };
 
-  const getRDNStatusBadge = (status: string) => {
-    switch (status) {
-      case 'DRAFT': return { class: 'bg-gray-100 text-gray-700', text: 'Draft' };
-      case 'ISSUED': return { class: 'bg-blue-100 text-blue-700', text: 'Issued' };
-      case 'IN_TRANSIT': return { class: 'bg-yellow-100 text-yellow-700', text: 'In Transit' };
-      case 'RECEIVED': return { class: 'bg-purple-100 text-purple-700', text: 'Received' };
-      case 'PARTIAL': return { class: 'bg-orange-100 text-orange-700', text: 'Partial' };
-      case 'APPROVED': return { class: 'bg-green-100 text-green-700', text: 'Approved' };
-      case 'REJECTED': return { class: 'bg-red-100 text-red-700', text: 'Rejected' };
-      default: return { class: 'bg-gray-100 text-gray-700', text: status };
-    }
+  const openConfirmModal = (rdn: ReturnDeliveryNote) => {
+    setSelectedRDN(rdn);
+
+    // Initialize actions for each item based on condition
+    const initialActions = new Map<number, ItemAction>();
+    rdn.items.forEach((item) => {
+      const defaultAction = item.condition === 'Good'
+        ? RETURN_ACTIONS.ADD_TO_STOCK
+        : RETURN_ACTIONS.SEND_FOR_REPAIR;
+
+      initialActions.set(item.item_id, {
+        item_id: item.item_id,
+        action: defaultAction,
+        notes: ''
+      });
+    });
+
+    setItemActions(initialActions);
+    setShowConfirmModal(true);
   };
 
-  const getConditionBadgeClass = (condition: string) => {
-    switch (condition) {
-      case 'Good': return 'bg-green-100 text-green-700';
-      case 'Damaged': return 'bg-orange-100 text-orange-700';
-      case 'Defective': return 'bg-red-100 text-red-700';
-      default: return 'bg-gray-100 text-gray-700';
-    }
+  const closeConfirmModal = () => {
+    setShowConfirmModal(false);
+    setSelectedRDN(null);
+    setItemActions(new Map());
+    setAcceptanceNotes('');
+  };
+
+  const updateItemAction = (itemId: number, action: string) => {
+    setItemActions((prev) => {
+      const newMap = new Map(prev);
+      const existing = newMap.get(itemId);
+      if (existing) {
+        newMap.set(itemId, { ...existing, action });
+      }
+      return newMap;
+    });
+  };
+
+  const updateItemNotes = (itemId: number, notes: string) => {
+    setItemActions((prev) => {
+      const newMap = new Map(prev);
+      const existing = newMap.get(itemId);
+      if (existing) {
+        newMap.set(itemId, { ...existing, notes });
+      }
+      return newMap;
+    });
   };
 
   const handleConfirmReceipt = async () => {
@@ -129,45 +159,35 @@ const ReceiveReturns: React.FC = () => {
 
     setConfirming(true);
     try {
+      // STEP 1: Confirm receipt (status: IN_TRANSIT → RECEIVED)
       await apiClient.post(`/return_delivery_note/${selectedRDN.return_note_id}/confirm`, {
-        acceptance_notes: acceptanceNotes,
+        acceptance_notes: acceptanceNotes
       });
-      showSuccess('Return delivery confirmed successfully!');
-      setShowConfirmModal(false);
-      setSelectedRDN(null);
-      setAcceptanceNotes('');
+
+      // STEP 2: Process all items with their actions using batch endpoint (eliminates N+1 API calls)
+      const itemActionsArray = Array.from(itemActions.values()).map(item => ({
+        item_id: item.item_id,
+        action: item.action,
+        notes: item.notes || ''
+      }));
+
+      const result = await apiClient.post(
+        `/return_delivery_note/${selectedRDN.return_note_id}/process_all_items`,
+        { items: itemActionsArray }
+      );
+
+      if (result.data.errors && result.data.errors.length > 0) {
+        showError(`Some items had issues: ${result.data.errors.join(', ')}`);
+      }
+
+      showSuccess('Return delivery processed successfully!');
+      closeConfirmModal();
       fetchReturnDeliveryNotes();
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
-      showError(error.response?.data?.error || 'Failed to confirm receipt');
+      showError(error.response?.data?.error || 'Failed to process return delivery');
     } finally {
       setConfirming(false);
-    }
-  };
-
-  const handleProcessItem = async () => {
-    if (!selectedRDN || !selectedItem) return;
-
-    setProcessing(true);
-    try {
-      await apiClient.post(
-        `/return_delivery_note/${selectedRDN.return_note_id}/items/${selectedItem.item_id}/process`,
-        {
-          action: processAction,
-          disposal_notes: disposalNotes,
-        }
-      );
-      showSuccess('Item processed successfully!');
-      setShowProcessModal(false);
-      setSelectedItem(null);
-      setProcessAction('add_to_stock');
-      setDisposalNotes('');
-      fetchReturnDeliveryNotes();
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      showError(error.response?.data?.error || 'Failed to process item');
-    } finally {
-      setProcessing(false);
     }
   };
 
@@ -178,8 +198,17 @@ const ReceiveReturns: React.FC = () => {
     } else if (activeTab === 'received') {
       return ['RECEIVED', 'PARTIAL'].includes(rdn.status);
     }
-    return true; // 'all' tab
+    return true;
   });
+
+  const getTabCount = (tab: TabType): number => {
+    if (tab === 'pending') {
+      return returnDeliveryNotes.filter((r) => r.status === 'IN_TRANSIT').length;
+    } else if (tab === 'received') {
+      return returnDeliveryNotes.filter((r) => ['RECEIVED', 'PARTIAL'].includes(r.status)).length;
+    }
+    return returnDeliveryNotes.length;
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -214,7 +243,7 @@ const ReceiveReturns: React.FC = () => {
             }`}
           >
             <TruckIcon className="w-4 h-4" />
-            In Transit ({returnDeliveryNotes.filter((r) => r.status === 'IN_TRANSIT').length})
+            In Transit ({getTabCount('pending')})
           </button>
           <button
             onClick={() => setActiveTab('received')}
@@ -225,8 +254,7 @@ const ReceiveReturns: React.FC = () => {
             }`}
           >
             <CheckCircleIcon className="w-4 h-4" />
-            Received (
-            {returnDeliveryNotes.filter((r) => ['RECEIVED', 'PARTIAL'].includes(r.status)).length})
+            Received ({getTabCount('received')})
           </button>
           <button
             onClick={() => setActiveTab('all')}
@@ -237,7 +265,7 @@ const ReceiveReturns: React.FC = () => {
             }`}
           >
             <DocumentTextIcon className="w-4 h-4" />
-            All ({returnDeliveryNotes.length})
+            All ({getTabCount('all')})
           </button>
         </div>
 
@@ -254,7 +282,7 @@ const ReceiveReturns: React.FC = () => {
         ) : (
           <div className="space-y-3">
             {filteredRDNs.map((rdn) => {
-              const statusBadge = getRDNStatusBadge(rdn.status);
+              const statusBadge = RDN_STATUS_BADGES[rdn.status] || RDN_STATUS_BADGES.DRAFT;
               const isExpanded = expandedRDNs.has(rdn.return_note_id);
 
               return (
@@ -300,10 +328,7 @@ const ReceiveReturns: React.FC = () => {
                       <div className="flex items-center gap-2 ml-4">
                         {rdn.status === 'IN_TRANSIT' && (
                           <button
-                            onClick={() => {
-                              setSelectedRDN(rdn);
-                              setShowConfirmModal(true);
-                            }}
+                            onClick={() => openConfirmModal(rdn)}
                             className="px-3 py-1.5 text-xs bg-green-600 hover:bg-green-700 text-white rounded transition-colors font-medium"
                           >
                             Confirm Receipt
@@ -389,7 +414,7 @@ const ReceiveReturns: React.FC = () => {
                               <th className="pb-2 font-medium">Condition</th>
                               <th className="pb-2 font-medium">Reason</th>
                               {['RECEIVED', 'PARTIAL'].includes(rdn.status) && (
-                                <th className="pb-2 font-medium text-center">Action</th>
+                                <th className="pb-2 font-medium text-center">Status</th>
                               )}
                             </tr>
                           </thead>
@@ -404,31 +429,14 @@ const ReceiveReturns: React.FC = () => {
                                   {item.quantity} {item.unit}
                                 </td>
                                 <td className="py-2">
-                                  <span
-                                    className={`px-2 py-1 rounded-full text-xs font-medium ${getConditionBadgeClass(
-                                      item.condition
-                                    )}`}
-                                  >
+                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${CONDITION_COLORS[item.condition.toUpperCase()] || CONDITION_COLORS.GOOD}`}>
                                     {item.condition}
                                   </span>
                                 </td>
                                 <td className="py-2 text-gray-600 text-xs">{item.return_reason || '-'}</td>
                                 {['RECEIVED', 'PARTIAL'].includes(rdn.status) && (
                                   <td className="py-2 text-center">
-                                    {item.material_return_id ? (
-                                      <span className="text-xs text-green-600 font-medium">Processed</span>
-                                    ) : (
-                                      <button
-                                        onClick={() => {
-                                          setSelectedRDN(rdn);
-                                          setSelectedItem(item);
-                                          setShowProcessModal(true);
-                                        }}
-                                        className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-                                      >
-                                        Process
-                                      </button>
-                                    )}
+                                    <span className="text-xs text-green-600 font-medium">Processed</span>
                                   </td>
                                 )}
                               </tr>
@@ -452,7 +460,7 @@ const ReceiveReturns: React.FC = () => {
         )}
       </div>
 
-      {/* Confirm Receipt Modal */}
+      {/* Improved Confirm Receipt Modal */}
       <AnimatePresence>
         {showConfirmModal && selectedRDN && (
           <motion.div
@@ -460,53 +468,147 @@ const ReceiveReturns: React.FC = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
-            onClick={() => setShowConfirmModal(false)}
+            onClick={closeConfirmModal}
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6"
+              className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Confirm Receipt</h3>
-                <button
-                  onClick={() => setShowConfirmModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <XMarkIcon className="w-5 h-5" />
-                </button>
+              <div className="sticky top-0 bg-white border-b border-gray-200 p-6 z-10">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Confirm & Process Return Delivery</h3>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {selectedRDN.return_note_number} • {selectedRDN.project_name}
+                    </p>
+                  </div>
+                  <button
+                    onClick={closeConfirmModal}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <XMarkIcon className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
-              <div className="mb-4">
-                <p className="text-sm text-gray-600 mb-2">
-                  Confirm receipt of <span className="font-medium">{selectedRDN.return_note_number}</span> from{' '}
-                  <span className="font-medium">{selectedRDN.project_name}</span>
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-gray-600">
+                  Review each item and decide the action. Good condition items are automatically set to "Add to Stock".
                 </p>
-                <p className="text-xs text-gray-500">
-                  Total items: {selectedRDN.total_items} • Vehicle: {selectedRDN.vehicle_number || 'N/A'}
-                </p>
+
+                {/* Items */}
+                <div className="space-y-3">
+                  {selectedRDN.items.map((item) => {
+                    const itemAction = itemActions.get(item.item_id);
+                    const needsNotes = itemAction?.action !== RETURN_ACTIONS.ADD_TO_STOCK;
+
+                    return (
+                      <div key={item.item_id} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-900">{item.material_name}</p>
+                            <p className="text-xs text-gray-500">{item.material_code}</p>
+                            <div className="flex items-center gap-3 mt-2">
+                              <span className="text-xs text-gray-600">
+                                {item.quantity} {item.unit}
+                              </span>
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${CONDITION_COLORS[item.condition.toUpperCase()] || CONDITION_COLORS.GOOD}`}>
+                                {item.condition}
+                              </span>
+                              {item.return_reason && (
+                                <span className="text-xs text-gray-500">• {item.return_reason}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-medium text-gray-700">Action</label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {Object.values(RETURN_ACTIONS).map((action) => {
+                              // Filter actions based on condition
+                              const isGoodCondition = item.condition.toLowerCase() === 'good';
+                              const shouldShowAction =
+                                (isGoodCondition && action === RETURN_ACTIONS.ADD_TO_STOCK) ||
+                                (!isGoodCondition && action !== RETURN_ACTIONS.ADD_TO_STOCK);
+
+                              if (!shouldShowAction) return null;
+
+                              const actionLabel = RETURN_ACTION_LABELS[action];
+                              return (
+                                <label
+                                  key={action}
+                                  className={`flex items-center p-2 border rounded-lg cursor-pointer transition-colors ${
+                                    itemAction?.action === action
+                                      ? 'border-blue-500 bg-blue-50'
+                                      : 'border-gray-300 hover:bg-gray-100'
+                                  }`}
+                                >
+                                  <input
+                                    type="radio"
+                                    value={action}
+                                    checked={itemAction?.action === action}
+                                    onChange={(e) => updateItemAction(item.item_id, e.target.value)}
+                                    className="w-3 h-3"
+                                  />
+                                  <span className="ml-2 text-xs">
+                                    <span className={`font-medium ${actionLabel.color}`}>
+                                      {actionLabel.label}
+                                    </span>
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                          {itemAction && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              {RETURN_ACTION_LABELS[itemAction.action as keyof typeof RETURN_ACTION_LABELS].description}
+                            </p>
+                          )}
+                        </div>
+
+                        {needsNotes && (
+                          <div className="mt-3">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Notes (Optional)
+                            </label>
+                            <textarea
+                              value={itemAction?.notes || ''}
+                              onChange={(e) => updateItemNotes(item.item_id, e.target.value)}
+                              rows={2}
+                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              placeholder="Additional notes for this action..."
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* General Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    General Acceptance Notes (Optional)
+                  </label>
+                  <textarea
+                    value={acceptanceNotes}
+                    onChange={(e) => setAcceptanceNotes(e.target.value)}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    placeholder="Any overall notes about the received materials..."
+                  />
+                </div>
               </div>
 
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Acceptance Notes (Optional)
-                </label>
-                <textarea
-                  value={acceptanceNotes}
-                  onChange={(e) => setAcceptanceNotes(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Any notes about the received materials..."
-                />
-              </div>
-
-              <div className="flex gap-3">
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 p-6 flex gap-3">
                 <button
-                  onClick={() => setShowConfirmModal(false)}
+                  onClick={closeConfirmModal}
                   disabled={confirming}
-                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -518,141 +620,12 @@ const ReceiveReturns: React.FC = () => {
                   {confirming ? (
                     <>
                       <ClockIcon className="w-4 h-4 animate-spin" />
-                      Confirming...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircleIcon className="w-4 h-4" />
-                      Confirm Receipt
-                    </>
-                  )}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Process Item Modal */}
-      <AnimatePresence>
-        {showProcessModal && selectedItem && selectedRDN && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
-            onClick={() => setShowProcessModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Process Returned Item</h3>
-                <button
-                  onClick={() => setShowProcessModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <XMarkIcon className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                <p className="font-medium text-gray-900">{selectedItem.material_name}</p>
-                <p className="text-sm text-gray-500">{selectedItem.material_code}</p>
-                <div className="flex items-center gap-4 mt-2 text-xs">
-                  <span>
-                    Quantity: <span className="font-medium">{selectedItem.quantity} {selectedItem.unit}</span>
-                  </span>
-                  <span className={`px-2 py-1 rounded-full ${getConditionBadgeClass(selectedItem.condition)}`}>
-                    {selectedItem.condition}
-                  </span>
-                </div>
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Action</label>
-                <div className="space-y-2">
-                  <label className="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                    <input
-                      type="radio"
-                      value="add_to_stock"
-                      checked={processAction === 'add_to_stock'}
-                      onChange={(e) => setProcessAction(e.target.value as any)}
-                      className="w-4 h-4 text-green-600"
-                    />
-                    <span className="ml-3 text-sm">
-                      <span className="font-medium text-gray-900">Add to Stock</span>
-                      <p className="text-xs text-gray-500">Material is in good condition, add to inventory</p>
-                    </span>
-                  </label>
-                  <label className="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                    <input
-                      type="radio"
-                      value="repair"
-                      checked={processAction === 'repair'}
-                      onChange={(e) => setProcessAction(e.target.value as any)}
-                      className="w-4 h-4 text-orange-600"
-                    />
-                    <span className="ml-3 text-sm">
-                      <span className="font-medium text-gray-900">Send for Repair</span>
-                      <p className="text-xs text-gray-500">Material needs repair before use</p>
-                    </span>
-                  </label>
-                  <label className="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                    <input
-                      type="radio"
-                      value="disposal"
-                      checked={processAction === 'disposal'}
-                      onChange={(e) => setProcessAction(e.target.value as any)}
-                      className="w-4 h-4 text-red-600"
-                    />
-                    <span className="ml-3 text-sm">
-                      <span className="font-medium text-gray-900">Mark for Disposal</span>
-                      <p className="text-xs text-gray-500">Material is beyond repair, dispose</p>
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              {processAction !== 'add_to_stock' && (
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                  <textarea
-                    value={disposalNotes}
-                    onChange={(e) => setDisposalNotes(e.target.value)}
-                    rows={2}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Additional notes..."
-                  />
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowProcessModal(false)}
-                  disabled={processing}
-                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleProcessItem}
-                  disabled={processing}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                >
-                  {processing ? (
-                    <>
-                      <ClockIcon className="w-4 h-4 animate-spin" />
                       Processing...
                     </>
                   ) : (
                     <>
                       <CheckCircleIcon className="w-4 h-4" />
-                      Process Item
+                      Confirm & Process All
                     </>
                   )}
                 </button>

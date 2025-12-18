@@ -302,6 +302,13 @@ def add_delivery_note_item_route(delivery_note_id):
     return add_item_to_delivery_note(delivery_note_id)
 
 
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>/items/bulk', methods=['POST'])
+@jwt_required
+def add_delivery_note_items_bulk_route(delivery_note_id):
+    """Add multiple items to a delivery note in a single request"""
+    return add_items_to_delivery_note_bulk(delivery_note_id)
+
+
 @inventory_routes.route('/delivery_note/<int:delivery_note_id>/items/<int:item_id>', methods=['PUT'])
 @jwt_required
 def update_delivery_note_item_route(delivery_note_id, item_id):
@@ -449,6 +456,13 @@ def confirm_return_delivery_receipt_route(return_note_id):
 def process_return_delivery_item_route(return_note_id, item_id):
     """STEP 6: PM processes individual RDN item"""
     return process_return_delivery_item(return_note_id, item_id)
+
+
+@inventory_routes.route('/return_delivery_note/<int:return_note_id>/process_all_items', methods=['POST'])
+@jwt_required
+def process_all_return_delivery_items_route(return_note_id):
+    """STEP 6 (Batch): PM processes all RDN items in a single request"""
+    return process_all_return_delivery_items(return_note_id)
 
 
 @inventory_routes.route('/my-return-delivery-notes', methods=['GET'])

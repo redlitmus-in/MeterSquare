@@ -84,7 +84,9 @@ const MaterialsManagement = lazy(() => import('@/roles/production-manager/pages/
 const ReceiveStock = lazy(() => import('@/roles/production-manager/pages/ReceiveStock'));
 const DispatchMaterials = lazy(() => import('@/roles/production-manager/pages/DispatchMaterials'));
 const StockTake = lazy(() => import('@/roles/production-manager/pages/StockTake'));
-const StockManagement = lazy(() => import('@/roles/production-manager/pages/StockManagement'));
+const MaterialsCatalogPage = lazy(() => import('@/roles/production-manager/pages/MaterialsCatalogPage'));
+const StockOutPage = lazy(() => import('@/roles/production-manager/pages/StockOutPage'));
+const StockInPage = lazy(() => import('@/roles/production-manager/pages/StockInPage'));
 const M2StoreReports = lazy(() => import('@/roles/production-manager/pages/M2StoreReports'));
 const ReturnableAssets = lazy(() => import('@/roles/production-manager/pages/ReturnableAssets'));
 const ReceiveReturns = lazy(() => import('@/roles/production-manager/pages/ReceiveReturns'));
@@ -1033,16 +1035,30 @@ function App() {
                 <M2StoreLanding />
               </ProductionManagerRoute>
             } />
-            {/* Redirect old materials route to combined inventory management */}
-            <Route path="m2-store/materials" element={
-              <Navigate to="/production-manager/m2-store/stock" replace />
-            } />
-            <Route path="m2-store/stock" element={
+            {/* New Inventory Management Routes */}
+            <Route path="m2-store/materials-catalog" element={
               <ProductionManagerRoute>
-                <StockManagement />
+                <MaterialsCatalogPage />
               </ProductionManagerRoute>
             } />
-            {/* Legacy routes - redirect to new Stock Management page */}
+            <Route path="m2-store/stock-out" element={
+              <ProductionManagerRoute>
+                <StockOutPage />
+              </ProductionManagerRoute>
+            } />
+            <Route path="m2-store/stock-in" element={
+              <ProductionManagerRoute>
+                <StockInPage />
+              </ProductionManagerRoute>
+            } />
+            {/* Redirect old routes */}
+            <Route path="m2-store/materials" element={
+              <Navigate to="/production-manager/m2-store/materials-catalog" replace />
+            } />
+            <Route path="m2-store/stock" element={
+              <Navigate to="/production-manager/m2-store/materials-catalog" replace />
+            } />
+            {/* Legacy routes */}
             <Route path="m2-store/receive" element={
               <ProductionManagerRoute>
                 <ReceiveStock />
