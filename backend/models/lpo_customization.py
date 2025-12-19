@@ -34,6 +34,10 @@ class LPOCustomization(db.Model):
     # Signatures
     include_signatures = db.Column(db.Boolean, default=True)
 
+    # VAT
+    vat_percent = db.Column(db.Numeric(5, 2), default=5.0)  # VAT percentage (e.g., 5.0 for 5%)
+    vat_amount = db.Column(db.Numeric(15, 2), default=0.0)   # Calculated VAT amount
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -57,6 +61,8 @@ class LPOCustomization(db.Model):
             'general_terms': json.loads(self.general_terms) if self.general_terms else [],
             'payment_terms_list': json.loads(self.payment_terms_list) if self.payment_terms_list else [],
             'include_signatures': self.include_signatures,
+            'vat_percent': float(self.vat_percent) if self.vat_percent else 5.0,
+            'vat_amount': float(self.vat_amount) if self.vat_amount else 0.0,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

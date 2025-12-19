@@ -8235,10 +8235,17 @@ def preview_lpo_pdf(cr_id):
                 "boq_rate": round(float(boq_rate), 2) if boq_rate else 0
             })
 
-        # VAT removed as per requirement
-        vat_percent = 0
-        vat_amount = 0
-        grand_total = subtotal
+        # VAT - use saved customization, otherwise default to 5%
+        if saved_customization and hasattr(saved_customization, 'vat_percent'):
+            vat_percent = float(saved_customization.vat_percent) if saved_customization.vat_percent is not None else 5.0
+            # Recalculate VAT amount based on subtotal
+            vat_amount = (subtotal * vat_percent) / 100
+        else:
+            # Default: 5% VAT
+            vat_percent = 5.0
+            vat_amount = (subtotal * 5.0) / 100
+
+        grand_total = subtotal + vat_amount
 
         # Default company TRN
         DEFAULT_COMPANY_TRN = "100223723600003"
@@ -8386,6 +8393,11 @@ def save_lpo_customization(cr_id):
         customization.general_terms = json.dumps(terms.get('general_terms', []))
         customization.payment_terms_list = json.dumps(terms.get('payment_terms_list', []))
         customization.include_signatures = data.get('include_signatures', True)
+
+        # Save VAT data from totals
+        totals = data.get('totals', {})
+        customization.vat_percent = float(totals.get('vat_percent', 5.0))
+        customization.vat_amount = float(totals.get('vat_amount', 0.0))
 
         db.session.commit()
 
