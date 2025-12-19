@@ -2098,12 +2098,21 @@ def complete_purchase():
         if cr.status != 'assigned_to_buyer':
             return jsonify({"error": f"Purchase cannot be completed. Current status: {cr.status}"}), 400
 
-        # Update the change request
-        cr.status = 'purchase_completed'
+        # ========================================
+        # NEW FEATURE: Route materials through Production Manager (M2 Store)
+        # When buyer completes purchase, materials go to warehouse first,
+        # then PM dispatches to site (like Internal Material Request flow)
+        # ========================================
+
+        # Update the change request - Route through Production Manager
+        cr.delivery_routing = 'via_production_manager'  # NEW FIELD
+        cr.store_request_status = 'pending_vendor_delivery'  # NEW FIELD
+        cr.status = 'routed_to_store'  # Changed from 'purchase_completed'
         cr.purchase_completed_by_user_id = buyer_id
         cr.purchase_completed_by_name = buyer_name
         cr.purchase_completion_date = datetime.utcnow()
         cr.purchase_notes = notes
+        cr.buyer_completion_notes = notes  # NEW FIELD
         cr.updated_at = datetime.utcnow()
 
         # Get the actual database item_id (master_item_id) from item_name
@@ -2207,23 +2216,101 @@ def complete_purchase():
                         db.session.add(new_material)
                         new_materials_added.append(material_name)
 
+        # ========================================
+        # NEW FEATURE: Auto-create Internal Material Requests
+        # These requests go to Production Manager so they know
+        # which materials to dispatch to which site
+        # ========================================
+        created_imr_count = 0
+        try:
+            # Get project details for final destination
+            project = Project.query.get(cr.project_id)
+            final_destination = project.project_name if project else f"Project {cr.project_id}"
+
+            # Create Internal Material Request for each material in the CR
+            for sub_item in sub_items_data:
+                if isinstance(sub_item, dict):
+                    imr = InternalMaterialRequest(
+                        cr_id=cr.cr_id,
+                        project_id=cr.project_id,
+                        request_buyer_id=buyer_id,
+                        material_name=sub_item.get('sub_item_name') or sub_item.get('material_name', 'Unknown'),
+                        quantity=sub_item.get('quantity', 0),
+                        brand=sub_item.get('brand', ''),
+                        size=sub_item.get('size', ''),
+                        unit=sub_item.get('unit', 'pcs'),
+                        unit_price=sub_item.get('unit_price', 0),
+                        total_cost=sub_item.get('total_price', 0),
+
+                        # NEW FIELDS for vendor delivery tracking
+                        source_type='from_vendor_delivery',
+                        status='awaiting_vendor_delivery',
+                        vendor_delivery_confirmed=False,
+                        final_destination_site=final_destination,
+                        routed_by_buyer_id=buyer_id,
+                        routed_to_store_at=datetime.utcnow(),
+                        request_send=True,  # Mark as sent to PM
+
+                        created_at=datetime.utcnow()
+                    )
+                    db.session.add(imr)
+                    created_imr_count += 1
+
+            log.info(f"✅ Created {created_imr_count} Internal Material Requests for CR-{cr_id}")
+
+        except Exception as imr_error:
+            log.error(f"❌ Error creating Internal Material Requests: {imr_error}")
+            # Don't fail the whole request, but log the error
+
         db.session.commit()
 
-        # Send notification to CR creator about purchase completion
+        # ========================================
+        # NEW FEATURE: Notify Production Manager about incoming vendor delivery
+        # ========================================
+        try:
+            # Notify Production Manager(s)
+            pm_role = Role.query.filter_by(role='production_manager').first()
+            if pm_role:
+                pms = User.query.filter_by(
+                    role_id=pm_role.role_id,
+                    is_deleted=False,
+                    is_active=True
+                ).all()
+
+                project_name = cr.project.project_name if cr.project else 'Unknown Project'
+                vendor_name = cr.selected_vendor_name or 'Selected Vendor'
+
+                for pm in pms:
+                    notification_service.create_notification(
+                        user_id=pm.user_id,
+                        title=f"📦 Incoming Vendor Delivery - {project_name}",
+                        message=f"{buyer_name} has routed {created_imr_count} material(s) from vendor '{vendor_name}' to M2 Store for project '{project_name}'. Materials will be delivered to warehouse for inspection and dispatch to site.",
+                        type='vendor_delivery_incoming',
+                        reference_type='change_request',
+                        reference_id=cr_id,
+                        action_url=f'/store/incoming-deliveries'
+                    )
+                    log.info(f"✅ Notified PM {pm.full_name} about incoming vendor delivery for CR-{cr_id}")
+
+        except Exception as pm_notif_error:
+            log.error(f"❌ Failed to send PM notification: {pm_notif_error}")
+
+        # Send notification to CR creator about purchase routing
         try:
             if cr.requested_by_user_id:
                 project_name = cr.project.project_name if cr.project else 'Unknown Project'
-                notification_service.notify_cr_purchase_completed(
-                    cr_id=cr_id,
-                    project_name=project_name,
-                    buyer_id=buyer_id,
-                    buyer_name=buyer_name,
-                    requester_user_id=cr.requested_by_user_id
+                notification_service.create_notification(
+                    user_id=cr.requested_by_user_id,
+                    title=f"Purchase Routed to M2 Store - {project_name}",
+                    message=f"{buyer_name} has completed the purchase and routed materials to M2 Store. Production Manager will receive materials from vendor and dispatch to your site.",
+                    type='cr_routed_to_store',
+                    reference_type='change_request',
+                    reference_id=cr_id
                 )
         except Exception as notif_error:
-            log.error(f"Failed to send CR purchase completion notification: {notif_error}")
+            log.error(f"Failed to send CR routing notification: {notif_error}")
 
-        success_message = "Purchase marked as complete successfully"
+        success_message = f"Purchase routed to M2 Store successfully! {created_imr_count} material request(s) sent to Production Manager"
         if new_materials_added:
             success_message += f". {len(new_materials_added)} new material(s) added to system"
 

@@ -159,6 +159,13 @@ class ChangeRequest(db.Model):
     is_sub_cr = db.Column(db.Boolean, default=False)  # True if this is a sub-CR
     submission_group_id = db.Column(db.String(50), nullable=True)  # UUID to group related sub-CRs
 
+    # Vendor Delivery Routing (Complete & Send to Store feature - Added 2025-12-19)
+    delivery_routing = db.Column(db.String(50), default='direct_to_site')  # 'direct_to_site' or 'via_production_manager'
+    vendor_delivered_to_store = db.Column(db.Boolean, default=False)  # Vendor confirmed delivery to warehouse
+    vendor_delivery_date = db.Column(db.DateTime, nullable=True)  # When vendor delivered to warehouse
+    buyer_completion_notes = db.Column(db.Text, nullable=True)  # Buyer notes when completing
+    store_request_status = db.Column(db.String(50), nullable=True)  # Workflow status: pending_vendor_delivery, delivered_to_store, pm_received, dispatched_to_site, delivered_to_site
+
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)  # ✅ PERFORMANCE: Added index
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)

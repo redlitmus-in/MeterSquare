@@ -337,7 +337,7 @@ const Store: React.FC = () => {
                       <th className="px-4 py-3 text-left text-sm font-semibold">Unit</th>
                       <th className="px-4 py-3 text-right text-sm font-semibold">Available Stock</th>
                       <th className="px-4 py-3 text-center text-sm font-semibold">Status</th>
-                      <th className="px-4 py-3 text-center text-sm font-semibold">Action</th>
+                      {/* <th className="px-4 py-3 text-center text-sm font-semibold">Action</th> */}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -369,7 +369,7 @@ const Store: React.FC = () => {
                             {item.available_quantity > 0 ? 'In Stock' : 'Out of Stock'}
                           </Badge>
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        {/* <td className="px-4 py-3 text-center">
                           <Button
                             size="sm"
                             onClick={() => openRequestModal(item)}
@@ -379,7 +379,7 @@ const Store: React.FC = () => {
                             <SendHorizontal className="h-4 w-4 mr-1" />
                             Request
                           </Button>
-                        </td>
+                        </td> */}
                       </tr>
                     ))}
                   </tbody>

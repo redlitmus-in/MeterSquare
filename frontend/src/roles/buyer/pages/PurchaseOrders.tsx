@@ -1602,23 +1602,24 @@ const PurchaseOrders: React.FC = () => {
                         </Button>
                       )}
 
-                      {/* Third Row: Mark as Complete - Show after email OR WhatsApp is sent */}
+                      {/* Third Row: Complete & Send to Store - Show after email OR WhatsApp is sent */}
                       {purchase.status === 'pending' && !purchase.vendor_selection_pending_td_approval && purchase.vendor_id && (purchase.vendor_email_sent || purchase.vendor_whatsapp_sent) && (
                         <Button
                           onClick={() => handleMarkAsComplete(purchase.cr_id)}
                           disabled={completingPurchaseId === purchase.cr_id}
                           size="sm"
                           className="w-full h-7 text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1"
+                          title="Materials will go to M2 Store first, then Production Manager will dispatch to site"
                         >
                           {completingPurchaseId === purchase.cr_id ? (
                             <>
                               <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              Completing...
+                              Sending to Store...
                             </>
                           ) : (
                             <>
-                              <Check className="w-3 h-3 mr-1" />
-                              Mark as Complete
+                              <Package className="w-3 h-3 mr-1" />
+                              Complete & Send to Store
                             </>
                           )}
                         </Button>
@@ -2750,20 +2751,21 @@ const PurchaseOrders: React.FC = () => {
                               )
                             )}
 
-                            {/* Mark as Complete - Show after email OR WhatsApp is sent */}
+                            {/* Complete & Send to Store - Show after email OR WhatsApp is sent */}
                             {purchase.status === 'pending' && !purchase.vendor_selection_pending_td_approval && purchase.vendor_id && (purchase.vendor_email_sent || purchase.vendor_whatsapp_sent) && (
                               <Button
                                 onClick={() => handleMarkAsComplete(purchase.cr_id)}
                                 disabled={completingPurchaseId === purchase.cr_id}
                                 size="sm"
                                 className="px-2 py-1 h-auto text-xs bg-green-600 hover:bg-green-700 text-white"
+                                title="Materials will go to M2 Store first, then Production Manager will dispatch to site"
                               >
                                 {completingPurchaseId === purchase.cr_id ? (
                                   <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                 ) : (
                                   <>
-                                    <Check className="w-3 h-3 sm:mr-1" />
-                                    <span className="hidden sm:inline">Complete</span>
+                                    <Package className="w-3 h-3 sm:mr-1" />
+                                    <span className="hidden sm:inline">Send to Store</span>
                                   </>
                                 )}
                               </Button>

@@ -1357,6 +1357,84 @@ def request_project_completion(project_id):
                 "error": "BOQ not found for this project"
             }), 404
 
+        # ============ VALIDATION: Check Incomplete Purchases & Returns ============
+        from models.change_request import ChangeRequest
+        from models.returnable_assets import AssetReturnRequest
+        from models.pm_assign_ss import PMAssignSS
+        from config.change_request_config import CR_CONFIG
+
+        # Get SE's assigned items
+        se_assignments = PMAssignSS.query.filter_by(
+            project_id=project_id,
+            assigned_to_se_id=user_id,
+            is_deleted=False
+        ).all()
+
+        # Extract item indices assigned to this SE
+        se_item_indices = set()
+        se_boq_ids = set()
+        for assignment in se_assignments:
+            if assignment.boq_id:
+                se_boq_ids.add(assignment.boq_id)
+            if assignment.item_indices:
+                se_item_indices.update(assignment.item_indices)
+
+        # Get incomplete change requests
+        # Use centralized completion statuses from config
+        incomplete_crs = ChangeRequest.query.filter(
+            ChangeRequest.project_id == project_id,
+            ChangeRequest.is_deleted == False,
+            ~ChangeRequest.status.in_(CR_CONFIG.COMPLETION_STATUSES)
+        ).all()
+
+        log.info(f"Validation for SE {user_id} on project {project_id}: Found {len(incomplete_crs)} incomplete CRs")
+
+        # BLOCK ALL INCOMPLETE PURCHASES IN THE PROJECT
+        # No filtering - any incomplete CR blocks completion
+        blocking_purchases = []
+        for cr in incomplete_crs:
+            blocking_purchases.append({
+                "cr_id": cr.cr_id,
+                "item_name": cr.item_name or f"Item {cr.item_id}",
+                "status": cr.status,
+                "requested_by": cr.requested_by_name,
+                "reason": "Purchase not completed"
+            })
+
+        # Get incomplete asset returns (only this SE's returns) with eager loading
+        from sqlalchemy.orm import joinedload
+        incomplete_returns = AssetReturnRequest.query.options(
+            joinedload(AssetReturnRequest.category)
+        ).filter(
+            AssetReturnRequest.project_id == project_id,
+            AssetReturnRequest.requested_by_id == user_id,
+            AssetReturnRequest.status.in_(CR_CONFIG.ASSET_RETURN_INCOMPLETE_STATUSES)
+        ).all()
+
+        blocking_returns = [{
+            "request_id": req.request_id,
+            "category": req.category.category_name if req.category else "Asset",
+            "quantity": req.quantity,
+            "status": req.status
+        } for req in incomplete_returns]
+
+        # Block if incomplete items exist
+        if blocking_purchases or blocking_returns:
+            log.warning(f"SE {user_id} completion blocked: {len(blocking_purchases)} purchases, {len(blocking_returns)} returns incomplete")
+
+            return jsonify({
+                "success": False,
+                "error": "Cannot request completion - incomplete purchases or returns exist",
+                "message": f"Please complete all purchases and asset returns before requesting project completion",
+                "incomplete_purchases_count": len(blocking_purchases),
+                "incomplete_returns_count": len(blocking_returns),
+                "blocking_items": {
+                    "purchases": blocking_purchases,
+                    "returns": blocking_returns
+                }
+            }), 400
+        # ============ END VALIDATION ============
+
         # Get latest BOQ history
         boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).first()
 

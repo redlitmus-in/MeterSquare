@@ -1934,9 +1934,49 @@ def confirm_se_completion():
         project.last_modified_at = datetime.utcnow()
         project.last_modified_by = pm_name
 
-        # Auto-complete project if all confirmed
+        # Auto-complete project if all confirmed AND no pending purchases/returns
         project_completed = False
         if confirmed_pairs == total_pairs and total_pairs > 0:
+            # ============ FINAL VALIDATION: Check Whole Project ============
+            from models.change_request import ChangeRequest
+            from models.returnable_assets import AssetReturnRequest
+            from config.change_request_config import CR_CONFIG
+
+            # Check for ANY incomplete purchases in the project
+            # Use centralized completion statuses from config
+            incomplete_purchases = ChangeRequest.query.filter(
+                ChangeRequest.project_id == project_id,
+                ChangeRequest.is_deleted == False,
+                ~ChangeRequest.status.in_(CR_CONFIG.COMPLETION_STATUSES)
+            ).count()
+
+            # Check for ANY incomplete returns in the project
+            incomplete_returns = AssetReturnRequest.query.filter(
+                AssetReturnRequest.project_id == project_id,
+                AssetReturnRequest.status.in_(CR_CONFIG.ASSET_RETURN_INCOMPLETE_STATUSES)
+            ).count()
+
+            # If incomplete items exist, don't complete the project yet
+            if incomplete_purchases > 0 or incomplete_returns > 0:
+                log.warning(f"PM {pm_user_id} confirmed SE {se_user_id}, but project {project_id} has {incomplete_purchases} incomplete purchases and {incomplete_returns} incomplete returns - NOT auto-completing")
+
+                # INTENTIONAL: Save PM confirmation even though project can't complete yet
+                # This allows tracking progress while waiting for purchases/returns to finish
+                db.session.commit()
+
+                return jsonify({
+                    "success": True,
+                    "message": f"SE completion confirmed successfully. Project will auto-complete when all purchases and returns are finished.",
+                    "confirmation_status": f"{confirmed_pairs}/{total_pairs} confirmations",
+                    "project_completed": False,
+                    "pending_items": {
+                        "purchases": incomplete_purchases,
+                        "returns": incomplete_returns
+                    }
+                }), 200
+            # ============ END FINAL VALIDATION ============
+
+            # All clear - complete the project
             project.status = 'completed'
             project.completion_requested = False
             project_completed = True

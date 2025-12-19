@@ -1939,300 +1939,293 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </motion.div>
                         );
+                      } else {
+                        // Render Purchase (parent) card
+                        const purchase = item as Purchase;
+                        return (
+                          <motion.div
+                            key={`pending-legacy-${purchase.cr_id}`}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.02 * index }}
+                            className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200"
+                          >
+                            {/* Header */}
+                            <div className="p-2">
+                              <div className="flex items-start justify-between mb-1">
+                                <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{purchase.project_name}</h3>
+                                <Badge className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-800">
+                                  {purchase.formatted_cr_id || `PO-${purchase.cr_id}`}
+                                </Badge>
+                              </div>
+
+                              <div className="space-y-0.5 text-[10px] text-gray-600">
+                                <div className="flex items-center gap-1">
+                                  <Package className="h-2.5 w-2.5 text-gray-400" />
+                                  <span className="truncate">{purchase.item_name || 'N/A'}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-2.5 w-2.5 text-gray-400" />
+                                  <span className="truncate">{purchase.created_at ? new Date(purchase.created_at).toLocaleDateString() : 'N/A'}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Store className="h-2.5 w-2.5 text-gray-500" />
+                                  <span className="truncate font-semibold text-gray-900">{purchase.vendor_name || 'N/A'}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Materials count and cost */}
+                            <div className="px-2 pb-2">
+                              <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
+                                <Package className="h-2.5 w-2.5" />
+                                Materials ({purchase.materials_count || 0})
+                              </div>
+                              <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600 font-semibold">Total Cost:</span>
+                                  <span className="font-bold text-blue-700">AED {(purchase.total_cost || 0).toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
+                              <button
+                                onClick={() => handleReviewVendorApproval(purchase.cr_id)}
+                                className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold w-full"
+                                style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                              >
+                                <Eye className="h-3 w-3" />
+                                <span>Details</span>
+                              </button>
+
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  onClick={() => handleApproveVendor(purchase.cr_id)}
+                                  disabled={approvingVendorId === purchase.cr_id}
+                                  className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {approvingVendorId === purchase.cr_id ? (
+                                    <>
+                                      <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      <span className="text-[8px]">Approving...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Check className="h-3 w-3" />
+                                      <span>Approve</span>
+                                    </>
+                                  )}
+                                </button>
+                                <button
+                                  onClick={() => handleRejectVendorSelection(purchase.cr_id)}
+                                  disabled={approvingVendorId === purchase.cr_id}
+                                  className="bg-red-600 hover:bg-red-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  <X className="h-3 w-3" />
+                                  <span>Reject</span>
+                                </button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
                       }
-
-                      // Otherwise, render regular purchase card
-                      const purchase = item;
-                      return (
-                        <motion.div
-                          key={`pending-legacy-${purchase.cr_id}`}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.02 * index }}
-                          className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200"
-                        >
-                          {/* Header */}
-                          <div className="p-2">
-                            <div className="flex items-start justify-between mb-1">
-                              <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{purchase.project_name}</h3>
-                              <Badge className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-800">
-                                {purchase.formatted_cr_id || `PO-${purchase.cr_id}`}
-                              </Badge>
-                            </div>
-
-                            <div className="space-y-0.5 text-[10px] text-gray-600">
-                              <div className="flex items-center gap-1">
-                                <Package className="h-2.5 w-2.5 text-gray-400" />
-                                <span className="truncate">{purchase.item_name || 'N/A'}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Calendar className="h-2.5 w-2.5 text-gray-400" />
-                                <span className="truncate">{purchase.created_at ? new Date(purchase.created_at).toLocaleDateString() : 'N/A'}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Store className="h-2.5 w-2.5 text-gray-500" />
-                                <span className="truncate font-semibold text-gray-900">{purchase.vendor_name || 'N/A'}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Materials count and cost */}
-                          <div className="px-2 pb-2">
-                            <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
-                              <Package className="h-2.5 w-2.5" />
-                              Materials ({purchase.materials_count || 0})
-                            </div>
-                            <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
-                              <div className="flex justify-between">
-                                <span className="text-gray-600 font-semibold">Total Cost:</span>
-                                <span className="font-bold text-blue-700">AED {(purchase.total_cost || 0).toLocaleString()}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Actions */}
-                          <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
-                            <button
-                              onClick={() => handleReviewVendorApproval(purchase.cr_id)}
-                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold w-full"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-3 w-3" />
-                              <span>Details</span>
-                            </button>
-
-                            <div className="grid grid-cols-2 gap-1">
-                              <button
-                                onClick={() => handleApproveVendor(purchase.cr_id)}
-                                disabled={approvingVendorId === purchase.cr_id}
-                                className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {approvingVendorId === purchase.cr_id ? (
-                                  <>
-                                    <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                    <span className="text-[8px]">Approving...</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Check className="h-3 w-3" />
-                                    <span>Approve</span>
-                                  </>
-                                )}
-                              </button>
-                              <button
-                                onClick={() => handleRejectVendorSelection(purchase.cr_id)}
-                                disabled={approvingVendorId === purchase.cr_id}
-                                className="bg-red-600 hover:bg-red-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <X className="h-3 w-3" />
-                                <span>Reject</span>
-                              </button>
-                            </div>
-                          </div>
-                        </motion.div>
-                      );
                     })}
 
-
-                    {/* 🔥 MIXED ORDERING: Render merged rejected items (purchases + POChildren mixed by date) */}
+                    {/* 🔥 MIXED ORDERING: Render merged rejected items (parents + PO children sorted by date) */}
                     {vendorApprovalsSubTab === 'rejected' && mergedRejectedItems.map((item, index) => {
-                      // Check if this item is a POChild or regular purchase
                       if (isPOChild(item)) {
-                        // Render rejected POChild card (will be added inline or you can keep existing)
-                        // For now, skip to keep code simple - rejected POChildren rendered separately
-                        return null;
-                      }
-
-                      // Otherwise, render regular purchase card
-                      const purchase = item;
-                      return (
-                        <motion.div
-                          key={`rejected-legacy-${purchase.cr_id}`}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.02 * index }}
-                          className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200"
-                        >
-                          {/* Header */}
-                          <div className="p-2">
-                            <div className="flex items-start justify-between mb-1">
-                              <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{purchase.project_name}</h3>
-                              <Badge className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-800">
-                                {purchase.formatted_cr_id || `PO-${purchase.cr_id}`}
-                              </Badge>
-                            </div>
-
-                            <div className="space-y-0.5 text-[10px] text-gray-600">
-                              <div className="flex items-center gap-1">
-                                <Package className="h-2.5 w-2.5 text-gray-400" />
-                                <span className="truncate">{purchase.item_name || 'N/A'}</span>
+                        // Render PO Child card
+                        const poChild = item;
+                        const totalCost = calculatePOChildTotal(poChild);
+                        return (
+                          <motion.div
+                            key={`rejected-po-${poChild.id}`}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.02 * index }}
+                            className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-red-200"
+                          >
+                            <div className="p-2 bg-red-50/30">
+                              <div className="flex items-start justify-between mb-1">
+                                <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{poChild.project_name || poChild.item_name}</h3>
+                                <Badge className="text-[9px] px-1.5 py-0.5 bg-red-100 text-red-800">
+                                  {poChild.formatted_id}
+                                </Badge>
                               </div>
-                              <div className="flex items-center gap-1">
-                                <Calendar className="h-2.5 w-2.5 text-gray-400" />
-                                <span className="truncate">{purchase.created_at ? new Date(purchase.created_at).toLocaleDateString() : 'N/A'}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Store className="h-2.5 w-2.5 text-gray-500" />
-                                <span className="truncate font-semibold text-gray-900">{purchase.vendor_name || 'N/A'}</span>
+
+                              <div className="space-y-0.5 text-[10px] text-gray-600">
+                                <div className="flex items-center gap-1">
+                                  <Package className="h-2.5 w-2.5 text-gray-400" />
+                                  <span className="truncate">{poChild.item_name || 'N/A'}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-2.5 w-2.5 text-gray-400" />
+                                  <span className="truncate">{poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Store className="h-2.5 w-2.5 text-red-400" />
+                                  <span className="truncate font-semibold text-gray-900">{poChild.vendor_name || 'N/A'}</span>
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          {/* Materials count and cost */}
-                          <div className="px-2 pb-2">
-                            <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
-                              <Package className="h-2.5 w-2.5" />
-                              Materials ({purchase.materials_count || 0})
-                            </div>
-                            <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
-                              <div className="flex justify-between">
-                                <span className="text-gray-600 font-semibold">Total Cost:</span>
-                                <span className="font-bold text-blue-700">AED {(purchase.total_cost || 0).toLocaleString()}</span>
+                            {/* Materials List */}
+                            <div className="px-2 pb-2">
+                              <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
+                                <Package className="h-2.5 w-2.5" />
+                                Materials ({poChild.materials?.length || 0})
                               </div>
-                            </div>
-                          </div>
+                              <div className="bg-gray-50 rounded border border-gray-200 max-h-28 overflow-y-auto">
+                                {poChild.materials && poChild.materials.length > 0 ? (
+                                  <div className="divide-y divide-gray-100">
+                                    {poChild.materials.map((material: any, idx: number) => {
+                                      const boqPrice = material.boq_unit_price || 0;
+                                      const vendorPrice = material.unit_price || material.boq_unit_price || 0;
+                                      const quantity = material.quantity || 0;
+                                      const materialTotal = material.total_price || material.boq_total_price || (vendorPrice * quantity) || 0;
 
-                          {/* Actions */}
-                          <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
-                            <button
-                              onClick={() => handleReviewVendorApproval(purchase.cr_id)}
-                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold w-full"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-3 w-3" />
-                              <span>View Details</span>
-                            </button>
-                            <div className="bg-red-100 border border-red-300 rounded px-2 py-1 text-[9px] text-red-800 font-bold text-center">
-                              <XCircle className="h-3 w-3 inline mr-1" />
-                              Rejected by TD
-                            </div>
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-
-                    {/* Render rejected PO children */}
-                    {vendorApprovalsSubTab === 'rejected' && filteredRejectedPOChildren.map((poChild, index) => {
-                      const totalCost = calculatePOChildTotal(poChild);
-                      return (
-                        <motion.div
-                          key={`rejected-po-${poChild.id}`}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.02 * index }}
-                          className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-red-200"
-                        >
-                          <div className="p-2 bg-red-50/30">
-                            <div className="flex items-start justify-between mb-1">
-                              <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{poChild.project_name || poChild.item_name}</h3>
-                              <Badge className="text-[9px] px-1.5 py-0.5 bg-red-100 text-red-800">
-                                {poChild.formatted_id}
-                              </Badge>
-                            </div>
-
-                            <div className="space-y-0.5 text-[10px] text-gray-600">
-                              <div className="flex items-center gap-1">
-                                <Package className="h-2.5 w-2.5 text-gray-400" />
-                                <span className="truncate">{poChild.item_name || 'N/A'}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Calendar className="h-2.5 w-2.5 text-gray-400" />
-                                <span className="truncate">{poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Store className="h-2.5 w-2.5 text-red-400" />
-                                <span className="truncate font-semibold text-gray-900">{poChild.vendor_name || 'N/A'}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Materials List */}
-                          <div className="px-2 pb-2">
-                            <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
-                              <Package className="h-2.5 w-2.5" />
-                              Materials ({poChild.materials?.length || 0})
-                            </div>
-                            <div className="bg-gray-50 rounded border border-gray-200 max-h-28 overflow-y-auto">
-                              {poChild.materials && poChild.materials.length > 0 ? (
-                                <div className="divide-y divide-gray-100">
-                                  {poChild.materials.map((material: any, idx: number) => {
-                                    const boqPrice = material.boq_unit_price || 0;
-                                    const vendorPrice = material.unit_price || material.boq_unit_price || 0;
-                                    const quantity = material.quantity || 0;
-                                    const materialTotal = material.total_price || material.boq_total_price || (vendorPrice * quantity) || 0;
-
-                                    return (
-                                      <div key={idx} className="px-1.5 py-1 text-[9px]">
-                                        <div className="flex justify-between items-start gap-1">
-                                          <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
-                                          <div className="text-right whitespace-nowrap">
-                                            {vendorPrice > 0 ? (
-                                              <span className="text-blue-700 font-bold">
-                                                AED {vendorPrice.toLocaleString()}
-                                              </span>
-                                            ) : (
-                                              <span className="text-amber-600 italic text-[8px]">
-                                                Price not set
-                                              </span>
-                                            )}
-                                            {boqPrice > 0 && boqPrice !== vendorPrice && (
-                                              <span className="text-gray-400 text-[8px] ml-0.5">
-                                                (BOQ:{boqPrice})
-                                              </span>
-                                            )}
+                                      return (
+                                        <div key={idx} className="px-1.5 py-1 text-[9px]">
+                                          <div className="flex justify-between items-start gap-1">
+                                            <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
+                                            <div className="text-right whitespace-nowrap">
+                                              {vendorPrice > 0 ? (
+                                                <span className="text-blue-700 font-bold">
+                                                  AED {vendorPrice.toLocaleString()}
+                                                </span>
+                                              ) : (
+                                                <span className="text-amber-600 italic text-[8px]">
+                                                  Price not set
+                                                </span>
+                                              )}
+                                              {boqPrice > 0 && boqPrice !== vendorPrice && (
+                                                <span className="text-gray-400 text-[8px] ml-0.5">
+                                                  (BOQ:{boqPrice})
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <div className="flex justify-between text-gray-500 mt-0.5">
+                                            <span>{quantity} {material.unit}</span>
+                                            <div className="text-right">
+                                              {materialTotal > 0 ? (
+                                                <span className="font-semibold text-gray-700">
+                                                  = AED {materialTotal.toLocaleString()}
+                                                </span>
+                                              ) : (
+                                                <span className="text-amber-600 italic text-[8px]">-</span>
+                                              )}
+                                            </div>
                                           </div>
                                         </div>
-                                        <div className="flex justify-between text-gray-500 mt-0.5">
-                                          <span>{quantity} {material.unit}</span>
-                                          <div className="text-right">
-                                            {materialTotal > 0 ? (
-                                              <span className="font-semibold text-gray-700">
-                                                = AED {materialTotal.toLocaleString()}
-                                              </span>
-                                            ) : (
-                                              <span className="text-amber-600 italic text-[8px]">-</span>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div className="px-2 py-2 text-[9px] text-gray-400 text-center">
-                                  No materials data
-                                </div>
-                              )}
-                            </div>
-                            <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
-                              <div className="flex justify-between">
-                                <span className="text-gray-600 font-semibold">Total Cost:</span>
-                                {totalCost > 0 ? (
-                                  <span className="font-bold text-blue-700">AED {totalCost.toLocaleString()}</span>
+                                      );
+                                    })}
+                                  </div>
                                 ) : (
-                                  <span className="text-amber-600 italic text-[9px]">Prices not set</span>
+                                  <div className="px-2 py-2 text-[9px] text-gray-400 text-center">
+                                    No materials data
+                                  </div>
                                 )}
                               </div>
+                              <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600 font-semibold">Total Cost:</span>
+                                  {totalCost > 0 ? (
+                                    <span className="font-bold text-blue-700">AED {totalCost.toLocaleString()}</span>
+                                  ) : (
+                                    <span className="text-amber-600 italic text-[9px]">Prices not set</span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                          </div>
 
-                          {/* Status */}
-                          <div className="border-t border-red-100 p-1.5 flex flex-col gap-1 bg-red-50/20">
-                            <button
-                              onClick={() => handleViewPOChildDetails(poChild)}
-                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-3 w-3" />
-                              <span>View Details</span>
-                            </button>
-                            <div className="bg-red-100 border border-red-300 rounded px-2 py-1 text-[9px] text-red-800 font-bold text-center">
-                              <XCircle className="h-3 w-3 inline mr-1" />
-                              Rejected by TD
+                            {/* Status */}
+                            <div className="border-t border-red-100 p-1.5 flex flex-col gap-1 bg-red-50/20">
+                              <button
+                                onClick={() => handleViewPOChildDetails(poChild)}
+                                className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
+                                style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                              >
+                                <Eye className="h-3 w-3" />
+                                <span>View Details</span>
+                              </button>
+                              <div className="bg-red-100 border border-red-300 rounded px-2 py-1 text-[9px] text-red-800 font-bold text-center">
+                                <XCircle className="h-3 w-3 inline mr-1" />
+                                Rejected by TD
+                              </div>
                             </div>
-                          </div>
-                        </motion.div>
-                      );
+                          </motion.div>
+                        );
+                      } else {
+                        // Render Purchase (parent) card
+                        const purchase = item as Purchase;
+                        return (
+                          <motion.div
+                            key={`rejected-legacy-${purchase.cr_id}`}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.02 * index }}
+                            className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200"
+                          >
+                            {/* Header */}
+                            <div className="p-2">
+                              <div className="flex items-start justify-between mb-1">
+                                <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{purchase.project_name}</h3>
+                                <Badge className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-800">
+                                  {purchase.formatted_cr_id || `PO-${purchase.cr_id}`}
+                                </Badge>
+                              </div>
+
+                              <div className="space-y-0.5 text-[10px] text-gray-600">
+                                <div className="flex items-center gap-1">
+                                  <Package className="h-2.5 w-2.5 text-gray-400" />
+                                  <span className="truncate">{purchase.item_name || 'N/A'}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-2.5 w-2.5 text-gray-400" />
+                                  <span className="truncate">{purchase.created_at ? new Date(purchase.created_at).toLocaleDateString() : 'N/A'}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Store className="h-2.5 w-2.5 text-gray-500" />
+                                  <span className="truncate font-semibold text-gray-900">{purchase.vendor_name || 'N/A'}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Materials count and cost */}
+                            <div className="px-2 pb-2">
+                              <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
+                                <Package className="h-2.5 w-2.5" />
+                                Materials ({purchase.materials_count || 0})
+                              </div>
+                              <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600 font-semibold">Total Cost:</span>
+                                  <span className="font-bold text-blue-700">AED {(purchase.total_cost || 0).toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
+                              <button
+                                onClick={() => handleReviewVendorApproval(purchase.cr_id)}
+                                className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold w-full"
+                                style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                              >
+                                <Eye className="h-3 w-3" />
+                                <span>View Details</span>
+                              </button>
+                              <div className="bg-red-100 border border-red-300 rounded px-2 py-1 text-[9px] text-red-800 font-bold text-center">
+                                <XCircle className="h-3 w-3 inline mr-1" />
+                                Rejected by TD
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      }
                     })}
                   </div>
                 )}

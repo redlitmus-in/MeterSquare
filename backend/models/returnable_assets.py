@@ -153,7 +153,7 @@ class AssetReturnRequest(db.Model):
     request_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     category_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_categories.category_id'), nullable=False)
     item_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_items.item_id'), nullable=True)  # NULL for quantity mode
-    project_id = db.Column(db.Integer, nullable=False)
+    project_id = db.Column(db.Integer, nullable=False, index=True)  # Index for project completion validation
     quantity = db.Column(db.Integer, default=1)  # For quantity mode
 
     # SE provides condition assessment
@@ -162,7 +162,7 @@ class AssetReturnRequest(db.Model):
     se_damage_description = db.Column(db.Text, nullable=True)  # If damaged, description
 
     # Request status
-    status = db.Column(db.String(30), default='pending')  # pending, approved, rejected, completed
+    status = db.Column(db.String(30), default='pending', index=True)  # pending, approved, rejected, completed - Index for filtering
 
     # PM reviews and confirms
     pm_condition_assessment = db.Column(db.String(20), nullable=True)  # PM's actual condition check
@@ -172,7 +172,7 @@ class AssetReturnRequest(db.Model):
     # Tracking
     tracking_code = db.Column(db.String(50), nullable=True)  # Unique code for tracking: RR-2025-001
     requested_by = db.Column(db.String(255), nullable=True)
-    requested_by_id = db.Column(db.Integer, nullable=True)
+    requested_by_id = db.Column(db.Integer, nullable=True, index=True)  # Index for SE-specific queries
     requested_at = db.Column(db.DateTime, default=datetime.utcnow)
     processed_by = db.Column(db.String(255), nullable=True)
     processed_by_id = db.Column(db.Integer, nullable=True)

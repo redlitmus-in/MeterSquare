@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -28,8 +28,9 @@ const VendorManagement: React.FC = () => {
   const roleSlug = getRoleSlug(user?.role || user?.role_name || '');
   const vendorsBasePath = `/${roleSlug}/vendors`;
 
-  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [allVendors, setAllVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -49,10 +50,6 @@ const VendorManagement: React.FC = () => {
     loadCategories();
   }, []);
 
-  useEffect(() => {
-    loadVendors();
-  }, [searchTerm, categoryFilter, statusFilter]);
-
   const loadCategories = async () => {
     try {
       const cats = await buyerVendorService.getVendorCategories();
@@ -66,22 +63,50 @@ const VendorManagement: React.FC = () => {
     try {
       setLoading(true);
       const response = await buyerVendorService.getAllVendors({
-        category: categoryFilter || undefined,
-        status: statusFilter || undefined,
-        search: searchTerm || undefined,
         page: 1,
-        per_page: 100
+        per_page: 1000 // Load all vendors at once for client-side filtering
       });
 
-      setVendors(response.vendors);
+      setAllVendors(response.vendors);
       setStatistics(response.statistics);
     } catch (error: any) {
       console.error('Error loading vendors:', error);
       showError(error.message || 'Failed to load vendors');
     } finally {
       setLoading(false);
+      setIsInitialLoad(false);
     }
   };
+
+  // Client-side filtering - instant, no API calls
+  const vendors = useMemo(() => {
+    return allVendors.filter(vendor => {
+      // Category filter
+      if (categoryFilter && vendor.category !== categoryFilter) {
+        return false;
+      }
+
+      // Status filter
+      if (statusFilter && vendor.status !== statusFilter) {
+        return false;
+      }
+
+      // Search filter - search in company name, email, contact person
+      if (searchTerm) {
+        const search = searchTerm.toLowerCase();
+        const matchesCompany = vendor.company_name?.toLowerCase().includes(search);
+        const matchesEmail = vendor.email?.toLowerCase().includes(search);
+        const matchesContact = vendor.contact_person_name?.toLowerCase().includes(search);
+        const matchesPhone = vendor.phone?.includes(search);
+
+        if (!matchesCompany && !matchesEmail && !matchesContact && !matchesPhone) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [allVendors, searchTerm, categoryFilter, statusFilter]);
 
   const handleAddVendor = () => {
     setEditingVendor(null);
@@ -128,11 +153,11 @@ const VendorManagement: React.FC = () => {
     setStatusFilter('');
   };
 
-  if (loading) {
+  if (isInitialLoad && loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <ModernLoadingSpinners variant="pulse-wave" color="blue" />
+          <ModernLoadingSpinners variant="pulse-wave" />
           <p className="text-gray-600 mt-4">Loading vendors...</p>
         </div>
       </div>
@@ -228,7 +253,7 @@ const VendorManagement: React.FC = () => {
       </motion.div>
 
       {/* Vendor List */}
-      {vendors.length === 0 ? (
+      {vendors.length === 0 && !loading ? (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -252,7 +277,7 @@ const VendorManagement: React.FC = () => {
             </button>
           )}
         </motion.div>
-      ) : (
+      ) : vendors.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {vendors.map((vendor, index) => (
             <motion.div
@@ -329,7 +354,7 @@ const VendorManagement: React.FC = () => {
             </motion.div>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Mobile Add Button */}
       <button

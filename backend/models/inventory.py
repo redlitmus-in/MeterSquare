@@ -110,6 +110,14 @@ class InternalMaterialRequest(db.Model):
     rejection_reason = db.Column(db.Text, nullable=True)
     notes = db.Column(db.Text, nullable=True)
     request_send = db.Column(db.Boolean, default=True)
+
+    # Vendor Delivery Routing (Complete & Send to Store feature - Added 2025-12-19)
+    source_type = db.Column(db.String(50), default='manual')  # 'manual' or 'from_vendor_delivery'
+    vendor_delivery_confirmed = db.Column(db.Boolean, default=False)  # Vendor delivered to store
+    final_destination_site = db.Column(db.String(255), nullable=True)  # Which site gets materials
+    routed_by_buyer_id = db.Column(db.Integer, nullable=True)  # Buyer who routed this
+    routed_to_store_at = db.Column(db.DateTime, nullable=True)  # When buyer completed routing
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

@@ -47,8 +47,18 @@ class ChangeRequestConfig:
     STATUS_ASSIGNED_TO_BUYER = 'assigned_to_buyer'
     STATUS_PURCHASE_COMPLETE = 'purchase_completed'  # Fixed: was 'purchase_complete', now 'purchase_completed'
     STATUS_REJECTED = 'rejected'
+    STATUS_CANCELLED = 'cancelled'
 
     # Status Arrays for Filtering
+    # Statuses that indicate a Change Request is complete (terminal states)
+    COMPLETION_STATUSES = [
+        'purchase_completed',
+        'rejected',
+        'cancelled'
+    ]
+
+    # Asset return incomplete statuses (blocks project completion)
+    ASSET_RETURN_INCOMPLETE_STATUSES = ['pending', 'approved']
     # Statuses that consume/reserve material quantities (includes pending to prevent over-allocation)
     MATERIAL_CONSUMING_STATUSES = [
         'pending',
@@ -84,6 +94,33 @@ class ChangeRequestConfig:
 
     # Request Types
     REQUEST_TYPE_EXTRA_MATERIALS = 'EXTRA_MATERIALS'
+
+    @staticmethod
+    def parse_item_id(item_id: str) -> int:
+        """
+        Parse item_id string to extract item index.
+        Handles formats: "item_5", "item_30_3" (BOQ_30, item_3)
+        Returns the last numeric segment.
+
+        Args:
+            item_id: String in format "item_N" or "item_BOQ_N"
+
+        Returns:
+            int: The item index (last number in the string)
+
+        Raises:
+            ValueError: If item_id format is invalid or cannot be parsed
+        """
+        if not item_id:
+            raise ValueError("item_id cannot be None or empty")
+
+        try:
+            # Split by underscore and get the last segment
+            # "item_5" -> ["item", "5"] -> "5" -> 5
+            # "item_30_3" -> ["item", "30", "3"] -> "3" -> 3
+            return int(item_id.split('_')[-1])
+        except (ValueError, IndexError, AttributeError) as e:
+            raise ValueError(f"Invalid item_id format '{item_id}': {e}")
 
     @classmethod
     def get_config(cls) -> Dict[str, Any]:

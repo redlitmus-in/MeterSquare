@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   BuildingOfficeIcon,
@@ -11,6 +11,7 @@ import {
   ArrowDownTrayIcon,
   DocumentTextIcon,
   UserGroupIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
@@ -104,6 +105,182 @@ interface Project {
   }>;
 }
 
+// Request Completion Modal Content Component
+const RequestCompletionModalContent: React.FC<{
+  project: Project;
+  onClose: () => void;
+  onSuccess: () => void;
+}> = ({ project, onClose, onSuccess }) => {
+  const [validating, setValidating] = useState(true);
+  const [validationData, setValidationData] = useState<any>(null);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    // Check validation when modal opens
+    const checkValidation = async () => {
+      try {
+        setValidating(true);
+        await siteEngineerService.requestProjectCompletion(project.project_id);
+        // If successful, no blocking items
+        setValidationData({ canProceed: true, blocking_items: null });
+      } catch (error: any) {
+        const errorData = error?.response?.data;
+        if (errorData?.blocking_items) {
+          setValidationData({
+            canProceed: false,
+            blocking_items: errorData.blocking_items,
+            message: errorData.message
+          });
+        } else {
+          setValidationData({
+            canProceed: false,
+            error: errorData?.error || 'Failed to check completion status'
+          });
+        }
+      } finally {
+        setValidating(false);
+      }
+    };
+
+    checkValidation();
+  }, [project.project_id]);
+
+  const handleSendRequest = async () => {
+    try {
+      setSending(true);
+      await siteEngineerService.requestProjectCompletion(project.project_id);
+      onSuccess();
+    } catch (error: any) {
+      showError(error?.response?.data?.error || 'Failed to send request');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const purchases = validationData?.blocking_items?.purchases || [];
+  const returns = validationData?.blocking_items?.returns || [];
+  const canProceed = validationData?.canProceed === true;
+
+  return (
+    <>
+      {/* Content */}
+      <div className="px-4 py-4">
+        {validating ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="w-6 h-6 border-3 border-[#243d8a] border-t-transparent rounded-full animate-spin"></div>
+            <span className="ml-3 text-gray-600 text-sm">Checking validation...</span>
+          </div>
+        ) : (
+          <>
+            {canProceed ? (
+              <>
+                <p className="text-gray-700 text-sm mb-3">
+                  Request Project Manager to mark this project as completed?
+                </p>
+                <div className="bg-[#243d8a]/5 border-l-4 border-[#243d8a] rounded-r px-3 py-2">
+                  <p className="text-xs font-semibold text-[#243d8a]">{project.project_name}</p>
+                  <p className="text-xs text-gray-700">{project.client || 'N/A'}</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="bg-red-50 border-l-4 border-red-500 rounded-r px-4 py-3 mb-4">
+                  <div className="flex items-start">
+                    <ExclamationTriangleIcon className="w-5 h-5 text-red-500 mt-0.5 mr-3 flex-shrink-0" />
+                    <div>
+                      <h3 className="font-semibold text-red-800 text-sm">Cannot Request Completion</h3>
+                      <p className="text-red-700 text-xs mt-1">
+                        Please complete all purchases and asset returns before requesting project completion.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {purchases.length > 0 && (
+                  <div className="mb-4">
+                    <h4 className="text-sm font-semibold text-gray-900 mb-2">
+                      Incomplete Purchases ({purchases.length})
+                    </h4>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {purchases.map((p: any, idx: number) => (
+                        <div key={idx} className="bg-gray-50 border border-gray-200 rounded px-3 py-2">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <p className="text-xs font-medium text-gray-900">{p.item_name}</p>
+                              <p className="text-xs text-gray-600 mt-0.5">Status: <span className="font-medium">{p.status}</span></p>
+                              <p className="text-xs text-gray-600">Requested by: {p.requested_by}</p>
+                            </div>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                              Pending
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {returns.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-900 mb-2">
+                      Incomplete Returns ({returns.length})
+                    </h4>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {returns.map((r: any, idx: number) => (
+                        <div key={idx} className="bg-gray-50 border border-gray-200 rounded px-3 py-2">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <p className="text-xs font-medium text-gray-900">{r.category}</p>
+                              <p className="text-xs text-gray-600 mt-0.5">Quantity: {r.quantity}</p>
+                            </div>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                              {r.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="bg-gray-50 px-4 py-3 flex items-center justify-end gap-2">
+        <button
+          onClick={onClose}
+          disabled={sending || validating}
+          className="px-4 py-2 bg-white hover:bg-gray-100 text-gray-700 font-medium rounded-lg transition-colors border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+        >
+          {canProceed ? 'Cancel' : 'Close'}
+        </button>
+        {canProceed && (
+          <button
+            onClick={handleSendRequest}
+            disabled={sending || validating}
+            className="px-4 py-2 bg-[#243d8a] hover:bg-[#1e3270] text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center gap-1.5 text-sm"
+          >
+            {sending ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                Sending...
+              </>
+            ) : (
+              <>
+                <CheckCircleIcon className="w-4 h-4" />
+                Send Request
+              </>
+            )}
+          </button>
+        )}
+      </div>
+    </>
+  );
+};
+
 const MyProjects: React.FC = () => {
   const { user } = useAuthStore();
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -116,6 +293,8 @@ const MyProjects: React.FC = () => {
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [projectToRequest, setProjectToRequest] = useState<Project | null>(null);
   const [requesting, setRequesting] = useState(false);
+  const [validationData, setValidationData] = useState<any>(null);
+  const [checkingValidation, setCheckingValidation] = useState(false);
   const [pendingChangeRequests, setPendingChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [approvedChangeRequests, setApprovedChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [rejectedChangeRequests, setRejectedChangeRequests] = useState<ChangeRequestItem[]>([]);
@@ -1044,62 +1223,21 @@ const MyProjects: React.FC = () => {
             </div>
 
             {/* Content */}
-            <div className="px-4 py-4">
-              <p className="text-gray-700 text-sm mb-3">
-                Request Project Manager to mark this project as completed?
-              </p>
-              <div className="bg-[#243d8a]/5 border-l-4 border-[#243d8a] rounded-r px-3 py-2">
-                <p className="text-xs font-semibold text-[#243d8a]">{projectToRequest.project_name}</p>
-                <p className="text-xs text-gray-700">{projectToRequest.client || 'N/A'}</p>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="bg-gray-50 px-4 py-3 flex items-center justify-end gap-2">
-              <button
-                onClick={() => {
-                  setShowRequestModal(false);
-                  setProjectToRequest(null);
-                }}
-                disabled={requesting}
-                className="px-4 py-2 bg-white hover:bg-gray-100 text-gray-700 font-medium rounded-lg transition-colors border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    setRequesting(true);
-                    await siteEngineerService.requestProjectCompletion(projectToRequest.project_id);
-                    showSuccess('Completion request sent to Project Manager');
-                    setShowRequestModal(false);
-                    setProjectToRequest(null);
-                    refetch();
-                  } catch (error: any) {
-                    console.error('Error requesting completion:', error);
-                    const errorMsg = error?.response?.data?.error || 'Failed to send request';
-                    const details = error?.response?.data?.details;
-                    showError(details ? `${errorMsg}. ${details}` : errorMsg);
-                  } finally {
-                    setRequesting(false);
-                  }
-                }}
-                disabled={requesting}
-                className="px-4 py-2 bg-[#243d8a] hover:bg-[#1e3270] text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center gap-1.5 text-sm"
-              >
-                {requesting ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircleIcon className="w-4 h-4" />
-                    Send Request
-                  </>
-                )}
-              </button>
-            </div>
+            <RequestCompletionModalContent
+              project={projectToRequest}
+              onClose={() => {
+                setShowRequestModal(false);
+                setProjectToRequest(null);
+                setValidationData(null);
+              }}
+              onSuccess={() => {
+                showSuccess('Completion request sent to Project Manager');
+                setShowRequestModal(false);
+                setProjectToRequest(null);
+                setValidationData(null);
+                refetch();
+              }}
+            />
           </motion.div>
         </div>
       )}
