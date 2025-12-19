@@ -135,14 +135,14 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
     setIsSaving(true);
     try {
-      await buyerService.saveLPOCustomization(purchase.cr_id, lpoData, includeSignatures);
+      await buyerService.saveLPOCustomization(purchase.cr_id, lpoData, includeSignatures, purchase.po_child_id);
       setLastSaved(new Date());
     } catch (error) {
       console.error('Auto-save failed:', error);
     } finally {
       setIsSaving(false);
     }
-  }, [lpoData, includeSignatures, purchase.cr_id]);
+  }, [lpoData, includeSignatures, purchase.cr_id, purchase.po_child_id]);
 
   // Debounced auto-save effect - triggers 2 seconds after user stops editing
   useEffect(() => {
@@ -1163,7 +1163,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                               setLpoData(newLpoData);
                                               // Auto-save after toggling checkbox
                                               try {
-                                                await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures);
+                                                await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures, purchase.po_child_id);
                                                 setLastSaved(new Date());
                                               } catch (error) {
                                                 console.error('Failed to save after toggle:', error);
@@ -1212,7 +1212,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                                     setLpoData(newLpoData);
                                                     // Immediate save after editing term
                                                     try {
-                                                      await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures);
+                                                      await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures, purchase.po_child_id);
                                                       setLastSaved(new Date());
                                                     } catch (error) {
                                                       console.error('Failed to save after edit:', error);
@@ -1250,7 +1250,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                                   setLpoData(newLpoData);
                                                   // Immediate save after deleting term
                                                   try {
-                                                    await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures);
+                                                    await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures, purchase.po_child_id);
                                                     setLastSaved(new Date());
                                                   } catch (error) {
                                                     console.error('Failed to save after delete:', error);
@@ -1293,7 +1293,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                               setNewCustomTerm('');
                                               // Immediate save after adding term
                                               try {
-                                                await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures);
+                                                await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures, purchase.po_child_id);
                                                 setLastSaved(new Date());
                                               } catch (error) {
                                                 console.error('Failed to save term:', error);
@@ -1320,7 +1320,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                             setNewCustomTerm('');
                                             // Immediate save after adding term
                                             try {
-                                              await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures);
+                                              await buyerService.saveLPOCustomization(purchase.cr_id, newLpoData, includeSignatures, purchase.po_child_id);
                                               setLastSaved(new Date());
                                             } catch (error) {
                                               console.error('Failed to save term:', error);

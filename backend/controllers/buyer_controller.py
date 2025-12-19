@@ -1406,7 +1406,6 @@ def get_buyer_pending_purchases():
                 "vendor_approval_date": cr.vendor_approval_date.isoformat() if cr.vendor_approval_date else None,
                 "vendor_selection_date": cr.vendor_selection_date.isoformat() if cr.vendor_selection_date else None,
                 "vendor_trn": vendor_trn,
-                "vendor_email": vendor_email,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
                 "vendor_selection_status": cr.vendor_selection_status,  # 'pending_td_approval', 'approved', 'rejected'
                 "vendor_email_sent": cr.vendor_email_sent or False,
@@ -3596,8 +3595,19 @@ def create_sub_crs_for_vendor_groups(cr_id):
                 save_price_for_future = material.get('save_price_for_future', False)
 
                 # Find the material from parent CR
+                # CRITICAL: Search sub_items_data first (has complete structure with sub_item_name)
+                # Then fallback to materials_data for backward compatibility
                 parent_material = None
-                if parent_cr.materials_data:
+
+                # First, search in sub_items_data (has sub_item_name and complete structure)
+                if parent_cr.sub_items_data:
+                    for pm in parent_cr.sub_items_data:
+                        if pm.get('material_name') == material_name:
+                            parent_material = pm
+                            break
+
+                # Fallback to materials_data if not found (for old CRs without sub_items_data)
+                if not parent_material and parent_cr.materials_data:
                     for pm in parent_cr.materials_data:
                         if pm.get('material_name') == material_name:
                             parent_material = pm
@@ -3912,8 +3922,19 @@ def create_po_children(cr_id):
                 negotiated_price = material.get('negotiated_price')
 
                 # Find the material from parent CR
+                # CRITICAL: Search sub_items_data first (has complete structure with sub_item_name)
+                # Then fallback to materials_data for backward compatibility
                 parent_material = None
-                if parent_cr.materials_data:
+
+                # First, search in sub_items_data (has sub_item_name and complete structure)
+                if parent_cr.sub_items_data:
+                    for pm in parent_cr.sub_items_data:
+                        if pm.get('material_name') == material_name:
+                            parent_material = pm
+                            break
+
+                # Fallback to materials_data if not found (for old CRs without sub_items_data)
+                if not parent_material and parent_cr.materials_data:
                     for pm in parent_cr.materials_data:
                         if pm.get('material_name') == material_name:
                             parent_material = pm
@@ -3960,6 +3981,10 @@ def create_po_children(cr_id):
                 po_materials.append({
                     'material_name': material_name,
                     'sub_item_name': parent_material.get('sub_item_name', '') if parent_material else '',
+                    'description': parent_material.get('description', '') if parent_material else '',
+                    'brand': parent_material.get('brand', '') if parent_material else '',
+                    'size': parent_material.get('size', '') if parent_material else '',
+                    'specification': parent_material.get('specification', '') if parent_material else '',
                     'quantity': quantity,
                     'unit': unit,
                     'unit_price': unit_price,  # Vendor's price
@@ -3967,7 +3992,8 @@ def create_po_children(cr_id):
                     'boq_unit_price': boq_unit_price,  # Original BOQ price for comparison
                     'boq_total_price': boq_total_price,  # BOQ total for comparison
                     'master_material_id': parent_material.get('master_material_id') if parent_material else None,
-                    'negotiated_price': negotiated_price  # Store negotiated price
+                    'negotiated_price': negotiated_price,  # Store negotiated price
+                    'is_new_material': parent_material.get('is_new_material', False) if parent_material else False  # Flag if new material
                 })
 
             # Check if a POChild already exists for this vendor (consolidate materials)
@@ -4158,7 +4184,7 @@ def create_po_children(cr_id):
 
 
 def update_purchase_order(cr_id):
-    """Update purchase order materials and costs"""
+    """Update purchase order materials and costs, and optionally material_vendor_selections"""
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
@@ -4167,9 +4193,11 @@ def update_purchase_order(cr_id):
         data = request.get_json()
         materials = data.get('materials')
         total_cost = data.get('total_cost')
+        material_vendor_selections = data.get('material_vendor_selections')
 
-        if not materials or total_cost is None:
-            return jsonify({"error": "Materials and total cost are required"}), 400
+        # Allow updating ONLY material_vendor_selections without materials/total_cost
+        if not materials and total_cost is None and not material_vendor_selections:
+            return jsonify({"error": "Materials, total cost, or material_vendor_selections are required"}), 400
 
         # Get the change request
         cr = ChangeRequest.query.filter_by(
@@ -4194,25 +4222,33 @@ def update_purchase_order(cr_id):
         if cr.status != 'assigned_to_buyer':
             return jsonify({"error": f"Cannot edit purchase. Current status: {cr.status}"}), 400
 
-        # Validate materials structure
-        if not isinstance(materials, list):
-            return jsonify({"error": "Materials must be an array"}), 400
+        # Validate and update materials if provided
+        if materials is not None:
+            if not isinstance(materials, list):
+                return jsonify({"error": "Materials must be an array"}), 400
 
-        # Update materials in sub_items_data format
-        updated_materials = []
-        for material in materials:
-            updated_materials.append({
-                "material_name": material.get('material_name', ''),
-                "sub_item_name": material.get('sub_item_name', ''),
-                "quantity": float(material.get('quantity', 0)),
-                "unit": material.get('unit', ''),
-                "unit_price": float(material.get('unit_price', 0)),
-                "total_price": float(material.get('total_price', 0))
-            })
+            # Update materials in sub_items_data format
+            updated_materials = []
+            for material in materials:
+                updated_materials.append({
+                    "material_name": material.get('material_name', ''),
+                    "sub_item_name": material.get('sub_item_name', ''),
+                    "quantity": float(material.get('quantity', 0)),
+                    "unit": material.get('unit', ''),
+                    "unit_price": float(material.get('unit_price', 0)),
+                    "total_price": float(material.get('total_price', 0))
+                })
 
-        # Update the change request
-        cr.sub_items_data = updated_materials
-        cr.materials_total_cost = float(total_cost)
+            cr.sub_items_data = updated_materials
+            cr.materials_total_cost = float(total_cost)
+
+        # Update material_vendor_selections if provided
+        if material_vendor_selections is not None:
+            from sqlalchemy.orm.attributes import flag_modified
+            cr.material_vendor_selections = material_vendor_selections
+            flag_modified(cr, 'material_vendor_selections')
+            log.info(f"Updated material_vendor_selections for CR {cr_id}: {material_vendor_selections}")
+
         cr.updated_at = datetime.utcnow()
 
         db.session.commit()
@@ -4222,8 +4258,9 @@ def update_purchase_order(cr_id):
             "message": "Purchase order updated successfully",
             "purchase": {
                 "cr_id": cr.cr_id,
-                "materials": cr.sub_items_data,
-                "total_cost": cr.materials_total_cost
+                "materials": cr.sub_items_data if materials is not None else cr.sub_items_data or cr.materials_data,
+                "total_cost": cr.materials_total_cost,
+                "material_vendor_selections": cr.material_vendor_selections or {}
             }
         }), 200
 
@@ -8047,8 +8084,9 @@ def preview_lpo_pdf(cr_id):
         current_user = g.user
         buyer_id = current_user['user_id']
 
-        # Check for po_child_id in query params
+        # Check for po_child_id and vendor_id in query params
         po_child_id = request.args.get('po_child_id', type=int)
+        vendor_id = request.args.get('vendor_id', type=int)
         po_child = None
 
         # Get the change request
@@ -8060,6 +8098,8 @@ def preview_lpo_pdf(cr_id):
         if po_child_id:
             po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
             print(f">>> preview_lpo_pdf: po_child_id={po_child_id}, po_child found={po_child is not None}")
+
+        print(f">>> preview_lpo_pdf: vendor_id from query={vendor_id}")
 
         # Get saved customizations if any (handle case where table doesn't exist yet)
         # Priority: 1) PO child specific, 2) CR-level, 3) Global default template
@@ -8097,10 +8137,14 @@ def preview_lpo_pdf(cr_id):
                 db.session.rollback()
                 log.warning(f"Could not create table: {str(create_error)}")
 
-        # Get vendor details - use POChild vendor if available
+        # Get vendor details - priority: POChild vendor > vendor_id param > CR's selected vendor
         vendor = None
         if po_child and po_child.vendor_id:
             vendor = Vendor.query.filter_by(vendor_id=po_child.vendor_id, is_deleted=False).first()
+        elif vendor_id:
+            # Use vendor_id from query param (for pre-POChild preview)
+            vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+            print(f">>> preview_lpo_pdf: Using vendor from query param: {vendor.company_name if vendor else None}")
         elif cr.selected_vendor_id:
             vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
 
@@ -8177,7 +8221,36 @@ def preview_lpo_pdf(cr_id):
         else:
             # Use parent CR's materials
             materials_list, cr_total = process_materials_with_negotiated_prices(cr)
-            print(f">>> preview_lpo_pdf: Using parent CR materials: {len(materials_list)} items, total: {cr_total}")
+
+            # If vendor_id is provided (pre-POChild preview), filter materials for that vendor only
+            print(f">>> preview_lpo_pdf: vendor_id={vendor_id}")
+            print(f">>> preview_lpo_pdf: material_vendor_selections type={type(cr.material_vendor_selections)}, value={cr.material_vendor_selections}")
+
+            if vendor_id and cr.material_vendor_selections:
+                print(f">>> preview_lpo_pdf: Filtering materials for vendor_id={vendor_id}")
+                filtered_materials = []
+                filtered_total = 0
+
+                for material in materials_list:
+                    mat_name = material.get('material_name', '')
+                    vendor_selection = cr.material_vendor_selections.get(mat_name, {})
+                    print(f">>> preview_lpo_pdf: Material '{mat_name}' vendor_selection: {vendor_selection}")
+
+                    if isinstance(vendor_selection, dict):
+                        selected_vendor_id = vendor_selection.get('vendor_id')
+                        print(f">>> preview_lpo_pdf: Material '{mat_name}' has vendor_id={selected_vendor_id}, comparing with {vendor_id}")
+                        if selected_vendor_id == vendor_id:
+                            filtered_materials.append(material)
+                            filtered_total += material.get('total_price', 0)
+                            print(f">>> preview_lpo_pdf: ✓ Including material '{mat_name}'")
+                        else:
+                            print(f">>> preview_lpo_pdf: ✗ Skipping '{mat_name}' (vendor {selected_vendor_id} != {vendor_id})")
+
+                materials_list = filtered_materials
+                cr_total = filtered_total
+                print(f">>> preview_lpo_pdf: FILTERED to {len(materials_list)} materials, total: {cr_total}")
+            else:
+                print(f">>> preview_lpo_pdf: NO FILTERING - Using all {len(materials_list)} materials")
 
         # Calculate totals
         subtotal = 0

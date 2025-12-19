@@ -2799,6 +2799,47 @@ def revision_boq(boq_id):
         boq_items = []
         total_boq_cost = 0
 
+        # ========== FIRST TIME EDIT: SAVE ORIGINAL BOQ TO HISTORY ==========
+        # Check if this is the first edit (no history exists for this BOQ)
+        existing_history_count = BOQDetailsHistory.query.filter_by(
+            boq_id=boq_id
+        ).count()
+
+        if existing_history_count == 0 and old_boq_details_json:
+            # This is the first edit - save the ORIGINAL/CURRENT BOQ data to history
+            log.info(f"📝 First edit detected for BOQ {boq_id} - storing original BOQ to history")
+
+            # Calculate totals from original BOQ data
+            original_items = old_boq_details_json.get("items", [])
+            original_total_items = len(original_items)
+            original_total_materials = 0
+            original_total_labour = 0
+            original_total_cost = 0
+
+            for item in original_items:
+                # Get selling price from original data
+                original_total_cost += item.get("selling_price", 0) or item.get("total_selling_price", 0) or 0
+
+                # Count materials and labour from sub_items
+                for sub_item in item.get("sub_items", []):
+                    original_total_materials += len(sub_item.get("materials", []))
+                    original_total_labour += len(sub_item.get("labour", []))
+
+            # Create history entry for ORIGINAL BOQ data (version 0)
+            original_boq_history = BOQDetailsHistory(
+                boq_detail_id=boq_details.boq_detail_id,
+                boq_id=boq_id,
+                version=0,  # Version 0 = original BOQ before any edits
+                boq_details=old_boq_details_json,  # Store original data
+                total_cost=old_total_cost or original_total_cost,
+                total_items=old_total_items or original_total_items,
+                total_materials=original_total_materials,
+                total_labour=original_total_labour,
+                created_by=f"System (Original by {boq.created_by})"
+            )
+            db.session.add(original_boq_history)
+            log.info(f"✅ Stored original BOQ data to history for BOQ {boq_id} (version 0)")
+
         # Store the payload directly in BOQDetailsHistory without recalculation
         if data.get("is_revision", False) and "items" in data:
             # Create history entry with payload data directly (no recalculation)
@@ -2824,11 +2865,26 @@ def revision_boq(boq_id):
             # Set total_boq_cost for later use
             total_boq_cost = total_cost
 
+            # ========== DETERMINE VERSION NUMBER FOR EDITED BOQ ==========
+            # Get the latest version from history to determine next version number
+            latest_history = BOQDetailsHistory.query.filter_by(
+                boq_id=boq_id
+            ).order_by(BOQDetailsHistory.version.desc()).first()
+
+            if latest_history:
+                # Increment from the latest version
+                edited_version = latest_history.version + 1
+            else:
+                # This shouldn't happen since we just added version 0, but fallback to next_version
+                edited_version = next_version if next_version > 0 else 1
+
+            log.info(f"📝 Storing edited BOQ to history for BOQ {boq_id} (version {edited_version})")
+
             # Create BOQDetailsHistory entry with the raw payload
             boq_detail_history = BOQDetailsHistory(
                 boq_detail_id=boq_details.boq_detail_id,
                 boq_id=boq_id,
-                version=next_version,
+                version=edited_version,
                 boq_details=payload_copy,  # Store payload directly as-is
                 total_cost=total_cost,
                 total_items=total_items,

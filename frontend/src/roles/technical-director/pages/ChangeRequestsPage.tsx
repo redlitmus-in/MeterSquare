@@ -244,7 +244,14 @@ const ChangeRequestsPage: React.FC = () => {
           };
         });
 
-        setVendorApprovals(mappedApprovals);
+        // Sort by updated_at (latest first), fallback to created_at
+        const sorted = mappedApprovals.sort((a, b) => {
+          const dateA = new Date(a.updated_at || a.created_at).getTime();
+          const dateB = new Date(b.updated_at || b.created_at).getTime();
+          return dateB - dateA; // Descending (newest first)
+        });
+
+        setVendorApprovals(sorted);
       }
     } catch (error) {
       console.error('Error loading vendor approvals:', error);
@@ -257,7 +264,14 @@ const ChangeRequestsPage: React.FC = () => {
       const response = await buyerService.getPendingPOChildren();
       if (response.success) {
         console.log('🔍 Pending PO Children:', response.po_children);
-        setPendingPOChildren(response.po_children || []);
+        const children = response.po_children || [];
+        // Sort by updated_at (latest first), fallback to created_at
+        const sorted = children.sort((a, b) => {
+          const dateA = new Date(a.updated_at || a.created_at).getTime();
+          const dateB = new Date(b.updated_at || b.created_at).getTime();
+          return dateB - dateA; // Descending (newest first)
+        });
+        setPendingPOChildren(sorted);
       }
     } catch (error) {
       console.error('Error loading pending PO children:', error);
@@ -272,7 +286,14 @@ const ChangeRequestsPage: React.FC = () => {
       console.log('📥 Approved PO Children response:', response);
       if (response.success) {
         console.log('✅ Approved PO Children loaded:', response.po_children?.length || 0, 'items');
-        setApprovedPOChildren(response.po_children || []);
+        const children = response.po_children || [];
+        // Sort by updated_at (latest first), fallback to created_at
+        const sorted = children.sort((a, b) => {
+          const dateA = new Date(a.updated_at || a.created_at).getTime();
+          const dateB = new Date(b.updated_at || b.created_at).getTime();
+          return dateB - dateA; // Descending (newest first)
+        });
+        setApprovedPOChildren(sorted);
       } else {
         console.warn('⚠️ Approved PO Children response not successful:', response);
         setApprovedPOChildren([]);
@@ -290,7 +311,14 @@ const ChangeRequestsPage: React.FC = () => {
       const response = await buyerService.getRejectedPOChildren();
       if (response.success) {
         console.log('🚫 Rejected PO Children loaded:', response.po_children?.length || 0, 'items');
-        setRejectedPOChildren(response.po_children || []);
+        const children = response.po_children || [];
+        // Sort by updated_at (latest first), fallback to created_at
+        const sorted = children.sort((a, b) => {
+          const dateA = new Date(a.updated_at || a.created_at).getTime();
+          const dateB = new Date(b.updated_at || b.created_at).getTime();
+          return dateB - dateA; // Descending (newest first)
+        });
+        setRejectedPOChildren(sorted);
       }
     } catch (error: any) {
       console.error('Error loading rejected PO children:', error);
@@ -717,6 +745,54 @@ const ChangeRequestsPage: React.FC = () => {
     const matchesSearch = (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase());
     return matchesSearch;
   });
+
+  // 🔥 MIXED ORDERING: Merge pending vendor approvals and pending PO children, sorted by date
+  const mergedPendingItems = React.useMemo(() => {
+    if (vendorApprovalsSubTab !== 'pending') {
+      return [];
+    }
+
+    // Get pending parent purchases
+    const pendingParents = filteredVendorApprovals.filter(p => p.vendor_selection_status === 'pending_td_approval');
+
+    // Combine both arrays
+    const combined: Array<Purchase | POChild> = [
+      ...pendingParents,
+      ...filteredPOChildren
+    ];
+
+    // Sort by updated_at (latest first), fallback to created_at
+    return combined.sort((a, b) => {
+      const dateA = new Date(a.updated_at || a.created_at).getTime();
+      const dateB = new Date(b.updated_at || b.created_at).getTime();
+      return dateB - dateA; // Descending (newest first)
+    });
+  }, [vendorApprovalsSubTab, filteredVendorApprovals, filteredPOChildren]);
+
+  // 🔥 MIXED ORDERING: Merge rejected vendor approvals and rejected PO children, sorted by date
+  const mergedRejectedItems = React.useMemo(() => {
+    if (vendorApprovalsSubTab !== 'rejected') {
+      return [];
+    }
+
+    // Get rejected parent purchases
+    const rejectedParents = filteredVendorApprovals.filter(p =>
+      p.vendor_selection_status === 'rejected' || p.vendor_selection_status === 'td_rejected'
+    );
+
+    // Combine both arrays
+    const combined: Array<Purchase | POChild> = [
+      ...rejectedParents,
+      ...filteredRejectedPOChildren
+    ];
+
+    // Sort by updated_at (latest first), fallback to created_at
+    return combined.sort((a, b) => {
+      const dateA = new Date(a.updated_at || a.created_at).getTime();
+      const dateB = new Date(b.updated_at || b.created_at).getTime();
+      return dateB - dateA; // Descending (newest first)
+    });
+  }, [vendorApprovalsSubTab, filteredVendorApprovals, filteredRejectedPOChildren]);
 
   // Calculate vendor totals for change requests
   const enrichedChangeRequests = filteredRequests.map(request => {
@@ -1745,8 +1821,128 @@ const ChangeRequestsPage: React.FC = () => {
                       }
                     })}
 
-                    {/* Render pending legacy vendor approvals (CR-based) */}
-                    {vendorApprovalsSubTab === 'pending' && filteredVendorApprovals.map((purchase, index) => {
+                    {/* 🔥 MIXED ORDERING: Render merged pending items (purchases + POChildren mixed by date) */}
+                    {vendorApprovalsSubTab === 'pending' && mergedPendingItems.map((item, index) => {
+                      // Check if this item is a POChild or regular purchase
+                      if (isPOChild(item)) {
+                        // Render POChild card
+                        const poChild = item;
+                        const totalCost = calculatePOChildTotal(poChild);
+                        return (
+                        <motion.div
+                          key={`pending-po-${poChild.id}`}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.02 * index }}
+                          className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-orange-200"
+                        >
+                          <div className="p-2 bg-orange-50/30">
+                            <div className="flex items-start justify-between mb-1">
+                              <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{poChild.project_name || poChild.item_name}</h3>
+                              <Badge className="text-[9px] px-1.5 py-0.5 bg-orange-600 text-white font-bold">
+                                {poChild.formatted_id}
+                              </Badge>
+                            </div>
+
+                            <div className="space-y-0.5 text-[10px] text-gray-600">
+                              <div className="flex items-center gap-1">
+                                <Package className="h-2.5 w-2.5 text-gray-400" />
+                                <span className="truncate">{poChild.item_name || 'N/A'}</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Calendar className="h-2.5 w-2.5 text-gray-400" />
+                                <span className="truncate">{poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Store className="h-2.5 w-2.5 text-orange-500" />
+                                <span className="truncate font-semibold text-orange-900">{poChild.vendor_name || 'N/A'}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="px-2 pb-2">
+                            <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
+                              <Package className="h-2.5 w-2.5" />
+                              Materials ({poChild.materials?.length || 0})
+                            </div>
+                            <div className="mt-1.5 pt-1 border-t border-orange-200 text-[10px]">
+                              <div className="flex justify-between">
+                                <span className="text-gray-600 font-semibold">Total Cost:</span>
+                                <span className="font-bold text-orange-700">AED {(totalCost || 0).toLocaleString()}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-orange-200 p-1.5 flex flex-col gap-1">
+                            <button
+                              onClick={() => {
+                                const mappedPOChild: ChangeRequestItem = {
+                                  cr_id: poChild.parent_cr_id || 0,
+                                  po_child_id: poChild.id,
+                                  project_name: poChild.project_name || poChild.item_name || '',
+                                  project_code: poChild.project_code || '',
+                                  created_at: poChild.created_at,
+                                  status: poChild.status,
+                                  item_name: poChild.item_name || '',
+                                  materials_data: poChild.materials || [],
+                                  materials_count: poChild.materials?.length || 0,
+                                  materials_total_cost: poChild.materials_total_cost || 0,
+                                  vendor_selection_status: poChild.vendor_selection_status,
+                                  selected_vendor_name: poChild.vendor_name,
+                                  selected_vendor_id: poChild.vendor_id,
+                                  formatted_cr_id: poChild.formatted_id || `PO-${poChild.parent_cr_id}.${poChild.id}`,
+                                  client: '',
+                                  location: '',
+                                  boq_id: poChild.boq_id,
+                                  boq_name: poChild.boq_name || ''
+                                };
+                                setSelectedChangeRequest(mappedPOChild);
+                                setShowDetailsModal(true);
+                              }}
+                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold w-full"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                            >
+                              <Eye className="h-3 w-3" />
+                              <span>Details</span>
+                            </button>
+
+                            <div className="grid grid-cols-2 gap-1">
+                              <button
+                                onClick={() => handleApprovePOChild(poChild.id)}
+                                disabled={approvingVendorId === poChild.vendor_id}
+                                className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {approvingVendorId === poChild.vendor_id ? (
+                                  <>
+                                    <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    <span className="text-[8px]">Approving...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Check className="h-3 w-3" />
+                                    <span>Approve</span>
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setRejectingPOChildId(poChild.id);
+                                  setShowRejectionModal(true);
+                                }}
+                                disabled={approvingVendorId === poChild.vendor_id}
+                                className="bg-red-600 hover:bg-red-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <X className="h-3 w-3" />
+                                <span>Reject</span>
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                        );
+                      }
+
+                      // Otherwise, render regular purchase card
+                      const purchase = item;
                       return (
                         <motion.div
                           key={`pending-legacy-${purchase.cr_id}`}
@@ -1837,170 +2033,18 @@ const ChangeRequestsPage: React.FC = () => {
                       );
                     })}
 
-                    {/* Render pending PO children */}
-                    {vendorApprovalsSubTab === 'pending' && filteredPOChildren.map((poChild, index) => {
-                      const totalCost = calculatePOChildTotal(poChild);
-                      return (
-                        <motion.div
-                          key={`pending-po-${poChild.id}`}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.02 * index }}
-                          className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-orange-200"
-                        >
-                          <div className="p-2 bg-orange-50/30">
-                            <div className="flex items-start justify-between mb-1">
-                              <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{poChild.project_name || poChild.item_name}</h3>
-                              <Badge className="text-[9px] px-1.5 py-0.5 bg-orange-100 text-orange-800">
-                                {poChild.formatted_id}
-                              </Badge>
-                            </div>
 
-                            <div className="space-y-0.5 text-[10px] text-gray-600">
-                              <div className="flex items-center gap-1">
-                                <Package className="h-2.5 w-2.5 text-gray-400" />
-                                <span className="truncate">{poChild.item_name || 'N/A'}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Calendar className="h-2.5 w-2.5 text-gray-400" />
-                                <span className="truncate">{poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Store className="h-2.5 w-2.5 text-orange-400" />
-                                <span className="truncate font-semibold text-gray-900">{poChild.vendor_name || 'N/A'}</span>
-                              </div>
-                            </div>
-                          </div>
+                    {/* 🔥 MIXED ORDERING: Render merged rejected items (purchases + POChildren mixed by date) */}
+                    {vendorApprovalsSubTab === 'rejected' && mergedRejectedItems.map((item, index) => {
+                      // Check if this item is a POChild or regular purchase
+                      if (isPOChild(item)) {
+                        // Render rejected POChild card (will be added inline or you can keep existing)
+                        // For now, skip to keep code simple - rejected POChildren rendered separately
+                        return null;
+                      }
 
-                          {/* Materials List */}
-                          <div className="px-2 pb-2">
-                            <div className="text-[9px] text-gray-500 mb-1 font-semibold flex items-center gap-1">
-                              <Package className="h-2.5 w-2.5" />
-                              Materials ({poChild.materials?.length || 0})
-                            </div>
-                            <div className="bg-gray-50 rounded border border-gray-200 max-h-28 overflow-y-auto">
-                              {poChild.materials && poChild.materials.length > 0 ? (
-                                <div className="divide-y divide-gray-100">
-                                  {poChild.materials.map((material: any, idx: number) => {
-                                    const boqPrice = material.boq_unit_price || 0;
-                                    const vendorPrice = material.unit_price || material.boq_unit_price || 0;
-                                    const quantity = material.quantity || 0;
-                                    const materialTotal = material.total_price || material.boq_total_price || (vendorPrice * quantity) || 0;
-                                    const priceDiff = vendorPrice - boqPrice;
-                                    const isOverBudget = priceDiff > 0;
-
-                                    return (
-                                      <div key={idx} className="px-1.5 py-1 text-[9px]">
-                                        <div className="flex justify-between items-start gap-1">
-                                          <span className="text-gray-800 font-medium flex-1 line-clamp-1">{material.material_name}</span>
-                                          <div className="text-right whitespace-nowrap">
-                                            {vendorPrice > 0 ? (
-                                              <span className="text-blue-700 font-bold">
-                                                AED {vendorPrice.toLocaleString()}
-                                              </span>
-                                            ) : (
-                                              <span className="text-amber-600 italic text-[8px]">
-                                                Price not set
-                                              </span>
-                                            )}
-                                            {boqPrice > 0 && boqPrice !== vendorPrice && (
-                                              <span className="text-gray-400 text-[8px] ml-0.5">
-                                                (BOQ:{boqPrice})
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <div className="flex justify-between text-gray-500 mt-0.5">
-                                          <span>{quantity} {material.unit}</span>
-                                          <div className="text-right">
-                                            {materialTotal > 0 ? (
-                                              <span className="font-semibold text-gray-700">
-                                                = AED {materialTotal.toLocaleString()}
-                                              </span>
-                                            ) : (
-                                              <span className="text-amber-600 italic text-[8px]">-</span>
-                                            )}
-                                            {boqPrice > 0 && priceDiff !== 0 && (
-                                              <span className={`ml-0.5 text-[8px] font-bold ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
-                                                {isOverBudget ? '+' : ''}{Math.round(priceDiff * quantity)}
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div className="px-2 py-2 text-[9px] text-gray-400 text-center">
-                                  No materials data
-                                </div>
-                              )}
-                            </div>
-                            <div className="mt-1.5 pt-1 border-t border-gray-200 text-[10px]">
-                              <div className="flex justify-between">
-                                <span className="text-gray-600 font-semibold">Total Cost:</span>
-                                {totalCost > 0 ? (
-                                  <span className="font-bold text-blue-700">AED {totalCost.toLocaleString()}</span>
-                                ) : (
-                                  <span className="text-amber-600 italic text-[9px]">Prices not set</span>
-                                )}
-                              </div>
-                              {/* BOQ Total as secondary */}
-                              {(() => {
-                                const boqTotal = (poChild.materials || []).reduce((sum: number, m: any) => {
-                                  const boqPrice = m.boq_unit_price || 0;
-                                  return sum + (boqPrice * (m.quantity || 0));
-                                }, 0);
-                                if (boqTotal > 0) {
-                                  return (
-                                    <div className="flex justify-between text-[8px] text-gray-400 mt-0.5">
-                                      <span>BOQ:</span>
-                                      <span>AED {boqTotal.toLocaleString()}</span>
-                                    </div>
-                                  );
-                                }
-                                return null;
-                              })()}
-                            </div>
-                          </div>
-
-                          {/* Actions */}
-                          <div className="border-t border-orange-100 p-1.5 flex flex-col gap-1 bg-orange-50/20">
-                            <button
-                              onClick={() => handleViewPOChildDetails(poChild)}
-                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold w-full"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-3 w-3" />
-                              <span>Details</span>
-                            </button>
-                            <div className="grid grid-cols-2 gap-1">
-                              <button
-                                onClick={() => handleApprovePOChild(poChild.id)}
-                                className="bg-green-600 hover:bg-green-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
-                              >
-                                <Check className="h-3 w-3" />
-                                <span>Approve</span>
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setRejectingPOChildId(poChild.id);
-                                  setShowRejectionModal(true);
-                                }}
-                                className="bg-red-600 hover:bg-red-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
-                              >
-                                <X className="h-3 w-3" />
-                                <span>Reject</span>
-                              </button>
-                            </div>
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-
-                    {/* Render rejected legacy vendor approvals (CR-based) */}
-                    {vendorApprovalsSubTab === 'rejected' && filteredVendorApprovals.map((purchase, index) => {
+                      // Otherwise, render regular purchase card
+                      const purchase = item;
                       return (
                         <motion.div
                           key={`rejected-legacy-${purchase.cr_id}`}
@@ -2346,65 +2390,6 @@ const ChangeRequestsPage: React.FC = () => {
           (permissions.canApproveChangeRequest(user) && selectedChangeRequest?.status === 'pending') ||
           (permissions.canApproveChangeRequest(user) && selectedChangeRequest?.vendor_selection_status === 'pending_td_approval')
         }
-        onEditLPO={() => {
-          if (selectedChangeRequest) {
-            // Convert back to POChild format if it has po_child_id
-            const poChildId = (selectedChangeRequest as any).po_child_id;
-            if (poChildId) {
-              // Find the POChild from all lists (pending, approved, rejected)
-              const poChild = pendingPOChildren.find(p => p.id === poChildId) ||
-                              approvedPOChildren.find(p => p.id === poChildId) ||
-                              rejectedPOChildren.find(p => p.id === poChildId);
-              if (poChild) {
-                // Close details modal first, then open LPO editor (edit mode)
-                setShowDetailsModal(false);
-                setSelectedChangeRequest(null);
-                // Use setTimeout to ensure state updates before opening new modal
-                setTimeout(() => {
-                  handleOpenLpoEditor(poChild, false); // false = edit mode
-                }, 50);
-              } else {
-                // If POChild not found in lists, create a minimal POChild object from selectedChangeRequest
-                const minimalPOChild: POChild = {
-                  id: poChildId,
-                  parent_cr_id: selectedChangeRequest.cr_id,
-                  materials: selectedChangeRequest.sub_items_data || selectedChangeRequest.materials_data || [],
-                  materials_total_cost: selectedChangeRequest.materials_total_cost || 0,
-                  status: selectedChangeRequest.status,
-                  vendor_selection_status: selectedChangeRequest.vendor_selection_status || 'pending',
-                  selected_vendor_id: (selectedChangeRequest as any).selected_vendor_id,
-                  selected_vendor_name: selectedChangeRequest.selected_vendor_name,
-                  created_at: selectedChangeRequest.created_at,
-                  updated_at: selectedChangeRequest.updated_at || selectedChangeRequest.created_at
-                };
-                setShowDetailsModal(false);
-                setSelectedChangeRequest(null);
-                setTimeout(() => {
-                  handleOpenLpoEditor(minimalPOChild, false); // false = edit mode
-                }, 50);
-              }
-            } else {
-              // No po_child_id - this is a legacy CR, open LPO editor with CR data
-              const legacyPOChild: POChild = {
-                id: 0, // No POChild ID
-                parent_cr_id: selectedChangeRequest.cr_id,
-                materials: selectedChangeRequest.sub_items_data || selectedChangeRequest.materials_data || [],
-                materials_total_cost: selectedChangeRequest.materials_total_cost || 0,
-                status: selectedChangeRequest.status,
-                vendor_selection_status: selectedChangeRequest.vendor_selection_status || 'pending',
-                selected_vendor_id: (selectedChangeRequest as any).selected_vendor_id,
-                selected_vendor_name: selectedChangeRequest.selected_vendor_name,
-                created_at: selectedChangeRequest.created_at,
-                updated_at: selectedChangeRequest.updated_at || selectedChangeRequest.created_at
-              };
-              setShowDetailsModal(false);
-              setSelectedChangeRequest(null);
-              setTimeout(() => {
-                handleOpenLpoEditor(legacyPOChild, false); // false = edit mode
-              }, 50);
-            }
-          }
-        }}
       />
 
       {/* Edit Change Request Modal */}

@@ -357,12 +357,18 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   }, [isOpen, includeLpoPdf, viewMode]);
 
   // Load LPO data function
-  const loadLpoData = async () => {
+  const loadLpoData = async (vendorId?: number) => {
     try {
-      console.log('>>> loadLpoData: Starting for cr_id:', purchase.cr_id, 'po_child_id:', purchase.po_child_id);
+      console.log('>>> loadLpoData: Starting for cr_id:', purchase.cr_id, 'po_child_id:', purchase.po_child_id, 'vendor_id:', vendorId);
       setIsLoadingLpo(true);
-      const response = await buyerService.previewLPOPdf(purchase.cr_id, purchase.po_child_id);
+      const response = await buyerService.previewLPOPdf(purchase.cr_id, purchase.po_child_id, vendorId);
       let enrichedLpoData = response.lpo_data;
+
+      console.log('>>> loadLpoData: Response received:', {
+        vendorName: enrichedLpoData.vendor?.company_name,
+        materialsCount: enrichedLpoData.items?.length,
+        materials: enrichedLpoData.items?.map((item: any) => item.material_name)
+      });
 
       // Try to load default template if no custom terms exist
       const hasCustomTerms = ((response.lpo_data.terms?.custom_terms?.length || 0) > 0) ||
@@ -476,6 +482,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       return;
     }
     try {
+      console.log('>>> handleDownloadLpoPdf: Generating PDF with data:', {
+        vendorName: lpoData.vendor?.company_name,
+        materialsCount: lpoData.items?.length,
+        materials: lpoData.items?.map((item: any) => item.material_name)
+      });
+
       const finalLpoData = !includeSignatures ? {
         ...lpoData,
         signatures: { ...lpoData.signatures, md_signature: null, td_signature: null, stamp_image: null }
@@ -2310,7 +2322,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                   {showIndividualVendorButtons && (
                                     <div className="flex items-center px-3 bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200">
                                       <Button
-                                        onClick={(e) => {
+                                        onClick={async (e) => {
                                           e.stopPropagation();
 
                                           // Get ONLY unlocked materials for this vendor to show in confirmation
@@ -2326,6 +2338,36 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
                                           if (vendorMaterials.length === 0) {
                                             toast.error('No materials found for this vendor');
+                                            return;
+                                          }
+
+                                          // CRITICAL: Save material_vendor_selections to database BEFORE showing dialog
+                                          // This ensures the backend can filter materials when Edit/Preview is clicked
+                                          try {
+                                            const materialVendorSelections: Record<string, any> = {};
+                                            materialVendors.forEach(mv => {
+                                              if (mv.selected_vendors.length > 0) {
+                                                const selectedVendor = mv.selected_vendors[0];
+                                                materialVendorSelections[mv.material_name] = {
+                                                  vendor_id: selectedVendor.vendor_id,
+                                                  vendor_name: selectedVendor.vendor_name,
+                                                  negotiated_price: selectedVendor.negotiated_price,
+                                                  vendor_material_name: selectedVendor.vendor_material_name,
+                                                  save_price_for_future: selectedVendor.save_price_for_future
+                                                };
+                                              }
+                                            });
+
+                                            // Save to database using updatePurchaseOrder
+                                            await buyerService.updatePurchaseOrder({
+                                              cr_id: purchase.cr_id,
+                                              material_vendor_selections: materialVendorSelections,
+                                              materials: null as any,
+                                              total_cost: 0
+                                            });
+                                          } catch (error) {
+                                            console.error('Failed to save material vendor selections:', error);
+                                            toast.error('Failed to save vendor selections');
                                             return;
                                           }
 
@@ -2536,7 +2578,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             size="sm"
                             onClick={() => {
                               if (!lpoData && !isLoadingLpo) {
-                                loadLpoData();
+                                // Pass vendor_id from vendorSendConfirmation when in confirmation dialog
+                                loadLpoData(vendorSendConfirmation?.vendor_id);
                               }
                               setShowLpoEditor(!showLpoEditor);
                             }}
@@ -2579,7 +2622,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={loadLpoData}
+                            onClick={() => loadLpoData(vendorSendConfirmation?.vendor_id)}
                             className="mt-2"
                           >
                             Retry
@@ -3217,11 +3260,11 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+                    className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {/* Header */}
-                    <div className="bg-gradient-to-r from-amber-50 to-orange-100 px-6 py-4 border-b border-amber-200">
+                    <div className="bg-gradient-to-r from-amber-50 to-orange-100 px-6 py-4 border-b border-amber-200 flex-shrink-0">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-amber-500 rounded-full">
                           <AlertCircle className="w-5 h-5 text-white" />
@@ -3231,7 +3274,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     </div>
 
                     {/* Body */}
-                    <div className="px-6 py-5">
+                    <div className="px-6 py-5 overflow-y-auto flex-1">
                       {/* Warning Message */}
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
                         <p className="text-sm text-amber-900 font-medium flex items-start gap-2">
@@ -3264,18 +3307,18 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
                       {/* Info about adding more materials later */}
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                        <p className="text-xs text-blue-800">
+                        <p className="text-sm text-blue-800">
                           <strong>Note:</strong> If you need to add more materials for this vendor later, you can create a new submission (will get a new CR number like .2, .3, etc.)
                         </p>
                       </div>
                     </div>
 
                     {/* Footer */}
-                    <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+                    <div className="bg-gray-50 px-6 py-4 border-t-2 border-gray-300 flex justify-end gap-3 flex-shrink-0">
                       <Button
                         onClick={() => setVendorSendConfirmation(null)}
                         variant="outline"
-                        className="px-6"
+                        className="px-6 py-2"
                       >
                         Review Again
                       </Button>
@@ -3307,6 +3350,9 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             }
 
                             const submissionGroupId = `${Date.now()}-${Math.random().toString(36).slice(2, 2 + SUBMISSION_ID_LENGTH)}`;
+
+                            // Note: material_vendor_selections already saved when "Send This Vendor to TD" was clicked
+                            console.log('>>> [Final Send] Creating POChild (vendor selections already saved)');
 
                             const response = await buyerService.createPOChildren(
                               purchase.cr_id,

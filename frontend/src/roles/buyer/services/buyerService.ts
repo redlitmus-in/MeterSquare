@@ -202,8 +202,9 @@ export interface UpdatePurchaseNotesResponse {
 
 export interface UpdatePurchaseOrderRequest {
   cr_id: number;
-  materials: PurchaseMaterial[];
-  total_cost: number;
+  materials?: PurchaseMaterial[] | null;
+  total_cost?: number | null;
+  material_vendor_selections?: Record<string, any> | null;
 }
 
 export interface UpdatePurchaseOrderResponse {
@@ -641,16 +642,26 @@ class BuyerService {
     }
   }
 
-  // Update purchase order (materials and total cost)
+  // Update purchase order (materials, total cost, and/or material_vendor_selections)
   // Note: Backend endpoint needs to be implemented at /api/buyer/purchase/{cr_id}/update
   async updatePurchaseOrder(data: UpdatePurchaseOrderRequest): Promise<UpdatePurchaseOrderResponse> {
     try {
+      const requestBody: any = {};
+
+      // Only include fields that are provided
+      if (data.materials !== null && data.materials !== undefined) {
+        requestBody.materials = data.materials;
+      }
+      if (data.total_cost !== null && data.total_cost !== undefined) {
+        requestBody.total_cost = data.total_cost;
+      }
+      if (data.material_vendor_selections !== null && data.material_vendor_selections !== undefined) {
+        requestBody.material_vendor_selections = data.material_vendor_selections;
+      }
+
       const response = await apiClient.put<UpdatePurchaseOrderResponse>(
         `/buyer/purchase/${data.cr_id}/update`,
-        {
-          materials: data.materials,
-          total_cost: data.total_cost
-        }
+        requestBody
       );
 
       if (response.data.success) {
@@ -800,13 +811,22 @@ class BuyerService {
   }
 
   // Preview LPO PDF data (get editable data before generation)
-  async previewLPOPdf(crId: number, poChildId?: number): Promise<LPOPreviewResponse> {
+  async previewLPOPdf(crId: number, poChildId?: number, vendorId?: number): Promise<LPOPreviewResponse> {
     try {
-      // Build URL with optional po_child_id query param
-      let url = `/buyer/purchase/${crId}/preview-lpo-pdf`;
+      // Build URL with optional query params
+      const params = new URLSearchParams();
       if (poChildId) {
-        url += `?po_child_id=${poChildId}`;
+        params.append('po_child_id', poChildId.toString());
       }
+      if (vendorId) {
+        params.append('vendor_id', vendorId.toString());
+      }
+
+      let url = `/buyer/purchase/${crId}/preview-lpo-pdf`;
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+
       const response = await apiClient.post<LPOPreviewResponse>(
         url,
         {}

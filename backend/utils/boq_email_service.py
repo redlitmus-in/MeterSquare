@@ -2021,25 +2021,6 @@ class BOQEmailService:
                                     </tr>
                                 </table>
 
-                                <!-- Materials Table -->
-                                <h2 style="color: #000000; font-size: 20px; margin: 30px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Materials Required</h2>
-                                <table width="100%" cellpadding="12" cellspacing="0" border="0" style="border: 2px solid #3b82f6; border-radius: 8px; overflow: hidden; margin: 20px 0;">
-                                    <thead>
-                                        <tr style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);">
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">S.No</th>
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Material Name</th>
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Brand</th>
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Specs</th>
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Quantity</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {materials_table_rows}
-                                    </tbody>
-                                </table>
-
-                                <div style="height: 2px; background: linear-gradient(90deg, transparent, #3b82f6, transparent); margin: 25px 0;"></div>
-
                                 <!-- Buyer Contact Information -->
                                 <h2 style="color: #000000; font-size: 20px; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Contact Person</h2>
                                 <table width="100%" cellpadding="10" cellspacing="0" border="0" style="background: #f0f9ff; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
