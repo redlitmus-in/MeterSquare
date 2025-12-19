@@ -515,6 +515,69 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     };
   }, [lpoData, includeSignatures, viewMode, purchase.cr_id, purchase.po_child_id]);
 
+  // Auto-load LPO data for regular PO when single vendor is detected
+  useEffect(() => {
+    // Only for buyer mode, when modal is open, and not in POChild confirmation dialog
+    if (viewMode !== 'buyer' || !isOpen || vendorSendConfirmation) return;
+
+    // Detect if all materials have the same single vendor
+    const vendorIds = new Set<number>();
+    materialVendors.forEach(m => {
+      if (m.selected_vendors.length > 0) {
+        vendorIds.add(m.selected_vendors[0].vendor_id);
+      }
+    });
+
+    // If exactly one vendor and LPO not loaded yet
+    if (vendorIds.size === 1 && !lpoData && !isLoadingLpo) {
+      const singleVendorId = Array.from(vendorIds)[0];
+      console.log('[Auto-load LPO] Detected single vendor, saving selections and loading LPO data for vendor:', singleVendorId);
+
+      // CRITICAL: Save material_vendor_selections to database FIRST
+      // This ensures the backend can populate vendor contact details correctly
+      const saveLpoDataAsync = async () => {
+        try {
+          const materialVendorSelections: Record<string, any> = {};
+          materialVendors.forEach(mv => {
+            if (mv.selected_vendors.length > 0) {
+              const selectedVendor = mv.selected_vendors[0];
+              materialVendorSelections[mv.material_name] = {
+                vendor_id: selectedVendor.vendor_id,
+                vendor_name: selectedVendor.vendor_name,
+                negotiated_price: selectedVendor.negotiated_price,
+                vendor_material_name: selectedVendor.vendor_material_name,
+                save_price_for_future: selectedVendor.save_price_for_future
+              };
+            }
+          });
+
+          // Save to database first
+          await buyerService.updatePurchaseOrder({
+            cr_id: purchase.cr_id,
+            material_vendor_selections: materialVendorSelections,
+            materials: null as any,
+            total_cost: 0
+          });
+
+          console.log('[Auto-load LPO] Saved vendor selections, now loading LPO data');
+
+          // Clear cache for this vendor to force fresh load with vendor data
+          const newMap = new Map(lpoDataByVendor);
+          newMap.delete(singleVendorId);
+          setLpoDataByVendor(newMap);
+
+          // Then load LPO data (will fetch fresh from backend)
+          loadLpoData(singleVendorId);
+        } catch (error) {
+          console.error('[Auto-load LPO] Failed to save vendor selections:', error);
+          toast.error('Failed to save vendor selections');
+        }
+      };
+
+      saveLpoDataAsync();
+    }
+  }, [materialVendors, viewMode, isOpen, vendorSendConfirmation, lpoData, isLoadingLpo]);
+
   // Download LPO PDF preview
   const handleDownloadLpoPdf = async () => {
     if (!lpoData) {
@@ -2634,10 +2697,63 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                               type="button"
                               variant="outline"
                               size="sm"
-                              onClick={() => {
+                              onClick={async () => {
                                 if (!lpoData && !isLoadingLpo) {
-                                  // Pass vendor_id from vendorSendConfirmation when in confirmation dialog
-                                  loadLpoData(vendorSendConfirmation?.vendor_id);
+                                  // For POChild confirmation dialog: use vendorSendConfirmation.vendor_id
+                                  // For regular PO: detect common vendor_id from materialVendors
+                                  let vendorIdToUse = vendorSendConfirmation?.vendor_id;
+
+                                  if (!vendorIdToUse) {
+                                    // Regular PO: Find the common vendor from materialVendors
+                                    const vendorIds = new Set<number>();
+                                    materialVendors.forEach(m => {
+                                      if (m.selected_vendors.length > 0) {
+                                        vendorIds.add(m.selected_vendors[0].vendor_id);
+                                      }
+                                    });
+                                    // If only one vendor, use it
+                                    if (vendorIds.size === 1) {
+                                      vendorIdToUse = Array.from(vendorIds)[0];
+
+                                      // CRITICAL: Save material_vendor_selections to database FIRST
+                                      // This ensures the backend can populate vendor contact details
+                                      try {
+                                        const materialVendorSelections: Record<string, any> = {};
+                                        materialVendors.forEach(mv => {
+                                          if (mv.selected_vendors.length > 0) {
+                                            const selectedVendor = mv.selected_vendors[0];
+                                            materialVendorSelections[mv.material_name] = {
+                                              vendor_id: selectedVendor.vendor_id,
+                                              vendor_name: selectedVendor.vendor_name,
+                                              negotiated_price: selectedVendor.negotiated_price,
+                                              vendor_material_name: selectedVendor.vendor_material_name,
+                                              save_price_for_future: selectedVendor.save_price_for_future
+                                            };
+                                          }
+                                        });
+
+                                        await buyerService.updatePurchaseOrder({
+                                          cr_id: purchase.cr_id,
+                                          material_vendor_selections: materialVendorSelections,
+                                          materials: null as any,
+                                          total_cost: 0
+                                        });
+
+                                        console.log('[Edit LPO] Saved vendor selections');
+
+                                        // Clear cache for this vendor to force fresh load with vendor data
+                                        const newMap = new Map(lpoDataByVendor);
+                                        newMap.delete(vendorIdToUse);
+                                        setLpoDataByVendor(newMap);
+                                      } catch (error) {
+                                        console.error('[Edit LPO] Failed to save vendor selections:', error);
+                                        toast.error('Failed to save vendor selections');
+                                        return;
+                                      }
+                                    }
+                                  }
+
+                                  loadLpoData(vendorIdToUse);
                                 }
                                 setShowLpoEditor(!showLpoEditor);
                               }}
