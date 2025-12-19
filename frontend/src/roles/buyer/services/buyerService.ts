@@ -974,6 +974,13 @@ class BuyerService {
       if (data.cc_emails && data.cc_emails.length > 0) {
         payload.cc_emails = data.cc_emails;
       }
+      // LPO PDF attachment (CRITICAL FIX: Was missing, causing no PDF for POChild)
+      if (data.include_lpo_pdf) {
+        payload.include_lpo_pdf = data.include_lpo_pdf;
+      }
+      if (data.lpo_data) {
+        payload.lpo_data = data.lpo_data;
+      }
 
       const response = await apiClient.post<SendVendorEmailResponse>(
         `/buyer/po-child/${poChildId}/send-vendor-email`,

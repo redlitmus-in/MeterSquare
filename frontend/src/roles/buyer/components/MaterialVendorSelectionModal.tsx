@@ -114,7 +114,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
   // LPO PDF state - Always enabled (mandatory)
   const includeLpoPdf = true; // LPO is now mandatory
-  const [lpoData, setLpoData] = useState<LPOData | null>(null);
+  const [lpoDataByVendor, setLpoDataByVendor] = useState<Map<number, LPOData>>(new Map()); // Store LPO data per vendor
+  const [lpoData, setLpoData] = useState<LPOData | null>(null); // Current LPO data
   const [isLoadingLpo, setIsLoadingLpo] = useState(false);
   const [showLpoEditor, setShowLpoEditor] = useState(false);
   const [includeSignatures, setIncludeSignatures] = useState(true);
@@ -360,6 +361,14 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const loadLpoData = async (vendorId?: number) => {
     try {
       console.log('>>> loadLpoData: Starting for cr_id:', purchase.cr_id, 'po_child_id:', purchase.po_child_id, 'vendor_id:', vendorId);
+
+      // Check if we already have LPO data for this vendor in the map
+      if (vendorId && lpoDataByVendor.has(vendorId)) {
+        console.log(`>>> loadLpoData: Loading from cache for vendor ${vendorId}`);
+        setLpoData(lpoDataByVendor.get(vendorId)!);
+        return;
+      }
+
       setIsLoadingLpo(true);
       const response = await buyerService.previewLPOPdf(purchase.cr_id, purchase.po_child_id, vendorId);
       let enrichedLpoData = response.lpo_data;
@@ -412,6 +421,14 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       }
 
       setLpoData(enrichedLpoData);
+
+      // Store in map if vendorId is provided
+      if (vendorId) {
+        const newMap = new Map(lpoDataByVendor);
+        newMap.set(vendorId, enrichedLpoData);
+        setLpoDataByVendor(newMap);
+      }
+
       // Set initial VAT checkbox state based on loaded data
       setIncludeVAT((enrichedLpoData.totals?.vat_percent || 0) > 0);
     } catch (error: unknown) {
@@ -436,6 +453,29 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       setIsSavingLpo(false);
     }
   };
+
+  // Update lpoDataByVendor map when lpoData changes in confirmation dialog
+  useEffect(() => {
+    if (lpoData && vendorSendConfirmation?.vendor_id) {
+      const newMap = new Map(lpoDataByVendor);
+      newMap.set(vendorSendConfirmation.vendor_id, lpoData);
+      setLpoDataByVendor(newMap);
+    }
+  }, [lpoData, vendorSendConfirmation?.vendor_id]);
+
+  // Load LPO data when POChild confirmation dialog opens
+  useEffect(() => {
+    if (vendorSendConfirmation?.vendor_id) {
+      // Check if we already have LPO data cached for this vendor
+      const cachedLpoData = lpoDataByVendor.get(vendorSendConfirmation.vendor_id);
+      if (cachedLpoData) {
+        setLpoData(cachedLpoData);
+      } else {
+        // Load fresh LPO data for this vendor
+        loadLpoData(vendorSendConfirmation.vendor_id);
+      }
+    }
+  }, [vendorSendConfirmation?.vendor_id]);
 
   // Auto-save effect - debounced to avoid excessive API calls
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -497,13 +537,15 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `LPO-${purchase.cr_id}.pdf`;
+      const vendorName = vendorSendConfirmation?.vendor_name || lpoData.vendor?.company_name || 'Vendor';
+      link.download = `LPO-${purchase.cr_id}-${vendorName.replace(/\s+/g, '-')}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      toast.success('LPO PDF downloaded');
+      toast.success('LPO PDF downloaded successfully');
     } catch (error: any) {
+      console.error('Error downloading LPO PDF:', error);
       toast.error(error.message || 'Failed to download LPO PDF');
     }
   };
@@ -2560,53 +2602,70 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                 )}
 
                 {/* LPO PDF Section - Only for Buyer mode */}
-                {viewMode === 'buyer' && (
-                  <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <FileText className="w-5 h-5 text-blue-600" />
-                          <div>
-                            <span className="text-sm font-medium text-gray-900">LPO PDF (Mandatory)</span>
-                            <p className="text-xs text-gray-500">Local Purchase Order PDF will be automatically generated and attached</p>
+                {viewMode === 'buyer' && (() => {
+                  // Check if multiple different vendors are selected
+                  const uniqueVendorIds = new Set<number>();
+                  materialVendors.forEach(m => {
+                    if (m.selected_vendors.length > 0) {
+                      uniqueVendorIds.add(m.selected_vendors[0].vendor_id);
+                    }
+                  });
+                  const hasMultipleVendors = uniqueVendorIds.size > 1;
+
+                  return (
+                    <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">
+                      <div className={`${hasMultipleVendors ? 'bg-gray-100' : 'bg-blue-50'} border ${hasMultipleVendors ? 'border-gray-300' : 'border-blue-200'} rounded-lg p-4`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <FileText className={`w-5 h-5 ${hasMultipleVendors ? 'text-gray-400' : 'text-blue-600'}`} />
+                            <div>
+                              <span className={`text-sm font-medium ${hasMultipleVendors ? 'text-gray-600' : 'text-gray-900'}`}>
+                                LPO PDF (Mandatory)
+                              </span>
+                              <p className={`text-xs ${hasMultipleVendors ? 'text-gray-500' : 'text-gray-500'}`}>
+                                {hasMultipleVendors
+                                  ? 'Common LPO editor disabled - Edit LPO separately for each vendor in their confirmation dialog'
+                                  : 'Local Purchase Order PDF will be automatically generated and attached'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                if (!lpoData && !isLoadingLpo) {
+                                  // Pass vendor_id from vendorSendConfirmation when in confirmation dialog
+                                  loadLpoData(vendorSendConfirmation?.vendor_id);
+                                }
+                                setShowLpoEditor(!showLpoEditor);
+                              }}
+                              className="text-xs"
+                              disabled={isLoadingLpo || hasMultipleVendors}
+                              title={hasMultipleVendors ? "Edit LPO separately for each vendor in their confirmation dialog" : "Edit LPO details"}
+                            >
+                              {isLoadingLpo ? (
+                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                              ) : (
+                                <Edit3 className="w-3 h-3 mr-1" />
+                              )}
+                              {showLpoEditor ? 'Hide' : 'Edit'}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={handleDownloadLpoPdf}
+                              className="text-xs"
+                              disabled={!lpoData || isLoadingLpo || hasMultipleVendors}
+                              title={hasMultipleVendors ? "Preview LPO separately for each vendor in their confirmation dialog" : "Preview LPO PDF"}
+                            >
+                              <Download className="w-3 h-3 mr-1" />
+                              Preview
+                            </Button>
                           </div>
                         </div>
-                        <div className="flex gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              if (!lpoData && !isLoadingLpo) {
-                                // Pass vendor_id from vendorSendConfirmation when in confirmation dialog
-                                loadLpoData(vendorSendConfirmation?.vendor_id);
-                              }
-                              setShowLpoEditor(!showLpoEditor);
-                            }}
-                            className="text-xs"
-                            disabled={isLoadingLpo || hasTdApprovedAnyPO}
-                            title={hasTdApprovedAnyPO ? "Cannot edit - TD has already approved this purchase order" : "Edit LPO details"}
-                          >
-                            {isLoadingLpo ? (
-                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                            ) : (
-                              <Edit3 className="w-3 h-3 mr-1" />
-                            )}
-                            {showLpoEditor ? 'Hide' : 'Edit'}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={handleDownloadLpoPdf}
-                            className="text-xs"
-                            disabled={!lpoData || isLoadingLpo}
-                          >
-                            <Download className="w-3 h-3 mr-1" />
-                            Preview
-                          </Button>
-                        </div>
-                      </div>
                       {isLoadingLpo && (
                         <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
                           <Loader2 className="w-4 h-4 animate-spin" />
@@ -3017,7 +3076,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       )}
                     </div>
                   </div>
-                )}
+                );
+                })()}
               </div>
 
               {/* Footer */}
@@ -3253,7 +3313,11 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]"
-                  onClick={() => setVendorSendConfirmation(null)}
+                  onClick={() => {
+                    setVendorSendConfirmation(null);
+                    setLpoData(null);
+                    setShowLpoEditor(false);
+                  }}
                 />
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
                   <motion.div
@@ -3306,17 +3370,446 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       </div>
 
                       {/* Info about adding more materials later */}
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
                         <p className="text-sm text-blue-800">
                           <strong>Note:</strong> If you need to add more materials for this vendor later, you can create a new submission (will get a new CR number like .2, .3, etc.)
                         </p>
+                      </div>
+
+                      {/* LPO PDF Section */}
+                      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <FileText className="w-5 h-5 text-blue-600" />
+                            <div>
+                              <span className="text-sm font-medium text-gray-900">LPO PDF (Mandatory)</span>
+                              <p className="text-xs text-gray-500">Local Purchase Order PDF will be generated and sent to TD</p>
+                            </div>
+                          </div>
+                          {lpoData && (
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowLpoEditor(!showLpoEditor)}
+                                className="text-xs"
+                              >
+                                <Edit3 className="w-3 h-3 mr-1" />
+                                {showLpoEditor ? 'Hide' : 'Edit'}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleDownloadLpoPdf}
+                                className="text-xs"
+                              >
+                                <Download className="w-3 h-3 mr-1" />
+                                Preview
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                        {isLoadingLpo && (
+                          <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Loading LPO data...
+                          </div>
+                        )}
+                        {lpoData && showLpoEditor && (
+                          <div className="mt-4 space-y-4 border-t border-blue-200 pt-4">
+                            <div className="text-sm font-medium text-gray-700">Edit LPO Details</div>
+
+                            {/* Quotation Ref and Subject */}
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="text-xs font-medium text-gray-600">Quotation Ref#</label>
+                                <Input
+                                  value={lpoData.lpo_info.quotation_ref}
+                                  onChange={(e) => setLpoData({
+                                    ...lpoData,
+                                    lpo_info: { ...lpoData.lpo_info, quotation_ref: e.target.value }
+                                  })}
+                                  className="mt-1 text-sm"
+                                  placeholder="Vendor quotation reference"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-gray-600">Subject</label>
+                                <Input
+                                  value={lpoData.vendor.subject}
+                                  onChange={(e) => setLpoData({
+                                    ...lpoData,
+                                    vendor: { ...lpoData.vendor, subject: e.target.value }
+                                  })}
+                                  className="mt-1 text-sm"
+                                  placeholder="LPO subject"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Custom Message for PDF */}
+                            <div>
+                              <label className="text-xs font-medium text-gray-600">LPO Message (shown in PDF)</label>
+                              <textarea
+                                value={lpoData.lpo_info.custom_message || ''}
+                                onChange={(e) => setLpoData({
+                                  ...lpoData,
+                                  lpo_info: { ...lpoData.lpo_info, custom_message: e.target.value }
+                                })}
+                                className="mt-1 w-full p-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
+                              />
+                              <p className="text-xs text-gray-400 mt-1">Edit the message that appears in the LPO PDF</p>
+                            </div>
+
+                            {/* VAT Configuration */}
+                            <div className="border-t border-blue-200 pt-4">
+                              <div className="text-sm font-medium text-gray-700 mb-3">VAT Configuration</div>
+
+                              {/* VAT Checkbox */}
+                              <div className="flex items-center gap-2 mb-3">
+                                <input
+                                  type="checkbox"
+                                  id="include-vat-pochild"
+                                  checked={includeVAT}
+                                  onChange={(e) => {
+                                    const isChecked = e.target.checked;
+                                    setIncludeVAT(isChecked);
+
+                                    if (!isChecked) {
+                                      // Disable VAT - set to 0%
+                                      setLpoData({
+                                        ...lpoData,
+                                        totals: {
+                                          ...lpoData.totals,
+                                          vat_percent: 0,
+                                          vat_amount: 0,
+                                          grand_total: lpoData.totals.subtotal
+                                        }
+                                      });
+                                    } else {
+                                      // Enable VAT - set to default 5%
+                                      const defaultVatPercent = 5;
+                                      const newVatAmount = (lpoData.totals.subtotal * defaultVatPercent) / 100;
+                                      const newGrandTotal = lpoData.totals.subtotal + newVatAmount;
+
+                                      setLpoData({
+                                        ...lpoData,
+                                        totals: {
+                                          ...lpoData.totals,
+                                          vat_percent: defaultVatPercent,
+                                          vat_amount: parseFloat(newVatAmount.toFixed(2)),
+                                          grand_total: parseFloat(newGrandTotal.toFixed(2))
+                                        }
+                                      });
+                                    }
+                                  }}
+                                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                />
+                                <label htmlFor="include-vat-pochild" className="text-xs font-medium text-gray-600">
+                                  Include VAT in LPO
+                                </label>
+                              </div>
+
+                              {/* VAT Percentage Input - Only show when VAT is enabled */}
+                              {includeVAT && (
+                                <div className="bg-gray-50 rounded-lg p-3">
+                                  <label className="text-xs font-medium text-gray-600 mb-2 block">VAT Percentage</label>
+                                  <div className="flex items-center gap-3">
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      max="100"
+                                      step="0.5"
+                                      value={lpoData.totals.vat_percent}
+                                      onChange={(e) => {
+                                        const newVatPercent = parseFloat(e.target.value) || 0;
+                                        const newVatAmount = (lpoData.totals.subtotal * newVatPercent) / 100;
+                                        const newGrandTotal = lpoData.totals.subtotal + newVatAmount;
+
+                                        setLpoData({
+                                          ...lpoData,
+                                          totals: {
+                                            ...lpoData.totals,
+                                            vat_percent: newVatPercent,
+                                            vat_amount: parseFloat(newVatAmount.toFixed(2)),
+                                            grand_total: parseFloat(newGrandTotal.toFixed(2))
+                                          }
+                                        });
+                                      }}
+                                      className="w-24 text-sm"
+                                      placeholder="5"
+                                    />
+                                    <span className="text-xs text-gray-600">%</span>
+                                    <div className="ml-auto text-right">
+                                      <div className="text-xs text-gray-500">VAT Amount</div>
+                                      <div className="text-sm font-bold text-gray-900">AED {lpoData.totals.vat_amount.toLocaleString()}</div>
+                                    </div>
+                                  </div>
+                                  <p className="text-xs text-gray-400 mt-2">Enter custom VAT percentage. Changes will be saved when you submit.</p>
+                                </div>
+                              )}
+
+                              {!includeVAT && (
+                                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                                  <p className="text-xs text-gray-500">VAT is disabled for this LPO. Check the box above to add VAT.</p>
+                                </div>
+                              )}
+
+                              {/* Price Summary */}
+                              <div className="mt-3 bg-white rounded-lg p-3 border border-gray-200">
+                                <div className="text-xs font-medium text-gray-700 mb-2">Price Summary</div>
+                                <div className="space-y-1 text-sm">
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">Subtotal:</span>
+                                    <span className="font-medium">AED {lpoData.totals.subtotal.toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">VAT ({lpoData.totals.vat_percent}%):</span>
+                                    <span className="font-medium">AED {lpoData.totals.vat_amount.toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between pt-1 border-t border-gray-300">
+                                    <span className="text-gray-800 font-semibold">Grand Total:</span>
+                                    <span className="font-bold text-blue-600">AED {lpoData.totals.grand_total.toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Terms Section */}
+                            <div className="border-t border-blue-200 pt-4">
+                              <div className="text-sm font-medium text-gray-700 mb-3">Terms & Conditions</div>
+
+                              {/* Delivery Terms */}
+                              <div className="mb-4">
+                                <label className="text-xs font-medium text-gray-600">Delivery Terms</label>
+                                <Input
+                                  value={lpoData.terms.completion_terms || lpoData.terms.delivery_terms || ''}
+                                  onChange={(e) => setLpoData({
+                                    ...lpoData,
+                                    terms: { ...lpoData.terms, completion_terms: e.target.value, delivery_terms: e.target.value }
+                                  })}
+                                  className="mt-1 text-sm"
+                                  placeholder="e.g., 04.12.25"
+                                />
+                              </div>
+
+                              {/* Payment Terms with Checkboxes */}
+                              <div className="bg-gray-50 rounded-lg p-3">
+                                <div className="text-xs font-medium text-gray-600 mb-2">Payment Terms (select to include in PDF)</div>
+
+                                {/* Payment terms list */}
+                                <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
+                                  {(lpoData.terms.custom_terms || []).map((term: {text: string, selected: boolean}, index: number) => (
+                                    <div key={index} className="flex items-center gap-2 bg-white p-2 rounded border border-gray-200">
+                                      <input
+                                        type="checkbox"
+                                        checked={term.selected}
+                                        onChange={(e) => {
+                                          const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                          updatedTerms[index] = { ...term, selected: e.target.checked };
+                                          setLpoData({
+                                            ...lpoData,
+                                            terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                          });
+                                        }}
+                                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                      />
+                                      {editingTermIndex === index ? (
+                                        <div className="flex-1 flex gap-2">
+                                          <Input
+                                            value={editingTermText}
+                                            onChange={(e) => setEditingTermText(e.target.value)}
+                                            className="flex-1 text-xs"
+                                            autoFocus
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                if (editingTermText.trim()) {
+                                                  const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                                  updatedTerms[index] = { ...term, text: editingTermText.trim() };
+                                                  setLpoData({
+                                                    ...lpoData,
+                                                    terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                                  });
+                                                }
+                                                setEditingTermIndex(null);
+                                                setEditingTermText('');
+                                              } else if (e.key === 'Escape') {
+                                                setEditingTermIndex(null);
+                                                setEditingTermText('');
+                                              }
+                                            }}
+                                          />
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => {
+                                              if (editingTermText.trim()) {
+                                                const updatedTerms = [...(lpoData.terms.custom_terms || [])];
+                                                updatedTerms[index] = { ...term, text: editingTermText.trim() };
+                                                setLpoData({
+                                                  ...lpoData,
+                                                  terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                                });
+                                              }
+                                              setEditingTermIndex(null);
+                                              setEditingTermText('');
+                                            }}
+                                          >
+                                            <Save className="w-3 h-3" />
+                                          </Button>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <span className="flex-1 text-xs text-gray-700">{term.text}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingTermIndex(index);
+                                              setEditingTermText(term.text);
+                                            }}
+                                            className="text-blue-500 hover:text-blue-700 p-1"
+                                          >
+                                            <Edit3 className="w-3 h-3" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updatedTerms = (lpoData.terms.custom_terms || []).filter((_: any, i: number) => i !== index);
+                                              setLpoData({
+                                                ...lpoData,
+                                                terms: { ...lpoData.terms, custom_terms: updatedTerms }
+                                              });
+                                            }}
+                                            className="text-red-500 hover:text-red-700 p-1"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {(!lpoData.terms.custom_terms || lpoData.terms.custom_terms.length === 0) && (
+                                    <div className="text-xs text-gray-400 italic py-2">No payment terms added yet.</div>
+                                  )}
+                                </div>
+
+                                {/* Add new payment term */}
+                                <div className="flex gap-2">
+                                  <Input
+                                    value={newCustomTerm}
+                                    onChange={(e) => setNewCustomTerm(e.target.value)}
+                                    placeholder="e.g., 50% Advance, 100% CDC after delivery..."
+                                    className="flex-1 text-sm"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        if (newCustomTerm.trim()) {
+                                          const currentTerms = lpoData.terms.custom_terms || [];
+                                          setLpoData({
+                                            ...lpoData,
+                                            terms: {
+                                              ...lpoData.terms,
+                                              custom_terms: [...currentTerms, { text: newCustomTerm.trim(), selected: true }]
+                                            }
+                                          });
+                                          setNewCustomTerm('');
+                                        }
+                                      }
+                                    }}
+                                  />
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      if (newCustomTerm.trim()) {
+                                        const currentTerms = lpoData.terms.custom_terms || [];
+                                        setLpoData({
+                                          ...lpoData,
+                                          terms: {
+                                            ...lpoData.terms,
+                                            custom_terms: [...currentTerms, { text: newCustomTerm.trim(), selected: true }]
+                                          }
+                                        });
+                                        setNewCustomTerm('');
+                                      }
+                                    }}
+                                  >
+                                    <Plus className="w-3 h-3 mr-1" /> Add
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Signature Selection */}
+                            <div className="border-t border-blue-200 pt-4">
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="checkbox"
+                                  id="include-signatures-pochild"
+                                  checked={includeSignatures}
+                                  onChange={(e) => setIncludeSignatures(e.target.checked)}
+                                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                />
+                                <label htmlFor="include-signatures-pochild" className="text-sm font-medium text-gray-700">
+                                  Include Signatures in LPO PDF
+                                </label>
+                              </div>
+
+                              {includeSignatures && (
+                                <div className="mt-3 bg-gray-50 p-3 rounded border border-gray-200">
+                                  <div className="text-xs text-gray-500 mb-2">Signatures from Admin Settings:</div>
+                                  <div className="grid grid-cols-3 gap-4">
+                                    <div className="text-center">
+                                      <div className="text-xs text-gray-500 mb-1">MD Signature</div>
+                                      {lpoData.signatures.md_signature ? (
+                                        <img src={lpoData.signatures.md_signature} alt="MD" className="h-10 mx-auto object-contain" />
+                                      ) : (
+                                        <div className="text-xs text-orange-500">Not uploaded</div>
+                                      )}
+                                      <div className="text-xs font-medium mt-1">{lpoData.signatures.md_name}</div>
+                                      <div className="text-xs text-gray-500">Managing Director</div>
+                                    </div>
+                                    <div className="text-center">
+                                      <div className="text-xs text-gray-500 mb-1">Stamp</div>
+                                      {lpoData.signatures.stamp_image ? (
+                                        <img src={lpoData.signatures.stamp_image} alt="Stamp" className="h-10 mx-auto object-contain" />
+                                      ) : (
+                                        <div className="text-xs text-orange-500">Not uploaded</div>
+                                      )}
+                                    </div>
+                                    <div className="text-center">
+                                      <div className="text-xs text-gray-500 mb-1">TD Signature</div>
+                                      {lpoData.signatures.td_signature ? (
+                                        <img src={lpoData.signatures.td_signature} alt="TD" className="h-10 mx-auto object-contain" />
+                                      ) : (
+                                        <div className="text-xs text-orange-500">Not uploaded</div>
+                                      )}
+                                      <div className="text-xs font-medium mt-1">{lpoData.signatures.td_name}</div>
+                                      <div className="text-xs text-gray-500">Technical Director</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                          </div>
+                        )}
                       </div>
                     </div>
 
                     {/* Footer */}
                     <div className="bg-gray-50 px-6 py-4 border-t-2 border-gray-300 flex justify-end gap-3 flex-shrink-0">
                       <Button
-                        onClick={() => setVendorSendConfirmation(null)}
+                        onClick={() => {
+                          setVendorSendConfirmation(null);
+                          setLpoData(null);
+                          setShowLpoEditor(false);
+                        }}
                         variant="outline"
                         className="px-6 py-2"
                       >
@@ -3346,6 +3839,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             if (materials.length === 0) {
                               toast.error('No materials to send for this vendor');
                               setVendorSendConfirmation(null);
+                              setLpoData(null);
+                              setShowLpoEditor(false);
                               return;
                             }
 
@@ -3369,6 +3864,25 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
                             if (response.po_children && response.po_children.length > 0) {
                               toast.info(`Purchase Order: ${response.po_children[0].formatted_id}`, { duration: 5000 });
+
+                              // Save LPO customization for the newly created POChild (if LPO was edited for this vendor)
+                              const vendorLpoData = lpoDataByVendor.get(sentVendorId);
+                              if (vendorLpoData) {
+                                const newPOChildId = response.po_children[0].id;
+                                try {
+                                  await buyerService.saveLPOCustomization(
+                                    purchase.cr_id,
+                                    vendorLpoData,
+                                    includeSignatures,
+                                    newPOChildId  // Associate with newly created POChild
+                                  );
+                                  console.log(`✅ Saved LPO customization for vendor ${sentVendorId}, POChild ${newPOChildId}`);
+                                } catch (error) {
+                                  console.error('Failed to save LPO customization:', error);
+                                  // Don't fail the whole operation if LPO save fails
+                                  toast.warning('Purchase order sent, but LPO customization save failed');
+                                }
+                              }
 
                               // Optimistically update purchase.po_children locally for immediate UI feedback
                               const newPOChild = {
@@ -3402,6 +3916,15 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             // Close confirmation dialog first (UI stays responsive)
                             setVendorSendConfirmation(null);
                             setIsSubmitting(false);
+
+                            // Reset LPO state for this vendor
+                            setLpoData(null);
+                            setShowLpoEditor(false);
+
+                            // Remove this vendor's LPO data from map (it's now saved with POChild ID)
+                            const newMap = new Map(lpoDataByVendor);
+                            newMap.delete(sentVendorId);
+                            setLpoDataByVendor(newMap);
 
                             // Lazy refresh data in background (doesn't block UI)
                             setTimeout(() => {
