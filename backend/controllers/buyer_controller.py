@@ -1366,10 +1366,13 @@ def get_buyer_pending_purchases():
             if is_admin_viewing and all_children_sent_to_td_or_approved:
                 continue
 
+            # Get submission_group_id from first POChild if any exist
+            submission_group_id = po_children_data[0].get('submission_group_id') if po_children_data else None
+
             pending_purchases.append({
                 "cr_id": cr.cr_id,
                 "formatted_cr_id": cr.get_formatted_cr_id(),
-                "submission_group_id": cr.submission_group_id,
+                "submission_group_id": submission_group_id,  # From POChild records
                 "po_children": po_children_data,  # POChild records for vendor splits
                 "project_id": project.project_id,
                 "project_name": project.project_name,
@@ -3194,171 +3197,26 @@ def select_vendor_for_material(cr_id):
                     })
                 # Fall through to normal processing if no vendor_id
 
-            # TD is changing vendor for SOME materials (not all)
-            # Only split out the changed materials, keep unchanged materials in original sub-CR
-            # Get parent CR to create new sub-CRs under it
-            parent_cr = ChangeRequest.query.filter_by(
-                cr_id=cr.parent_cr_id,
-                is_deleted=False
-            ).first()
-
-            if not parent_cr:
-                return jsonify({"error": "Parent CR not found for sub-CR splitting"}), 404
-
-            # Get existing sub-CR count for the parent
-            existing_sub_cr_count = ChangeRequest.query.filter_by(
-                parent_cr_id=parent_cr.cr_id,
-                is_deleted=False
-            ).count()
-            next_suffix_number = existing_sub_cr_count + 1
-
-            created_sub_crs = []
-            old_sub_cr_id = cr.get_formatted_cr_id()
-            old_vendor_name = cr.selected_vendor_name
-
-            # Group changed materials by their new vendor
-            vendor_groups = {}
-            for sel in changed_materials:
-                vendor_id = sel.get('vendor_id')
-                if not vendor_id:
-                    continue
-                if vendor_id not in vendor_groups:
-                    vendor_groups[vendor_id] = []
-                vendor_groups[vendor_id].append(sel)
-
-            # Create new sub-CRs for each new vendor (only for changed materials)
-            for vendor_id, vendor_materials in vendor_groups.items():
-                vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
-                if not vendor:
-                    return jsonify({"error": f"Vendor {vendor_id} not found"}), 404
-                if vendor.status != 'active':
-                    return jsonify({"error": f"Vendor '{vendor.company_name}' is not active"}), 400
-
-                # Build materials data for new sub-CR
-                new_materials = []
-                total_cost = 0.0
-
-                for sel in vendor_materials:
-                    material_name = sel.get('material_name')
-                    # Find the material from original sub-CR
-                    original_material = None
-                    if cr.materials_data:
-                        for m in cr.materials_data:
-                            if m.get('material_name') == material_name:
-                                original_material = m
-                                break
-
-                    if original_material:
-                        unit_price = sel.get('negotiated_price') or original_material.get('unit_price', 0)
-                        quantity = original_material.get('quantity', 0)
-                        material_total = unit_price * quantity
-                        total_cost += material_total
-
-                        new_materials.append({
-                            'material_name': material_name,
-                            'sub_item_name': original_material.get('sub_item_name', ''),
-                            'quantity': quantity,
-                            'unit': original_material.get('unit', ''),
-                            'unit_price': unit_price,
-                            'total_price': material_total,
-                            'master_material_id': original_material.get('master_material_id')
-                        })
-
-                # Create new sub-CR for the split-off materials
-                new_sub_cr = ChangeRequest(
-                    boq_id=parent_cr.boq_id,
-                    project_id=parent_cr.project_id,
-                    requested_by_user_id=parent_cr.requested_by_user_id,
-                    requested_by_name=parent_cr.requested_by_name,
-                    requested_by_role=parent_cr.requested_by_role,
-                    request_type=parent_cr.request_type,
-                    justification=f"Sub-CR for vendor {vendor.company_name} - Split by TD from {old_sub_cr_id}",
-                    status='pending_td_approval',  # NOT auto-approved
-                    approval_required_from='technical_director',  # Set approval_required_from to TD
-                    item_id=parent_cr.item_id,
-                    item_name=parent_cr.item_name,
-                    sub_item_id=parent_cr.sub_item_id,
-                    sub_items_data=new_materials,
-                    materials_data=new_materials,
-                    materials_total_cost=total_cost,
-                    assigned_to_buyer_user_id=parent_cr.assigned_to_buyer_user_id,
-                    assigned_to_buyer_name=parent_cr.assigned_to_buyer_name,
-                    assigned_to_buyer_date=parent_cr.assigned_to_buyer_date,
-                    # Vendor selection
-                    selected_vendor_id=vendor_id,
-                    selected_vendor_name=vendor.company_name,
-                    vendor_selected_by_buyer_id=user_id,
-                    vendor_selected_by_buyer_name=user_name,
-                    vendor_selection_date=datetime.utcnow(),
-                    vendor_selection_status='pending_td_approval',  # NOT auto-approved
-                    # Sub-CR specific fields
-                    parent_cr_id=parent_cr.cr_id,
-                    cr_number_suffix=f".{next_suffix_number}",
-                    is_sub_cr=True,
-                    submission_group_id=cr.submission_group_id,  # Keep same group
-                    use_per_material_vendors=False,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
-                )
-
-                db.session.add(new_sub_cr)
-                db.session.flush()
-
-                created_sub_crs.append({
-                    'cr_id': new_sub_cr.cr_id,
-                    'formatted_cr_id': new_sub_cr.get_formatted_cr_id(),
-                    'vendor_id': vendor_id,
-                    'vendor_name': vendor.company_name,
-                    'materials_count': len(new_materials),
-                    'total_cost': total_cost
-                })
-
-                next_suffix_number += 1
-
-            # Update the ORIGINAL sub-CR to keep only the unchanged materials
-            if unchanged_materials:
-                # Keep the original sub-CR but update its materials list
-                remaining_materials = []
-                remaining_total_cost = 0.0
-
-                for sel in unchanged_materials:
-                    material_name = sel.get('material_name')
-                    # Find the material from original sub-CR
-                    if cr.materials_data:
-                        for m in cr.materials_data:
-                            if m.get('material_name') == material_name:
-                                remaining_materials.append(m)
-                                remaining_total_cost += m.get('total_price', 0) or (m.get('unit_price', 0) * m.get('quantity', 0))
-                                break
-
-                # Update original sub-CR with remaining materials
-                cr.materials_data = remaining_materials
-                cr.sub_items_data = remaining_materials
-                cr.materials_total_cost = remaining_total_cost
-                cr.updated_at = datetime.utcnow()
-                # Keep original vendor and status
-
-                # Flag JSONB fields as modified so SQLAlchemy detects the change
-                from sqlalchemy.orm.attributes import flag_modified
-                flag_modified(cr, 'materials_data')
-                flag_modified(cr, 'sub_items_data')
-
-            else:
-                # All materials were moved to new sub-CRs, soft-delete the original
-                cr.is_deleted = True
-                cr.updated_at = datetime.utcnow()
-
-            db.session.commit()
-
+            # 🗑️ DEPRECATED: Old sub-CR system - Now use POChild table instead
+            # This code path is no longer supported after schema cleanup (2025-12-19)
+            # If you need to split materials by vendor, use create_po_children_for_vendor_groups()
             return jsonify({
-                "success": True,
-                "message": f"{len(changed_materials)} material(s) separated into new purchase order(s). {len(unchanged_materials)} material(s) remain with original vendor.",
-                "split_result": {
-                    "original_sub_cr": old_sub_cr_id,
-                    "original_materials_remaining": len(unchanged_materials),
-                    "new_sub_crs": created_sub_crs
-                }
-            })
+                "error": "Material-level vendor changes are not supported for this purchase type. Please use the POChild vendor management system."
+            }), 400
+
+            # Old deprecated code below (kept for reference):
+            # parent_cr = ChangeRequest.query.filter_by(
+            #     cr_id=cr.parent_cr_id,  # ❌ Column removed
+            #     is_deleted=False
+            # ).first()
+            #
+            # if not parent_cr:
+            #     return jsonify({"error": "Parent CR not found for sub-CR splitting"}), 404
+
+            # 🗑️ DEPRECATED CODE REMOVED (2025-12-19) - Lines 3216-3369
+            # This code tried to create sub-CRs using deprecated columns:
+            # - parent_cr_id, cr_number_suffix, submission_group_id
+            # Use POChild table and create_po_children_for_vendor_groups() instead
 
         # Initialize material_vendor_selections if it doesn't exist
         if not cr.material_vendor_selections:
