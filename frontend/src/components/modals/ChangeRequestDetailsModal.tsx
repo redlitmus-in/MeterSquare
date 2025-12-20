@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send, FileText, Download, Loader2, ChevronDown, Edit, Eye, ExternalLink, GitCompare } from 'lucide-react';
+import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send, FileText, Download, Loader2, ChevronDown, Edit, ExternalLink, GitCompare } from 'lucide-react';
 import { ChangeRequestItem } from '@/services/changeRequestService';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
@@ -32,7 +32,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 }) => {
   const { user } = useAuthStore();
   const [showEditModal, setShowEditModal] = useState(false);
-  const [expandedJustifications, setExpandedJustifications] = useState<Set<number>>(new Set());
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<number>>(new Set());
   const [expandedSpecs, setExpandedSpecs] = useState<Set<number>>(new Set());
   const [lpoData, setLpoData] = useState<any>(null);
@@ -52,19 +51,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const [showVendorComparisonModal, setShowVendorComparisonModal] = useState(false);
   const [competitorVendors, setCompetitorVendors] = useState<Vendor[]>([]);
   const [loadingCompetitors, setLoadingCompetitors] = useState(false);
-
-  // Toggle justification expansion
-  const toggleJustification = (idx: number) => {
-    setExpandedJustifications(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(idx)) {
-        newSet.delete(idx);
-      } else {
-        newSet.add(idx);
-      }
-      return newSet;
-    });
-  };
 
   // Toggle description expansion
   const toggleDescription = (idx: number) => {
@@ -158,7 +144,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
           const lpoDataFromResponse = response.lpo_data || response;
           setLpoData(lpoDataFromResponse);
         } catch (error) {
-          console.log('Could not fetch LPO prices:', error);
+          // Silently fail - LPO prices are optional fallback
         }
       }
     };
@@ -415,8 +401,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     sum + (mat.total_price || (mat.quantity * mat.unit_price) || 0), 0
   );
 
-  const isHighValue = changeRequest.approval_required_from === 'technical_director';
-
   // Use role helper functions with fallback string checks for robustness
   const userRoleLower = user?.role?.toLowerCase() || '';
   const userRoleNameLower = user?.role_name?.toLowerCase() || '';
@@ -460,9 +444,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         changeRequest.approval_required_from === 'estimator' &&
                         !isVendorPendingApproval &&
                         !isFinalStatus;
-
-  // Check if there are any new materials (determines if pricing columns should be shown)
-  const hasNewMaterials = materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined);
 
   // Check Project Manager with fallback string matching
   const userIsProjectManager = isProjectManager(user) ||
@@ -559,7 +540,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   </div>
                   <div>
                     <h1 className="text-lg sm:text-2xl font-bold text-white">
-                      PO-{changeRequest.cr_id || 'N/A'}
+                      {changeRequest.formatted_cr_id || `PO-${changeRequest.cr_id}` || 'N/A'}
                     </h1>
                     <p className="text-xs sm:text-sm text-white/80 mt-0.5 sm:mt-1 truncate max-w-[180px] sm:max-w-none">
                       {changeRequest.project_name || 'Project'} • BOQ: {changeRequest.boq_name || `#${changeRequest.boq_id}` || 'N/A'}
@@ -713,7 +694,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                 </div>
 
                 {/* Vendor Comparison Section - For TD to compare vendors */}
-                {isTechnicalDirector(user) && !changeRequest.selected_vendor_id && !(changeRequest as any).vendor_details && (
+                {userIsTechnicalDirector && !changeRequest.selected_vendor_id && !(changeRequest as any).vendor_details && (
                   <div className="bg-white rounded-lg shadow-sm mb-4 sm:mb-6 p-4 sm:p-5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -749,13 +730,12 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                 {/* Vendor Details Section */}
                 {(changeRequest.selected_vendor_id || (changeRequest as any).vendor_details) && (
                   <div className="bg-white rounded-lg shadow-sm mb-4 sm:mb-6 overflow-hidden">
-                    {/* Header with Compare Button - Visible to TD */}
-                    {isTechnicalDirector(user) && (
-                      <div className="bg-gradient-to-r from-purple-50 to-blue-50 px-4 sm:px-5 py-3 border-b border-gray-200 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
-                            <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    {/* Header with Compare Button - Always visible when vendor is selected */}
+                    <div className="bg-gradient-to-r from-purple-50 to-blue-50 px-4 sm:px-5 py-3 border-b border-gray-200 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                             </svg>
                           </div>
                           <div>
@@ -782,7 +762,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           )}
                         </button>
                       </div>
-                    )}
                     <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-200">
                       {/* Vendor Company Information */}
                       <div className="p-4 sm:p-5">
@@ -801,38 +780,35 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                               {(changeRequest as any).vendor_details?.company_name || changeRequest.selected_vendor_name || 'N/A'}
                             </span>
                           </div>
-                          {(changeRequest as any).vendor_details?.contact_person_name && (
-                            <div className="flex justify-between items-start">
-                              <span className="text-xs text-gray-500 min-w-[100px]">Contact Person</span>
-                              <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                                {(changeRequest as any).vendor_details.contact_person_name}
-                              </span>
-                            </div>
-                          )}
-                          {(changeRequest as any).vendor_details?.email && (
-                            <div className="flex justify-between items-start">
-                              <span className="text-xs text-gray-500 min-w-[100px]">Email</span>
-                              <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4 break-words">
-                                {(changeRequest as any).vendor_details.email}
-                              </span>
-                            </div>
-                          )}
-                          {(changeRequest as any).vendor_details?.phone && (
-                            <div className="flex justify-between items-start">
-                              <span className="text-xs text-gray-500 min-w-[100px]">Phone</span>
-                              <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                                {(changeRequest as any).vendor_details.phone_code} {(changeRequest as any).vendor_details.phone}
-                              </span>
-                            </div>
-                          )}
-                          {(changeRequest as any).vendor_details?.category && (
-                            <div className="flex justify-between items-start">
-                              <span className="text-xs text-gray-500 min-w-[100px]">Category</span>
-                              <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                                {(changeRequest as any).vendor_details.category}
-                              </span>
-                            </div>
-                          )}
+
+                          {/* Vendor contact details */}
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[100px]">Contact Person</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
+                              {(changeRequest as any).vendor_details?.contact_person_name || (changeRequest as any).vendor_contact_person || 'N/A'}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[100px]">Email</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4 break-words">
+                              {(changeRequest as any).vendor_details?.email || (changeRequest as any).vendor_email || 'N/A'}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[100px]">Phone</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
+                              {(changeRequest as any).vendor_details?.phone_code || (changeRequest as any).vendor_phone_code || ''} {(changeRequest as any).vendor_details?.phone || (changeRequest as any).vendor_phone || 'N/A'}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[100px]">Category</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
+                              {(changeRequest as any).vendor_details?.category || (changeRequest as any).vendor_category || 'N/A'}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -847,36 +823,35 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <h3 className="text-sm font-semibold text-gray-900">Selection Details</h3>
                         </div>
                         <div className="space-y-3">
-                          {((changeRequest as any).vendor_details?.street_address || (changeRequest as any).vendor_details?.city) && (
-                            <div className="flex justify-between items-start">
-                              <span className="text-xs text-gray-500 min-w-[100px]">Address</span>
-                              <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                                {[
-                                  (changeRequest as any).vendor_details.street_address,
-                                  (changeRequest as any).vendor_details.city,
-                                  (changeRequest as any).vendor_details.state,
-                                  (changeRequest as any).vendor_details.country,
-                                  (changeRequest as any).vendor_details.pin_code
-                                ].filter(Boolean).join(', ')}
-                              </span>
-                            </div>
-                          )}
-                          {(changeRequest as any).vendor_details?.gst_number && (
-                            <div className="flex justify-between items-start">
-                              <span className="text-xs text-gray-500 min-w-[100px]">GST/TRN Number</span>
-                              <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                                {(changeRequest as any).vendor_details.gst_number}
-                              </span>
-                            </div>
-                          )}
-                          {changeRequest.vendor_selected_by_buyer_name && (
-                            <div className="flex justify-between items-start">
-                              <span className="text-xs text-gray-500 min-w-[100px]">Selected By</span>
-                              <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                                {changeRequest.vendor_selected_by_buyer_name}
-                              </span>
-                            </div>
-                          )}
+                          {/* Show address from vendor_details or fallback fields */}
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[100px]">Address</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
+                              {[
+                                (changeRequest as any).vendor_details?.street_address || (changeRequest as any).vendor_street_address,
+                                (changeRequest as any).vendor_details?.city || (changeRequest as any).vendor_city,
+                                (changeRequest as any).vendor_details?.state || (changeRequest as any).vendor_state,
+                                (changeRequest as any).vendor_details?.country || (changeRequest as any).vendor_country,
+                                (changeRequest as any).vendor_details?.pin_code || (changeRequest as any).vendor_pin_code
+                              ].filter(Boolean).join(', ') || 'N/A'}
+                            </span>
+                          </div>
+
+                          {/* Show GST/TRN from vendor_details or fallback field */}
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[100px]">GST/TRN Number</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
+                              {(changeRequest as any).vendor_details?.gst_number || (changeRequest as any).vendor_gst_number || 'N/A'}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs text-gray-500 min-w-[100px]">Selected By</span>
+                            <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
+                              {changeRequest.vendor_selected_by_buyer_name || 'N/A'}
+                            </span>
+                          </div>
+
                           {changeRequest.vendor_selection_date && (
                             <div className="flex justify-between items-start">
                               <span className="text-xs text-gray-500 min-w-[100px]">Selection Date</span>
@@ -892,7 +867,180 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         </div>
                       </div>
                     </div>
+
+                    {/* View Competitor Vendors Button - Show to TD if comparison data exists */}
+                    {userIsTechnicalDirector && changeRequest.material_vendor_selections && Object.keys(changeRequest.material_vendor_selections).length > 0 && (
+                      <div className="px-4 pb-4">
+                        <button
+                          onClick={() => {
+                            // Scroll to the Buyer's Vendor Evaluation section
+                            const vendorComparisonSection = document.getElementById('vendor-comparison-section');
+                            if (vendorComparisonSection) {
+                              vendorComparisonSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }
+                          }}
+                          className="w-full px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                          </svg>
+                          View Competitor Vendors
+                        </button>
+                      </div>
+                    )}
                   </div>
+                )}
+
+                {/* Buyer's Vendor Evaluation (Comparison Data) - Only show to TD if vendor comparison data exists */}
+                {userIsTechnicalDirector && changeRequest.material_vendor_selections && Object.keys(changeRequest.material_vendor_selections).length > 0 && (
+                  (() => {
+                    // Extract vendor comparison data from material_vendor_selections
+                    const allEvaluatedVendors = new Map<number, any>();
+
+                    try {
+                      Object.entries(changeRequest.material_vendor_selections).forEach(([materialName, selection]: [string, any]) => {
+                        // ✅ Null safety: Validate selection and vendor_comparison_data
+                        if (!selection || typeof selection !== 'object') return;
+                        if (!selection.vendor_comparison_data || !Array.isArray(selection.vendor_comparison_data)) return;
+
+                        selection.vendor_comparison_data.forEach((vendorData: any) => {
+                          // ✅ Null safety: Validate vendorData before processing
+                          if (!vendorData || typeof vendorData !== 'object') return;
+                          if (!vendorData.vendor_id) return;
+
+                          if (!allEvaluatedVendors.has(vendorData.vendor_id)) {
+                            allEvaluatedVendors.set(vendorData.vendor_id, {
+                              ...vendorData,
+                              materials: []
+                            });
+                          }
+                          allEvaluatedVendors.get(vendorData.vendor_id).materials.push({
+                            material_name: materialName,
+                            vendor_material_name: vendorData.vendor_material_name,
+                            negotiated_price: vendorData.negotiated_price
+                          });
+                        });
+                      });
+                    } catch (error) {
+                      console.error('Error rendering vendor comparison:', error);
+                      return (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                          <p className="text-sm text-yellow-800">
+                            Unable to display vendor comparison data. The data may be incomplete or corrupted.
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    const evaluatedVendorsList = Array.from(allEvaluatedVendors.values());
+                    const selectedVendor = evaluatedVendorsList.find(v => v?.is_selected);
+                    const otherVendors = evaluatedVendorsList.filter(v => !v?.is_selected);
+
+                    if (evaluatedVendorsList.length === 0) return null;
+
+                    return (
+                      <div id="vendor-comparison-section" className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg shadow-sm p-4 sm:p-5 mb-4 sm:mb-6 border border-blue-200">
+                        <div className="flex items-center gap-2 mb-4">
+                          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
+                            <GitCompare className="w-4 h-4 text-white" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-900">Buyer's Vendor Evaluation</h3>
+                            <p className="text-xs text-gray-600 mt-0.5">
+                              Buyer evaluated {evaluatedVendorsList.length} vendor{evaluatedVendorsList.length !== 1 ? 's' : ''} for this purchase
+                            </p>
+                          </div>
+                        </div>
+
+                        {otherVendors.length > 0 && (
+                          <div className="space-y-3">
+                            <div className="bg-white border border-blue-200 rounded-lg p-3">
+                              <p className="text-xs font-semibold text-gray-700 mb-2">
+                                <span className="text-blue-600">{otherVendors.length}</span> other vendor{otherVendors.length !== 1 ? 's were' : ' was'} considered:
+                              </p>
+                              <div className="space-y-2">
+                                {otherVendors.map((vendor: any) => (
+                                  <div key={vendor.vendor_id} className="bg-gray-50 border border-gray-200 rounded-md p-2.5">
+                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-semibold text-gray-900 text-sm truncate">{vendor.vendor_name}</p>
+                                        {vendor.vendor_category && (
+                                          <p className="text-xs text-gray-500 mt-0.5">{vendor.vendor_category}</p>
+                                        )}
+                                      </div>
+                                      <div className="text-right flex-shrink-0">
+                                        <p className="text-xs text-gray-500">Total Materials</p>
+                                        <p className="font-semibold text-gray-900">{vendor.materials.length}</p>
+                                      </div>
+                                    </div>
+
+                                    {/* Contact Info Grid */}
+                                    <div className="grid grid-cols-2 gap-2 text-xs border-t border-gray-300 pt-2 mt-2">
+                                      {vendor.vendor_contact_person && (
+                                        <div>
+                                          <span className="text-gray-500">Contact:</span>
+                                          <span className="ml-1 text-gray-900 font-medium">{vendor.vendor_contact_person}</span>
+                                        </div>
+                                      )}
+                                      {vendor.vendor_phone && (
+                                        <div>
+                                          <span className="text-gray-500">Phone:</span>
+                                          <span className="ml-1 text-gray-900 font-medium">
+                                            {vendor.vendor_phone_code} {vendor.vendor_phone}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {vendor.vendor_email && (
+                                        <div className="col-span-2">
+                                          <span className="text-gray-500">Email:</span>
+                                          <span className="ml-1 text-gray-900 font-medium break-all">{vendor.vendor_email}</span>
+                                        </div>
+                                      )}
+                                      {vendor.vendor_gst_number && (
+                                        <div>
+                                          <span className="text-gray-500">TRN:</span>
+                                          <span className="ml-1 text-gray-900 font-medium">{vendor.vendor_gst_number}</span>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Materials with prices */}
+                                    <div className="mt-2 border-t border-gray-300 pt-2">
+                                      <p className="text-xs font-semibold text-gray-700 mb-1.5">Materials & Prices:</p>
+                                      <div className="space-y-1">
+                                        {vendor.materials.map((mat: any, idx: number) => (
+                                          <div key={idx} className="flex justify-between items-start text-xs bg-white rounded px-2 py-1">
+                                            <span className="text-gray-700 flex-1">
+                                              {mat.material_name}
+                                              {mat.vendor_material_name && mat.vendor_material_name !== mat.material_name && (
+                                                <span className="text-gray-500 ml-1">({mat.vendor_material_name})</span>
+                                              )}
+                                            </span>
+                                            {mat.negotiated_price != null && (
+                                              <span className="font-semibold text-gray-900 ml-2">
+                                                AED {Number(mat.negotiated_price).toFixed(2)}
+                                              </span>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="bg-green-50 border border-green-300 rounded-lg p-2.5 flex items-start gap-2">
+                              <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+                              <p className="text-xs text-green-800">
+                                <span className="font-semibold">{selectedVendor?.vendor_name || changeRequest.selected_vendor_name}</span> was selected by the buyer after comparison
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()
                 )}
 
                 {/* Justification/Reason Section */}
@@ -1345,7 +1493,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                               const vendorTotal = material.total_price || (material.quantity * vendorUnitPrice) || 0;
                               const boqTotal = material.original_total_price || material.boq_total_price || (material.quantity * boqUnitPrice) || 0;
                               const unitPriceDiff = vendorUnitPrice - boqUnitPrice;
-                              const totalDiff = vendorTotal - boqTotal;
 
                               return (
                               <>

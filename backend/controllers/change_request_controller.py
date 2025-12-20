@@ -1534,8 +1534,10 @@ def get_all_change_requests():
             # Skip material lookup - master_material_id values like 'mat_198_1_2'
             # are not database IDs but sub_item identifiers
 
-            # Add POChildren data for this change request (for PM/SE/EST/MEP visibility)
-            po_children = POChild.query.filter_by(
+            # Add POChildren data for this change request (for PM/SE/EST/MEP visibility) with eager loading
+            po_children = POChild.query.options(
+                joinedload(POChild.vendor)  # Eager load vendor relationship
+            ).filter_by(
                 parent_cr_id=cr.cr_id,
                 is_deleted=False
             ).all()
@@ -2428,7 +2430,7 @@ def complete_purchase_and_merge_to_boq(cr_id):
                 'totalMaterialCost': 0,
                 'totalLabourCost': 0,
                 'base_cost': 0,
-                'profit_margin_percentage': change_request.original_profit_percentage or CR_CONFIG.DEFAULT_PROFIT_PERCENTAGE,
+                'profit_margin_percentage': CR_CONFIG.DEFAULT_PROFIT_PERCENTAGE,  # Use default (removed column)
                 'profit_margin_amount': 0,
                 'total_cost': 0,
                 'selling_price': 0

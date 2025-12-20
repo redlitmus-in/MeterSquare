@@ -36,6 +36,7 @@ export const formatCurrency = (value: number, currency: string = INVENTORY_DEFAU
 export const normalizeStatus = (status: string | undefined): string => {
   const normalized = status?.toUpperCase() || 'PENDING';
   if (normalized === 'SEND_REQUEST') return 'PENDING';
+  if (normalized === 'AWAITING_VENDOR_DELIVERY') return 'PENDING';  // Vendor deliveries routed from buyer
   if (normalized === 'DN_PENDING') return 'DN_PENDING';
   return normalized;
 };

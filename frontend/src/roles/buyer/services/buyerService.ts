@@ -49,6 +49,16 @@ export interface POChild {
   vendor_name?: string | null;
   vendor_phone?: string | null;
   vendor_email?: string | null;
+  // Vendor detail fields from backend to_dict() - required for TD modal display
+  vendor_phone_code?: string | null;
+  vendor_contact_person?: string | null;
+  vendor_category?: string | null;
+  vendor_street_address?: string | null;
+  vendor_city?: string | null;
+  vendor_state?: string | null;
+  vendor_country?: string | null;
+  vendor_pin_code?: string | null;
+  vendor_gst_number?: string | null;
   vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
   vendor_selected_by_buyer_id?: number | null;
   vendor_selected_by_buyer_name?: string | null;
@@ -89,6 +99,8 @@ export interface POChild {
   client?: string;
   location?: string;
   boq_name?: string;
+  // Material vendor selections from parent CR for vendor comparison display
+  material_vendor_selections?: Record<string, any>;
 }
 
 export interface Purchase {

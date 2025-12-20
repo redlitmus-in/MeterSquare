@@ -21,6 +21,7 @@ export interface ChangeRequestItem {
   requested_by_role: string;
   request_type: string;
   justification: string;
+  reason?: string; // Alias for justification (backward compatibility)
   status: 'pending' | 'under_review' | 'approved_by_pm' | 'approved_by_td' | 'approved' | 'rejected' | 'assigned_to_buyer' | 'purchase_completed';
   current_approver_role?: string | null;
   materials_data: Array<{
@@ -125,6 +126,20 @@ export interface ChangeRequestItem {
   vendor_approved_by_td_name?: string | null;
   vendor_approval_date?: string | null;
   vendor_rejection_reason?: string | null;
+
+  // Vendor Detail Fields (for displaying full vendor information in modals)
+  vendor_email?: string | null;
+  vendor_phone?: string | null;
+  vendor_phone_code?: string | null;
+  vendor_contact_person?: string | null;
+  vendor_category?: string | null;
+  vendor_street_address?: string | null;
+  vendor_city?: string | null;
+  vendor_state?: string | null;
+  vendor_country?: string | null;
+  vendor_pin_code?: string | null;
+  vendor_gst_number?: string | null;
+  vendor_details?: any;  // Vendor details object from API
 
   // Per-Material Vendor Selection (with vendor prices)
   material_vendor_selections?: Record<string, {

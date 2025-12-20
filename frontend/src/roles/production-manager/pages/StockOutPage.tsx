@@ -737,7 +737,7 @@ const StockOutPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-4">
                         <div className="flex gap-2 flex-wrap">
-                          {(req.status === 'PENDING' || req.status === 'send_request') && (
+                          {normalizeStatus(req.status) === 'PENDING' && (
                             <>
                               <button
                                 onClick={() => handleApproveRequest(req.request_id!)}

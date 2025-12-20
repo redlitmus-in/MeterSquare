@@ -346,6 +346,13 @@ class ChangeRequest(db.Model):
             'vendor_whatsapp_sent': self.vendor_whatsapp_sent,
             'vendor_whatsapp_sent_at': self.vendor_whatsapp_sent_at.isoformat() if self.vendor_whatsapp_sent_at else None,
 
+            # Vendor Delivery Routing (Complete & Send to Store feature)
+            'delivery_routing': self.delivery_routing,
+            'vendor_delivered_to_store': self.vendor_delivered_to_store,
+            'vendor_delivery_date': self.vendor_delivery_date.isoformat() if self.vendor_delivery_date else None,
+            'buyer_completion_notes': self.buyer_completion_notes,
+            'store_request_status': self.store_request_status,
+
             # Timestamps
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

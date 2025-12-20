@@ -411,12 +411,16 @@ const ChangeRequestsPage: React.FC = () => {
     const calculatedTotal = mappedMaterials.reduce((sum, m) => sum + (m.total_price || 0), 0);
 
     // Fetch vendor details if vendor is selected
+    // Note: POChild API already returns vendor fields via eager loading in to_dict()
+    // So we can use those directly, but still fetch full details as backup
     let vendorDetailsData = null;
     if (poChild.vendor_id) {
       try {
-        vendorDetailsData = await buyerVendorService.getVendorById(poChild.vendor_id);
+        const vendorResponse = await buyerVendorService.getVendorById(poChild.vendor_id);
+        vendorDetailsData = vendorResponse;
       } catch (error) {
-        console.error('Error loading vendor details:', error);
+        // Fallback: Use vendor fields from POChild API response (from to_dict() eager loading)
+        vendorDetailsData = null; // We'll rely on POChild vendor fields passed below
       }
     }
 
@@ -451,7 +455,33 @@ const ChangeRequestsPage: React.FC = () => {
       po_child_id: poChild.id,
       // Full vendor details for display in modal
       vendor_details: vendorDetailsData,
+      // Vendor fields directly from POChild API response (from to_dict() method)
+      // Now properly typed in POChild interface - no need for 'as any' casts
+      vendor_email: poChild.vendor_email,
+      vendor_phone: poChild.vendor_phone,
+      vendor_phone_code: poChild.vendor_phone_code,
+      vendor_contact_person: poChild.vendor_contact_person,
+      vendor_category: poChild.vendor_category,
+      vendor_street_address: poChild.vendor_street_address,
+      vendor_city: poChild.vendor_city,
+      vendor_state: poChild.vendor_state,
+      vendor_country: poChild.vendor_country,
+      vendor_pin_code: poChild.vendor_pin_code,
+      vendor_gst_number: poChild.vendor_gst_number,
+      // Material vendor selections from parent CR for vendor comparison display
+      material_vendor_selections: poChild.material_vendor_selections || {},
     };
+
+    // Debug: Log the data being set to verify vendor fields are present
+    console.log('Setting POChild as ChangeRequest:', {
+      vendor_email: poChildAsChangeRequest.vendor_email,
+      vendor_phone: poChildAsChangeRequest.vendor_phone,
+      vendor_contact_person: poChildAsChangeRequest.vendor_contact_person,
+      vendor_category: poChildAsChangeRequest.vendor_category,
+      vendor_gst_number: poChildAsChangeRequest.vendor_gst_number,
+      vendor_street_address: poChildAsChangeRequest.vendor_street_address,
+      full_object: poChildAsChangeRequest
+    });
 
     setSelectedChangeRequest(poChildAsChangeRequest);
     setShowDetailsModal(true);
@@ -1891,10 +1921,35 @@ const ChangeRequestsPage: React.FC = () => {
                                   selected_vendor_name: poChild.vendor_name,
                                   selected_vendor_id: poChild.vendor_id,
                                   formatted_cr_id: poChild.formatted_id || `PO-${poChild.parent_cr_id}.${poChild.id}`,
-                                  client: '',
-                                  location: '',
+                                  client: poChild.client || '',
+                                  location: poChild.location || '',
                                   boq_id: poChild.boq_id,
-                                  boq_name: poChild.boq_name || ''
+                                  boq_name: poChild.boq_name || '',
+
+                                  // Vendor detail fields (from backend po_child.to_dict())
+                                  vendor_contact_person: (poChild as any).vendor_contact_person,
+                                  vendor_email: (poChild as any).vendor_email,
+                                  vendor_phone: (poChild as any).vendor_phone,
+                                  vendor_phone_code: (poChild as any).vendor_phone_code,
+                                  vendor_category: (poChild as any).vendor_category,
+                                  vendor_street_address: (poChild as any).vendor_street_address,
+                                  vendor_city: (poChild as any).vendor_city,
+                                  vendor_state: (poChild as any).vendor_state,
+                                  vendor_country: (poChild as any).vendor_country,
+                                  vendor_pin_code: (poChild as any).vendor_pin_code,
+                                  vendor_gst_number: (poChild as any).vendor_gst_number,
+
+                                  // Vendor selection tracking
+                                  vendor_selected_by_buyer_name: (poChild as any).vendor_selected_by_buyer_name,
+                                  vendor_selection_date: (poChild as any).vendor_selection_date,
+
+                                  // Parent CR fields
+                                  requested_by_name: (poChild as any).requested_by_name,
+                                  requested_by_role: (poChild as any).requested_by_role,
+                                  justification: (poChild as any).justification,
+
+                                  // Material vendor selections for competitor comparison
+                                  material_vendor_selections: (poChild as any).material_vendor_selections || {}
                                 };
                                 setSelectedChangeRequest(mappedPOChild);
                                 setShowDetailsModal(true);

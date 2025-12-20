@@ -1,5 +1,5 @@
 from flask import request, jsonify, g
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 from config.db import db
 from models.project import Project
 from models.boq import BOQ, BOQDetails, MasterItem, MasterSubItem, MasterMaterial
@@ -1177,6 +1177,9 @@ def get_buyer_pending_purchases():
                     ChangeRequest.vendor_selection_status.is_(None),
                     ChangeRequest.vendor_selection_status != 'rejected'
                 )
+            ).order_by(
+                ChangeRequest.updated_at.desc().nulls_last(),
+                ChangeRequest.created_at.desc()
             ).paginate(page=page, per_page=per_page, error_out=False)
 
             change_requests = paginated_result.items
@@ -1220,6 +1223,9 @@ def get_buyer_pending_purchases():
                     ChangeRequest.vendor_selection_status.is_(None),
                     ChangeRequest.vendor_selection_status != 'rejected'
                 )
+            ).order_by(
+                ChangeRequest.updated_at.desc().nulls_last(),
+                ChangeRequest.created_at.desc()
             ).paginate(page=page, per_page=per_page, error_out=False)
 
             change_requests = paginated_result.items
@@ -1503,6 +1509,9 @@ def get_buyer_completed_purchases():
             ).filter(
                 ChangeRequest.status == 'purchase_completed',
                 ChangeRequest.is_deleted == False
+            ).order_by(
+                ChangeRequest.updated_at.desc().nulls_last(),
+                ChangeRequest.created_at.desc()
             ).paginate(page=page, per_page=per_page, error_out=False)
 
             change_requests = paginated_result.items
@@ -1518,6 +1527,9 @@ def get_buyer_completed_purchases():
                 ChangeRequest.status == 'purchase_completed',
                 ChangeRequest.assigned_to_buyer_user_id == buyer_id,
                 ChangeRequest.is_deleted == False
+            ).order_by(
+                ChangeRequest.updated_at.desc().nulls_last(),
+                ChangeRequest.created_at.desc()
             ).paginate(page=page, per_page=per_page, error_out=False)
 
             change_requests = paginated_result.items
@@ -1707,17 +1719,23 @@ def get_buyer_completed_purchases():
 
         if is_admin_viewing:
             completed_po_children = POChild.query.filter(
-                POChild.status == 'purchase_completed',
+                POChild.status.in_(['purchase_completed', 'routed_to_store']),
                 POChild.is_deleted == False
+            ).order_by(
+                POChild.updated_at.desc().nulls_last(),
+                POChild.created_at.desc()
             ).all()
         else:
             # Get POChildren where parent CR is assigned to this buyer
             completed_po_children = POChild.query.join(
                 ChangeRequest, POChild.parent_cr_id == ChangeRequest.cr_id
             ).filter(
-                POChild.status == 'purchase_completed',
+                POChild.status.in_(['purchase_completed', 'routed_to_store']),
                 POChild.is_deleted == False,
                 ChangeRequest.assigned_to_buyer_user_id == buyer_id
+            ).order_by(
+                POChild.updated_at.desc().nulls_last(),
+                POChild.created_at.desc()
             ).all()
 
         completed_po_children_list = []
@@ -1815,6 +1833,9 @@ def get_buyer_rejected_purchases():
                     ChangeRequest.vendor_selection_status == 'rejected'
                 ),
                 ChangeRequest.is_deleted == False
+            ).order_by(
+                ChangeRequest.updated_at.desc().nulls_last(),
+                ChangeRequest.created_at.desc()
             ).paginate(page=page, per_page=per_page, error_out=False)
 
             change_requests = paginated_result.items
@@ -1831,6 +1852,9 @@ def get_buyer_rejected_purchases():
                 ),
                 ChangeRequest.assigned_to_buyer_user_id == buyer_id,
                 ChangeRequest.is_deleted == False
+            ).order_by(
+                ChangeRequest.updated_at.desc().nulls_last(),
+                ChangeRequest.created_at.desc()
             ).paginate(page=page, per_page=per_page, error_out=False)
 
             change_requests = paginated_result.items
@@ -1991,6 +2015,9 @@ def get_buyer_rejected_purchases():
                         POChild.vendor_selection_status == 'td_rejected'
                     ),
                     POChild.is_deleted == False
+                ).order_by(
+                    POChild.updated_at.desc().nulls_last(),
+                    POChild.created_at.desc()
                 ).all()
             else:
                 # Query by vendor_selected_by_buyer_id OR by parent CR's assigned buyer
@@ -2006,6 +2033,9 @@ def get_buyer_rejected_purchases():
                         POChild.vendor_selected_by_buyer_id == buyer_id,
                         ChangeRequest.assigned_to_buyer_user_id == buyer_id
                     )
+                ).order_by(
+                    POChild.updated_at.desc().nulls_last(),
+                    POChild.created_at.desc()
                 ).all()
 
             for poc in po_children:
@@ -2775,8 +2805,10 @@ def update_po_child_prices(po_child_id):
         if not materials_updates or not isinstance(materials_updates, list):
             return jsonify({"error": "materials array is required"}), 400
 
-        # Get the POChild
-        po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
+        # Get the POChild with eager loading
+        po_child = POChild.query.options(
+            joinedload(POChild.vendor)
+        ).filter_by(id=po_child_id, is_deleted=False).first()
         if not po_child:
             return jsonify({"error": "Purchase order not found"}), 404
 
@@ -3324,6 +3356,49 @@ def select_vendor_for_material(cr_id):
                 vendor_selection_data['negotiated_price'] = float(negotiated_price)
                 vendor_selection_data['save_price_for_future'] = bool(save_price_for_future)
 
+            # CRITICAL: Store ALL evaluated vendors for TD comparison (vendor_comparison_data)
+            # This allows TD to see which vendors were evaluated and their prices
+            if all_selected_vendors and len(all_selected_vendors) > 0:
+                # ✅ PERFORMANCE: Avoid N+1 query - fetch all vendors in one query
+                vendor_ids = [v.get('vendor_id') for v in all_selected_vendors if v.get('vendor_id')]
+
+                if vendor_ids:
+                    # Single query to fetch all evaluated vendors at once
+                    vendors_map = {
+                        v.vendor_id: v
+                        for v in Vendor.query.filter(
+                            Vendor.vendor_id.in_(vendor_ids),
+                            Vendor.is_deleted == False
+                        ).all()
+                    }
+
+                    vendor_comparison_list = []
+                    for evaluated_vendor_info in all_selected_vendors:
+                        eval_vendor_id = evaluated_vendor_info.get('vendor_id')
+                        if eval_vendor_id:
+                            # O(1) lookup from pre-fetched map instead of N database queries
+                            eval_vendor = vendors_map.get(eval_vendor_id)
+                            if eval_vendor:
+                                vendor_comparison_list.append({
+                                    'vendor_id': eval_vendor_id,
+                                    'vendor_name': evaluated_vendor_info.get('vendor_name', eval_vendor.company_name),
+                                    'vendor_material_name': evaluated_vendor_info.get('vendor_material_name'),
+                                    'negotiated_price': evaluated_vendor_info.get('negotiated_price'),
+                                    'vendor_email': eval_vendor.email,
+                                    'vendor_phone': eval_vendor.phone,
+                                    'vendor_phone_code': eval_vendor.phone_code,
+                                    'vendor_contact_person': eval_vendor.contact_person_name,
+                                    'vendor_category': eval_vendor.category,
+                                    'vendor_street_address': eval_vendor.street_address,
+                                    'vendor_city': eval_vendor.city,
+                                    'vendor_state': eval_vendor.state,
+                                    'vendor_country': eval_vendor.country,
+                                    'vendor_gst_number': eval_vendor.gst_number,
+                                    'is_selected': eval_vendor_id == vendor_id
+                                })
+                    vendor_selection_data['vendor_comparison_data'] = vendor_comparison_list
+                    log.info(f"Saved vendor comparison data for material '{material_name}': {len(vendor_comparison_list)} vendors evaluated")
+
             cr.material_vendor_selections[material_name] = vendor_selection_data
 
             updated_materials.append(material_name)
@@ -3768,8 +3843,10 @@ def create_po_children(cr_id):
         # Create POChild records for each vendor group
         created_po_children = []
 
-        # Get existing POChild records for this parent CR (to consolidate same vendors)
-        existing_po_children = POChild.query.filter_by(
+        # Get existing POChild records for this parent CR (to consolidate same vendors) with eager loading
+        existing_po_children = POChild.query.options(
+            joinedload(POChild.vendor)
+        ).filter_by(
             parent_cr_id=cr_id,
             is_deleted=False
         ).all()
@@ -4054,8 +4131,10 @@ def create_po_children(cr_id):
                     'consolidated': False
                 })
 
-        # Check if ALL materials from parent CR have been assigned to PO children
-        all_po_children = POChild.query.filter_by(
+        # Check if ALL materials from parent CR have been assigned to PO children with eager loading
+        all_po_children = POChild.query.options(
+            joinedload(POChild.vendor)
+        ).filter_by(
             parent_cr_id=parent_cr.cr_id,
             is_deleted=False
         ).all()
@@ -4520,8 +4599,10 @@ def td_approve_po_child(po_child_id):
         td_id = current_user['user_id']
         td_name = current_user.get('full_name', 'Unknown TD')
 
-        # Get the PO child
-        po_child = POChild.query.filter_by(
+        # Get the PO child with eager loading
+        po_child = POChild.query.options(
+            joinedload(POChild.vendor)
+        ).filter_by(
             id=po_child_id,
             is_deleted=False
         ).first()
@@ -4598,8 +4679,10 @@ def td_reject_po_child(po_child_id):
         if not reason:
             return jsonify({"error": "Rejection reason is required"}), 400
 
-        # Get the PO child
-        po_child = POChild.query.filter_by(
+        # Get the PO child with eager loading
+        po_child = POChild.query.options(
+            joinedload(POChild.vendor)
+        ).filter_by(
             id=po_child_id,
             is_deleted=False
         ).first()
@@ -4691,8 +4774,10 @@ def reselect_vendor_for_po_child(po_child_id):
         if not vendor_id:
             return jsonify({"error": "vendor_id is required"}), 400
 
-        # Get the PO child
-        po_child = POChild.query.filter_by(
+        # Get the PO child with eager loading
+        po_child = POChild.query.options(
+            joinedload(POChild.vendor)
+        ).filter_by(
             id=po_child_id,
             is_deleted=False
         ).first()
@@ -4802,8 +4887,10 @@ def complete_po_child_purchase(po_child_id):
         data = request.get_json() or {}
         notes = data.get('notes', '')
 
-        # Get the PO child
-        po_child = POChild.query.filter_by(
+        # Get the PO child with eager loading
+        po_child = POChild.query.options(
+            joinedload(POChild.vendor)
+        ).filter_by(
             id=po_child_id,
             is_deleted=False
         ).first()
@@ -4827,26 +4914,91 @@ def complete_po_child_purchase(po_child_id):
         if po_child.status != 'vendor_approved':
             return jsonify({"error": f"Purchase cannot be completed. Current status: {po_child.status}"}), 400
 
-        # Update the PO child
-        po_child.status = 'purchase_completed'
+        # Update the PO child - Route through Production Manager (M2 Store)
+        po_child.status = 'routed_to_store'  # Changed from 'purchase_completed'
         po_child.purchase_completed_by_user_id = buyer_id
         po_child.purchase_completed_by_name = buyer_name
         po_child.purchase_completion_date = datetime.utcnow()
         po_child.updated_at = datetime.utcnow()
 
+        # Set delivery routing fields
+        po_child.delivery_routing = 'via_production_manager'
+        po_child.store_request_status = 'pending_vendor_delivery'
+
         db.session.commit()
 
-        # Check if all PO children for parent CR are completed
-        all_po_children = POChild.query.filter_by(
+        # Create Internal Material Requests for Production Manager
+        created_imr_count = 0
+        materials_to_route = po_child.sub_items_data or po_child.materials_data
+        if materials_to_route:
+            from models.inventory import InternalMaterialRequest
+            # notification_service is already imported at top of file
+
+            # Get project info for the request
+            parent_cr = po_child.parent_cr
+            project_id = parent_cr.project_id if parent_cr else None
+            project = Project.query.get(project_id) if project_id else None
+            project_name = project.project_name if project else "Unknown Project"
+            final_destination = project.location if project else "Unknown Site"
+
+            for material in materials_to_route:
+                if isinstance(material, dict):
+                    imr = InternalMaterialRequest(
+                        cr_id=po_child.parent_cr_id,
+                        project_id=project_id,
+                        request_buyer_id=buyer_id,
+                        material_name=material.get('sub_item_name') or material.get('material_name', 'Unknown'),
+                        quantity=material.get('quantity', 0),
+                        brand=material.get('brand'),
+                        size=material.get('size'),
+                        notes=f"From PO Child #{po_child.id} - Vendor delivery expected",
+                        source_type='from_vendor_delivery',
+                        status='awaiting_vendor_delivery',
+                        final_destination_site=final_destination,
+                        routed_by_buyer_id=buyer_id,
+                        routed_to_store_at=datetime.utcnow(),
+                        request_send=True,
+                        created_at=datetime.utcnow(),
+                        created_by=buyer_name,
+                        last_modified_by=buyer_name
+                    )
+                    db.session.add(imr)
+                    created_imr_count += 1
+
+            db.session.commit()
+
+            # Notify Production Manager about incoming vendor delivery
+            if created_imr_count > 0:
+                from models.user import User
+                from models.role import Role
+                pm = User.query.filter(
+                    User.role.has(Role.role == 'Production Manager'),
+                    User.is_deleted == False
+                ).first()
+                if pm:
+                    notification_service.create_notification(
+                        user_id=pm.user_id,
+                        title=f"📦 Incoming Vendor Delivery - {project_name}",
+                        message=f"{buyer_name} has routed {created_imr_count} material(s) from PO Child #{po_child.id} to M2 Store. Expected destination: {final_destination}",
+                        type='vendor_delivery_incoming',
+                        link=f'/production-manager/stock-out'
+                    )
+
+        # Check if all PO children for parent CR are completed with eager loading
+        all_po_children = POChild.query.options(
+            joinedload(POChild.vendor)
+        ).filter_by(
             parent_cr_id=po_child.parent_cr_id,
             is_deleted=False
         ).all()
 
-        all_completed = all(pc.status == 'purchase_completed' for pc in all_po_children)
+        all_routed = all(pc.status in ['routed_to_store', 'purchase_completed'] for pc in all_po_children)
 
-        # If all completed, update parent CR status
-        if all_completed and parent_cr:
-            parent_cr.status = 'purchase_completed'
+        # If all routed to store, update parent CR status
+        if all_routed and parent_cr:
+            parent_cr.status = 'routed_to_store'
+            parent_cr.delivery_routing = 'via_production_manager'
+            parent_cr.store_request_status = 'pending_vendor_delivery'
             parent_cr.purchase_completed_by_user_id = buyer_id
             parent_cr.purchase_completed_by_name = buyer_name
             parent_cr.purchase_completion_date = datetime.utcnow()
@@ -4855,9 +5007,11 @@ def complete_po_child_purchase(po_child_id):
 
         return jsonify({
             "success": True,
-            "message": "Purchase marked as complete successfully",
+            "message": f"Purchase routed to M2 Store successfully! {created_imr_count} material request(s) created for Production Manager.",
             "po_child": po_child.to_dict(),
-            "all_po_children_completed": all_completed
+            "all_po_children_completed": all_routed,
+            "material_requests_created": created_imr_count,
+            "status": "routed_to_store"
         }), 200
 
     except Exception as e:
@@ -4881,10 +5035,15 @@ def get_pending_po_children():
         if not is_td and not is_admin:
             return jsonify({"error": "Access denied. TD or Admin role required."}), 403
 
-        # Get all POChild records pending TD approval
-        pending_po_children = POChild.query.filter_by(
+        # Get all POChild records pending TD approval with eager loading
+        pending_po_children = POChild.query.options(
+            joinedload(POChild.vendor)  # Eager load vendor relationship
+        ).filter_by(
             vendor_selection_status='pending_td_approval',
             is_deleted=False
+        ).order_by(
+            POChild.updated_at.desc().nulls_last(),
+            POChild.created_at.desc()
         ).all()
 
         result = []
@@ -5097,7 +5256,25 @@ def get_pending_po_children():
                 'location': project.location if project else None,
                 'boq_name': boq.boq_name if boq else None,
                 'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
-                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None
+                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None,
+                # ✅ Include parent CR's material_vendor_selections for vendor comparison display
+                'material_vendor_selections': material_vendor_selections,
+
+                # ✅ Frontend compatibility fields (ChangeRequestDetailsModal expects these)
+                'selected_vendor_id': po_child.vendor_id,  # Frontend checks for this field
+                'selected_vendor_name': po_child.vendor_name,  # Frontend displays this
+                'requested_by_name': parent_cr.requested_by_name if parent_cr else None,  # Original CR requester (PM/SE)
+                'requested_by_role': parent_cr.requested_by_role if parent_cr else None,  # Original requester role
+
+                # ✅ Include justification from parent CR
+                'justification': parent_cr.justification if parent_cr else None,
+
+                # ✅ Include vendor selection tracking
+                'vendor_selected_by_buyer_name': po_child.vendor_selected_by_buyer_name,
+                'vendor_selection_date': po_child.vendor_selection_date.isoformat() if po_child.vendor_selection_date else None,
+
+                # ✅ Include material_vendor_selections from parent CR for competitor comparison
+                'material_vendor_selections': parent_cr.material_vendor_selections if parent_cr and parent_cr.material_vendor_selections else {},
             })
 
         return jsonify({
@@ -5128,14 +5305,19 @@ def get_rejected_po_children():
         if not is_td and not is_admin:
             return jsonify({"error": "Access denied. TD or Admin role required."}), 403
 
-        # Get all POChild records rejected by TD
-        rejected_po_children = POChild.query.filter(
+        # Get all POChild records rejected by TD with eager loading
+        rejected_po_children = POChild.query.options(
+            joinedload(POChild.vendor)  # Eager load vendor relationship
+        ).filter(
             or_(
                 POChild.vendor_selection_status == 'td_rejected',
                 POChild.vendor_selection_status == 'rejected',
                 POChild.status == 'td_rejected'
             ),
             POChild.is_deleted == False
+        ).order_by(
+            POChild.updated_at.desc().nulls_last(),
+            POChild.created_at.desc()
         ).all()
 
         result = []
@@ -5259,7 +5441,25 @@ def get_rejected_po_children():
                 'location': project.location if project else None,
                 'boq_name': boq.boq_name if boq else None,
                 'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
-                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None
+                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None,
+                # ✅ Include parent CR's material_vendor_selections for vendor comparison display
+                'material_vendor_selections': material_vendor_selections,
+
+                # ✅ Frontend compatibility fields (ChangeRequestDetailsModal expects these)
+                'selected_vendor_id': po_child.vendor_id,
+                'selected_vendor_name': po_child.vendor_name,
+                'requested_by_name': parent_cr.requested_by_name if parent_cr else None,
+                'requested_by_role': parent_cr.requested_by_role if parent_cr else None,
+
+                # ✅ Include justification from parent CR
+                'justification': parent_cr.justification if parent_cr else None,
+
+                # ✅ Include vendor selection tracking
+                'vendor_selected_by_buyer_name': po_child.vendor_selected_by_buyer_name,
+                'vendor_selection_date': po_child.vendor_selection_date.isoformat() if po_child.vendor_selection_date else None,
+
+                # ✅ Include material_vendor_selections from parent CR for competitor comparison
+                'material_vendor_selections': parent_cr.material_vendor_selections if parent_cr and parent_cr.material_vendor_selections else {},
             })
 
         return jsonify({
@@ -5296,6 +5496,9 @@ def get_buyer_pending_po_children():
             pending_po_children = POChild.query.filter(
                 POChild.vendor_selection_status == 'pending_td_approval',
                 POChild.is_deleted == False
+            ).order_by(
+                POChild.updated_at.desc().nulls_last(),
+                POChild.created_at.desc()
             ).all()
         else:
             pending_po_children = POChild.query.join(
@@ -5304,6 +5507,9 @@ def get_buyer_pending_po_children():
                 POChild.vendor_selection_status == 'pending_td_approval',
                 POChild.is_deleted == False,
                 ChangeRequest.assigned_to_buyer_user_id == user_id
+            ).order_by(
+                POChild.updated_at.desc().nulls_last(),
+                POChild.created_at.desc()
             ).all()
 
         result = []
@@ -5325,6 +5531,11 @@ def get_buyer_pending_po_children():
             # Enrich materials with prices from BOQ
             enriched_materials = []
             po_materials = po_child.materials_data or []
+
+            # Get material vendor selections from parent CR for negotiated prices
+            material_vendor_selections = {}
+            if parent_cr and parent_cr.material_vendor_selections:
+                material_vendor_selections = parent_cr.material_vendor_selections
 
             # Build BOQ price lookup
             boq_price_lookup = {}
@@ -5372,7 +5583,25 @@ def get_buyer_pending_po_children():
                 'location': project.location if project else None,
                 'boq_name': boq.boq_name if boq else None,
                 'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
-                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None
+                'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None,
+                # ✅ Include parent CR's material_vendor_selections for vendor comparison display
+                'material_vendor_selections': material_vendor_selections,
+
+                # ✅ Frontend compatibility fields (ChangeRequestDetailsModal expects these)
+                'selected_vendor_id': po_child.vendor_id,
+                'selected_vendor_name': po_child.vendor_name,
+                'requested_by_name': parent_cr.requested_by_name if parent_cr else None,
+                'requested_by_role': parent_cr.requested_by_role if parent_cr else None,
+
+                # ✅ Include justification from parent CR
+                'justification': parent_cr.justification if parent_cr else None,
+
+                # ✅ Include vendor selection tracking
+                'vendor_selected_by_buyer_name': po_child.vendor_selected_by_buyer_name,
+                'vendor_selection_date': po_child.vendor_selection_date.isoformat() if po_child.vendor_selection_date else None,
+
+                # ✅ Include material_vendor_selections from parent CR for competitor comparison
+                'material_vendor_selections': parent_cr.material_vendor_selections if parent_cr and parent_cr.material_vendor_selections else {},
             })
 
         return jsonify({
@@ -5416,11 +5645,16 @@ def get_approved_po_children():
         if not is_buyer and not is_td and not is_admin:
             return jsonify({"error": "Access denied. Buyer, TD, or Admin role required."}), 403
 
-        # Get all POChild records with approved vendor selection (not yet completed)
-        approved_po_children = POChild.query.filter(
+        # Get all POChild records with approved vendor selection (not yet completed) with eager loading
+        approved_po_children = POChild.query.options(
+            joinedload(POChild.vendor)  # Eager load vendor relationship
+        ).filter(
             POChild.vendor_selection_status == 'approved',
-            POChild.status != 'purchase_completed',
+            ~POChild.status.in_(['purchase_completed', 'routed_to_store']),
             POChild.is_deleted == False
+        ).order_by(
+            POChild.updated_at.desc().nulls_last(),
+            POChild.created_at.desc()
         ).all()
 
         log.info(f"Found {len(approved_po_children)} approved PO children in database")
@@ -5563,7 +5797,23 @@ def get_approved_po_children():
                 'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
                 'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None,
                 'vendor_phone': vendor_phone,
-                'vendor_email': vendor_email
+                'vendor_email': vendor_email,
+
+                # ✅ Frontend compatibility fields (ChangeRequestDetailsModal expects these)
+                'selected_vendor_id': po_child.vendor_id,
+                'selected_vendor_name': po_child.vendor_name,
+                'requested_by_name': parent_cr.requested_by_name if parent_cr else None,
+                'requested_by_role': parent_cr.requested_by_role if parent_cr else None,
+
+                # ✅ Include justification from parent CR
+                'justification': parent_cr.justification if parent_cr else None,
+
+                # ✅ Include vendor selection tracking
+                'vendor_selected_by_buyer_name': po_child.vendor_selected_by_buyer_name,
+                'vendor_selection_date': po_child.vendor_selection_date.isoformat() if po_child.vendor_selection_date else None,
+
+                # ✅ Include material_vendor_selections from parent CR for competitor comparison
+                'material_vendor_selections': parent_cr.material_vendor_selections if parent_cr and parent_cr.material_vendor_selections else {},
             })
 
         log.info(f"Returning {len(result)} approved PO children to user {user_id} (role: {user_role})")

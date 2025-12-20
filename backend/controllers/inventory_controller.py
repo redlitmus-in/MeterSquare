@@ -1162,7 +1162,7 @@ def approve_internal_request(request_id):
         if not internal_req:
             return jsonify({'error': 'Internal request not found'}), 404
 
-        if internal_req.status not in ['pending', 'PENDING', 'send_request']:
+        if internal_req.status not in ['pending', 'PENDING', 'send_request', 'awaiting_vendor_delivery']:
             return jsonify({'error': f'Request is already {internal_req.status}'}), 400
 
         # Validate that inventory_material_id exists
@@ -1238,7 +1238,7 @@ def reject_internal_request(request_id):
         if not internal_req:
             return jsonify({'error': 'Internal request not found'}), 404
 
-        if internal_req.status not in ['pending', 'PENDING', 'send_request']:
+        if internal_req.status not in ['pending', 'PENDING', 'send_request', 'awaiting_vendor_delivery']:
             return jsonify({'error': f'Request is already {internal_req.status}'}), 400
 
         data = request.get_json()

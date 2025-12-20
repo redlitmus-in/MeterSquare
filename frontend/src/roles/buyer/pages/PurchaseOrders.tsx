@@ -1014,7 +1014,7 @@ const PurchaseOrders: React.FC = () => {
                                     Sent to Vendor
                                   </div>
 
-                                  {/* Complete Purchase button */}
+                                  {/* Complete & Send to Store button */}
                                   <Button
                                     onClick={async () => {
                                       try {
@@ -1032,16 +1032,17 @@ const PurchaseOrders: React.FC = () => {
                                     variant="default"
                                     size="sm"
                                     className="w-full h-7 text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1"
+                                    title="Materials will go to M2 Store first, then Production Manager will dispatch to site"
                                   >
                                     {completingPurchaseId === poChild.id ? (
                                       <>
                                         <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                        Completing...
+                                        Sending to Store...
                                       </>
                                     ) : (
                                       <>
-                                        <CheckCircle className="w-3 h-3 mr-1" />
-                                        Complete Purchase
+                                        <Package className="w-3 h-3 mr-1" />
+                                        Complete & Send to Store
                                       </>
                                     )}
                                   </Button>
@@ -1875,7 +1876,7 @@ const PurchaseOrders: React.FC = () => {
                             <CheckCircle className="w-3 h-3 mr-1" />
                             Sent to Vendor
                           </div>
-                          {/* Complete Purchase Button */}
+                          {/* Complete & Send to Store Button */}
                           <Button
                             onClick={async () => {
                               try {
@@ -1892,16 +1893,17 @@ const PurchaseOrders: React.FC = () => {
                             disabled={completingPurchaseId === poChild.id}
                             className="w-full bg-green-600 hover:bg-green-700 text-white text-xs"
                             size="sm"
+                            title="Materials will go to M2 Store first, then Production Manager will dispatch to site"
                           >
                             {completingPurchaseId === poChild.id ? (
                               <>
                                 <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                                Completing...
+                                Sending to Store...
                               </>
                             ) : (
                               <>
-                                <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
-                                Complete Purchase
+                                <Package className="w-3.5 h-3.5 mr-1.5" />
+                                Complete & Send to Store
                               </>
                             )}
                           </Button>
