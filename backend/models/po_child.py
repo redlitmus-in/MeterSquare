@@ -86,7 +86,7 @@ class POChild(db.Model):
 
     def to_dict(self):
         """Convert to dictionary for JSON response"""
-        return {
+        result = {
             'id': self.id,
             'parent_cr_id': self.parent_cr_id,
             'suffix': self.suffix,
@@ -122,6 +122,26 @@ class POChild(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'is_deleted': self.is_deleted
         }
+
+        # Include full vendor details if vendor relationship is loaded
+        # This data is used by ChangeRequestDetailsModal.tsx to display vendor information
+        if self.vendor:
+            result['vendor_details'] = {
+                'company_name': self.vendor.company_name,
+                'contact_person_name': self.vendor.contact_person_name,
+                'email': self.vendor.email,
+                'phone_code': self.vendor.phone_code,
+                'phone': self.vendor.phone,  # Frontend expects 'phone' (line 802)
+                'category': self.vendor.category,
+                'street_address': self.vendor.street_address,
+                'city': self.vendor.city,
+                'state': self.vendor.state,
+                'pin_code': self.vendor.pin_code,  # Frontend expects 'pin_code' (line 835)
+                'gst_number': self.vendor.gst_number,
+                'country': self.vendor.country
+            }
+
+        return result
 
     def __repr__(self):
         return f'<POChild {self.id}: {self.get_formatted_id()}>'

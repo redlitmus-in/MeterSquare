@@ -5493,7 +5493,9 @@ def get_buyer_pending_po_children():
 
         # Get POChildren where parent CR is assigned to this buyer and pending TD approval
         if is_admin_viewing:
-            pending_po_children = POChild.query.filter(
+            pending_po_children = POChild.query.options(
+                joinedload(POChild.vendor)  # Eager load vendor relationship
+            ).filter(
                 POChild.vendor_selection_status == 'pending_td_approval',
                 POChild.is_deleted == False
             ).order_by(
@@ -5501,7 +5503,9 @@ def get_buyer_pending_po_children():
                 POChild.created_at.desc()
             ).all()
         else:
-            pending_po_children = POChild.query.join(
+            pending_po_children = POChild.query.options(
+                joinedload(POChild.vendor)  # Eager load vendor relationship
+            ).join(
                 ChangeRequest, POChild.parent_cr_id == ChangeRequest.cr_id
             ).filter(
                 POChild.vendor_selection_status == 'pending_td_approval',

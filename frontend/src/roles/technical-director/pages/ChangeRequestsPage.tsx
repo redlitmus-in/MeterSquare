@@ -410,19 +410,9 @@ const ChangeRequestsPage: React.FC = () => {
     // Calculate total from mapped materials (in case backend total is 0)
     const calculatedTotal = mappedMaterials.reduce((sum, m) => sum + (m.total_price || 0), 0);
 
-    // Fetch vendor details if vendor is selected
-    // Note: POChild API already returns vendor fields via eager loading in to_dict()
-    // So we can use those directly, but still fetch full details as backup
-    let vendorDetailsData = null;
-    if (poChild.vendor_id) {
-      try {
-        const vendorResponse = await buyerVendorService.getVendorById(poChild.vendor_id);
-        vendorDetailsData = vendorResponse;
-      } catch (error) {
-        // Fallback: Use vendor fields from POChild API response (from to_dict() eager loading)
-        vendorDetailsData = null; // We'll rely on POChild vendor fields passed below
-      }
-    }
+    // Use vendor_details from POChild API response (now included via backend fix)
+    // POChild.to_dict() now includes full vendor details when vendor relationship is loaded
+    const vendorDetailsData = (poChild as any).vendor_details || null;
 
     const poChildAsChangeRequest: ChangeRequestItem & { po_child_id?: number; vendor_details?: any } = {
       cr_id: poChild.parent_cr_id,
@@ -453,7 +443,7 @@ const ChangeRequestsPage: React.FC = () => {
       vendor_selection_date: poChild.vendor_selection_date,
       // PO Child ID for LPO preview
       po_child_id: poChild.id,
-      // Full vendor details for display in modal
+      // Full vendor details for display in modal (from POChild API response)
       vendor_details: vendorDetailsData,
       // Vendor fields directly from POChild API response (from to_dict() method)
       // Now properly typed in POChild interface - no need for 'as any' casts
@@ -1925,6 +1915,9 @@ const ChangeRequestsPage: React.FC = () => {
                                   location: poChild.location || '',
                                   boq_id: poChild.boq_id,
                                   boq_name: poChild.boq_name || '',
+
+                                  // Vendor details object (from backend po_child.to_dict())
+                                  vendor_details: (poChild as any).vendor_details,
 
                                   // Vendor detail fields (from backend po_child.to_dict())
                                   vendor_contact_person: (poChild as any).vendor_contact_person,
