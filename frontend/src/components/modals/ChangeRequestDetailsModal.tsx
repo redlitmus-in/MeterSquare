@@ -1547,33 +1547,65 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           </tr>
                         );
                       })}
-                      {shouldShowPricing && (
-                        <tr className="bg-gray-100 border-t-2 border-gray-300">
-                          <td colSpan={hasNewMaterials ? 9 : 8} className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
-                            Total Cost:
-                          </td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
-                            <div className="text-base font-bold text-purple-700">
-                              {formatCurrency(totalMaterialsCost)}
-                            </div>
-                            {/* BOQ Total as secondary - always show */}
-                            {(() => {
-                              const boqTotal = materialsData.reduce((sum: number, mat: any) => {
-                                const boqPrice = mat.boq_unit_price || mat.original_unit_price || 0;
-                                return sum + (boqPrice * (mat.quantity || 0));
-                              }, 0);
-                              if (boqTotal > 0) {
-                                return (
+                      {shouldShowPricing && (() => {
+                        // Calculate subtotal, VAT, and grand total
+                        const subtotal = totalMaterialsCost;
+                        const vatPercent = lpoData?.totals?.vat_percent || 0;
+                        const vatAmount = vatPercent > 0 ? (subtotal * vatPercent / 100) : 0;
+                        const grandTotal = subtotal + vatAmount;
+
+                        const boqTotal = materialsData.reduce((sum: number, mat: any) => {
+                          const boqPrice = mat.boq_unit_price || mat.original_unit_price || 0;
+                          return sum + (boqPrice * (mat.quantity || 0));
+                        }, 0);
+
+                        return (
+                          <>
+                            {/* Subtotal Row */}
+                            <tr className="bg-gray-50">
+                              <td colSpan={hasNewMaterials ? 9 : 8} className="px-4 py-2 text-sm font-semibold text-gray-700 text-right">
+                                Subtotal:
+                              </td>
+                              <td className="px-4 py-2 text-right whitespace-nowrap">
+                                <div className="text-sm font-semibold text-gray-900">
+                                  {formatCurrency(subtotal)}
+                                </div>
+                                {boqTotal > 0 && (
                                   <div className="text-[10px] text-gray-400 mt-0.5">
                                     BOQ: {formatCurrency(boqTotal)}
                                   </div>
-                                );
-                              }
-                              return null;
-                            })()}
-                          </td>
-                        </tr>
-                      )}
+                                )}
+                              </td>
+                            </tr>
+
+                            {/* VAT Row - Only show if VAT > 0 */}
+                            {vatPercent > 0 && (
+                              <tr className="bg-gray-50">
+                                <td colSpan={hasNewMaterials ? 9 : 8} className="px-4 py-2 text-sm font-semibold text-gray-700 text-right">
+                                  VAT ({vatPercent}%):
+                                </td>
+                                <td className="px-4 py-2 text-right whitespace-nowrap">
+                                  <div className="text-sm font-semibold text-gray-900">
+                                    {formatCurrency(vatAmount)}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+
+                            {/* Total Row */}
+                            <tr className="bg-gray-100 border-t-2 border-gray-300">
+                              <td colSpan={hasNewMaterials ? 9 : 8} className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
+                                Total Cost:
+                              </td>
+                              <td className="px-4 py-3 text-right whitespace-nowrap">
+                                <div className="text-base font-bold text-purple-700">
+                                  {formatCurrency(grandTotal)}
+                                </div>
+                              </td>
+                            </tr>
+                          </>
+                        );
+                      })()}
                     </tbody>
                   </table>
                     );
@@ -1857,10 +1889,10 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                                   <span className="ml-2">{lpoData.terms.payment_terms}</span>
                                 </div>
                               )}
-                              {lpoData.terms.completion_terms && (
+                              {(lpoData.terms.delivery_terms || lpoData.terms.completion_terms) && (
                                 <div>
-                                  <span className="text-gray-600">Delivery/Completion:</span>
-                                  <span className="ml-2">{lpoData.terms.completion_terms}</span>
+                                  <span className="text-gray-600">Delivery Terms:</span>
+                                  <span className="ml-2">{lpoData.terms.delivery_terms || lpoData.terms.completion_terms}</span>
                                 </div>
                               )}
                               {lpoData.terms.custom_terms && lpoData.terms.custom_terms.length > 0 && (

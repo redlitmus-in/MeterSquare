@@ -163,10 +163,13 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
     """
     from models.vendor import VendorProduct
 
+    print(f">>> process_materials_with_negotiated_prices: START for CR {cr.cr_id}")
     sub_items_data = cr.sub_items_data or cr.materials_data or []
+    print(f">>> process_materials_with_negotiated_prices: Found {len(sub_items_data)} sub_items")
     cr_total = 0
     materials_list = []
     material_vendor_selections = cr.material_vendor_selections or {}
+    print(f">>> process_materials_with_negotiated_prices: material_vendor_selections has {len(material_vendor_selections)} entries")
 
     # Build vendor product price lookup by vendor_id
     # Get unique vendor IDs from material selections
@@ -234,32 +237,57 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         if (original_unit_price == 0 or not original_unit_price) and material_name:
                             original_unit_price = boq_material_prices_by_name.get(material_name, 0)
 
-                        # Check if there's a negotiated price or vendor product price for this material
+                        # Check if there's a vendor price for this material
+                        # IMPORTANT: Frontend saves vendor rate in 'negotiated_price' field (not 'quoted_price')
                         vendor_selection = material_vendor_selections.get(material_name, {})
-                        negotiated_price = vendor_selection.get('negotiated_price')
-                        vendor_id = vendor_selection.get('vendor_id')
+
+                        # Frontend sends vendor rate as 'negotiated_price'
+                        vendor_rate_from_selection = float(vendor_selection.get('negotiated_price', 0) or 0) if isinstance(vendor_selection, dict) else 0
+                        vendor_id = vendor_selection.get('vendor_id') if isinstance(vendor_selection, dict) else None
+
+                        # ✅ Get brand and specification from vendor selection (same as POChild path)
+                        vendor_brand = vendor_selection.get('brand', '') if isinstance(vendor_selection, dict) else ''
+                        vendor_specification = vendor_selection.get('specification', '') if isinstance(vendor_selection, dict) else ''
 
                         # Lookup vendor product price from catalog
                         vendor_product_price = 0
                         if vendor_id and vendor_id in vendor_product_prices:
                             vendor_product_price = vendor_product_prices[vendor_id].get(material_name.lower().strip(), 0)
 
-                        # Use vendor price if no negotiated price (prefer vendor catalog over BOQ)
-                        effective_price = negotiated_price or vendor_product_price or original_unit_price
+                        # ✅ FIXED: Use proper priority
+                        # Priority: 1. vendor rate from selection, 2. vendor_product_price (catalog), 3. BOQ original_unit_price
+                        if vendor_rate_from_selection > 0:
+                            effective_price = vendor_rate_from_selection  # ✅ VENDOR RATE (THIS IS THE KEY!)
+                        elif vendor_product_price > 0:
+                            effective_price = vendor_product_price
+                        else:
+                            effective_price = original_unit_price
 
                         # CRITICAL FIX: When vendor is selected, use vendor price for display AND total
-                        # Show vendor price for both pending_td_approval AND approved status
-                        # Use vendor price if EITHER negotiated_price OR vendor_product_price exists
-                        has_vendor_price = (negotiated_price and negotiated_price > 0) or (vendor_product_price and vendor_product_price > 0)
+                        # Use vendor price if ANY vendor price exists
+                        has_vendor_price = (vendor_rate_from_selection > 0) or (vendor_product_price > 0)
                         vendor_selected = (cr.vendor_selection_status in ['approved', 'pending_td_approval'] and has_vendor_price)
-                        
-                        # Use vendor price when vendor selected, otherwise BOQ price
-                        display_unit_price = effective_price if vendor_selected else original_unit_price
+
+                        # ✅ FIX: Use vendor price when available, regardless of approval status
+                        # If vendor has a price, use it (for LPO generation, vendor must be selected)
+                        # Only fall back to BOQ if no vendor pricing exists at all
+                        if has_vendor_price:
+                            display_unit_price = effective_price  # Use vendor price
+                        else:
+                            display_unit_price = original_unit_price  # Fall back to BOQ only if no vendor price
+
                         material_total = float(quantity) * float(display_unit_price)
+
+                        # Debug logging for price selection
+                        print(f">>> process_materials: '{material_name}' - BOQ: {original_unit_price}, vendor_rate: {vendor_rate_from_selection}, vendor_catalog: {vendor_product_price}, effective: {effective_price}, display: {display_unit_price}, brand: '{vendor_brand}', spec: '{vendor_specification}'")
 
                         # FIXED: Use vendor price for cr_total when approved
                         cr_total += material_total
-                        
+
+                        # ✅ Get brand and specification - prefer vendor selection, fallback to material data (same as POChild)
+                        final_brand = vendor_brand or material.get('brand', '')
+                        final_specification = vendor_specification or material.get('specification', '')
+
                         materials_list.append({
                             "material_name": material_name,
                             "master_material_id": master_material_id,
@@ -272,7 +300,9 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                             "negotiated_price": effective_price if effective_price != original_unit_price else None,
                             "vendor_product_price": vendor_product_price,
                             "original_unit_price": original_unit_price,  # Add original for reference
-                            "boq_unit_price": original_unit_price  # For PDF comparison
+                            "boq_unit_price": original_unit_price,  # For PDF comparison
+                            "brand": final_brand,  # ✅ Brand from vendor selection (same as POChild)
+                            "specification": final_specification  # ✅ Specification from vendor selection (same as POChild)
                         })
                 else:
                     material_name = sub_item.get('material_name', '')
@@ -292,40 +322,60 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                     if (original_unit_price == 0 or not original_unit_price) and material_name:
                         original_unit_price = boq_material_prices_by_name.get(material_name, 0)
 
-                    # Check if there's a negotiated price or vendor product price for this material
+                    # Check if there's a vendor price for this material
+                    # IMPORTANT: Frontend saves vendor rate in 'negotiated_price' field (not 'quoted_price')
                     vendor_selection = material_vendor_selections.get(material_name, {})
-                    negotiated_price = vendor_selection.get('negotiated_price')
-                    vendor_id = vendor_selection.get('vendor_id')
+
+                    # Frontend sends vendor rate as 'negotiated_price'
+                    vendor_rate_from_selection = float(vendor_selection.get('negotiated_price', 0) or 0) if isinstance(vendor_selection, dict) else 0
+                    vendor_id = vendor_selection.get('vendor_id') if isinstance(vendor_selection, dict) else None
+
+                    # ✅ Get brand and specification from vendor selection
+                    vendor_brand = vendor_selection.get('brand', '') if isinstance(vendor_selection, dict) else ''
+                    vendor_specification = vendor_selection.get('specification', '') if isinstance(vendor_selection, dict) else ''
 
                     # Lookup vendor product price from catalog
                     vendor_product_price = 0
                     if vendor_id and vendor_id in vendor_product_prices:
                         vendor_product_price = vendor_product_prices[vendor_id].get(material_name.lower().strip(), 0)
 
-                    # Use vendor price if no negotiated price (prefer vendor catalog over BOQ)
-                    effective_price = negotiated_price or vendor_product_price or original_unit_price
+                    # ✅ FIXED: Use proper priority
+                    # Priority: 1. vendor rate from selection, 2. vendor_product_price (catalog), 3. BOQ original_unit_price
+                    if vendor_rate_from_selection > 0:
+                        effective_price = vendor_rate_from_selection  # ✅ VENDOR RATE (THIS IS THE KEY!)
+                    elif vendor_product_price > 0:
+                        effective_price = vendor_product_price
+                    else:
+                        effective_price = original_unit_price
 
                     # CRITICAL FIX: When vendor is selected, use vendor price for display AND total
-                    # Show vendor price for both pending_td_approval AND approved status
-                    # Use vendor price if EITHER negotiated_price OR vendor_product_price exists
-                    has_vendor_price = (negotiated_price and negotiated_price > 0) or (vendor_product_price and vendor_product_price > 0)
+                    # Use vendor price if ANY vendor price exists
+                    has_vendor_price = (vendor_rate_from_selection > 0) or (vendor_product_price > 0)
                     vendor_selected = (cr.vendor_selection_status in ['approved', 'pending_td_approval'] and has_vendor_price)
-                    
-                    # Use vendor price when vendor selected, otherwise BOQ price
-                    display_unit_price = effective_price if vendor_selected else original_unit_price
+
+                    # ✅ FIX: Use vendor price when available, regardless of approval status
+                    if has_vendor_price:
+                        display_unit_price = effective_price  # Use vendor price
+                    else:
+                        display_unit_price = original_unit_price  # Fall back to BOQ only if no vendor price
+
                     sub_total = float(quantity) * float(display_unit_price)
 
                     # FIXED: Use vendor price for cr_total when approved
                     cr_total += sub_total
-                    
+
+                    # ✅ Get brand and specification - prefer vendor selection, fallback to sub_item data (same as POChild)
+                    final_brand = vendor_brand or sub_item.get('brand', '')
+                    final_specification = vendor_specification or sub_item.get('specification', '')
+
                     materials_list.append({
                         "material_name": material_name,
                         "master_material_id": master_material_id,
                         "is_new_material": sub_item.get('is_new_material', False),  # From change request
                         "justification": sub_item.get('justification', ''),  # Individual material justification
                         "sub_item_name": sub_item.get('sub_item_name', ''),
-                        "brand": sub_item.get('brand', ''),
-                        "specification": sub_item.get('specification', ''),
+                        "brand": final_brand,  # ✅ Brand from vendor selection (same as POChild)
+                        "specification": final_specification,  # ✅ Specification from vendor selection (same as POChild)
                         "size": sub_item.get('size', ''),
                         "quantity": quantity,
                         "unit": sub_item.get('unit', ''),
@@ -400,6 +450,9 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                 "boq_unit_price": original_unit_price  # For PDF comparison
             })
 
+    print(f">>> process_materials_with_negotiated_prices: RETURN {len(materials_list)} materials, total={cr_total}")
+    for mat in materials_list:
+        print(f">>>   - {mat.get('material_name')}: unit_price={mat.get('unit_price')}, negotiated_price={mat.get('negotiated_price')}, brand={mat.get('brand', 'N/A')}")
     return materials_list, cr_total
 
 def create_buyer():
@@ -8336,7 +8389,7 @@ def preview_lpo_pdf(cr_id):
                 db.session.rollback()
                 log.warning(f"Could not create table: {str(create_error)}")
 
-        # Get vendor details - priority: POChild vendor > vendor_id param > CR's selected vendor
+        # Get vendor details - priority: POChild vendor > vendor_id param > CR's selected vendor > auto-detect from material_vendor_selections
         vendor = None
         if po_child and po_child.vendor_id:
             vendor = Vendor.query.filter_by(vendor_id=po_child.vendor_id, is_deleted=False).first()
@@ -8346,6 +8399,23 @@ def preview_lpo_pdf(cr_id):
             print(f">>> preview_lpo_pdf: Using vendor from query param: {vendor.company_name if vendor else None}")
         elif cr.selected_vendor_id:
             vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
+        else:
+            # Auto-detect vendor from material_vendor_selections (for regular LPO with all materials to one vendor)
+            if cr.material_vendor_selections and isinstance(cr.material_vendor_selections, dict):
+                # Get unique vendor IDs from all materials
+                vendor_ids_in_selections = set()
+                for mat_name, selection in cr.material_vendor_selections.items():
+                    if isinstance(selection, dict) and selection.get('vendor_id'):
+                        vendor_ids_in_selections.add(selection.get('vendor_id'))
+
+                # If all materials go to the same vendor, use that vendor
+                if len(vendor_ids_in_selections) == 1:
+                    auto_detected_vendor_id = list(vendor_ids_in_selections)[0]
+                    vendor = Vendor.query.filter_by(vendor_id=auto_detected_vendor_id, is_deleted=False).first()
+                    vendor_id = auto_detected_vendor_id  # Set vendor_id for later use
+                    print(f">>> preview_lpo_pdf: Auto-detected single vendor: {vendor.company_name if vendor else None} (vendor_id={vendor_id})")
+                elif len(vendor_ids_in_selections) > 1:
+                    print(f">>> preview_lpo_pdf: Multiple vendors detected ({len(vendor_ids_in_selections)}), cannot auto-detect single vendor")
 
         # Get project details
         project = Project.query.get(cr.project_id)
@@ -8385,23 +8455,51 @@ def preview_lpo_pdf(cr_id):
                 stored_unit_price = float(material.get('unit_price', 0) or 0)
                 negotiated_price = float(material.get('negotiated_price', 0) or 0)
 
-                # Check parent CR's vendor selections for negotiated price
+                # Check parent CR's vendor selections
+                # IMPORTANT: Frontend saves vendor rate in 'negotiated_price' field (not 'quoted_price')
                 selection = parent_vendor_selections.get(mat_name, {})
-                selection_price = float(selection.get('negotiated_price', 0) or 0) if isinstance(selection, dict) else 0
+                if isinstance(selection, dict):
+                    # Frontend sends vendor rate as 'negotiated_price'
+                    selection_vendor_rate = float(selection.get('negotiated_price', 0) or 0)
+                    # Get brand and specification from vendor selection
+                    vendor_brand = selection.get('brand', '')
+                    vendor_specification = selection.get('specification', '')
+                else:
+                    selection_vendor_rate = 0
+                    vendor_brand = ''
+                    vendor_specification = ''
 
                 # Lookup vendor product price as fallback
                 vendor_product_price = vendor_product_prices.get(mat_name.lower().strip(), 0)
 
                 # Debug logging
-                print(f">>> LPO Price Debug for '{mat_name}': stored={stored_unit_price}, negotiated={negotiated_price}, selection={selection_price}, vendor_product={vendor_product_price}, raw_material={material}")
+                print(f">>> LPO Price Debug for '{mat_name}': stored={stored_unit_price}, negotiated={negotiated_price}, selection_vendor_rate={selection_vendor_rate}, vendor_product={vendor_product_price}")
 
-                # Use best available price: negotiated > stored (vendor rate) > vendor catalog > selection (BOQ fallback)
-                # Priority: negotiated first, then stored vendor rate from POChild, then vendor catalog, then BOQ rate as fallback
-                final_price = negotiated_price or stored_unit_price or vendor_product_price or selection_price
+                # Use best available price with proper priority:
+                # 1. negotiated_price from material data (if > 0) - custom override
+                # 2. selection_vendor_rate from vendor selection (VENDOR RATE - if > 0) ← THE KEY!
+                # 3. stored_unit_price from POChild (if > 0)
+                # 4. vendor_product_price from vendor catalog (if > 0)
+                # 5. fallback to 0
+                if negotiated_price > 0:
+                    final_price = negotiated_price
+                elif selection_vendor_rate > 0:
+                    final_price = selection_vendor_rate  # ✅ VENDOR RATE (THIS IS THE KEY!)
+                elif stored_unit_price > 0:
+                    final_price = stored_unit_price
+                elif vendor_product_price > 0:
+                    final_price = vendor_product_price
+                else:
+                    final_price = 0
+
                 mat_total = quantity * final_price if final_price else float(material.get('total_price', 0) or 0)
 
                 # Preserve BOQ/original prices for comparison display
                 boq_unit_price = material.get('boq_unit_price') or material.get('original_unit_price') or 0
+
+                # Get brand and specification - prefer vendor selection, fallback to material data
+                final_brand = vendor_brand or material.get('brand', '')
+                final_specification = vendor_specification or material.get('specification', '')
 
                 materials_list.append({
                     'material_name': mat_name,
@@ -8412,9 +8510,12 @@ def preview_lpo_pdf(cr_id):
                     'total_price': mat_total,
                     'negotiated_price': final_price,
                     'boq_unit_price': float(boq_unit_price) if boq_unit_price else 0,
-                    'original_unit_price': float(boq_unit_price) if boq_unit_price else 0
+                    'original_unit_price': float(boq_unit_price) if boq_unit_price else 0,
+                    'brand': final_brand,
+                    'specification': final_specification
                 })
                 cr_total += mat_total
+                print(f">>> LPO Material Added: '{mat_name}' - Rate: {final_price}, Brand: '{final_brand}', Spec: '{final_specification}'")
             cr_total = po_child.materials_total_cost or cr_total or sum(m.get('total_price', 0) for m in materials_list)
             print(f">>> preview_lpo_pdf: Using POChild materials: {len(materials_list)} items, total: {cr_total}")
         else:
@@ -8426,7 +8527,7 @@ def preview_lpo_pdf(cr_id):
             print(f">>> preview_lpo_pdf: material_vendor_selections type={type(cr.material_vendor_selections)}, value={cr.material_vendor_selections}")
 
             if vendor_id and cr.material_vendor_selections:
-                print(f">>> preview_lpo_pdf: Filtering materials for vendor_id={vendor_id}")
+                print(f">>> preview_lpo_pdf: Filtering and enriching materials for vendor_id={vendor_id}")
                 filtered_materials = []
                 filtered_total = 0
 
@@ -8438,10 +8539,30 @@ def preview_lpo_pdf(cr_id):
                     if isinstance(vendor_selection, dict):
                         selected_vendor_id = vendor_selection.get('vendor_id')
                         print(f">>> preview_lpo_pdf: Material '{mat_name}' has vendor_id={selected_vendor_id}, comparing with {vendor_id}")
+
                         if selected_vendor_id == vendor_id:
+                            # Enrich material with vendor-specific data
+                            # IMPORTANT: Frontend saves vendor rate in 'negotiated_price' field (not 'quoted_price')
+                            vendor_rate_from_selection = float(vendor_selection.get('negotiated_price', 0) or 0)
+
+                            # Use vendor rate from selection, fallback to existing unit_price
+                            vendor_rate = vendor_rate_from_selection if vendor_rate_from_selection > 0 else material.get('unit_price', 0)
+
+                            # Update material with vendor-specific data
+                            material['unit_price'] = vendor_rate
+                            material['negotiated_price'] = vendor_rate
+                            material['vendor_rate'] = vendor_rate
+                            material['vendor_material_name'] = vendor_selection.get('vendor_material_name', mat_name)
+                            material['brand'] = vendor_selection.get('brand', material.get('brand', ''))
+                            material['specification'] = vendor_selection.get('specification', material.get('specification', ''))
+
+                            # Recalculate total with vendor rate
+                            qty = material.get('quantity', 0)
+                            material['total_price'] = qty * vendor_rate
+
                             filtered_materials.append(material)
-                            filtered_total += material.get('total_price', 0)
-                            print(f">>> preview_lpo_pdf: ✓ Including material '{mat_name}'")
+                            filtered_total += material['total_price']
+                            print(f">>> preview_lpo_pdf: ✓ Including material '{mat_name}' with vendor rate {vendor_rate}, brand: {material.get('brand', 'N/A')}, spec: {material.get('specification', 'N/A')}")
                         else:
                             print(f">>> preview_lpo_pdf: ✗ Skipping '{mat_name}' (vendor {selected_vendor_id} != {vendor_id})")
 
@@ -8455,8 +8576,20 @@ def preview_lpo_pdf(cr_id):
         subtotal = 0
         items = []
         for i, material in enumerate(materials_list, 1):
-            # Use negotiated price if available, otherwise use original unit price
-            rate = material.get('negotiated_price') if material.get('negotiated_price') is not None else material.get('unit_price', 0)
+            # Use best available price with proper fallback logic
+            # Priority: negotiated_price (if > 0) > unit_price (vendor rate) > 0
+            negotiated = float(material.get('negotiated_price', 0) or 0)
+            unit = float(material.get('unit_price', 0) or 0)
+
+            # Only use negotiated_price if it's explicitly set and greater than 0
+            if negotiated > 0:
+                rate = negotiated
+            elif unit > 0:
+                rate = unit
+            else:
+                # Last resort: use 0 (will show as 0.00 in PDF)
+                rate = 0
+
             qty = material.get('quantity', 0)
             amount = float(qty) * float(rate)
             subtotal += amount
@@ -8700,6 +8833,74 @@ def generate_lpo_pdf(cr_id):
             lpo_data['signatures']['md_signature'] = getattr(settings, 'md_signature_image', None)
             lpo_data['signatures']['td_signature'] = getattr(settings, 'td_signature_image', None)
             lpo_data['signatures']['stamp_image'] = getattr(settings, 'company_stamp_image', None)
+
+        # Always fetch fresh vendor data from database (don't rely on frontend cache)
+        from models.vendor import Vendor
+        from models.po_child import POChild
+
+        # Get vendor_id from po_child_id or cr
+        po_child_id = data.get('po_child_id') or request.args.get('po_child_id', type=int)
+        vendor_id = None
+
+        if po_child_id:
+            po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
+            vendor_id = po_child.vendor_id if po_child else None
+            log.info(f"LPO PDF - POChild {po_child_id} has vendor_id: {vendor_id}")
+
+        # Fallback to CR's selected vendor
+        if not vendor_id:
+            vendor_id = cr.selected_vendor_id
+            log.info(f"LPO PDF - Using CR's selected_vendor_id: {vendor_id}")
+
+        # Auto-detect vendor from material_vendor_selections if still not found
+        if not vendor_id and cr.material_vendor_selections and isinstance(cr.material_vendor_selections, dict):
+            vendor_ids_in_selections = set()
+            for mat_name, selection in cr.material_vendor_selections.items():
+                if isinstance(selection, dict) and selection.get('vendor_id'):
+                    vendor_ids_in_selections.add(selection.get('vendor_id'))
+
+            if len(vendor_ids_in_selections) == 1:
+                vendor_id = list(vendor_ids_in_selections)[0]
+                log.info(f"LPO PDF - Auto-detected vendor_id: {vendor_id}")
+            elif len(vendor_ids_in_selections) > 1:
+                log.warning(f"LPO PDF - Multiple vendors detected, cannot auto-detect")
+
+        # Refresh vendor data if vendor_id is available
+        if vendor_id:
+            vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+            if vendor:
+                # Get vendor phone with code
+                vendor_phone = ""
+                if hasattr(vendor, 'phone_code') and vendor.phone_code and vendor.phone:
+                    vendor_phone = f"{vendor.phone_code} {vendor.phone}"
+                elif vendor.phone:
+                    vendor_phone = vendor.phone
+
+                # Get vendor TRN (try trn field first, then gst_number)
+                vendor_trn = getattr(vendor, 'trn', '') or getattr(vendor, 'gst_number', '') or ""
+
+                # Get project details
+                project = Project.query.get(cr.project_id)
+
+                # Update lpo_data with fresh vendor info (preserve subject and other customized fields)
+                preserved_subject = lpo_data.get('vendor', {}).get('subject', '')
+
+                lpo_data['vendor'] = {
+                    "vendor_id": vendor.vendor_id,
+                    "company_name": vendor.company_name,
+                    "contact_person": vendor.contact_person_name,
+                    "phone": vendor_phone,
+                    "fax": getattr(vendor, 'fax', ''),
+                    "email": vendor.email,
+                    "trn": vendor_trn,
+                    "project": project.project_name if project else "",
+                    "subject": preserved_subject  # Keep customized subject
+                }
+                log.info(f"LPO PDF - Refreshed vendor data for vendor_id {vendor_id}: {vendor.company_name}")
+            else:
+                log.warning(f"LPO PDF - Vendor {vendor_id} not found in database")
+        else:
+            log.warning(f"LPO PDF - No vendor_id available for CR {cr_id}")
 
         # Generate PDF
         generator = LPOPDFGenerator()

@@ -373,12 +373,6 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       const response = await buyerService.previewLPOPdf(purchase.cr_id, purchase.po_child_id, vendorId);
       let enrichedLpoData = response.lpo_data;
 
-      console.log('>>> loadLpoData: Response received:', {
-        vendorName: enrichedLpoData.vendor?.company_name,
-        materialsCount: enrichedLpoData.items?.length,
-        materials: enrichedLpoData.items?.map((item: any) => item.material_name)
-      });
-
       // Try to load default template if no custom terms exist
       const hasCustomTerms = ((response.lpo_data.terms?.custom_terms?.length || 0) > 0) ||
         (response.lpo_data.lpo_info?.custom_message);
@@ -585,12 +579,6 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       return;
     }
     try {
-      console.log('>>> handleDownloadLpoPdf: Generating PDF with data:', {
-        vendorName: lpoData.vendor?.company_name,
-        materialsCount: lpoData.items?.length,
-        materials: lpoData.items?.map((item: any) => item.material_name)
-      });
-
       const finalLpoData = !includeSignatures ? {
         ...lpoData,
         signatures: { ...lpoData.signatures, md_signature: null, td_signature: null, stamp_image: null }

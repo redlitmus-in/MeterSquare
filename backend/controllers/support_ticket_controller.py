@@ -14,6 +14,7 @@ import os
 import uuid
 from werkzeug.utils import secure_filename
 from supabase import create_client, Client
+from utils.comprehensive_notification_service import ComprehensiveNotificationService
 
 log = get_logger()
 
@@ -361,6 +362,19 @@ def public_submit_ticket(ticket_id):
         ticket.updated_at = datetime.utcnow()
         db.session.commit()
 
+        # Notify dev team about new ticket submission
+        try:
+            ComprehensiveNotificationService.notify_ticket_submitted(
+                ticket_id=ticket.ticket_id,
+                ticket_number=ticket.ticket_number,
+                client_name=ticket.reporter_name,
+                client_email=ticket.reporter_email,
+                subject=ticket.subject,
+                priority=ticket.priority
+            )
+        except Exception as e:
+            log.error(f"Failed to send ticket submission notification: {e}")
+
         return jsonify({
             "success": True,
             "message": "Ticket submitted successfully",
@@ -437,6 +451,22 @@ def public_confirm_resolution(ticket_id):
         flag_modified(ticket, 'response_history')
 
         db.session.commit()
+
+        # Notify dev team that client confirmed resolution
+        try:
+            # Get feedback from request if provided
+            data = request.get_json() or {}
+            client_feedback = data.get('feedback', 'Client confirmed the issue is resolved')
+
+            ComprehensiveNotificationService.notify_ticket_closed_by_client(
+                ticket_id=ticket.ticket_id,
+                ticket_number=ticket.ticket_number,
+                subject=ticket.subject,
+                client_name=ticket.reporter_name,
+                client_feedback=client_feedback
+            )
+        except Exception as e:
+            log.error(f"Failed to send ticket closure notification: {e}")
 
         return jsonify({
             "success": True,
@@ -555,6 +585,19 @@ def admin_approve_ticket(ticket_id):
         db.session.commit()
         log.info(f"Ticket approved: {ticket.ticket_number}")
 
+        # Notify client about ticket approval
+        try:
+            ComprehensiveNotificationService.notify_ticket_approved(
+                ticket_id=ticket.ticket_id,
+                ticket_number=ticket.ticket_number,
+                client_user_id=ticket.user_id,
+                client_email=ticket.reporter_email,
+                subject=ticket.subject,
+                approved_by_name=ticket.approved_by_name
+            )
+        except Exception as e:
+            log.error(f"Failed to send ticket approval notification: {e}")
+
         return jsonify({
             "success": True,
             "message": "Ticket approved successfully",
@@ -606,6 +649,20 @@ def admin_reject_ticket(ticket_id):
 
         db.session.commit()
         log.info(f"Ticket rejected: {ticket.ticket_number}")
+
+        # Notify client about ticket rejection
+        try:
+            ComprehensiveNotificationService.notify_ticket_rejected(
+                ticket_id=ticket.ticket_id,
+                ticket_number=ticket.ticket_number,
+                client_user_id=ticket.user_id,
+                client_email=ticket.reporter_email,
+                subject=ticket.subject,
+                rejection_reason=ticket.rejection_reason,
+                rejected_by_name=ticket.rejected_by_name
+            )
+        except Exception as e:
+            log.error(f"Failed to send ticket rejection notification: {e}")
 
         return jsonify({
             "success": True,
@@ -675,6 +732,20 @@ def admin_resolve_ticket(ticket_id):
         db.session.commit()
         log.info(f"Ticket resolved: {ticket.ticket_number}")
 
+        # Notify client about ticket resolution
+        try:
+            ComprehensiveNotificationService.notify_ticket_resolved(
+                ticket_id=ticket.ticket_id,
+                ticket_number=ticket.ticket_number,
+                client_user_id=ticket.user_id,
+                client_email=ticket.reporter_email,
+                subject=ticket.subject,
+                resolution_notes=ticket.resolution_notes,
+                resolved_by_name=ticket.resolved_by_name
+            )
+        except Exception as e:
+            log.error(f"Failed to send ticket resolution notification: {e}")
+
         return jsonify({
             "success": True,
             "message": "Ticket resolved",
@@ -726,6 +797,21 @@ def admin_update_status(ticket_id):
 
         db.session.commit()
         log.info(f"Ticket status updated: {ticket.ticket_number} to {new_status}")
+
+        # Notify client about status updates (but not for 'closed' which is handled separately)
+        if new_status in ['in_review', 'in_progress', 'pending_deployment']:
+            try:
+                ComprehensiveNotificationService.notify_ticket_status_updated(
+                    ticket_id=ticket.ticket_id,
+                    ticket_number=ticket.ticket_number,
+                    client_user_id=ticket.user_id,
+                    client_email=ticket.reporter_email,
+                    subject=ticket.subject,
+                    new_status=new_status,
+                    updated_by_name=ticket.admin_name
+                )
+            except Exception as e:
+                log.error(f"Failed to send ticket status update notification: {e}")
 
         return jsonify({
             "success": True,

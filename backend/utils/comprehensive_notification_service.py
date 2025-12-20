@@ -1,6 +1,9 @@
 """
 Comprehensive Notification Service
 Handles notifications for ALL workflows: BOQ, CR, PR, Projects, Extensions, Vendors, etc.
+
+✅ DYNAMIC ROUTES: All action URLs are now generated dynamically based on recipient's role
+   This ensures notifications work across different environments (dev/prod) and for all roles.
 """
 
 from utils.notification_utils import NotificationManager
@@ -11,6 +14,16 @@ from models.notification import Notification
 from config.logging import get_logger
 from config.db import db
 from datetime import datetime, timedelta
+
+# ✅ NEW: Import dynamic route mapping utilities
+from utils.role_route_mapper import (
+    get_boq_approval_url,
+    get_boq_view_url,
+    get_td_approval_url,
+    get_change_request_url,
+    get_project_url,
+    build_notification_action_url
+)
 
 log = get_logger()
 
@@ -86,8 +99,12 @@ class ComprehensiveNotificationService:
         Trigger: Estimator sends BOQ to PM
         Recipients: PM
         Priority: URGENT
+        ✅ FIXED: Dynamic URL based on recipient's actual role
         """
         try:
+            # ✅ Generate dynamic URL based on recipient's role (fixes dev/prod user ID mismatch)
+            action_url = get_boq_approval_url(pm_user_id, boq_id)
+
             notification = NotificationManager.create_notification(
                 user_id=pm_user_id,
                 type='approval',
@@ -96,7 +113,7 @@ class ComprehensiveNotificationService:
                 priority='urgent',
                 category='boq',
                 action_required=True,
-                action_url=f'/project-manager/my-projects?boq_id={boq_id}',
+                action_url=action_url,  # ✅ Now dynamic!
                 action_label='Review BOQ',
                 metadata={'boq_id': boq_id},
                 sender_id=estimator_id,
@@ -104,7 +121,7 @@ class ComprehensiveNotificationService:
             )
 
             send_notification_to_user(pm_user_id, notification.to_dict())
-            log.info(f"Sent BOQ approval request to PM {pm_user_id} for BOQ {boq_id}")
+            log.info(f"Sent BOQ approval request to user {pm_user_id} for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error sending BOQ approval notification: {e}")
 
@@ -115,9 +132,12 @@ class ComprehensiveNotificationService:
         Trigger: PM decision on BOQ
         Recipients: Estimator who created BOQ
         Priority: HIGH
+        ✅ FIXED: Dynamic URL based on recipient's actual role
         """
         try:
+            # ✅ Generate dynamic URL based on recipient's role
             if approved:
+                action_url = get_boq_view_url(estimator_user_id, boq_id, tab='approved')
                 notification = NotificationManager.create_notification(
                     user_id=estimator_user_id,
                     type='success',
@@ -125,7 +145,7 @@ class ComprehensiveNotificationService:
                     message=f'Your BOQ for {project_name} has been approved by {pm_name}',
                     priority='high',
                     category='boq',
-                    action_url=f'/estimator/projects?tab=approved&boq_id={boq_id}',
+                    action_url=action_url,  # ✅ Now dynamic!
                     action_label='View BOQ',
                     metadata={'boq_id': boq_id, 'decision': 'approved', 'target_role': 'estimator'},
                     sender_id=pm_id,
@@ -133,6 +153,7 @@ class ComprehensiveNotificationService:
                     target_role='estimator'
                 )
             else:
+                action_url = get_boq_view_url(estimator_user_id, boq_id, tab='rejected')
                 notification = NotificationManager.create_notification(
                     user_id=estimator_user_id,
                     type='rejection',
@@ -141,7 +162,7 @@ class ComprehensiveNotificationService:
                     priority='high',
                     category='boq',
                     action_required=True,
-                    action_url=f'/estimator/projects?tab=rejected&boq_id={boq_id}',
+                    action_url=action_url,  # ✅ Now dynamic!
                     action_label='View Details',
                     metadata={'boq_id': boq_id, 'decision': 'rejected', 'reason': rejection_reason, 'target_role': 'estimator'},
                     sender_id=pm_id,
@@ -161,12 +182,16 @@ class ComprehensiveNotificationService:
         Trigger: Estimator forwards BOQ to TD
         Recipients: Technical Director
         Priority: URGENT
+        ✅ FIXED: Dynamic URL based on recipient's actual role
         """
         try:
             # Check for duplicate notification (within 5 minutes)
             if check_duplicate_notification(td_user_id, 'BOQ', 'boq_id', boq_id, minutes=5):
                 log.info(f"[notify_boq_sent_to_td] Skipping duplicate notification for TD {td_user_id}, BOQ {boq_id}")
                 return
+
+            # ✅ Generate dynamic URL based on recipient's role
+            action_url = get_td_approval_url(td_user_id, boq_id, tab='pending')
 
             notification = NotificationManager.create_notification(
                 user_id=td_user_id,
@@ -176,7 +201,7 @@ class ComprehensiveNotificationService:
                 priority='urgent',
                 category='boq',
                 action_required=True,
-                action_url=f'/technical-director/project-approvals?tab=pending&boq_id={boq_id}',
+                action_url=action_url,  # ✅ Now dynamic!
                 action_label='Review BOQ',
                 metadata={'boq_id': boq_id},
                 sender_id=estimator_id,
@@ -208,7 +233,7 @@ class ComprehensiveNotificationService:
                     message=f'BOQ for {project_name} has been sent to client ({client_email}) by {estimator_name}',
                     priority='high',
                     category='boq',
-                    action_url=f'/technical-director/project-approvals?tab=sent&boq_id={boq_id}',
+                    action_url=build_notification_action_url(td_user_id, 'project-approvals', {'tab': 'sent', 'boq_id': boq_id}, 'technical-director'),
                     action_label='View BOQ',
                     metadata={'boq_id': boq_id, 'client_email': client_email},
                     sender_id=estimator_id,
@@ -253,7 +278,7 @@ class ComprehensiveNotificationService:
                     message=f'BOQ for {project_name} has been approved{client_info}. Confirmed by {estimator_name}',
                     priority='high',
                     category='boq',
-                    action_url=f'/technical-director/project-approvals?tab=sent&boq_id={boq_id}',
+                    action_url=build_notification_action_url(td_user_id, 'project-approvals', {'tab': 'sent', 'boq_id': boq_id}, 'technical-director'),
                     action_label='View BOQ',
                     metadata={'boq_id': boq_id, 'client_confirmed': True},
                     sender_id=estimator_id,
@@ -300,7 +325,7 @@ class ComprehensiveNotificationService:
                     priority='high',
                     category='boq',
                     action_required=True,
-                    action_url=f'/technical-director/project-approvals?tab=sent&boq_id={boq_id}',
+                    action_url=build_notification_action_url(td_user_id, 'project-approvals', {'tab': 'sent', 'boq_id': boq_id}, 'technical-director'),
                     action_label='View Details',
                     metadata={'boq_id': boq_id, 'client_rejected': True, 'reason': rejection_reason},
                     sender_id=estimator_id,
@@ -339,7 +364,7 @@ class ComprehensiveNotificationService:
                         message=f'BOQ for {project_name} has been approved by {td_name}',
                         priority='high',
                         category='boq',
-                        action_url=f'/estimator/projects?tab=approved&boq_id={boq_id}',
+                        action_url=get_boq_view_url(estimator_user_id, boq_id, tab='approved'),
                         action_label='View BOQ',
                         metadata={'boq_id': boq_id, 'decision': 'approved', 'target_role': 'estimator'},
                         sender_id=td_id,
@@ -355,7 +380,7 @@ class ComprehensiveNotificationService:
                         priority='high',
                         category='boq',
                         action_required=True,
-                        action_url=f'/estimator/projects?tab=rejected&boq_id={boq_id}',
+                        action_url=get_boq_view_url(estimator_user_id, boq_id, tab='rejected'),
                         action_label='View Details',
                         metadata={'boq_id': boq_id, 'decision': 'rejected', 'reason': rejection_reason, 'target_role': 'estimator'},
                         sender_id=td_id,
@@ -391,7 +416,7 @@ class ComprehensiveNotificationService:
                     priority='urgent',
                     category='project',
                     action_required=True,
-                    action_url=f'/project-manager/my-projects?project_id={project_id}',
+                    action_url=get_project_url(pm_user_id, project_id),
                     action_label='View Project',
                     metadata={'project_id': project_id},
                     sender_id=td_id,
@@ -426,7 +451,7 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='assignment',
                 action_required=True,
-                action_url=f'/site-engineer/projects?boq_id={boq_id}',
+                action_url=build_notification_action_url(se_user_id, 'projects', {'boq_id': boq_id}, 'site-engineer'),
                 action_label='View Items',
                 metadata={'boq_id': boq_id, 'items_count': items_count},
                 sender_id=pm_id,
@@ -460,7 +485,7 @@ class ComprehensiveNotificationService:
                 priority='medium',
                 category='project',
                 action_required=True,
-                action_url=f'/project-manager/my-projects?boq_id={boq_id}',
+                action_url=get_boq_approval_url(pm_user_id, boq_id),
                 action_label='Confirm Completion',
                 metadata={'boq_id': boq_id},
                 sender_id=se_id,
@@ -493,7 +518,7 @@ class ComprehensiveNotificationService:
                 message=f'{pm_name} has confirmed completion of your items for {project_name}',
                 priority='medium',
                 category='project',
-                action_url=f'/site-engineer/projects?boq_id={boq_id}',
+                action_url=build_notification_action_url(se_user_id, 'projects', {'boq_id': boq_id}, 'site-engineer'),
                 action_label='View Project',
                 metadata={'boq_id': boq_id},
                 sender_id=pm_id,
@@ -652,10 +677,14 @@ class ComprehensiveNotificationService:
                 log.info(f"Skipping duplicate CR rejected notification for CR {cr_id}")
                 return
 
-            # Determine correct route based on request_type
+            # ✅ Generate dynamic URL based on recipient's actual role from database
             route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
-            # Default to site-engineer if creator_role not provided
-            role_path = (creator_role or 'site-engineer').lower().replace(' ', '-').replace('_', '-')
+            action_url = build_notification_action_url(
+                user_id=creator_user_id,
+                base_page=route,
+                query_params={'cr_id': cr_id},
+                fallback_role_route='site-engineer'  # Fallback if user role not found
+            )
 
             notification = NotificationManager.create_notification(
                 user_id=creator_user_id,
@@ -665,7 +694,7 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='change_request',
                 action_required=True,
-                action_url=f'/{role_path}/{route}?cr_id={cr_id}',
+                action_url=action_url,  # ✅ Now dynamic based on actual user role!
                 action_label='View Details',
                 metadata={'cr_id': cr_id, 'reason': rejection_reason, 'request_type': request_type},
                 sender_id=rejector_id,
@@ -701,7 +730,7 @@ class ComprehensiveNotificationService:
                 priority='urgent',
                 category='change_request',
                 action_required=True,
-                action_url=f'/technical-director/change-requests?cr_id={cr_id}',
+                action_url=get_change_request_url(td_user_id, cr_id),
                 action_label='Review Vendor',
                 metadata={'cr_id': cr_id, 'vendor_name': vendor_name, 'request_type': request_type, 'target_role': 'technical-director'},
                 sender_id=buyer_id,
@@ -728,10 +757,14 @@ class ComprehensiveNotificationService:
                 log.info(f"Skipping duplicate CR purchase completed notification for CR {cr_id}")
                 return
 
-            # Determine correct route based on request_type
+            # ✅ Generate dynamic URL based on recipient's actual role from database
             route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
-            # Default to site-engineer if requester_role not provided
-            role_path = (requester_role or 'site-engineer').lower().replace(' ', '-').replace('_', '-')
+            action_url = build_notification_action_url(
+                user_id=requester_user_id,
+                base_page=route,
+                query_params={'cr_id': cr_id},
+                fallback_role_route='site-engineer'  # Fallback if user role not found
+            )
 
             notification = NotificationManager.create_notification(
                 user_id=requester_user_id,
@@ -740,7 +773,7 @@ class ComprehensiveNotificationService:
                 message=f'{buyer_name} completed the purchase for your materials request in {project_name}',
                 priority='medium',
                 category='change_request',
-                action_url=f'/{role_path}/{route}?cr_id={cr_id}',
+                action_url=action_url,  # ✅ Now dynamic based on actual user role!
                 action_label='View Details',
                 metadata={'cr_id': cr_id, 'request_type': request_type},
                 sender_id=buyer_id,
@@ -776,7 +809,7 @@ class ComprehensiveNotificationService:
                 priority='urgent',
                 category='extension',
                 action_required=True,
-                action_url=f'/technical-director/project-approvals?tab=assigned&boq_id={boq_id}',
+                action_url=get_td_approval_url(td_user_id, boq_id, tab='assigned'),
                 action_label='Review Request',
                 metadata={'boq_id': boq_id, 'days_requested': days_requested, 'reason': reason},
                 sender_id=pm_id,
@@ -809,7 +842,7 @@ class ComprehensiveNotificationService:
                 message=f'{td_name} approved {days_approved} day(s) extension for {project_name}',
                 priority='high',
                 category='extension',
-                action_url=f'/project-manager/my-projects?boq_id={boq_id}',
+                action_url=get_boq_approval_url(pm_user_id, boq_id),
                 action_label='View Project',
                 metadata={'boq_id': boq_id, 'days_approved': days_approved},
                 sender_id=td_id,
@@ -843,7 +876,7 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='extension',
                 action_required=True,
-                action_url=f'/project-manager/my-projects?boq_id={boq_id}',
+                action_url=get_boq_approval_url(pm_user_id, boq_id),
                 action_label='View Details',
                 metadata={'boq_id': boq_id, 'reason': rejection_reason},
                 sender_id=td_id,
@@ -878,7 +911,7 @@ class ComprehensiveNotificationService:
                 message=f'{td_name} approved vendor "{vendor_name}"',
                 priority='medium',
                 category='vendor',
-                action_url=f'/buyer/vendors?vendor_id={vendor_id}',
+                action_url=build_notification_action_url(buyer_user_id, 'vendors', {'vendor_id': vendor_id}, 'buyer'),
                 action_label='View Vendor',
                 metadata={'vendor_id': vendor_id},
                 sender_id=td_id,
@@ -925,7 +958,7 @@ class ComprehensiveNotificationService:
                     priority='high',
                     category='boq',
                     action_required=True,
-                    action_url=f'/technical-director/project-approvals?tab=revisions&boq_id={boq_id}',
+                    action_url=get_td_approval_url(td_user_id, boq_id, tab='revisions'),
                     action_label='Review Revision',
                     metadata={'boq_id': boq_id, 'internal_revision_number': revision_number},
                     sender_id=actor_id,
@@ -956,7 +989,7 @@ class ComprehensiveNotificationService:
                 message=f'Your internal revision #{revision_number} for {project_name} was approved by {td_name}',
                 priority='high',
                 category='boq',
-                action_url=f'/estimator/projects?tab=revisions&boq_id={boq_id}',
+                action_url=get_boq_view_url(estimator_user_id, boq_id, tab='revisions'),
                 action_label='View BOQ',
                 metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'approved'},
                 sender_id=td_id,
@@ -985,7 +1018,7 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='boq',
                 action_required=True,
-                action_url=f'/estimator/projects?tab=revisions&boq_id={boq_id}',
+                action_url=get_boq_view_url(estimator_user_id, boq_id, tab='revisions'),
                 action_label='View Details',
                 metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'rejected', 'reason': rejection_reason},
                 sender_id=td_id,
@@ -1019,7 +1052,7 @@ class ComprehensiveNotificationService:
                 message=message,
                 priority='high',
                 category='boq',
-                action_url=f'/estimator/projects?tab=revisions&boq_id={boq_id}',
+                action_url=get_boq_view_url(estimator_user_id, boq_id, tab='revisions'),
                 action_label='View BOQ',
                 metadata={'boq_id': boq_id, 'client_revision_approved': True, 'revision_number': revision_number},
                 sender_id=td_id,
@@ -1054,7 +1087,7 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='boq',
                 action_required=True,
-                action_url=f'/estimator/projects?tab=revisions&boq_id={boq_id}',
+                action_url=get_boq_view_url(estimator_user_id, boq_id, tab='revisions'),
                 action_label='Make Changes',
                 metadata={'boq_id': boq_id, 'client_revision_rejected': True, 'reason': rejection_reason, 'revision_number': revision_number},
                 sender_id=td_id,
@@ -1097,7 +1130,7 @@ class ComprehensiveNotificationService:
                     priority='normal',
                     category='assets',
                     action_required=False,
-                    action_url=f'/site-engineer/site-assets',
+                    action_url=build_notification_action_url(se_user_id, 'site-assets', None, 'site-engineer'),
                     action_label='View Assets',
                     metadata={
                         'project_id': project_id,
@@ -1145,7 +1178,7 @@ class ComprehensiveNotificationService:
                     priority='normal',
                     category='assets',
                     action_required=False,
-                    action_url=f'/production-manager/returnable-assets',
+                    action_url=build_notification_action_url(pm_user_id, 'returnable-assets', None, 'production-manager'),
                     action_label='View Assets',
                     metadata={
                         'project_id': project_id,
@@ -1186,7 +1219,7 @@ class ComprehensiveNotificationService:
                     priority=priority,
                     category='assets',
                     action_required=condition in ['damaged', 'poor'],
-                    action_url=f'/production-manager/returnable-assets',
+                    action_url=build_notification_action_url(pm_user_id, 'returnable-assets', None, 'production-manager'),
                     action_label='Review Assets',
                     metadata={
                         'project_id': project_id,
@@ -1226,7 +1259,7 @@ class ComprehensiveNotificationService:
                     priority='normal',
                     category='assets',
                     action_required=False,
-                    action_url=f'/production-manager/returnable-assets',
+                    action_url=build_notification_action_url(pm_user_id, 'returnable-assets', None, 'production-manager'),
                     action_label='View Assets',
                     metadata={
                         'category_code': category_code,
@@ -1571,6 +1604,250 @@ class ComprehensiveNotificationService:
             log.info(f"Sent delivery confirmed notification for DN {delivery_note_number}")
         except Exception as e:
             log.error(f"Error sending delivery confirmed notification: {e}")
+
+    # ==================== SUPPORT TICKET NOTIFICATIONS ====================
+
+    @staticmethod
+    def notify_ticket_submitted(ticket_id, ticket_number, client_name, client_email, subject, priority):
+        """
+        Notify dev team when a new support ticket is submitted
+        Trigger: Client submits new support ticket
+        Recipients: All users with 'admin' or 'developer' roles
+        """
+        try:
+            # Get admin users (dev team)
+            admin_role = Role.query.filter_by(role='admin').first()
+            dev_users = []
+            if admin_role:
+                dev_users = User.query.filter_by(role_id=admin_role.role_id, is_active=True, is_deleted=False).all()
+
+            for dev_user in dev_users:
+                # Check for duplicate notification
+                if check_duplicate_notification(dev_user.user_id, f'New Support Ticket #{ticket_number}', 'ticket_id', ticket_id):
+                    continue
+
+                notification = NotificationManager.create_notification(
+                    user_id=dev_user.user_id,
+                    type='warning' if priority == 'urgent' else 'info',
+                    title=f'New Support Ticket #{ticket_number}',
+                    message=f'{client_name} submitted a {priority} priority ticket: {subject[:80]}...',
+                    priority='urgent' if priority == 'urgent' else 'normal',
+                    category='support',
+                    action_required=True,
+                    action_url=build_notification_action_url(dev_user.user_id, 'support-management', {'ticket_id': ticket_id}, 'admin'),
+                    action_label='View Ticket',
+                    metadata={
+                        'ticket_id': ticket_id,
+                        'ticket_number': ticket_number,
+                        'client_email': client_email,
+                        'priority': priority,
+                        'workflow': 'support_ticket'
+                    },
+                    sender_name=client_name
+                )
+                send_notification_to_user(dev_user.user_id, notification.to_dict())
+
+            log.info(f"Sent ticket submission notification to {len(dev_users)} dev team members for ticket #{ticket_number}")
+        except Exception as e:
+            log.error(f"Error sending ticket submission notification: {e}")
+
+    @staticmethod
+    def notify_ticket_approved(ticket_id, ticket_number, client_user_id, client_email, subject, approved_by_name):
+        """
+        Notify client when their support ticket is approved by dev team
+        Trigger: Admin approves ticket
+        Recipients: Client (if has user account) + email log
+        """
+        try:
+            # Notify client if they have a user account
+            if client_user_id:
+                # Check for duplicate
+                if not check_duplicate_notification(client_user_id, f'Ticket #{ticket_number} Approved', 'ticket_id', ticket_id):
+                    notification = NotificationManager.create_notification(
+                        user_id=client_user_id,
+                        type='success',
+                        title=f'Your Ticket #{ticket_number} is Approved',
+                        message=f'Your support ticket "{subject[:60]}..." has been approved and our team is working on it.',
+                        priority='normal',
+                        category='support',
+                        action_required=False,
+                        action_url=build_notification_action_url(client_user_id, 'support', {'ticket_id': ticket_id}, 'dashboard'),
+                        action_label='View Ticket',
+                        metadata={
+                            'ticket_id': ticket_id,
+                            'ticket_number': ticket_number,
+                            'status': 'approved',
+                            'workflow': 'support_ticket'
+                        },
+                        sender_name=approved_by_name
+                    )
+                    send_notification_to_user(client_user_id, notification.to_dict())
+
+            log.info(f"Sent ticket approval notification for ticket #{ticket_number} to client")
+        except Exception as e:
+            log.error(f"Error sending ticket approval notification: {e}")
+
+    @staticmethod
+    def notify_ticket_rejected(ticket_id, ticket_number, client_user_id, client_email, subject, rejection_reason, rejected_by_name):
+        """
+        Notify client when their support ticket is rejected
+        Trigger: Admin rejects ticket
+        Recipients: Client (if has user account) + email log
+        """
+        try:
+            # Notify client if they have a user account
+            if client_user_id:
+                # Check for duplicate
+                if not check_duplicate_notification(client_user_id, f'Ticket #{ticket_number} Rejected', 'ticket_id', ticket_id):
+                    notification = NotificationManager.create_notification(
+                        user_id=client_user_id,
+                        type='error',
+                        title=f'Your Ticket #{ticket_number} was Rejected',
+                        message=f'Your support ticket was not approved. Reason: {rejection_reason[:80] if rejection_reason else "No reason provided"}...',
+                        priority='normal',
+                        category='support',
+                        action_required=False,
+                        action_url=build_notification_action_url(client_user_id, 'support', {'ticket_id': ticket_id}, 'dashboard'),
+                        action_label='View Ticket',
+                        metadata={
+                            'ticket_id': ticket_id,
+                            'ticket_number': ticket_number,
+                            'status': 'rejected',
+                            'rejection_reason': rejection_reason,
+                            'workflow': 'support_ticket'
+                        },
+                        sender_name=rejected_by_name
+                    )
+                    send_notification_to_user(client_user_id, notification.to_dict())
+
+            log.info(f"Sent ticket rejection notification for ticket #{ticket_number} to client")
+        except Exception as e:
+            log.error(f"Error sending ticket rejection notification: {e}")
+
+    @staticmethod
+    def notify_ticket_status_updated(ticket_id, ticket_number, client_user_id, client_email, subject, new_status, updated_by_name):
+        """
+        Notify client when ticket status is updated (in_review, in_progress, pending_deployment)
+        Trigger: Admin updates ticket status
+        Recipients: Client (if has user account) + email log
+        """
+        try:
+            status_messages = {
+                'in_review': 'is under review by our team',
+                'in_progress': 'is actively being worked on',
+                'pending_deployment': 'is ready and pending deployment'
+            }
+
+            status_message = status_messages.get(new_status, f'status updated to {new_status}')
+
+            # Notify client if they have a user account
+            if client_user_id:
+                # Check for duplicate
+                if not check_duplicate_notification(client_user_id, f'Ticket #{ticket_number} Status Update', 'ticket_id', ticket_id):
+                    notification = NotificationManager.create_notification(
+                        user_id=client_user_id,
+                        type='info',
+                        title=f'Ticket #{ticket_number} Status Update',
+                        message=f'Your support ticket "{subject[:60]}..." {status_message}.',
+                        priority='normal',
+                        category='support',
+                        action_required=False,
+                        action_url=build_notification_action_url(client_user_id, 'support', {'ticket_id': ticket_id}, 'dashboard'),
+                        action_label='View Ticket',
+                        metadata={
+                            'ticket_id': ticket_id,
+                            'ticket_number': ticket_number,
+                            'status': new_status,
+                            'workflow': 'support_ticket'
+                        },
+                        sender_name=updated_by_name
+                    )
+                    send_notification_to_user(client_user_id, notification.to_dict())
+
+            log.info(f"Sent ticket status update notification for ticket #{ticket_number} to client (status: {new_status})")
+        except Exception as e:
+            log.error(f"Error sending ticket status update notification: {e}")
+
+    @staticmethod
+    def notify_ticket_resolved(ticket_id, ticket_number, client_user_id, client_email, subject, resolution_notes, resolved_by_name):
+        """
+        Notify client when their ticket is marked as resolved
+        Trigger: Admin marks ticket as resolved
+        Recipients: Client (if has user account) + email log
+        """
+        try:
+            # Notify client if they have a user account
+            if client_user_id:
+                # Check for duplicate
+                if not check_duplicate_notification(client_user_id, f'Ticket #{ticket_number} Resolved', 'ticket_id', ticket_id):
+                    notification = NotificationManager.create_notification(
+                        user_id=client_user_id,
+                        type='success',
+                        title=f'Your Ticket #{ticket_number} is Resolved',
+                        message=f'Your support ticket "{subject[:60]}..." has been resolved. Please confirm if the issue is fixed.',
+                        priority='normal',
+                        category='support',
+                        action_required=True,
+                        action_url=build_notification_action_url(client_user_id, 'support', {'ticket_id': ticket_id}, 'dashboard'),
+                        action_label='Confirm Resolution',
+                        metadata={
+                            'ticket_id': ticket_id,
+                            'ticket_number': ticket_number,
+                            'status': 'resolved',
+                            'resolution_notes': resolution_notes,
+                            'workflow': 'support_ticket'
+                        },
+                        sender_name=resolved_by_name
+                    )
+                    send_notification_to_user(client_user_id, notification.to_dict())
+
+            log.info(f"Sent ticket resolution notification for ticket #{ticket_number} to client")
+        except Exception as e:
+            log.error(f"Error sending ticket resolution notification: {e}")
+
+    @staticmethod
+    def notify_ticket_closed_by_client(ticket_id, ticket_number, subject, client_name, client_feedback):
+        """
+        Notify dev team when client confirms resolution and closes ticket
+        Trigger: Client confirms resolution
+        Recipients: All admin/dev team users
+        """
+        try:
+            # Get admin users (dev team)
+            admin_role = Role.query.filter_by(role='admin').first()
+            dev_users = []
+            if admin_role:
+                dev_users = User.query.filter_by(role_id=admin_role.role_id, is_active=True, is_deleted=False).all()
+
+            for dev_user in dev_users:
+                # Check for duplicate
+                if check_duplicate_notification(dev_user.user_id, f'Ticket #{ticket_number} Closed', 'ticket_id', ticket_id):
+                    continue
+
+                notification = NotificationManager.create_notification(
+                    user_id=dev_user.user_id,
+                    type='success',
+                    title=f'Ticket #{ticket_number} Closed by Client',
+                    message=f'{client_name} confirmed resolution and closed ticket "{subject[:60]}...". Feedback: {client_feedback[:50] if client_feedback else "None"}...',
+                    priority='normal',
+                    category='support',
+                    action_required=False,
+                    action_url=build_notification_action_url(dev_user.user_id, 'support-management', {'ticket_id': ticket_id}, 'admin'),
+                    action_label='View Ticket',
+                    metadata={
+                        'ticket_id': ticket_id,
+                        'ticket_number': ticket_number,
+                        'status': 'closed',
+                        'client_feedback': client_feedback,
+                        'workflow': 'support_ticket'
+                    },
+                    sender_name=client_name
+                )
+                send_notification_to_user(dev_user.user_id, notification.to_dict())
+
+            log.info(f"Sent ticket closure notification to {len(dev_users)} dev team members for ticket #{ticket_number}")
+        except Exception as e:
+            log.error(f"Error sending ticket closure notification: {e}")
 
 
 # Create singleton instance

@@ -177,9 +177,14 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         <DollarSign className="w-5 h-5 text-green-600" />
                       </div>
                       <div>
-                        <div className="text-sm text-gray-600">Total Cost</div>
+                        <div className="text-sm text-gray-600">Total Cost (incl. VAT)</div>
                         <div className="text-2xl font-bold text-green-600">
-                          {formatCurrency(localPurchase.total_cost)}
+                          {(() => {
+                            const subtotal = localPurchase.total_cost || 0;
+                            const vatPercent = (localPurchase as any).vat_percent || 5;
+                            const grandTotal = subtotal + (subtotal * vatPercent / 100);
+                            return formatCurrency(grandTotal);
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -532,13 +537,41 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                               </>
                             );
                           }
+                          // Calculate VAT and totals
+                          const subtotal = localPurchase.total_cost || 0;
+                          // Check if purchase has VAT data, otherwise use 5% default for UAE
+                          const vatPercent = (localPurchase as any).vat_percent || 5;
+                          const vatAmount = (subtotal * vatPercent / 100);
+                          const grandTotal = subtotal + vatAmount;
+
                           return (
-                            <TableRow className="bg-blue-50 font-bold">
-                              <TableCell colSpan={7} className="text-right text-sm">Total Cost:</TableCell>
-                              <TableCell className="text-right text-green-700 text-base">
-                                {formatCurrency(localPurchase.total_cost)}
-                              </TableCell>
-                            </TableRow>
+                            <>
+                              {/* Subtotal Row */}
+                              <TableRow className="bg-gray-50">
+                                <TableCell colSpan={7} className="text-right text-sm font-semibold">Subtotal:</TableCell>
+                                <TableCell className="text-right text-gray-900 font-semibold">
+                                  {formatCurrency(subtotal)}
+                                </TableCell>
+                              </TableRow>
+
+                              {/* VAT Row */}
+                              {vatPercent > 0 && (
+                                <TableRow className="bg-gray-50">
+                                  <TableCell colSpan={7} className="text-right text-sm font-semibold">VAT ({vatPercent}%):</TableCell>
+                                  <TableCell className="text-right text-gray-900 font-semibold">
+                                    {formatCurrency(vatAmount)}
+                                  </TableCell>
+                                </TableRow>
+                              )}
+
+                              {/* Total Row */}
+                              <TableRow className="bg-blue-50 font-bold border-t-2 border-blue-300">
+                                <TableCell colSpan={7} className="text-right text-sm">Total Cost:</TableCell>
+                                <TableCell className="text-right text-green-700 text-base">
+                                  {formatCurrency(grandTotal)}
+                                </TableCell>
+                              </TableRow>
+                            </>
                           );
                         })()}
                       </TableBody>
@@ -567,9 +600,14 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         </p>
                       </div>
                       <div>
-                        <span className="text-gray-500 text-xs">This Purchase</span>
+                        <span className="text-gray-500 text-xs">This Purchase (incl. VAT)</span>
                         <p className="font-semibold text-gray-900 mt-1">
-                          {formatCurrency(localPurchase.total_cost || 0)}
+                          {(() => {
+                            const subtotal = localPurchase.total_cost || 0;
+                            const vatPercent = (localPurchase as any).vat_percent || 5;
+                            const grandTotal = subtotal + (subtotal * vatPercent / 100);
+                            return formatCurrency(grandTotal);
+                          })()}
                         </p>
                       </div>
                       <div>

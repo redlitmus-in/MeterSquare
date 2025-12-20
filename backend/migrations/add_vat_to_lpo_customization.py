@@ -9,11 +9,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv('DATABASE_URL')
-
-def upgrade():
+def upgrade(database_url=None):
     """Add VAT fields to lpo_customizations table"""
-    engine = create_engine(DATABASE_URL)
+    if database_url is None:
+        database_url = os.getenv('DATABASE_URL')
+
+    engine = create_engine(database_url)
 
     with engine.connect() as conn:
         try:
@@ -56,9 +57,12 @@ def upgrade():
             conn.rollback()
             raise
 
-def downgrade():
+def downgrade(database_url=None):
     """Remove VAT fields from lpo_customizations table"""
-    engine = create_engine(DATABASE_URL)
+    if database_url is None:
+        database_url = os.getenv('DATABASE_URL')
+
+    engine = create_engine(database_url)
 
     with engine.connect() as conn:
         try:
@@ -79,4 +83,21 @@ def downgrade():
 if __name__ == '__main__':
     print("Running migration: Add VAT fields to lpo_customizations")
     print("=" * 60)
-    upgrade()
+
+    # Run on PRODUCTION database
+    print("\n>>> PRODUCTION DATABASE:")
+    print("-" * 60)
+    prod_db_url = os.getenv('DATABASE_URL')
+    upgrade(prod_db_url)
+
+    # Run on DEVELOPMENT database
+    print("\n>>> DEVELOPMENT DATABASE:")
+    print("-" * 60)
+    dev_db_url = os.getenv('DEV_DATABASE_URL')
+    if dev_db_url:
+        upgrade(dev_db_url)
+    else:
+        print("DEV_DATABASE_URL not found, skipping development database")
+
+    print("\n" + "=" * 60)
+    print("[SUCCESS] Migration completed on ALL databases!")

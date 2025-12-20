@@ -44,7 +44,7 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
   const [editingTermText, setEditingTermText] = useState('');
   const [isSavingDefault, setIsSavingDefault] = useState(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [includeVAT, setIncludeVAT] = useState(true);
+  const [includeVAT, setIncludeVAT] = useState(false);  // Default to false, will be set from loaded data
 
   // Load LPO data when modal opens
   useEffect(() => {
@@ -55,10 +55,12 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
 
   // Set initial VAT checkbox state based on loaded data
   useEffect(() => {
-    if (lpoData) {
-      setIncludeVAT(lpoData.totals.vat_percent > 0);
+    if (lpoData && lpoData.totals) {
+      const shouldIncludeVAT = (lpoData.totals.vat_percent || 0) > 0;
+      setIncludeVAT(shouldIncludeVAT);
+      console.log(`[LPO VAT Sync] VAT checkbox set to: ${shouldIncludeVAT}, vat_percent: ${lpoData.totals.vat_percent}`);
     }
-  }, [lpoData?.totals.vat_percent]);
+  }, [lpoData]);
 
   const loadLpoData = async () => {
     try {
