@@ -19,7 +19,10 @@ import {
   UserPlusIcon,
   TableCellsIcon,
   Squares2X2Icon,
-  TrashIcon
+  TrashIcon,
+  MagnifyingGlassIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon
 } from '@heroicons/react/24/outline';
 import {
   FileText,
@@ -270,6 +273,11 @@ const ProjectApprovals: React.FC = () => {
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [isRevisionApproval, setIsRevisionApproval] = useState(false);
   const [expandedRemarks, setExpandedRemarks] = useState<Set<number>>(new Set()); // Track expanded remarks by BOQ ID
+
+  // ✅ Search and Pagination States
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
 
   // Day Extension States
   const [pendingDayExtensions, setPendingDayExtensions] = useState<any[]>([]);
@@ -1156,45 +1164,77 @@ const ProjectApprovals: React.FC = () => {
     });
   }, [estimations]);
 
-  const filteredEstimations = useMemo(() => sortedEstimations.filter(est => {
-    if (filterStatus === 'pending') {
-      // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
-      return est.status === 'pending' && !est.pmAssigned;
-    } else if (filterStatus === 'revisions') {
-      // Revisions: Show ALL BOQs with revision_number != 0
-      const hasRevisions = (est as any).revision_number != null && (est as any).revision_number !== 0;
+  // ✅ Reset page when filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterStatus, searchTerm, selectedRevisionNumber]);
 
-      // Must have revision_number not equal to 0
-      if (!hasRevisions) return false;
+  const filteredEstimations = useMemo(() => {
+    let filtered = sortedEstimations.filter(est => {
+      if (filterStatus === 'pending') {
+        // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
+        return est.status === 'pending' && !est.pmAssigned;
+      } else if (filterStatus === 'revisions') {
+        // Revisions: Show ALL BOQs with revision_number != 0
+        const hasRevisions = (est as any).revision_number != null && (est as any).revision_number !== 0;
 
-      // Filter by revision number if specific revision is selected
-      if (selectedRevisionNumber !== 'all') {
-        const revisionNumber = (est as any).revision_number || 0;
-        return revisionNumber === selectedRevisionNumber;
+        // Must have revision_number not equal to 0
+        if (!hasRevisions) return false;
+
+        // Filter by revision number if specific revision is selected
+        if (selectedRevisionNumber !== 'all') {
+          const revisionNumber = (est as any).revision_number || 0;
+          return revisionNumber === selectedRevisionNumber;
+        }
+
+        return true;
+      } else if (filterStatus === 'approved') {
+        // Approved: TD approved internally, includes "approved", "revision_approved", and "sent_for_confirmation" (waiting for client)
+        return (est.status === 'approved' || est.status === 'revision_approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned;
+      } else if (filterStatus === 'sent') {
+        // Client Response: Shows both approved (client_confirmed) and rejected (client_rejected) by client
+        return (est.status === 'client_confirmed' || est.status === 'client_rejected') && !est.pmAssigned;
+      } else if (filterStatus === 'assigned') {
+        // Assigned: PM has been assigned (can be after client confirms)
+        return est.pmAssigned === true && est.status !== 'rejected' && est.status !== 'completed' && est.status !== 'cancelled';
+      } else if (filterStatus === 'completed') {
+        // Completed: Project is completed
+        return est.status === 'completed';
+      } else if (filterStatus === 'rejected') {
+        // Rejected: TD rejected the BOQ
+        return est.status === 'rejected';
+      } else if (filterStatus === 'cancelled') {
+        // Cancelled: Client doesn't want to proceed with business
+        return est.status === 'cancelled';
       }
+      return false;
+    });
 
-      return true;
-    } else if (filterStatus === 'approved') {
-      // Approved: TD approved internally, includes "approved", "revision_approved", and "sent_for_confirmation" (waiting for client)
-      return (est.status === 'approved' || est.status === 'revision_approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned;
-    } else if (filterStatus === 'sent') {
-      // Client Response: Shows both approved (client_confirmed) and rejected (client_rejected) by client
-      return (est.status === 'client_confirmed' || est.status === 'client_rejected') && !est.pmAssigned;
-    } else if (filterStatus === 'assigned') {
-      // Assigned: PM has been assigned (can be after client confirms)
-      return est.pmAssigned === true && est.status !== 'rejected' && est.status !== 'completed' && est.status !== 'cancelled';
-    } else if (filterStatus === 'completed') {
-      // Completed: Project is completed
-      return est.status === 'completed';
-    } else if (filterStatus === 'rejected') {
-      // Rejected: TD rejected the BOQ
-      return est.status === 'rejected';
-    } else if (filterStatus === 'cancelled') {
-      // Cancelled: Client doesn't want to proceed with business
-      return est.status === 'cancelled';
+    // ✅ Apply search filter
+    if (searchTerm.trim()) {
+      const searchLower = searchTerm.toLowerCase().trim();
+      filtered = filtered.filter(est => {
+        // Search by ID (B-123, 123), project code (MSQ26), project name, client, or location
+        const idString = `b-${est.id}`;
+        return est.projectName?.toLowerCase().includes(searchLower) ||
+          est.clientName?.toLowerCase().includes(searchLower) ||
+          est.location?.toLowerCase().includes(searchLower) ||
+          est.projectCode?.toLowerCase().includes(searchLower) ||
+          idString.includes(searchLower) ||
+          est.id?.toString().includes(searchTerm.trim());
+      });
     }
-    return false;
-  }), [sortedEstimations, filterStatus, selectedRevisionNumber]);
+
+    return filtered;
+  }, [sortedEstimations, filterStatus, selectedRevisionNumber, searchTerm]);
+
+  // ✅ Paginated results
+  const paginatedEstimations = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredEstimations.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredEstimations, currentPage, ITEMS_PER_PAGE]);
+
+  const totalPages = Math.ceil(filteredEstimations.length / ITEMS_PER_PAGE);
 
   // Calculate counts for each tab
   const tabCounts = useMemo(() => {
@@ -1655,6 +1695,33 @@ const ProjectApprovals: React.FC = () => {
           </div>
         </div>
 
+        {/* ✅ Search Bar */}
+        <div className="mb-6">
+          <div className="relative max-w-md">
+            <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search by ID (B-123), project code (MSQ26), project name, client..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all bg-white shadow-sm"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+          {searchTerm && (
+            <p className="mt-2 text-sm text-gray-500">
+              Found {filteredEstimations.length} result{filteredEstimations.length !== 1 ? 's' : ''} for "{searchTerm}"
+            </p>
+          )}
+        </div>
+
         {/* TD Revision Comparison Page - Show only for revisions tab */}
         {filterStatus === 'revisions' ? (
           <TDRevisionComparisonPage
@@ -1866,7 +1933,7 @@ const ProjectApprovals: React.FC = () => {
         ) : viewMode === 'cards' ? (
           /* Card View */
           <div className="space-y-4">
-            {filteredEstimations.map((estimation, index) => (
+            {paginatedEstimations.map((estimation, index) => (
             <motion.div
               key={estimation.id}
               initial={{ opacity: 0, x: -20 }}
@@ -2181,7 +2248,7 @@ const ProjectApprovals: React.FC = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredEstimations.length === 0 ? (
+                  {paginatedEstimations.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={9} className="text-center py-12 text-gray-500">
                         <div className="flex flex-col items-center">
@@ -2191,7 +2258,7 @@ const ProjectApprovals: React.FC = () => {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredEstimations.map((estimation) => (
+                    paginatedEstimations.map((estimation) => (
                       <TableRow key={estimation.id} className="border-gray-200 hover:bg-gray-50/50">
                         <TableCell>
                           <span className="text-xs font-semibold text-black">
@@ -2314,6 +2381,47 @@ const ProjectApprovals: React.FC = () => {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
             <DocumentTextIcon className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500">No estimations found for the selected filter</p>
+          </div>
+        )}
+
+        {/* ✅ Pagination Controls */}
+        {!showPMWorkloadView && filterStatus !== 'revisions' && (
+          <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+            <div className="text-sm text-gray-600 font-medium">
+              Showing {filteredEstimations.length > 0 ? ((currentPage - 1) * ITEMS_PER_PAGE) + 1 : 0} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredEstimations.length)} of {filteredEstimations.length} projects
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                style={{ color: 'rgb(36, 61, 138)' }}
+              >
+                Previous
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                    currentPage === page
+                      ? 'border-[rgb(36,61,138)] bg-blue-50'
+                      : 'border-gray-300 hover:bg-gray-50'
+                  }`}
+                  style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                >
+                  {page}
+                </button>
+              ))}
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages || totalPages === 0}
+                className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                style={{ color: 'rgb(36, 61, 138)' }}
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
         </div>

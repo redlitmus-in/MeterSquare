@@ -90,6 +90,9 @@ const TDVendorApproval: React.FC = () => {
   const [rejectionReason, setRejectionReason] = useState('');
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [assignmentToReject, setAssignmentToReject] = useState<BOQAssignment | null>(null);
+  // ✅ PERFORMANCE: Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   useEffect(() => {
     if (activeTab === 'se_boq') {
@@ -186,6 +189,18 @@ const TDVendorApproval: React.FC = () => {
     });
   }, [assignments, seBoqSubTab]);
 
+  // ✅ PERFORMANCE: Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [seBoqSubTab, activeTab]);
+
+  // ✅ PERFORMANCE: Paginated assignments
+  const totalPages = Math.ceil(filteredAssignments.length / itemsPerPage);
+  const paginatedAssignments = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredAssignments.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredAssignments, currentPage, itemsPerPage]);
+
   const stats = useMemo(() => {
     return {
       pending: assignments.filter(a => a.vendor_selection_status === 'pending_td_approval').length,
@@ -281,14 +296,14 @@ const TDVendorApproval: React.FC = () => {
           <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-500 text-lg">PO vendor approvals coming soon</p>
         </div>
-      ) : filteredAssignments.length === 0 ? (
+      ) : paginatedAssignments.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
           <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-500 text-lg">No {seBoqSubTab} SE BOQ vendor requests</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredAssignments.map((assignment, index) => (
+          {paginatedAssignments.map((assignment, index) => (
             <motion.div
               key={assignment.assignment_id}
               initial={false}
@@ -437,6 +452,45 @@ const TDVendorApproval: React.FC = () => {
           ))}
         </div>
       )}
+
+      {/* ✅ PERFORMANCE: Pagination Controls */}
+      <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+        <div className="text-sm text-gray-600 font-medium">
+          Showing {filteredAssignments.length > 0 ? ((currentPage - 1) * itemsPerPage) + 1 : 0} to {Math.min(currentPage * itemsPerPage, filteredAssignments.length)} of {filteredAssignments.length} requests
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            style={{ color: 'rgb(36, 61, 138)' }}
+          >
+            Previous
+          </button>
+          {Array.from({ length: totalPages || 1 }, (_, i) => i + 1).map(page => (
+            <button
+              key={page}
+              onClick={() => setCurrentPage(page)}
+              className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                currentPage === page
+                  ? 'border-[rgb(36,61,138)] bg-blue-50'
+                  : 'border-gray-300 hover:bg-gray-50'
+              }`}
+              style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+            >
+              {page}
+            </button>
+          ))}
+          <button
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages || totalPages === 0}
+            className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            style={{ color: 'rgb(36, 61, 138)' }}
+          >
+            Next
+          </button>
+        </div>
+      </div>
 
       {/* Details Modal */}
       {showDetailsModal && selectedAssignment && (

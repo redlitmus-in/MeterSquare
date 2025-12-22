@@ -303,6 +303,9 @@ const MyProjects: React.FC = () => {
   const [showAssignBuyerModal, setShowAssignBuyerModal] = useState(false);
   const [projectToAssign, setProjectToAssign] = useState<Project | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // ✅ PERFORMANCE: Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   // Real-time auto-sync for projects
   const { data: projectsData, isLoading: loading, refetch } = useProjectsAutoSync(
@@ -478,6 +481,18 @@ const MyProjects: React.FC = () => {
     return statusMatch;
   });
 
+  // ✅ PERFORMANCE: Reset page when filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterStatus, searchQuery]);
+
+  // ✅ PERFORMANCE: Paginated projects
+  const totalPages = Math.ceil(filteredProjects.length / itemsPerPage);
+  const paginatedProjects = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredProjects.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredProjects, currentPage, itemsPerPage]);
+
   const getTabCounts = () => ({
     ongoing: projects.filter(p => {
       const statusLower = p.status?.toLowerCase();
@@ -613,13 +628,13 @@ const MyProjects: React.FC = () => {
 
         {/* Projects List */}
         <div className="space-y-3 sm:space-y-4">
-          {filteredProjects.length === 0 ? (
+          {paginatedProjects.length === 0 ? (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 sm:p-12 text-center">
               <BuildingOfficeIcon className="w-12 sm:w-16 h-12 sm:h-16 text-gray-300 mx-auto mb-3 sm:mb-4" />
               <p className="text-gray-500 text-base sm:text-lg">No projects in this category</p>
             </div>
           ) : (
-            filteredProjects.map((project, index) => (
+            paginatedProjects.map((project, index) => (
               <motion.div
                 key={project.project_id}
                 initial={{ opacity: 0, y: 20 }}
@@ -749,6 +764,45 @@ const MyProjects: React.FC = () => {
               </motion.div>
             ))
           )}
+        </div>
+
+        {/* ✅ PERFORMANCE: Pagination Controls */}
+        <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+          <div className="text-sm text-gray-600 font-medium">
+            Showing {filteredProjects.length > 0 ? ((currentPage - 1) * itemsPerPage) + 1 : 0} to {Math.min(currentPage * itemsPerPage, filteredProjects.length)} of {filteredProjects.length} projects
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              style={{ color: 'rgb(36, 61, 138)' }}
+            >
+              Previous
+            </button>
+            {Array.from({ length: totalPages || 1 }, (_, i) => i + 1).map(page => (
+              <button
+                key={page}
+                onClick={() => setCurrentPage(page)}
+                className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                  currentPage === page
+                    ? 'border-[rgb(36,61,138)] bg-blue-50'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+              >
+                {page}
+              </button>
+            ))}
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages || totalPages === 0}
+              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              style={{ color: 'rgb(36, 61, 138)' }}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 

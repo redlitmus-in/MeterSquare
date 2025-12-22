@@ -327,7 +327,7 @@ const EstimatorHub: React.FC = () => {
   const [hasSavedDraft, setHasSavedDraft] = useState(false);
   const [draftData, setDraftData] = useState<any>(null);
   const [totalProjects, setTotalProjects] = useState(0);
-  const itemsPerPage = 10; // Fixed at 10 items per page
+  const itemsPerPage = 20; // ✅ PERFORMANCE: 20 items per page
   const [boqCurrentPage, setBoqCurrentPage] = useState(1); // Pagination for BOQ tabs
   const [showSendEmailModal, setShowSendEmailModal] = useState(false);
   const [boqToEmail, setBoqToEmail] = useState<BOQ | null>(null);
@@ -3294,45 +3294,43 @@ const EstimatorHub: React.FC = () => {
                 )}
 
                 {/* Pagination */}
-                {totalProjects > itemsPerPage && (
-                  <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
-                    <div className="text-sm text-gray-600 font-medium">
-                      Showing {startIndex + 1} to {Math.min(startIndex + filteredProjects.length, totalProjects)} of {totalProjects} projects
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                        disabled={currentPage === 1}
-                        className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        style={{ color: 'rgb(36, 61, 138)' }}
-                      >
-                        Previous
-                      </button>
-                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                        <button
-                          key={page}
-                          onClick={() => setCurrentPage(page)}
-                          className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                            currentPage === page
-                              ? 'border-[rgb(36,61,138)] bg-blue-50'
-                              : 'border-gray-300 hover:bg-gray-50'
-                          }`}
-                          style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
-                        >
-                          {page}
-                        </button>
-                      ))}
-                      <button
-                        onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                        disabled={currentPage === totalPages}
-                        className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        style={{ color: 'rgb(36, 61, 138)' }}
-                      >
-                        Next
-                      </button>
-                    </div>
+                <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                  <div className="text-sm text-gray-600 font-medium">
+                    Showing {totalProjects > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + filteredProjects.length, totalProjects)} of {totalProjects} projects
                   </div>
-                )}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      style={{ color: 'rgb(36, 61, 138)' }}
+                    >
+                      Previous
+                    </button>
+                    {Array.from({ length: totalPages || 1 }, (_, i) => i + 1).map(page => (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                          currentPage === page
+                            ? 'border-[rgb(36,61,138)] bg-blue-50'
+                            : 'border-gray-300 hover:bg-gray-50'
+                        }`}
+                        style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages || totalPages === 0}
+                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      style={{ color: 'rgb(36, 61, 138)' }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
                     </>
                   );
                 })()}

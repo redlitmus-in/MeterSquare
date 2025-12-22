@@ -73,7 +73,7 @@ const PurchaseOrders: React.FC = () => {
   const [pendingPage, setPendingPage] = useState(1);
   const [completedPage, setCompletedPage] = useState(1);
   const [rejectedPage, setRejectedPage] = useState(1);
-  const perPage = 50; // Items per page
+  const perPage = 20; // Items per page
 
   // ✅ OPTIMIZED: Fetch pending purchases - Real-time updates via Supabase (NO POLLING)
   // BEFORE: Polling every 2 seconds = 30 requests/minute per user
@@ -2844,75 +2844,50 @@ const PurchaseOrders: React.FC = () => {
               setCurrentPage = setRejectedPage;
             }
 
-            // Only show pagination if we have pagination data
-            if (!currentPagination || currentPagination.pages <= 1) return null;
-
-            const { total, pages, has_next, has_prev } = currentPagination;
-            const start = (currentPage - 1) * perPage + 1;
+            // Always show pagination
+            const total = currentPagination?.total || 0;
+            const pages = currentPagination?.pages || 1;
+            const has_next = currentPagination?.has_next || false;
+            const has_prev = currentPagination?.has_prev || false;
+            const start = total > 0 ? (currentPage - 1) * perPage + 1 : 0;
             const end = Math.min(currentPage * perPage, total);
 
             return (
-              <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 sm:px-6">
-                {/* Results info */}
-                <div className="flex-1 flex justify-between sm:hidden">
-                  <Button
+              <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                <div className="text-sm text-gray-600 font-medium">
+                  Showing {start} to {end} of {total} results
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
                     onClick={() => setCurrentPage(currentPage - 1)}
                     disabled={!has_prev}
-                    variant="outline"
-                    size="sm"
-                    className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    style={{ color: 'rgb(36, 61, 138)' }}
                   >
                     Previous
-                  </Button>
-                  <Button
+                  </button>
+                  {Array.from({ length: pages }, (_, i) => i + 1).map(page => (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                        currentPage === page
+                          ? 'border-[rgb(36,61,138)] bg-blue-50'
+                          : 'border-gray-300 hover:bg-gray-50'
+                      }`}
+                      style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                  <button
                     onClick={() => setCurrentPage(currentPage + 1)}
                     disabled={!has_next}
-                    variant="outline"
-                    size="sm"
-                    className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    style={{ color: 'rgb(36, 61, 138)' }}
                   >
                     Next
-                  </Button>
-                </div>
-                <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm text-gray-700">
-                      Showing <span className="font-medium">{start}</span> to{' '}
-                      <span className="font-medium">{end}</span> of{' '}
-                      <span className="font-medium">{total}</span> results
-                    </p>
-                  </div>
-                  <div>
-                    <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
-                      <Button
-                        onClick={() => setCurrentPage(currentPage - 1)}
-                        disabled={!has_prev}
-                        variant="outline"
-                        size="sm"
-                        className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <span className="sr-only">Previous</span>
-                        <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                          <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                      </Button>
-                      <span className="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">
-                        Page {currentPage} of {pages}
-                      </span>
-                      <Button
-                        onClick={() => setCurrentPage(currentPage + 1)}
-                        disabled={!has_next}
-                        variant="outline"
-                        size="sm"
-                        className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <span className="sr-only">Next</span>
-                        <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                          <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                        </svg>
-                      </Button>
-                    </nav>
-                  </div>
+                  </button>
                 </div>
               </div>
             );

@@ -265,6 +265,9 @@ const MyProjects: React.FC = () => {
   const [processingBOQ, setProcessingBOQ] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  // ✅ PERFORMANCE: Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [seToDelete, setSeToDelete] = useState<{ id: number; name: string } | null>(null);
 
@@ -698,6 +701,18 @@ const MyProjects: React.FC = () => {
     return false;
   });
 
+  // ✅ PERFORMANCE: Reset page when filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterStatus, searchQuery]);
+
+  // ✅ PERFORMANCE: Paginated projects
+  const totalPages = Math.ceil(filteredProjects.length / itemsPerPage);
+  const paginatedProjects = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredProjects.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredProjects, currentPage, itemsPerPage]);
+
   const getTabCounts = () => ({
     for_approval: projects.filter(p => {
       const status = p.boq_status?.toLowerCase() || '';
@@ -901,14 +916,14 @@ const MyProjects: React.FC = () => {
           </div>
 
           {/* Projects List */}
-          {filteredProjects.length === 0 ? (
+          {paginatedProjects.length === 0 ? (
             <div className="bg-gray-50 rounded-xl border border-gray-200 p-12 text-center">
               <BuildingOfficeIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 text-lg">No projects in this category</p>
             </div>
           ) : viewMode === 'cards' ? (
             <div className="space-y-4">
-              {filteredProjects.map((project, index) => (
+              {paginatedProjects.map((project, index) => (
               <motion.div
                 key={project.project_id}
                 initial={{ opacity: 0, y: 20 }}
@@ -1204,7 +1219,7 @@ const MyProjects: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredProjects.map((project) => (
+                  {paginatedProjects.map((project) => (
                     <tr key={project.project_id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="text-xs font-semibold text-black">
@@ -1349,6 +1364,45 @@ const MyProjects: React.FC = () => {
               </table>
             </div>
           )}
+
+          {/* ✅ PERFORMANCE: Pagination Controls */}
+          <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+            <div className="text-sm text-gray-600 font-medium">
+              Showing {filteredProjects.length > 0 ? ((currentPage - 1) * itemsPerPage) + 1 : 0} to {Math.min(currentPage * itemsPerPage, filteredProjects.length)} of {filteredProjects.length} projects
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                style={{ color: 'rgb(36, 61, 138)' }}
+              >
+                Previous
+              </button>
+              {Array.from({ length: totalPages || 1 }, (_, i) => i + 1).map(page => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                    currentPage === page
+                      ? 'border-[rgb(36,61,138)] bg-blue-50'
+                      : 'border-gray-300 hover:bg-gray-50'
+                  }`}
+                  style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                >
+                  {page}
+                </button>
+              ))}
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages || totalPages === 0}
+                className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                style={{ color: 'rgb(36, 61, 138)' }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

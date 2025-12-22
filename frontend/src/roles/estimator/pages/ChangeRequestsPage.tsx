@@ -58,7 +58,7 @@ const ChangeRequestsPage: React.FC = () => {
     has_next: boolean;
     has_prev: boolean;
   } | null>(null);
-  const perPage = 50;
+  const perPage = 20;
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
@@ -830,35 +830,39 @@ const ChangeRequestsPage: React.FC = () => {
           </Tabs>
 
           {/* ✅ PERFORMANCE: Pagination Controls */}
-          {pagination && pagination.total_pages > 1 && (
-            <div className="mt-6 flex items-center justify-between border-t border-gray-200 pt-4">
-              <div className="text-sm text-gray-600">
-                Showing {Math.min((currentPage - 1) * perPage + 1, pagination.total_count)}-
-                {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
+          {pagination && (
+            <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+              <div className="text-sm text-gray-600 font-medium">
+                Showing {pagination.total_count > 0 ? Math.min((currentPage - 1) * perPage + 1, pagination.total_count) : 0} to {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                   disabled={!pagination.has_prev}
-                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                    pagination.has_prev
-                      ? 'bg-[#243d8a] hover:bg-[#1e3270] text-white'
-                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  }`}
+                  className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  style={{ color: 'rgb(36, 61, 138)' }}
                 >
                   Previous
                 </button>
-                <span className="px-4 py-2 text-sm text-gray-600 flex items-center">
-                  Page {currentPage} of {pagination.total_pages}
-                </span>
+                {Array.from({ length: pagination.total_pages || 1 }, (_, i) => i + 1).map(page => (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                      currentPage === page
+                        ? 'border-[rgb(36,61,138)] bg-blue-50'
+                        : 'border-gray-300 hover:bg-gray-50'
+                    }`}
+                    style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                  >
+                    {page}
+                  </button>
+                ))}
                 <button
                   onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
                   disabled={!pagination.has_next}
-                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                    pagination.has_next
-                      ? 'bg-[#243d8a] hover:bg-[#1e3270] text-white'
-                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  }`}
+                  className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  style={{ color: 'rgb(36, 61, 138)' }}
                 >
                   Next
                 </button>
