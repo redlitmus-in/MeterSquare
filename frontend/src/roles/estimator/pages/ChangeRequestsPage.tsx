@@ -49,6 +49,16 @@ const ChangeRequestsPage: React.FC = () => {
   const [changeRequests, setChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
+
+  // ✅ PERFORMANCE: Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<{
+    total_count: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  } | null>(null);
+  const perPage = 50;
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
@@ -78,12 +88,23 @@ const ChangeRequestsPage: React.FC = () => {
     loadChangeRequests(false); // Silent reload without toasts
   }, [changeRequestUpdateTimestamp]); // Reload whenever timestamp changes
 
+  // ✅ PERFORMANCE: Reload when page changes
+  useEffect(() => {
+    if (!initialLoad) {
+      loadChangeRequests(false);
+    }
+  }, [currentPage]);
+
   const loadChangeRequests = async (showToasts = false) => {
     try {
-      const response = await changeRequestService.getChangeRequests();
+      // ✅ PERFORMANCE: Use pagination to reduce data load
+      const response = await changeRequestService.getChangeRequests(currentPage, perPage);
 
       if (response.success) {
         setChangeRequests(response.data);
+        if (response.pagination) {
+          setPagination(response.pagination);
+        }
         // Only show success toast on initial load to avoid spam
         if (showToasts && response.data.length > 0) {
           showSuccess(`Loaded ${response.data.length} purchase request(s)`);
@@ -271,8 +292,15 @@ const ChangeRequestsPage: React.FC = () => {
 
   const filteredRequests = changeRequests.filter(req => {
     const projectName = req.project_name || req.boq_name || '';
-    const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase().trim();
+    // ✅ Search by ID (PO-123, 123), project code (MSQ26), project name, or requester name
+    const idString = `po-${req.cr_id}`;
+    const matchesSearch = !searchTerm ||
+                         projectName.toLowerCase().includes(searchLower) ||
+                         req.requested_by_name.toLowerCase().includes(searchLower) ||
+                         req.project_code?.toLowerCase().includes(searchLower) ||
+                         idString.includes(searchLower) ||
+                         req.cr_id.toString().includes(searchTerm.trim());
     const matchesTab = (
       (activeTab === 'pending' && (req.status === 'send_to_est' || req.status === 'under_review' || (req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'approved_by_pm' && req.status !== 'rejected' && req.status !== 'purchase_completed' && req.status !== 'pending_td_approval'))) ||
       (activeTab === 'approved' && (req.status === 'assigned_to_buyer' || req.status === 'approved_by_pm' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs')) ||
@@ -800,6 +828,43 @@ const ChangeRequestsPage: React.FC = () => {
               </div>
             </TabsContent>
           </Tabs>
+
+          {/* ✅ PERFORMANCE: Pagination Controls */}
+          {pagination && pagination.total_pages > 1 && (
+            <div className="mt-6 flex items-center justify-between border-t border-gray-200 pt-4">
+              <div className="text-sm text-gray-600">
+                Showing {Math.min((currentPage - 1) * perPage + 1, pagination.total_count)}-
+                {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={!pagination.has_prev}
+                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                    pagination.has_prev
+                      ? 'bg-[#243d8a] hover:bg-[#1e3270] text-white'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  Previous
+                </button>
+                <span className="px-4 py-2 text-sm text-gray-600 flex items-center">
+                  Page {currentPage} of {pagination.total_pages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
+                  disabled={!pagination.has_next}
+                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                    pagination.has_next
+                      ? 'bg-[#243d8a] hover:bg-[#1e3270] text-white'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -108,12 +108,18 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
       return dateB - dateA; // Most recent first
     });
 
-  // Filter based on search
-  const filteredBOQs = boqsWithRevisions.filter(boq =>
-    getProjectTitle(boq).toLowerCase().includes(searchTerm.toLowerCase()) ||
-    getProjectName(boq).toLowerCase().includes(searchTerm.toLowerCase()) ||
-    getClientName(boq).toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter based on search (includes ID search)
+  const filteredBOQs = boqsWithRevisions.filter(boq => {
+    const searchLower = searchTerm.toLowerCase().trim();
+    // ✅ Search by ID (B-123, 123), title, project name, or client
+    const boqIdString = `b-${boq.boq_id || boq.id}`;
+    return !searchTerm ||
+      getProjectTitle(boq).toLowerCase().includes(searchLower) ||
+      getProjectName(boq).toLowerCase().includes(searchLower) ||
+      getClientName(boq).toLowerCase().includes(searchLower) ||
+      boqIdString.includes(searchLower) ||
+      (boq.boq_id || boq.id)?.toString().includes(searchTerm.trim());
+  });
 
   useEffect(() => {
     if (selectedBoq) {

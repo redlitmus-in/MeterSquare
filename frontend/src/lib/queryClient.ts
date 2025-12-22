@@ -13,9 +13,10 @@ export { CACHE_TIMES, queryKeys, STALE_TIMES, CACHE_GC_TIMES };
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Stale time: Data is immediately stale - always fetch fresh
-      // This ensures we always get the latest data from the server
-      staleTime: 0,
+      // PERFORMANCE: Data is fresh for 30 seconds before revalidation
+      // This prevents redundant API calls on tab switches and navigation
+      // Mutations still invalidate cache immediately for real-time updates
+      staleTime: STALE_TIMES.STANDARD, // 30 seconds - prevents redundant fetches
 
       // Cache time: How long to keep unused data in cache
       gcTime: CACHE_GC_TIMES.STANDARD, // 10 minutes (formerly cacheTime)
@@ -33,11 +34,12 @@ export const queryClient = new QueryClient({
       // Retry delay
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
 
-      // Refetch on window focus - get fresh data when user returns to tab
+      // Refetch on window focus - revalidate when user returns to tab
+      // Combined with staleTime, only fetches if data is stale (>30s old)
       refetchOnWindowFocus: true,
 
-      // Always refetch when component mounts
-      refetchOnMount: true,
+      // Revalidate on mount if data is stale
+      refetchOnMount: 'always',
 
       // Refetch on reconnect
       refetchOnReconnect: 'always',

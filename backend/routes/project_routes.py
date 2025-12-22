@@ -1,6 +1,7 @@
 from flask import Blueprint
 from controllers.project_controller import *
 from utils.authentication import *
+from utils.response_cache import cached_response
 
 project_routes = Blueprint("project_routes", __name__, url_prefix='/api')
 
@@ -12,6 +13,7 @@ def create_project_route():
 
 @project_routes.route('/all_project', methods=['GET'])
 @jwt_required
+@cached_response(timeout=30, key_prefix='all_projects')  # Cache for 30 seconds
 def get_all_projects_route():
     return get_all_projects()
 

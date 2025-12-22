@@ -91,15 +91,18 @@ const VendorManagement: React.FC = () => {
         return false;
       }
 
-      // Search filter - search in company name, email, contact person
+      // Search filter - search in company name, email, contact person, phone, or vendor ID
       if (searchTerm) {
-        const search = searchTerm.toLowerCase();
+        const search = searchTerm.toLowerCase().trim();
         const matchesCompany = vendor.company_name?.toLowerCase().includes(search);
         const matchesEmail = vendor.email?.toLowerCase().includes(search);
         const matchesContact = vendor.contact_person_name?.toLowerCase().includes(search);
         const matchesPhone = vendor.phone?.includes(search);
+        // ✅ Add vendor ID search (V-123, 123)
+        const vendorIdString = `v-${vendor.vendor_id}`;
+        const matchesId = vendorIdString.includes(search) || vendor.vendor_id?.toString().includes(searchTerm.trim());
 
-        if (!matchesCompany && !matchesEmail && !matchesContact && !matchesPhone) {
+        if (!matchesCompany && !matchesEmail && !matchesContact && !matchesPhone && !matchesId) {
           return false;
         }
       }

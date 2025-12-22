@@ -103,10 +103,15 @@ const MaterialsToPurchase: React.FC = () => {
 
   const filteredMaterials = useMemo(() => {
     return materials.filter(material => {
-      const matchesSearch =
-        material.project_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        material.material_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        material.client.toLowerCase().includes(searchTerm.toLowerCase());
+      const searchLower = searchTerm.toLowerCase().trim();
+      // ✅ Search by ID (M-123, 123), project name, material name, or client
+      const materialIdString = `m-${material.material_id || material.id}`;
+      const matchesSearch = !searchTerm ||
+        material.project_name.toLowerCase().includes(searchLower) ||
+        material.material_name.toLowerCase().includes(searchLower) ||
+        material.client.toLowerCase().includes(searchLower) ||
+        materialIdString.includes(searchLower) ||
+        (material.material_id || material.id)?.toString().includes(searchTerm.trim());
 
       const matchesTab = material.purchase_status === activeTab;
 

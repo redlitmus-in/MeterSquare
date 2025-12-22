@@ -270,10 +270,18 @@ const PurchaseOrders: React.FC = () => {
   const filteredPurchases = useMemo(() => {
     return currentPurchases
       .filter(purchase => {
-        const matchesSearch =
-          purchase.project_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          purchase.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          purchase.item_name.toLowerCase().includes(searchTerm.toLowerCase());
+        const searchLower = searchTerm.toLowerCase().trim();
+        // ✅ Search by ID (CR-123, PO-123, 123), project code (MSQ26), project name, client, or item
+        const crIdString = `cr-${purchase.cr_id}`;
+        const poIdString = `po-${purchase.cr_id}`;
+        const matchesSearch = !searchTerm ||
+          purchase.project_name.toLowerCase().includes(searchLower) ||
+          purchase.client.toLowerCase().includes(searchLower) ||
+          purchase.item_name.toLowerCase().includes(searchLower) ||
+          purchase.project_code?.toLowerCase().includes(searchLower) ||
+          crIdString.includes(searchLower) ||
+          poIdString.includes(searchLower) ||
+          purchase.cr_id?.toString().includes(searchTerm.trim());
 
         return matchesSearch;
       })
@@ -291,11 +299,19 @@ const PurchaseOrders: React.FC = () => {
       return [];
     }
 
-    // Filter approved PO children by search term
-    const filteredPOChildren = approvedPOChildren.filter(poChild =>
-      (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (poChild.vendor_name || '').toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    // Filter approved PO children by search term (includes ID and project code search)
+    const searchLower = searchTerm.toLowerCase().trim();
+    const filteredPOChildren = approvedPOChildren.filter(poChild => {
+      const poIdString = `po-${poChild.id}`;
+      const formattedId = (poChild.formatted_id || '').toLowerCase();
+      return !searchTerm ||
+        (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
+        (poChild.vendor_name || '').toLowerCase().includes(searchLower) ||
+        poChild.project_code?.toLowerCase().includes(searchLower) ||
+        poIdString.includes(searchLower) ||
+        formattedId.includes(searchLower) ||
+        poChild.id?.toString().includes(searchTerm.trim());
+    });
 
     // Combine filtered purchases and filtered PO children
     const combined: Array<Purchase | POChild> = [
@@ -1953,10 +1969,18 @@ const PurchaseOrders: React.FC = () => {
 
               {/* Pending POChildren Cards (when on Pending Approval tab) */}
               {activeTab === 'pending_approval' && pendingPOChildren
-                .filter(poChild =>
-                  (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  (poChild.vendor_name || '').toLowerCase().includes(searchTerm.toLowerCase())
-                )
+                .filter(poChild => {
+                  const searchLower = searchTerm.toLowerCase().trim();
+                  const poIdString = `po-${poChild.id}`;
+                  const formattedId = (poChild.formatted_id || '').toLowerCase();
+                  return !searchTerm ||
+                    (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
+                    (poChild.vendor_name || '').toLowerCase().includes(searchLower) ||
+                    poChild.project_code?.toLowerCase().includes(searchLower) ||
+                    poIdString.includes(searchLower) ||
+                    formattedId.includes(searchLower) ||
+                    poChild.id?.toString().includes(searchTerm.trim());
+                })
                 .map((poChild) => (
                 <motion.div
                   key={`pending-po-child-${poChild.id}`}
@@ -2105,10 +2129,18 @@ const PurchaseOrders: React.FC = () => {
 
               {/* Completed PO Children Cards (when on Completed tab) */}
               {activeTab === 'completed' && completedPOChildren
-                .filter(poChild =>
-                  (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  (poChild.vendor_name || '').toLowerCase().includes(searchTerm.toLowerCase())
-                )
+                .filter(poChild => {
+                  const searchLower = searchTerm.toLowerCase().trim();
+                  const poIdString = `po-${poChild.id}`;
+                  const formattedId = (poChild.formatted_id || '').toLowerCase();
+                  return !searchTerm ||
+                    (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
+                    (poChild.vendor_name || '').toLowerCase().includes(searchLower) ||
+                    poChild.project_code?.toLowerCase().includes(searchLower) ||
+                    poIdString.includes(searchLower) ||
+                    formattedId.includes(searchLower) ||
+                    poChild.id?.toString().includes(searchTerm.trim());
+                })
                 .map((poChild) => (
                 <motion.div
                   key={`completed-po-child-${poChild.id}`}
@@ -2262,9 +2294,17 @@ const PurchaseOrders: React.FC = () => {
 
               {/* TD Rejected PO Children Cards (when on Rejected tab) - Buyer can re-select vendor */}
               {activeTab === 'rejected' && tdRejectedPOChildren
-                .filter(poChild =>
-                  (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase())
-                )
+                .filter(poChild => {
+                  const searchLower = searchTerm.toLowerCase().trim();
+                  const poIdString = `po-${poChild.po_child_id}`;
+                  const formattedId = (poChild.formatted_id || '').toLowerCase();
+                  return !searchTerm ||
+                    (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
+                    poChild.project_code?.toLowerCase().includes(searchLower) ||
+                    poIdString.includes(searchLower) ||
+                    formattedId.includes(searchLower) ||
+                    poChild.po_child_id?.toString().includes(searchTerm.trim());
+                })
                 .map((poChild) => (
                 <motion.div
                   key={`td-rejected-po-child-${poChild.po_child_id}`}

@@ -143,13 +143,11 @@ apiClient.interceptors.request.use(
       delete config.headers['Content-Type'];
     }
 
-    // ❌ DISABLED: In-memory axios cache causes stale data issues
-    // React Query already handles caching properly with invalidation on mutations
-    // The custom adapter was preventing fresh data from being fetched
-    // Keeping the cache infrastructure for potential future use, but not using it
-
-    // Always fetch fresh data - let React Query handle caching
-    config.headers['X-Skip-Cache'] = 'true';
+    // ✅ PERFORMANCE: React Query now handles caching with proper staleTime
+    // Backend cache can work in conjunction with React Query:
+    // - React Query: Client-side cache with staleTime (30s default)
+    // - Backend: Server-side cache for expensive computations
+    // Cache is automatically invalidated on mutations via React Query
 
     return config;
   },

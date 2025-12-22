@@ -166,9 +166,14 @@ const TeamAssignment: React.FC = () => {
       (filterStatus === 'unassigned' && project.status === 'unassigned') ||
       (filterStatus === 'assigned' &&
         (project.status === 'assigned' || project.status === 'in-progress'));
-    const matchesSearch =
-      project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      project.client.toLowerCase().includes(searchTerm.toLowerCase());
+    // ✅ Search by ID (P-123, 123), project name, or client
+    const searchLower = searchTerm.toLowerCase().trim();
+    const projectIdString = `p-${project.id}`;
+    const matchesSearch = !searchTerm ||
+      project.name.toLowerCase().includes(searchLower) ||
+      project.client.toLowerCase().includes(searchLower) ||
+      projectIdString.includes(searchLower) ||
+      project.id?.toString().includes(searchTerm.trim());
     return matchesStatus && matchesSearch;
   });
 

@@ -677,8 +677,15 @@ const ChangeRequestsPage: React.FC = () => {
 
   const filteredRequests = changeRequests.filter(req => {
     const projectName = req.project_name || req.boq_name || '';
-    const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase().trim();
+    // ✅ Search by ID (CR-123, 123), project code (MSQ26), project name, or requester name
+    const idString = `cr-${req.cr_id}`;
+    const matchesSearch = !searchTerm ||
+                         projectName.toLowerCase().includes(searchLower) ||
+                         req.requested_by_name.toLowerCase().includes(searchLower) ||
+                         req.project_code?.toLowerCase().includes(searchLower) ||
+                         idString.includes(searchLower) ||
+                         req.cr_id.toString().includes(searchTerm.trim());
 
     let matchesTab = false;
     const status = req.status?.trim(); // Trim to handle trailing spaces
@@ -700,7 +707,16 @@ const ChangeRequestsPage: React.FC = () => {
 
   // Filter vendor approvals for vendor_approvals tab with sub-tabs
   const filteredVendorApprovals = vendorApprovals.filter(purchase => {
-    const matchesSearch = purchase.project_name.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase().trim();
+    // ✅ Search by ID (CR-123, PO-123, 123), project code (MSQ26), project name
+    const crIdString = `cr-${purchase.cr_id}`;
+    const poIdString = `po-${purchase.cr_id}`;
+    const matchesSearch = !searchTerm ||
+      purchase.project_name.toLowerCase().includes(searchLower) ||
+      purchase.project_code?.toLowerCase().includes(searchLower) ||
+      crIdString.includes(searchLower) ||
+      poIdString.includes(searchLower) ||
+      purchase.cr_id?.toString().includes(searchTerm.trim());
 
     if (vendorApprovalsSubTab === 'pending') {
       // Show pending vendor approvals (waiting for TD approval)
@@ -717,7 +733,15 @@ const ChangeRequestsPage: React.FC = () => {
 
   // Filter PO children for vendor_approvals tab (new system)
   const filteredPOChildren = pendingPOChildren.filter(poChild => {
-    const matchesSearch = (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase().trim();
+    const poIdString = `po-${poChild.id}`;
+    const formattedId = (poChild.formatted_id || '').toLowerCase();
+    const matchesSearch = !searchTerm ||
+      (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
+      poChild.project_code?.toLowerCase().includes(searchLower) ||
+      poIdString.includes(searchLower) ||
+      formattedId.includes(searchLower) ||
+      poChild.id?.toString().includes(searchTerm.trim());
 
     if (vendorApprovalsSubTab === 'pending') {
       return matchesSearch && poChild.vendor_selection_status === 'pending_td_approval';
@@ -728,7 +752,15 @@ const ChangeRequestsPage: React.FC = () => {
 
   // Filter approved PO children for approved sub-tab
   const filteredApprovedPOChildren = approvedPOChildren.filter(poChild => {
-    const matchesSearch = (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase().trim();
+    const poIdString = `po-${poChild.id}`;
+    const formattedId = (poChild.formatted_id || '').toLowerCase();
+    const matchesSearch = !searchTerm ||
+      (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
+      poChild.project_code?.toLowerCase().includes(searchLower) ||
+      poIdString.includes(searchLower) ||
+      formattedId.includes(searchLower) ||
+      poChild.id?.toString().includes(searchTerm.trim());
     return matchesSearch;
   });
 
@@ -762,7 +794,15 @@ const ChangeRequestsPage: React.FC = () => {
 
   // Filter rejected PO children for rejected sub-tab
   const filteredRejectedPOChildren = rejectedPOChildren.filter(poChild => {
-    const matchesSearch = (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase().trim();
+    const poIdString = `po-${poChild.id}`;
+    const formattedId = (poChild.formatted_id || '').toLowerCase();
+    const matchesSearch = !searchTerm ||
+      (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
+      poChild.project_code?.toLowerCase().includes(searchLower) ||
+      poIdString.includes(searchLower) ||
+      formattedId.includes(searchLower) ||
+      poChild.id?.toString().includes(searchTerm.trim());
     return matchesSearch;
   });
 

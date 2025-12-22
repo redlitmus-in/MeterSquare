@@ -280,7 +280,8 @@ def get_vendor_by_id(vendor_id):
         vendor_data = vendor.to_dict()
 
         # Get vendor products
-        products = VendorProduct.query.filter_by(vendor_id=vendor_id, is_deleted=False).all()
+        # ✅ PERFORMANCE: Limit to 200 products per vendor (use pagination for more)
+        products = VendorProduct.query.filter_by(vendor_id=vendor_id, is_deleted=False).order_by(VendorProduct.product_id.desc()).limit(200).all()
         vendor_data['products'] = [product.to_dict() for product in products]
         vendor_data['products_count'] = len(products)
 
@@ -444,7 +445,8 @@ def get_vendor_products(vendor_id):
         if not vendor:
             return jsonify({"success": False, "error": "Vendor not found"}), 404
 
-        products = VendorProduct.query.filter_by(vendor_id=vendor_id, is_deleted=False).all()
+        # ✅ PERFORMANCE: Limit to 200 products per vendor (use pagination for more)
+        products = VendorProduct.query.filter_by(vendor_id=vendor_id, is_deleted=False).order_by(VendorProduct.product_id.desc()).limit(200).all()
         products_list = [product.to_dict() for product in products]
 
         return jsonify({

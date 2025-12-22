@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   PlusIcon,
@@ -17,6 +17,7 @@ import { useChangeRequestsAutoSync } from '@/hooks/useAutoSync';
 import { changeRequestService } from '@/services/changeRequestService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { API_BASE_URL } from '@/api/config';
+import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 interface POChildInfo {
   id: number;
@@ -56,22 +57,64 @@ const ChangeRequestsPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<ChangeRequest | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false); // Prevents double-submission
+  const [changeRequestsData, setChangeRequestsData] = useState<ChangeRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // ✅ PERFORMANCE: Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<{
+    total_count: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  } | null>(null);
+  const perPage = 50;
 
   // Use centralized API URL from config
   const API_URL = API_BASE_URL;
   const token = localStorage.getItem('access_token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-  // Real-time auto-sync hook
-  const { data: changeRequestsData, isLoading: loading, refetch } = useChangeRequestsAutoSync(
-    async () => {
-      const response = await changeRequestService.getChangeRequests();
+  // ✅ LISTEN TO REAL-TIME UPDATES
+  const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
+
+  // Load change requests with pagination
+  const loadChangeRequests = async (showLoadingSpinner = false) => {
+    if (showLoadingSpinner) setLoading(true);
+    try {
+      const response = await changeRequestService.getChangeRequests(currentPage, perPage);
       if (response.success) {
-        return response.data;
+        setChangeRequestsData(response.data as any);
+        if (response.pagination) {
+          setPagination(response.pagination);
+        }
       }
-      throw new Error(response.message || 'Failed to load change requests');
+    } catch (error) {
+      console.error('Failed to load change requests:', error);
+    } finally {
+      setLoading(false);
     }
-  );
+  };
+
+  // Initial load
+  useEffect(() => {
+    loadChangeRequests(true);
+  }, []);
+
+  // Reload when page changes
+  useEffect(() => {
+    if (!loading) {
+      loadChangeRequests(false);
+    }
+  }, [currentPage]);
+
+  // Reload on real-time updates
+  useEffect(() => {
+    if (changeRequestUpdateTimestamp === 0) return;
+    loadChangeRequests(false);
+  }, [changeRequestUpdateTimestamp]);
+
+  const refetch = () => loadChangeRequests(false);
 
   const changeRequests = useMemo(() => changeRequestsData || [], [changeRequestsData]);
 
@@ -325,6 +368,43 @@ const ChangeRequestsPage: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+
+              {/* ✅ PERFORMANCE: Pagination Controls */}
+              {pagination && pagination.total_pages > 1 && (
+                <div className="mt-4 flex items-center justify-between border-t border-gray-200 pt-4 px-6">
+                  <div className="text-sm text-gray-600">
+                    Showing {Math.min((currentPage - 1) * perPage + 1, pagination.total_count)}-
+                    {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={!pagination.has_prev}
+                      className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                        pagination.has_prev
+                          ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      Previous
+                    </button>
+                    <span className="px-4 py-2 text-sm text-gray-600 flex items-center">
+                      Page {currentPage} of {pagination.total_pages}
+                    </span>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
+                      disabled={!pagination.has_next}
+                      className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                        pagination.has_next
+                          ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </motion.div>

@@ -737,11 +737,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     const isFallback = matchedVendors.length === 0;
     const vendorsToReturn = matchedVendors;  // Only exact matches, no fallback
 
-    // Apply search filter
+    // Apply search filter (includes vendor ID search)
     const filteredVendors = vendorsToReturn.filter(vendor => {
       if (!searchTerm) return true;
-      return vendor.company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        vendor.category?.toLowerCase().includes(searchTerm.toLowerCase());
+      const searchLower = searchTerm.toLowerCase().trim();
+      // ✅ Search by ID (V-123, 123), company name, or category
+      const vendorIdString = `v-${vendor.vendor_id}`;
+      return vendor.company_name.toLowerCase().includes(searchLower) ||
+        vendor.category?.toLowerCase().includes(searchLower) ||
+        vendorIdString.includes(searchLower) ||
+        vendor.vendor_id?.toString().includes(searchTerm.trim());
     });
 
     return { vendors: filteredVendors, isFallback };

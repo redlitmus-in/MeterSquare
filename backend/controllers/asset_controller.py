@@ -2228,20 +2228,42 @@ def get_asset_tracking_history(tracking_code):
             'maintenance': []
         }
 
-        # Get all related movements
-        for req in requests:
-            movements = AssetMovement.query.filter(
-                AssetMovement.category_id == req.category_id,
-                AssetMovement.project_id == req.project_id
-            ).order_by(AssetMovement.created_at.desc()).all()
-            result['movements'].extend([m.to_dict() for m in movements])
+        # ✅ PERFORMANCE: Batch load movements and maintenance to avoid N+1 queries
+        # Collect unique category/project combinations and item_ids
+        category_project_pairs = set()
+        item_ids = set()
+        category_ids = set()
 
-            # Get maintenance records
+        for req in requests:
+            category_project_pairs.add((req.category_id, req.project_id))
             if req.item_id:
-                maintenance = AssetMaintenance.query.filter_by(item_id=req.item_id).all()
+                item_ids.add(req.item_id)
             else:
-                maintenance = AssetMaintenance.query.filter_by(category_id=req.category_id).all()
-            result['maintenance'].extend([m.to_dict() for m in maintenance])
+                category_ids.add(req.category_id)
+
+        # Batch query movements (single query instead of N queries)
+        from sqlalchemy import or_, and_
+        if category_project_pairs:
+            movement_conditions = [
+                and_(AssetMovement.category_id == cat_id, AssetMovement.project_id == proj_id)
+                for cat_id, proj_id in category_project_pairs
+            ]
+            movements = AssetMovement.query.filter(
+                or_(*movement_conditions)
+            ).order_by(AssetMovement.created_at.desc()).limit(200).all()
+            result['movements'] = [m.to_dict() for m in movements]
+
+        # Batch query maintenance records (single query instead of N queries)
+        maintenance_records = []
+        if item_ids:
+            maintenance_records.extend(
+                AssetMaintenance.query.filter(AssetMaintenance.item_id.in_(item_ids)).limit(100).all()
+            )
+        if category_ids:
+            maintenance_records.extend(
+                AssetMaintenance.query.filter(AssetMaintenance.category_id.in_(category_ids)).limit(100).all()
+            )
+        result['maintenance'] = [m.to_dict() for m in maintenance_records]
 
         return jsonify(result), 200
 

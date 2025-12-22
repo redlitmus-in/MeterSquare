@@ -45,7 +45,7 @@ import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 import PreliminaryPurchaseForm from '@/components/change-requests/PreliminaryPurchaseForm';
-import { useChangeRequestsAutoSync } from '@/hooks/useAutoSync';
+import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 import { permissions } from '@/utils/rolePermissions';
 
 interface Buyer {
@@ -180,6 +180,21 @@ const ChangeRequestsPage: React.FC = () => {
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [selectedBuyerId, setSelectedBuyerId] = useState<number | null>(null);
 
+  // ✅ PERFORMANCE: Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<{
+    total_count: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  } | null>(null);
+  const perPage = 50;
+
+  // State for data loading
+  const [changeRequestsData, setChangeRequestsData] = useState<ChangeRequestItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
+
   // Lock body scroll when modals are open
   React.useEffect(() => {
     if (showBuyerSelectionModal || showExtraForm) {
@@ -192,16 +207,48 @@ const ChangeRequestsPage: React.FC = () => {
     };
   }, [showBuyerSelectionModal, showExtraForm]);
 
-  // Real-time auto-sync hook - no manual polling needed
-  const { data: changeRequestsData, isLoading, isFetching, refetch } = useChangeRequestsAutoSync(
-    async () => {
-      const response = await changeRequestService.getChangeRequests();
+  // ✅ LISTEN TO REAL-TIME UPDATES
+  const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
+
+  // Load change requests with pagination
+  const loadChangeRequests = async (showLoadingSpinner = false) => {
+    if (showLoadingSpinner) setIsLoading(true);
+    setIsFetching(true);
+    try {
+      const response = await changeRequestService.getChangeRequests(currentPage, perPage);
       if (response.success) {
-        return response.data;
+        setChangeRequestsData(response.data);
+        if (response.pagination) {
+          setPagination(response.pagination);
+        }
       }
-      throw new Error(response.message || 'Failed to load change requests');
+    } catch (error) {
+      console.error('Failed to load change requests:', error);
+    } finally {
+      setIsLoading(false);
+      setIsFetching(false);
     }
-  );
+  };
+
+  // Initial load
+  useEffect(() => {
+    loadChangeRequests(true);
+  }, []);
+
+  // Reload when page changes
+  useEffect(() => {
+    if (!isLoading) {
+      loadChangeRequests(false);
+    }
+  }, [currentPage]);
+
+  // Reload on real-time updates
+  useEffect(() => {
+    if (changeRequestUpdateTimestamp === 0) return;
+    loadChangeRequests(false);
+  }, [changeRequestUpdateTimestamp]);
+
+  const refetch = () => loadChangeRequests(false);
 
   const changeRequests = useMemo(() => {
     const allRequests = changeRequestsData || [];
@@ -522,8 +569,15 @@ const ChangeRequestsPage: React.FC = () => {
 
   const filteredRequests = changeRequests.filter(req => {
     const projectName = req.project_name || req.boq_name || '';
-    const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase().trim();
+    // ✅ Search by ID (CR-123, 123), project code (MSQ26), project name, or requester name
+    const idString = `cr-${req.cr_id}`;
+    const matchesSearch = !searchTerm ||
+                         projectName.toLowerCase().includes(searchLower) ||
+                         req.requested_by_name.toLowerCase().includes(searchLower) ||
+                         req.project_code?.toLowerCase().includes(searchLower) ||
+                         idString.includes(searchLower) ||
+                         req.cr_id.toString().includes(searchTerm.trim());
 
     let matchesTab = false;
     if (isExtraMaterial) {
@@ -2062,6 +2116,43 @@ const ChangeRequestsPage: React.FC = () => {
               </TabsContent>
             )}
           </Tabs>
+
+          {/* ✅ PERFORMANCE: Pagination Controls */}
+          {pagination && pagination.total_pages > 1 && (
+            <div className="mt-6 flex items-center justify-between border-t border-gray-200 pt-4">
+              <div className="text-sm text-gray-600">
+                Showing {Math.min((currentPage - 1) * perPage + 1, pagination.total_count)}-
+                {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={!pagination.has_prev}
+                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                    pagination.has_prev
+                      ? 'bg-[#243d8a] hover:bg-[#1e3270] text-white'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  Previous
+                </button>
+                <span className="px-4 py-2 text-sm text-gray-600 flex items-center">
+                  Page {currentPage} of {pagination.total_pages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
+                  disabled={!pagination.has_next}
+                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                    pagination.has_next
+                      ? 'bg-[#243d8a] hover:bg-[#1e3270] text-white'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

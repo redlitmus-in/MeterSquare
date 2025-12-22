@@ -1246,7 +1246,9 @@ def get_boq(boq_id):
         # Fetch project details
         project = Project.query.filter_by(project_id=boq.project_id).first()
         # Get BOQ history to track which items were added via new_purchase
-        boq_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.asc()).all()
+        # ✅ PERFORMANCE: Limit history to last 200 entries (sufficient for tracking new purchases)
+        boq_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).limit(200).all()
+        boq_history.reverse()  # Restore ascending order for processing
         # Track newly added items using master_item_id and item_name from history
         new_purchase_item_ids = set()  # Track by master_item_id
         new_purchase_item_names = set()  # Track by item_name as fallback
@@ -1896,8 +1898,9 @@ def get_all_boq():
             log.info(f"📊 Processing {len(boqs)} BOQs for user {user_id} (role: {user_role})")
 
         # OPTIMIZATION: Fetch all BOQ histories at once to avoid N+1 queries
+        # ✅ PERFORMANCE: Limit to 1000 most recent histories across all BOQs
         boq_ids = [boq.boq_id for boq, _ in boqs]
-        all_histories = BOQHistory.query.filter(BOQHistory.boq_id.in_(boq_ids)).order_by(BOQHistory.boq_id, BOQHistory.created_at.desc()).all() if boq_ids else []
+        all_histories = BOQHistory.query.filter(BOQHistory.boq_id.in_(boq_ids)).order_by(BOQHistory.boq_id, BOQHistory.created_at.desc()).limit(1000).all() if boq_ids else []
 
         # Group histories by boq_id for quick lookup
         history_by_boq = {}
@@ -3966,7 +3969,8 @@ def get_sub_item_labours(sub_item_id):
 
 def get_all_item():
     try:
-        boq_items = MasterItem.query.filter_by(is_deleted=False).all()
+        # ✅ PERFORMANCE: Limit to 500 items (use search for larger datasets)
+        boq_items = MasterItem.query.filter_by(is_deleted=False).order_by(MasterItem.item_name.asc()).limit(500).all()
         item_details = []
         for item in boq_items:
             item_details.append({
@@ -4766,7 +4770,8 @@ def get_sub_item(item_id):
 def get_custom_units():
     """Get all custom units (non-deleted)"""
     try:
-        custom_units = CustomUnit.query.filter_by(is_deleted=False).order_by(CustomUnit.unit_label.asc()).all()
+        # ✅ PERFORMANCE: Limit to 200 units (typically much smaller dataset)
+        custom_units = CustomUnit.query.filter_by(is_deleted=False).order_by(CustomUnit.unit_label.asc()).limit(200).all()
 
         units_data = []
         for unit in custom_units:

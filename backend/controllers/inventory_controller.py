@@ -1064,8 +1064,8 @@ def get_sent_internal_requests():
         if project_id:
             query = query.filter_by(project_id=int(project_id))
 
-        # Order by latest first
-        requests = query.order_by(InternalMaterialRequest.created_at.desc()).all()
+        # Order by latest first - PERFORMANCE: Limit to 200 records max
+        requests = query.order_by(InternalMaterialRequest.created_at.desc()).limit(200).all()
 
         # Enrich with project and material details
         result = []
@@ -1126,8 +1126,8 @@ def get_all_internal_material_requests():
         if status:
             query = query.filter_by(status=status.upper())
 
-        # Order by latest first
-        requests = query.order_by(InternalMaterialRequest.created_at.desc()).all()
+        # Order by latest first - PERFORMANCE: Limit to 200 records max
+        requests = query.order_by(InternalMaterialRequest.created_at.desc()).limit(200).all()
 
         # Enrich with project details
         result = []
@@ -1669,8 +1669,8 @@ def get_all_material_returns():
         if end_date:
             query = query.filter(MaterialReturn.created_at <= end_date)
 
-        # Order by latest first
-        returns = query.order_by(MaterialReturn.created_at.desc()).all()
+        # Order by latest first - PERFORMANCE: Limit to 200 records max
+        returns = query.order_by(MaterialReturn.created_at.desc()).limit(200).all()
 
         # Enrich with project details
         result = []
@@ -2927,7 +2927,8 @@ def get_delivery_notes_for_se():
             # By default, show issued/dispatched and in-transit notes (not draft or cancelled)
             query = query.filter(MaterialDeliveryNote.status.in_(['ISSUED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'PARTIAL']))
 
-        notes = query.order_by(MaterialDeliveryNote.created_at.desc()).all()
+        # PERFORMANCE: Limit to 200 records max
+        notes = query.order_by(MaterialDeliveryNote.created_at.desc()).limit(200).all()
 
         # Enrich with project details
         project_map = {p.project_id: {'project_name': p.project_name, 'project_code': p.project_code} for p in assigned_projects}
@@ -3197,7 +3198,8 @@ def get_all_return_delivery_notes():
         if end_date:
             query = query.filter(ReturnDeliveryNote.return_date <= end_date)
 
-        rdns = query.order_by(ReturnDeliveryNote.created_at.desc()).all()
+        # PERFORMANCE: Limit to 200 records max
+        rdns = query.order_by(ReturnDeliveryNote.created_at.desc()).limit(200).all()
 
         result = []
         for rdn in rdns:

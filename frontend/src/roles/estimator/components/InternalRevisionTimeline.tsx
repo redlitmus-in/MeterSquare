@@ -492,11 +492,17 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     return { label: status, color: 'bg-gray-100 text-gray-700' };
   };
 
-  const filteredBOQs = boqs.filter(boq =>
-    boq.boq_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    boq.project?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    boq.project?.client?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredBOQs = boqs.filter(boq => {
+    const searchLower = searchTerm.toLowerCase().trim();
+    // ✅ Search by ID (B-123, 123), BOQ name, project name, or client
+    const boqIdString = `b-${boq.boq_id || boq.id}`;
+    return !searchTerm ||
+      boq.boq_name?.toLowerCase().includes(searchLower) ||
+      boq.project?.name?.toLowerCase().includes(searchLower) ||
+      boq.project?.client?.toLowerCase().includes(searchLower) ||
+      boqIdString.includes(searchLower) ||
+      (boq.boq_id || boq.id)?.toString().includes(searchTerm.trim());
+  });
 
   // Toggle expansion for a revision
   const toggleRevisionExpansion = (index: number) => {

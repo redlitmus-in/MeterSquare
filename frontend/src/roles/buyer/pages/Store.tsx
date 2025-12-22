@@ -145,8 +145,14 @@ const Store: React.FC = () => {
     if (!storeItems) return [];
 
     return storeItems.filter(item => {
-      const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           item.description?.toLowerCase().includes(searchTerm.toLowerCase());
+      const searchLower = searchTerm.toLowerCase().trim();
+      // ✅ Search by ID (S-123, 123), name, or description
+      const itemIdString = `s-${item.id}`;
+      const matchesSearch = !searchTerm ||
+                           item.name.toLowerCase().includes(searchLower) ||
+                           item.description?.toLowerCase().includes(searchLower) ||
+                           itemIdString.includes(searchLower) ||
+                           item.id?.toString().includes(searchTerm.trim());
       const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
 
       return matchesSearch && matchesCategory;

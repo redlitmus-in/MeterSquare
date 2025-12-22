@@ -2,6 +2,8 @@ from flask import Blueprint, g, jsonify
 from controllers.buyer_controller import *
 from controllers.auth_controller import jwt_required
 from controllers.upload_image_controller import *
+from utils.response_cache import cached_response, cache_dashboard_data
+
 # Create blueprint with URL prefix
 buyer_routes = Blueprint('buyer_routes', __name__, url_prefix='/api/buyer')
 
@@ -71,6 +73,7 @@ def check_buyer_td_or_admin_access():
 # Dashboard route
 @buyer_routes.route('/dashboard', methods=['GET'])
 @jwt_required
+@cache_dashboard_data(timeout=30)  # Cache dashboard for 30 seconds
 def get_buyer_dashboard_route():
     """Get buyer dashboard statistics (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()
@@ -92,6 +95,7 @@ def get_buyer_boq_materials_route():
 
 @buyer_routes.route('/new-purchases', methods=['GET'])
 @jwt_required
+@cached_response(timeout=15, key_prefix='buyer_pending')  # Short cache for frequently updated data
 def get_buyer_pending_purchases_route():
     """Get pending purchases (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()
@@ -102,6 +106,7 @@ def get_buyer_pending_purchases_route():
 
 @buyer_routes.route('/completed-purchases', methods=['GET'])
 @jwt_required
+@cached_response(timeout=30, key_prefix='buyer_completed')  # Longer cache for historical data
 def get_buyer_completed_purchases_route():
     """Get completed purchases (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()
@@ -112,6 +117,7 @@ def get_buyer_completed_purchases_route():
 
 @buyer_routes.route('/rejected-purchases', methods=['GET'])
 @jwt_required
+@cached_response(timeout=30, key_prefix='buyer_rejected')  # Longer cache for historical data
 def get_buyer_rejected_purchases_route():
     """Get rejected purchases (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()

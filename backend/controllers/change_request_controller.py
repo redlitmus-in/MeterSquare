@@ -1408,7 +1408,8 @@ def get_all_change_requests():
             change_requests = ordered_query.offset(offset).limit(page_size).all()
             log.info(f"📊 Processing page {page} ({len(change_requests)}/{total_count} CRs) for user {user_id}")
         else:
-            change_requests = ordered_query.all()
+            # PERFORMANCE: Default limit when no pagination to prevent loading huge datasets
+            change_requests = ordered_query.limit(200).all()
             total_count = len(change_requests)
 
         # 🔍 DEBUG: Log what we're returning for buyer role

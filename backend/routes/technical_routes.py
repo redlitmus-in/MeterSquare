@@ -2,6 +2,7 @@ from flask import Blueprint, g, jsonify
 from controllers.projectmanager_controller import *
 from utils.authentication import jwt_required
 from controllers.techical_director_controller import *
+from utils.response_cache import cached_response, cache_dashboard_data
 
 technical_routes = Blueprint('technical_routes', __name__, url_prefix='/api')
 
@@ -26,6 +27,7 @@ def check_estimator_td_or_admin_access():
 # BOQ Management
 @technical_routes.route('/td_boqs', methods=['GET'])
 @jwt_required
+@cached_response(timeout=30, key_prefix='td_boqs')  # Cache for 30 seconds
 def get_all_td_boqs_route():
     """TD or Admin views all BOQs"""
     access_check = check_td_or_admin_access()
@@ -54,6 +56,7 @@ def create_pm_route():
 #All project manager listout assign and unassign project
 @technical_routes.route('/all_pm', methods=['GET'])
 @jwt_required
+@cached_response(timeout=60, key_prefix='all_pm')  # Cache for 60 seconds (rarely changes)
 def get_all_pm_route():
     """TD or Admin views all PMs"""
     access_check = check_td_or_admin_access()
@@ -194,6 +197,7 @@ def get_td_se_boq_vendor_requests_route():
 # Dashboard Statistics
 @technical_routes.route('/td-dashboard-stats', methods=['GET'])
 @jwt_required
+@cache_dashboard_data(timeout=30)  # Cache dashboard for 30 seconds
 def get_td_dashboard_stats_route():
     """Get comprehensive dashboard statistics for Technical Director"""
     access_check = check_td_or_admin_access()

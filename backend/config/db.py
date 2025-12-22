@@ -68,6 +68,10 @@ def initialize_db(app):
         "pool_recycle": 3600,      # ✅ Recycle connections after 1 hour (was 30 min)
         "pool_pre_ping": True,     # ✅ NEW: Test connections before using (prevents stale connections)
         "echo_pool": environment == "development",  # ✅ Debug pool in dev only
+        # ✅ PERFORMANCE: Query timeout to prevent long-running queries from blocking
+        "connect_args": {
+            "options": "-c statement_timeout=30000"  # 30 second query timeout
+        }
     }
 
     # For Supabase or connection-limited databases, use smaller pool

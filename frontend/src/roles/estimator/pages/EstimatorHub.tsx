@@ -536,14 +536,20 @@ const EstimatorHub: React.FC = () => {
         });
       });
 
-      // Then apply search filter
+      // Then apply search filter (includes ID and project code search)
       if (searchTerm) {
-        filteredProj = filteredProj.filter(project =>
-          project.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          project.client?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          project.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          project.description?.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+        const searchLower = searchTerm.toLowerCase().trim();
+        filteredProj = filteredProj.filter(project => {
+          // ✅ Search by ID (P-123, 123), project code (MSQ26), project name, client, location, description
+          const projectIdString = `p-${project.project_id}`;
+          return project.project_name?.toLowerCase().includes(searchLower) ||
+            project.client?.toLowerCase().includes(searchLower) ||
+            project.location?.toLowerCase().includes(searchLower) ||
+            project.description?.toLowerCase().includes(searchLower) ||
+            project.project_code?.toLowerCase().includes(searchLower) ||
+            projectIdString.includes(searchLower) ||
+            project.project_id?.toString().includes(searchTerm.trim());
+        });
       }
 
       setFilteredProjects(filteredProj);
@@ -833,12 +839,18 @@ const EstimatorHub: React.FC = () => {
       let filteredProj = [...projects];
 
       if (searchTerm) {
-        filteredProj = filteredProj.filter(project =>
-          project.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          project.client?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          project.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          project.description?.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+        const searchLower = searchTerm.toLowerCase().trim();
+        filteredProj = filteredProj.filter(project => {
+          // ✅ Search by ID (P-123, 123), project code (MSQ26), project name, client, location, description
+          const projectIdString = `p-${project.project_id}`;
+          return project.project_name?.toLowerCase().includes(searchLower) ||
+            project.client?.toLowerCase().includes(searchLower) ||
+            project.location?.toLowerCase().includes(searchLower) ||
+            project.description?.toLowerCase().includes(searchLower) ||
+            project.project_code?.toLowerCase().includes(searchLower) ||
+            projectIdString.includes(searchLower) ||
+            project.project_id?.toString().includes(searchTerm.trim());
+        });
       }
 
       setFilteredProjects(filteredProj);
@@ -903,13 +915,19 @@ const EstimatorHub: React.FC = () => {
         );
       }
 
-      // Filter by search term
+      // Filter by search term (includes ID and project code search)
       if (searchTerm) {
-        filtered = filtered.filter(boq =>
-          boq.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          boq.project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          boq.project.client.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+        const searchLower = searchTerm.toLowerCase().trim();
+        filtered = filtered.filter(boq => {
+          // ✅ Search by ID (B-123, 123), project code (MSQ26), title, project name, or client
+          const boqIdString = `b-${boq.id}`;
+          return boq.title?.toLowerCase().includes(searchLower) ||
+            boq.project.name.toLowerCase().includes(searchLower) ||
+            boq.project.client.toLowerCase().includes(searchLower) ||
+            boq.project_code?.toLowerCase().includes(searchLower) ||
+            boqIdString.includes(searchLower) ||
+            boq.id?.toString().includes(searchTerm.trim());
+        });
       }
 
       setFilteredBOQs(filtered);
