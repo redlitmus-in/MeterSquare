@@ -135,11 +135,6 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   // Track last initialized CR ID to avoid reinitializing with stale prop data
   const lastInitializedCrId = useRef<number | null>(null);
 
-  // Purchase summary note - single note for entire purchase (applies to all vendors)
-  const [purchaseSummaryNote, setPurchaseSummaryNote] = useState<string>('');
-  const [isSavingNote, setIsSavingNote] = useState(false);
-  const [savedNote, setSavedNote] = useState<string>(''); // Track last saved version
-
   // Per-material supplier notes - specific notes for each individual material
   const [materialNotes, setMaterialNotes] = useState<Record<string, string>>({});
   const [editingMaterialNote, setEditingMaterialNote] = useState<string | null>(null);
@@ -176,16 +171,6 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       );
     });
   };
-
-  // Initialize purchase summary note when modal opens
-  useEffect(() => {
-    if (!isOpen || !purchase) return;
-
-    // Load supplier notes from purchase data (single note for entire purchase)
-    const initialNote = purchase.supplier_notes || '';
-    setPurchaseSummaryNote(initialNote);
-    setSavedNote(initialNote);
-  }, [isOpen, purchase?.cr_id]);
 
   // Initialize per-material notes from purchase data
   useEffect(() => {
@@ -1004,31 +989,6 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     });
   };
 
-  // Save purchase summary note
-  const handleSavePurchaseNote = async () => {
-    try {
-      setIsSavingNote(true);
-
-      // Call the backend API to update supplier notes
-      await buyerService.updateSupplierNotes(purchase.cr_id, purchaseSummaryNote.trim());
-
-      // Update saved state
-      setSavedNote(purchaseSummaryNote.trim());
-
-      toast.success('Purchase notes saved successfully');
-
-      // Notify parent to refresh data
-      if (onNotesUpdated) {
-        onNotesUpdated();
-      }
-    } catch (error: any) {
-      console.error('Error saving purchase notes:', error);
-      toast.error(error.response?.data?.error || 'Failed to save notes');
-    } finally {
-      setIsSavingNote(false);
-    }
-  };
-
   // Save per-material supplier notes
   const handleSaveMaterialNote = async (materialName: string) => {
     try {
@@ -1096,7 +1056,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       const response = await buyerService.selectVendorForMaterial(
         purchase.cr_id,
         vendorMaterialSelections,
-        purchaseSummaryNote || undefined // Include purchase summary notes
+        undefined // No purchase-level notes, only per-material notes
       );
 
       toast.success(`${vendorMaterialSelections.length} material(s) sent to TD for ${vendorName}!`);
@@ -1221,7 +1181,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         const vendorGroups = Array.from(vendorGroupsMap.entries()).map(([vendorId, materials]) => ({
           vendor_id: vendorId,
           vendor_name: materials[0].selected_vendors[0].vendor_name,
-          supplier_notes: purchaseSummaryNote || undefined, // Include purchase summary notes
+          supplier_notes: undefined, // No purchase-level notes, only per-material notes
           materials: materials.map(m => {
             const selectedVendor = m.selected_vendors[0];
 
@@ -1327,11 +1287,11 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           item_name: purchase.item_name
         }));
 
-      // Use purchase summary notes for single-vendor scenario
+      // Single-vendor scenario
       const response = await buyerService.selectVendorForMaterial(
         purchase.cr_id,
         materialSelections,
-        purchaseSummaryNote || undefined // Include purchase summary notes
+        undefined // No purchase-level notes, only per-material notes
       );
 
       // Show different message based on mode and response type
@@ -1496,65 +1456,6 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   </div>
                 </div>
 
-                {/* Purchase Summary Note Section - Only for Buyer mode */}
-                {viewMode === 'buyer' && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3 }}
-                    className="mb-6 p-5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl shadow-sm"
-                  >
-                    <div className="flex items-start gap-3 mb-3">
-                      <FileText className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
-                      <div className="flex-1">
-                        <h3 className="text-sm font-semibold text-gray-900 mb-1">
-                          Purchase Summary / Notes to Supplier
-                        </h3>
-                        <p className="text-xs text-gray-600">
-                          Add general notes, requirements, or instructions for this purchase order. This will be included in the LPO PDF and vendor email.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <textarea
-                        value={purchaseSummaryNote}
-                        onChange={(e) => setPurchaseSummaryNote(e.target.value)}
-                        placeholder="Example: Please ensure materials are delivered by [date]. All items must comply with [specification]. Delivery address: [location]..."
-                        className="w-full min-h-[100px] px-4 py-3 text-sm border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-transparent resize-y bg-white placeholder:text-gray-400"
-                        rows={4}
-                      />
-
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs text-gray-500">
-                          {purchaseSummaryNote.length > 0 && (
-                            <span className={purchaseSummaryNote === savedNote ? 'text-green-600' : 'text-amber-600'}>
-                              {purchaseSummaryNote === savedNote ? '✓ Saved' : '• Unsaved changes'}
-                            </span>
-                          )}
-                        </div>
-
-                        <Button
-                          onClick={handleSavePurchaseNote}
-                          disabled={isSavingNote || purchaseSummaryNote === savedNote}
-                          className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        >
-                          {isSavingNote ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              Saving...
-                            </>
-                          ) : (
-                            <>
-                              <Save className="w-4 h-4" />
-                              Save Notes
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
 
                 {/* AI-Powered Info Banner - Floating Light Navy & Red Theme - Only for Buyer mode */}
                 {viewMode === 'buyer' && (
@@ -4207,15 +4108,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
                             // Note: material_vendor_selections already saved when "Send This Vendor to TD" was clicked
 
-                            // Include purchase summary notes
-                            console.log('🔍 [DEBUG] Including purchase summary notes for vendor', sentVendorId, ':', purchaseSummaryNote);
-
                             const response = await buyerService.createPOChildren(
                               purchase.cr_id,
                               [{
                                 vendor_id: sentVendorId,
                                 vendor_name: sentVendorName,
-                                supplier_notes: purchaseSummaryNote || undefined,  // Include purchase summary notes
+                                supplier_notes: undefined,  // No purchase-level notes, only per-material notes
                                 materials: materials
                               }],
                               submissionGroupId
