@@ -868,6 +868,27 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       </div>
                     </div>
 
+                    {/* Supplier Notes */}
+                    {changeRequest.supplier_notes && (
+                      <div className="px-4 pb-4">
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                          <div className="flex items-start gap-2">
+                            <div className="w-5 h-5 rounded bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                              <svg className="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-semibold text-blue-900 mb-1">Notes for Supplier</div>
+                              <div className="text-sm text-blue-800 whitespace-pre-wrap break-words italic">
+                                "{changeRequest.supplier_notes}"
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* View Competitor Vendors Button - Show to TD if comparison data exists */}
                     {userIsTechnicalDirector && changeRequest.material_vendor_selections && Object.keys(changeRequest.material_vendor_selections).length > 0 && (
                       <div className="px-4 pb-4">

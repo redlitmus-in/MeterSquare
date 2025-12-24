@@ -13,6 +13,7 @@ from config.logging import get_logger
 from datetime import datetime
 import os
 import json
+import re
 from supabase import create_client, Client
 from utils.comprehensive_notification_service import notification_service
 
@@ -51,9 +52,18 @@ def has_buyer_permissions(user_role: str) -> bool:
     return is_buyer_role(user_role) or is_technical_director(user_role) or is_admin_role(user_role)
 
 
-# Configuration constants
-supabase_url = os.environ.get('SUPABASE_URL')
-supabase_key = os.environ.get('SUPABASE_KEY')
+# ============================================================================
+# VALIDATION HELPER FUNCTIONS
+# ============================================================================
+
+# Configuration constants based on environment
+environment = os.environ.get('ENVIRONMENT', 'production')
+if environment == 'development':
+    supabase_url = os.environ.get('DEV_SUPABASE_URL')
+    supabase_key = os.environ.get('DEV_SUPABASE_KEY')
+else:
+    supabase_url = os.environ.get('SUPABASE_URL')
+    supabase_key = os.environ.get('SUPABASE_KEY')
 SUPABASE_BUCKET = "file_upload"
 # Pre-build base URL for public files
 PUBLIC_URL_BASE = f"{supabase_url}/storage/v1/object/public/{SUPABASE_BUCKET}/"
@@ -163,13 +173,10 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
     """
     from models.vendor import VendorProduct
 
-    print(f">>> process_materials_with_negotiated_prices: START for CR {cr.cr_id}")
     sub_items_data = cr.sub_items_data or cr.materials_data or []
-    print(f">>> process_materials_with_negotiated_prices: Found {len(sub_items_data)} sub_items")
     cr_total = 0
     materials_list = []
     material_vendor_selections = cr.material_vendor_selections or {}
-    print(f">>> process_materials_with_negotiated_prices: material_vendor_selections has {len(material_vendor_selections)} entries")
 
     # Build vendor product price lookup by vendor_id
     # Get unique vendor IDs from material selections
@@ -277,9 +284,6 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                             display_unit_price = original_unit_price  # Fall back to BOQ only if no vendor price
 
                         material_total = float(quantity) * float(display_unit_price)
-
-                        # Debug logging for price selection
-                        print(f">>> process_materials: '{material_name}' - BOQ: {original_unit_price}, vendor_rate: {vendor_rate_from_selection}, vendor_catalog: {vendor_product_price}, effective: {effective_price}, display: {display_unit_price}, brand: '{vendor_brand}', spec: '{vendor_specification}'")
 
                         # FIXED: Use vendor price for cr_total when approved
                         cr_total += material_total
@@ -450,9 +454,6 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                 "boq_unit_price": original_unit_price  # For PDF comparison
             })
 
-    print(f">>> process_materials_with_negotiated_prices: RETURN {len(materials_list)} materials, total={cr_total}")
-    for mat in materials_list:
-        print(f">>>   - {mat.get('material_name')}: unit_price={mat.get('unit_price')}, negotiated_price={mat.get('negotiated_price')}, brand={mat.get('brand', 'N/A')}")
     return materials_list, cr_total
 
 def create_buyer():
@@ -1447,6 +1448,9 @@ def get_buyer_pending_purchases():
                 "materials": materials_list,
                 "materials_count": len(materials_list),
                 "total_cost": round(cr_total, 2),
+                "requested_by_user_id": cr.requested_by_user_id if cr.requested_by_user_id else None,
+                "requested_by_name": cr.requested_by_name if cr.requested_by_name else None,
+                "requested_by_role": cr.requested_by_role if cr.requested_by_role else None,
                 "approved_by": cr.approved_by_user_id,
                 "approved_at": cr.approval_date.isoformat() if cr.approval_date else None,
                 "created_at": cr.created_at.isoformat() if cr.created_at else None,
@@ -1736,6 +1740,9 @@ def get_buyer_completed_purchases():
                 "materials": materials_list,
                 "materials_count": len(materials_list),
                 "total_cost": round(cr_total, 2),
+                "requested_by_user_id": cr.requested_by_user_id if cr.requested_by_user_id else None,
+                "requested_by_name": cr.requested_by_name if cr.requested_by_name else None,
+                "requested_by_role": cr.requested_by_role if cr.requested_by_role else None,
                 "approved_by": cr.approved_by_user_id,
                 "approved_at": cr.approval_date.isoformat() if cr.approval_date else None,
                 "created_at": cr.created_at.isoformat() if cr.created_at else None,
@@ -1753,7 +1760,7 @@ def get_buyer_completed_purchases():
                 "vendor_category": vendor_details['category'],
                 "vendor_street_address": vendor_details['street_address'],
                 "vendor_city": vendor_details['city'],
-                "vendor_state": vendor_details['state'],
+  "vendor_state": vendor_details['state'],
                 "vendor_country": vendor_details['country'],
                 "vendor_gst_number": vendor_details['gst_number'],
                 "vendor_selected_by_name": vendor_details['selected_by_name'],
@@ -1771,7 +1778,9 @@ def get_buyer_completed_purchases():
         # POChild already imported above
 
         if is_admin_viewing:
-            completed_po_children = POChild.query.filter(
+            completed_po_children = POChild.query.options(
+                joinedload(POChild.parent_cr)
+            ).filter(
                 POChild.status.in_(['purchase_completed', 'routed_to_store']),
                 POChild.is_deleted == False
             ).order_by(
@@ -1780,7 +1789,9 @@ def get_buyer_completed_purchases():
             ).all()
         else:
             # Get POChildren where parent CR is assigned to this buyer
-            completed_po_children = POChild.query.join(
+            completed_po_children = POChild.query.options(
+                joinedload(POChild.parent_cr)
+            ).join(
                 ChangeRequest, POChild.parent_cr_id == ChangeRequest.cr_id
             ).filter(
                 POChild.status.in_(['purchase_completed', 'routed_to_store']),
@@ -1793,7 +1804,7 @@ def get_buyer_completed_purchases():
 
         completed_po_children_list = []
         for po_child in completed_po_children:
-            parent_cr = ChangeRequest.query.get(po_child.parent_cr_id)
+            parent_cr = po_child.parent_cr  # Use preloaded relationship
             project = Project.query.get(parent_cr.project_id) if parent_cr else None
             boq = BOQ.query.get(po_child.boq_id) if po_child.boq_id else (BOQ.query.get(parent_cr.boq_id) if parent_cr and parent_cr.boq_id else None)
 
@@ -1874,6 +1885,8 @@ def get_buyer_rejected_purchases():
         # Get rejected change requests:
         # 1. status='rejected' (rejected by TD)
         # 2. vendor_selection_status='rejected' (vendor rejected by TD)
+        # EXCLUDE: CRs that have been split into POChildren (status='split_to_sub_crs')
+        #          These are handled separately via td_rejected_po_children
         if is_admin_viewing:
             # ✅ PERFORMANCE: Add eager loading + pagination
             paginated_result = ChangeRequest.query.options(
@@ -1885,6 +1898,7 @@ def get_buyer_rejected_purchases():
                     ChangeRequest.status == 'rejected',
                     ChangeRequest.vendor_selection_status == 'rejected'
                 ),
+                ChangeRequest.status != 'split_to_sub_crs',  # Exclude split CRs - POChildren are handled separately
                 ChangeRequest.is_deleted == False
             ).order_by(
                 ChangeRequest.updated_at.desc().nulls_last(),
@@ -1903,6 +1917,7 @@ def get_buyer_rejected_purchases():
                     ChangeRequest.status == 'rejected',
                     ChangeRequest.vendor_selection_status == 'rejected'
                 ),
+                ChangeRequest.status != 'split_to_sub_crs',  # Exclude split CRs - POChildren are handled separately
                 ChangeRequest.assigned_to_buyer_user_id == buyer_id,
                 ChangeRequest.is_deleted == False
             ).order_by(
@@ -2036,6 +2051,9 @@ def get_buyer_rejected_purchases():
                 "materials": materials_list,
                 "materials_count": len(materials_list),
                 "total_cost": round(cr_total, 2),
+                "requested_by_user_id": cr.requested_by_user_id if cr.requested_by_user_id else None,
+                "requested_by_name": cr.requested_by_name if cr.requested_by_name else None,
+                "requested_by_role": cr.requested_by_role if cr.requested_by_role else None,
                 "created_at": cr.created_at.isoformat() if cr.created_at else None,
                 "status": cr.status,
                 "rejection_type": rejection_type,
@@ -2062,7 +2080,9 @@ def get_buyer_rejected_purchases():
         td_rejected_po_children = []
         try:
             if is_admin_viewing:
-                po_children = POChild.query.filter(
+                po_children = POChild.query.options(
+                    joinedload(POChild.parent_cr)
+                ).filter(
                     or_(
                         POChild.status == 'td_rejected',
                         POChild.vendor_selection_status == 'td_rejected'
@@ -2074,7 +2094,9 @@ def get_buyer_rejected_purchases():
                 ).all()
             else:
                 # Query by vendor_selected_by_buyer_id OR by parent CR's assigned buyer
-                po_children = POChild.query.outerjoin(
+                po_children = POChild.query.options(
+                    joinedload(POChild.parent_cr)
+                ).outerjoin(
                     ChangeRequest, POChild.parent_cr_id == ChangeRequest.cr_id
                 ).filter(
                     or_(
@@ -2092,8 +2114,8 @@ def get_buyer_rejected_purchases():
                 ).all()
 
             for poc in po_children:
-                # Get parent CR for project/boq info
-                parent_cr = ChangeRequest.query.filter_by(cr_id=poc.parent_cr_id).first()
+                # Get parent CR for project/boq info (use preloaded relationship)
+                parent_cr = poc.parent_cr
                 project = Project.query.get(poc.project_id) if poc.project_id else None
                 boq = BOQ.query.filter_by(boq_id=poc.boq_id).first() if poc.boq_id else None
 
@@ -2558,9 +2580,19 @@ def select_vendor_for_purchase(cr_id):
 
         data = request.get_json()
         vendor_id = data.get('vendor_id')
+        supplier_notes = data.get('supplier_notes', '').strip() if data.get('supplier_notes') else None
 
         if not vendor_id:
             return jsonify({"error": "Vendor ID is required"}), 400
+
+        # Validate supplier_notes if provided
+        if supplier_notes:
+            if len(supplier_notes) > 5000:
+                return jsonify({"error": "Supplier notes cannot exceed 5000 characters"}), 400
+            # Check for control characters (except newlines and tabs)
+            import re
+            if re.search(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', supplier_notes):
+                return jsonify({"error": "Supplier notes contain invalid characters"}), 400
 
         # Get the change request
         cr = ChangeRequest.query.filter_by(
@@ -2605,6 +2637,7 @@ def select_vendor_for_purchase(cr_id):
         # Update the change request with vendor selection
         cr.selected_vendor_id = vendor_id
         cr.selected_vendor_name = vendor.company_name
+        cr.supplier_notes = supplier_notes  # Add supplier notes
         cr.updated_at = datetime.utcnow()
 
         # Set status and fields based on user role
@@ -3180,9 +3213,19 @@ def select_vendor_for_material(cr_id):
 
         data = request.get_json()
         material_selections = data.get('material_selections')  # Array of {material_name, vendor_id}
+        supplier_notes = data.get('supplier_notes', '').strip() if data.get('supplier_notes') else None
+
 
         if not material_selections or not isinstance(material_selections, list):
             return jsonify({"error": "material_selections array is required"}), 400
+
+        # Validate supplier_notes if provided
+        if supplier_notes:
+            if len(supplier_notes) > 5000:
+                return jsonify({"error": "Supplier notes cannot exceed 5000 characters"}), 400
+            import re
+            if re.search(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', supplier_notes):
+                return jsonify({"error": "Supplier notes contain invalid characters"}), 400
 
         # Get the change request
         cr = ChangeRequest.query.filter_by(
@@ -3261,6 +3304,7 @@ def select_vendor_for_material(cr_id):
                     # Update sub-CR's main vendor fields (vendor changed, but NOT auto-approved)
                     cr.selected_vendor_id = new_vendor_id
                     cr.selected_vendor_name = new_vendor.company_name
+                    cr.supplier_notes = supplier_notes  # Add supplier notes
                     # Keep status as pending_td_approval - TD needs to explicitly approve
                     cr.vendor_selection_status = 'pending_td_approval'
                     cr.approval_required_from = 'technical_director'  # Set approval_required_from to TD
@@ -3483,6 +3527,7 @@ def select_vendor_for_material(cr_id):
                 cr.vendor_selected_by_buyer_id = user_id
                 cr.vendor_selected_by_buyer_name = user_name
                 cr.vendor_selection_date = datetime.utcnow()
+                cr.supplier_notes = supplier_notes  # Add supplier notes for single-vendor scenario
 
         cr.updated_at = datetime.utcnow()
         db.session.commit()
@@ -3941,6 +3986,24 @@ def create_po_children(cr_id):
             vendor_id = vendor_group.get('vendor_id')
             vendor_name = vendor_group.get('vendor_name')
             materials = vendor_group.get('materials')
+            supplier_notes = vendor_group.get('supplier_notes')  # Notes for supplier
+
+            # Validate supplier_notes
+            if supplier_notes:
+                supplier_notes = supplier_notes.strip()
+                # Enforce length limit (5000 characters)
+                if len(supplier_notes) > 5000:
+                    return jsonify({
+                        "error": "Supplier notes exceed maximum length of 5000 characters"
+                    }), 400
+                # Basic content validation (no control characters except newlines/tabs)
+                if any(ord(c) < 32 and c not in '\n\r\t' for c in supplier_notes):
+                    return jsonify({
+                        "error": "Supplier notes contain invalid characters"
+                    }), 400
+                # Set to None if empty after stripping
+                if not supplier_notes:
+                    supplier_notes = None
 
             if not vendor_id or not materials:
                 continue
@@ -3995,6 +4058,7 @@ def create_po_children(cr_id):
                 quantity = material.get('quantity', 0)
                 unit = material.get('unit', '')
                 negotiated_price = material.get('negotiated_price')
+                supplier_notes_for_material = material.get('supplier_notes')  # Per-material notes from frontend
 
                 # Find the material from parent CR
                 # CRITICAL: Search sub_items_data first (has complete structure with sub_item_name)
@@ -4068,7 +4132,8 @@ def create_po_children(cr_id):
                     'boq_total_price': boq_total_price,  # BOQ total for comparison
                     'master_material_id': parent_material.get('master_material_id') if parent_material else None,
                     'negotiated_price': negotiated_price,  # Store negotiated price
-                    'is_new_material': parent_material.get('is_new_material', False) if parent_material else False  # Flag if new material
+                    'is_new_material': parent_material.get('is_new_material', False) if parent_material else False,  # Flag if new material
+                    'supplier_notes': supplier_notes_for_material  # Per-material notes for supplier
                 })
 
             # Check if a POChild already exists for this vendor (consolidate materials)
@@ -4121,6 +4186,9 @@ def create_po_children(cr_id):
                 existing_po_child.vendor_selection_status = 'pending_td_approval'
                 existing_po_child.status = 'pending_td_approval'
                 existing_po_child.updated_at = datetime.utcnow()
+                # Update supplier notes (allow clearing with empty string)
+                if supplier_notes is not None:
+                    existing_po_child.supplier_notes = supplier_notes if supplier_notes.strip() else None
                 # Clear any previous rejection
                 existing_po_child.rejection_reason = None
 
@@ -4154,6 +4222,7 @@ def create_po_children(cr_id):
                     submission_group_id=submission_group_id,
                     materials_data=po_materials,
                     materials_total_cost=total_cost,
+                    supplier_notes=supplier_notes,  # Add supplier notes
                     vendor_id=vendor_id,
                     vendor_name=vendor.company_name,
                     vendor_selected_by_buyer_id=user_id,
@@ -4347,58 +4416,6 @@ def update_purchase_order(cr_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to update purchase order: {str(e)}"}), 500
-
-
-def update_purchase_notes(cr_id):
-    """Update purchase notes"""
-    try:
-        current_user = g.user
-        buyer_id = current_user['user_id']
-        user_role = current_user.get('role', '').lower()
-
-        data = request.get_json()
-        notes = data.get('notes', '')
-
-        # Get the change request
-        cr = ChangeRequest.query.filter_by(
-            cr_id=cr_id,
-            is_deleted=False
-        ).first()
-
-        if not cr:
-            return jsonify({"error": "Purchase not found"}), 404
-
-        # Check if admin or admin viewing as buyer
-        is_admin = user_role == 'admin'
-        from utils.admin_viewing_context import get_effective_user_context
-        user_context = get_effective_user_context()
-        is_admin_viewing = user_context.get('is_admin_viewing', False)
-
-        # Verify it's assigned to this buyer or completed by this buyer (skip check for admin)
-        if not is_admin and not is_admin_viewing and cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
-            return jsonify({"error": "This purchase is not assigned to you"}), 403
-
-        # Update notes
-        cr.purchase_notes = notes
-        cr.updated_at = datetime.utcnow()
-
-        db.session.commit()
-
-        return jsonify({
-            "success": True,
-            "message": "Purchase notes updated successfully",
-            "purchase": {
-                "cr_id": cr.cr_id,
-                "purchase_notes": cr.purchase_notes
-            }
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        log.error(f"Error updating purchase notes: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"error": f"Failed to update notes: {str(e)}"}), 500
 
 
 def td_approve_vendor(cr_id):
@@ -4814,7 +4831,7 @@ def td_reject_po_child(po_child_id):
 
 
 def reselect_vendor_for_po_child(po_child_id):
-    """Buyer re-selects vendor for a TD-rejected POChild"""
+    """Buyer re-selects vendor for a TD-rejected POChild (with full material data and prices)"""
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
@@ -4823,9 +4840,35 @@ def reselect_vendor_for_po_child(po_child_id):
 
         data = request.get_json()
         vendor_id = data.get('vendor_id')
+        materials = data.get('materials', [])
 
+        # Input validation
         if not vendor_id:
             return jsonify({"error": "vendor_id is required"}), 400
+
+        try:
+            vendor_id = int(vendor_id)
+        except (ValueError, TypeError):
+            return jsonify({"error": "vendor_id must be a valid integer"}), 400
+
+        if not isinstance(materials, list):
+            return jsonify({"error": "materials must be an array"}), 400
+
+        # Validate each material
+        for idx, material in enumerate(materials):
+            if not isinstance(material, dict):
+                return jsonify({"error": f"Material at index {idx} must be an object"}), 400
+
+            if 'material_name' not in material or not material.get('material_name'):
+                return jsonify({"error": f"Material at index {idx} missing material_name"}), 400
+
+            if 'negotiated_price' in material and material['negotiated_price'] is not None:
+                try:
+                    price = float(material['negotiated_price'])
+                    if price < 0:
+                        return jsonify({"error": f"Negative price not allowed for material {material.get('material_name')}"}), 400
+                except (ValueError, TypeError):
+                    return jsonify({"error": f"Invalid negotiated_price for material {material.get('material_name')}"}), 400
 
         # Get the PO child with eager loading
         po_child = POChild.query.options(
@@ -4866,7 +4909,48 @@ def reselect_vendor_for_po_child(po_child_id):
         if vendor.status != 'active':
             return jsonify({"error": "Vendor is not active"}), 400
 
-        # Update PO Child with new vendor
+        # Update materials_data with new negotiated prices if provided
+        if materials and len(materials) > 0:
+            existing_materials = po_child.materials_data or []
+            updated_materials = []
+            total_cost = 0.0
+
+            for existing_mat in existing_materials:
+                mat_name = existing_mat.get('material_name', '')
+                # Find matching material from request
+                matching_material = next(
+                    (m for m in materials if m.get('material_name') == mat_name),
+                    None
+                )
+
+                if matching_material:
+                    # Update with new negotiated price
+                    negotiated_price = matching_material.get('negotiated_price')
+                    if negotiated_price is not None:
+                        existing_mat['negotiated_price'] = negotiated_price
+                        existing_mat['unit_price'] = negotiated_price
+
+                    # Calculate cost for this material
+                    price = negotiated_price or existing_mat.get('unit_price', 0) or 0
+                    quantity = existing_mat.get('quantity', 0) or 0
+                    total_cost += price * quantity
+
+                    # Track if price should be saved for future
+                    if matching_material.get('save_price_for_future'):
+                        existing_mat['save_price_for_future'] = True
+                else:
+                    # Keep existing material data, add to total
+                    price = existing_mat.get('negotiated_price') or existing_mat.get('unit_price', 0) or 0
+                    quantity = existing_mat.get('quantity', 0) or 0
+                    total_cost += price * quantity
+
+                updated_materials.append(existing_mat)
+
+            # Update materials_data and total_cost
+            po_child.materials_data = updated_materials
+            po_child.materials_total_cost = round(total_cost, 2)
+
+        # Update PO Child with new vendor (always use authoritative vendor name from database)
         po_child.vendor_id = vendor_id
         po_child.vendor_name = vendor.company_name
         po_child.vendor_selected_by_buyer_id = buyer_id
@@ -4878,6 +4962,12 @@ def reselect_vendor_for_po_child(po_child_id):
         po_child.updated_at = datetime.utcnow()
 
         db.session.commit()
+
+        # Audit log for vendor re-selection
+        log.info(f"PO Child {po_child.get_formatted_id()} vendor re-selected: "
+                 f"vendor_id={vendor_id} ({vendor.company_name}), "
+                 f"materials_total_cost={po_child.materials_total_cost}, "
+                 f"by buyer {buyer_name} (id={buyer_id})")
 
         # Send notification to TD about new vendor selection
         try:
@@ -4929,6 +5019,120 @@ def reselect_vendor_for_po_child(po_child_id):
         return jsonify({"error": f"Failed to re-select vendor: {str(e)}"}), 500
 
 
+def get_project_site_engineers(project_id):
+    """Get all site engineers assigned to a project for buyer to select recipient"""
+    try:
+        from models.pm_assign_ss import PMAssignSS
+        from models.role import Role
+
+        log.info(f"🔍 Fetching site engineers for project {project_id}")
+
+        project = Project.query.filter_by(
+            project_id=project_id,
+            is_deleted=False
+        ).first()
+
+        if not project:
+            log.warning(f"Project {project_id} not found")
+            return jsonify({"error": "Project not found"}), 404
+
+        log.info(f"✅ Project found: {project.project_name} (Code: {project.project_code})")
+        log.info(f"   project.site_supervisor_id = {project.site_supervisor_id}")
+
+        site_engineers = []
+        seen_ids = set()
+
+        # Get Site Engineer/Supervisor role IDs
+        se_roles = Role.query.filter(
+            Role.role.in_(['Site Engineer', 'Site Supervisor', 'site_engineer', 'site_supervisor', 'siteengineer', 'sitesupervisor']),
+            Role.is_deleted == False
+        ).all()
+        se_role_ids = [role.role_id for role in se_roles]
+        log.info(f"   SE Role IDs: {se_role_ids}")
+
+        # Check direct site_supervisor_id
+        if project.site_supervisor_id:
+            se_user = User.query.filter_by(
+                user_id=project.site_supervisor_id,
+                is_deleted=False
+            ).first()
+            if se_user:
+                log.info(f"   ✅ Found direct SE: {se_user.full_name} (ID: {se_user.user_id})")
+                site_engineers.append({
+                    'user_id': se_user.user_id,
+                    'full_name': se_user.full_name,
+                    'email': se_user.email
+                })
+                seen_ids.add(se_user.user_id)
+            else:
+                log.warning(f"   ⚠️ site_supervisor_id {project.site_supervisor_id} not found or deleted")
+
+        # Check PMAssignSS table for additional site engineers
+        assignments = PMAssignSS.query.filter_by(
+            project_id=project_id,
+            is_deleted=False
+        ).all()
+
+        log.info(f"   Found {len(assignments)} PMAssignSS records for project {project_id}")
+
+        for idx, assignment in enumerate(assignments):
+            log.info(f"   Assignment {idx+1}: ss_ids = {assignment.ss_ids}, assigned_to_se_id = {assignment.assigned_to_se_id}")
+
+            # Check ss_ids array
+            if assignment.ss_ids and isinstance(assignment.ss_ids, list):
+                for ss_id in assignment.ss_ids:
+                    if ss_id not in seen_ids:
+                        ss_user = User.query.filter_by(
+                            user_id=ss_id,
+                            is_deleted=False
+                        ).first()
+                        if ss_user:
+                            log.info(f"      ✅ Found SE from ss_ids: {ss_user.full_name} (ID: {ss_user.user_id})")
+                            site_engineers.append({
+                                'user_id': ss_user.user_id,
+                                'full_name': ss_user.full_name,
+                                'email': ss_user.email
+                            })
+                            seen_ids.add(ss_user.user_id)
+                        else:
+                            log.warning(f"      ⚠️ User ID {ss_id} from ss_ids not found or deleted")
+
+            # Also check assigned_to_se_id (single SE assignment)
+            if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in seen_ids:
+                se_user = User.query.filter_by(
+                    user_id=assignment.assigned_to_se_id,
+                    is_deleted=False
+                ).first()
+                if se_user:
+                    log.info(f"      ✅ Found SE from assigned_to_se_id: {se_user.full_name} (ID: {se_user.user_id})")
+                    site_engineers.append({
+                        'user_id': se_user.user_id,
+                        'full_name': se_user.full_name,
+                        'email': se_user.email
+                    })
+                    seen_ids.add(se_user.user_id)
+                else:
+                    log.warning(f"      ⚠️ User ID {assignment.assigned_to_se_id} from assigned_to_se_id not found or deleted")
+
+        log.info(f"📊 Total site engineers found: {len(site_engineers)}")
+        for se in site_engineers:
+            log.info(f"   - {se['full_name']} ({se['email']})")
+
+        return jsonify({
+            "success": True,
+            "project_id": project_id,
+            "project_name": project.project_name,
+            "project_code": project.project_code,
+            "site_engineers": site_engineers
+        }), 200
+
+    except Exception as e:
+        log.error(f"❌ Error fetching site engineers for project {project_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch site engineers: {str(e)}"}), 500
+
+
 def complete_po_child_purchase(po_child_id):
     """Mark a POChild purchase as complete"""
     try:
@@ -4939,6 +5143,7 @@ def complete_po_child_purchase(po_child_id):
 
         data = request.get_json() or {}
         notes = data.get('notes', '')
+        intended_recipient = data.get('intended_recipient_name', '')  # Site engineer selected by buyer
 
         # Get the PO child with eager loading
         po_child = POChild.query.options(
@@ -4982,7 +5187,7 @@ def complete_po_child_purchase(po_child_id):
 
         # Create Internal Material Requests for Production Manager
         created_imr_count = 0
-        materials_to_route = po_child.sub_items_data or po_child.materials_data
+        materials_to_route = po_child.materials_data
         if materials_to_route:
             from models.inventory import InternalMaterialRequest
             # notification_service is already imported at top of file
@@ -5008,6 +5213,7 @@ def complete_po_child_purchase(po_child_id):
                         source_type='from_vendor_delivery',
                         status='awaiting_vendor_delivery',
                         final_destination_site=final_destination,
+                        intended_recipient_name=intended_recipient,  # Site engineer selected by buyer
                         routed_by_buyer_id=buyer_id,
                         routed_to_store_at=datetime.utcnow(),
                         request_send=True,
@@ -5544,6 +5750,9 @@ def get_buyer_pending_po_children():
         if user_role == 'admin':
             is_admin_viewing = True
 
+        # DEBUG: Log the user info
+        log.info(f"🔍 get_buyer_pending_po_children called by user_id={user_id}, role={user_role}, is_admin_viewing={is_admin_viewing}")
+
         # Get POChildren where parent CR is assigned to this buyer and pending TD approval
         if is_admin_viewing:
             pending_po_children = POChild.query.options(
@@ -5568,6 +5777,11 @@ def get_buyer_pending_po_children():
                 POChild.updated_at.desc().nulls_last(),
                 POChild.created_at.desc()
             ).all()
+
+        # DEBUG: Log query results
+        log.info(f"🔍 Found {len(pending_po_children)} POChildren pending TD approval")
+        for poc in pending_po_children:
+            log.info(f"  - POChild ID={poc.id}, parent_cr_id={poc.parent_cr_id}, vendor={poc.vendor_name}")
 
         result = []
         for po_child in pending_po_children:
@@ -6025,8 +6239,10 @@ def preview_po_child_vendor_email(po_child_id):
         buyer_id = current_user['user_id']
         user_role = current_user.get('role', '').lower()
 
-        # Get the POChild record
-        po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
+        # Get the POChild record with parent_cr preloaded
+        po_child = POChild.query.options(
+            joinedload(POChild.parent_cr)
+        ).filter_by(id=po_child_id, is_deleted=False).first()
         if not po_child:
             return jsonify({"error": "Purchase order child not found"}), 404
 
@@ -6045,8 +6261,8 @@ def preview_po_child_vendor_email(po_child_id):
         if not vendor:
             return jsonify({"error": "Vendor not found"}), 404
 
-        # Get parent CR for project info
-        parent_cr = ChangeRequest.query.filter_by(cr_id=po_child.parent_cr_id).first()
+        # Get parent CR for project info (use preloaded relationship)
+        parent_cr = po_child.parent_cr
         if not parent_cr:
             return jsonify({"error": "Parent purchase order not found"}), 404
 
@@ -6194,12 +6410,14 @@ def send_vendor_email(cr_id, po_child_id=None):
         if is_po_child:
             # Get POChild record
             from models.po_child import POChild
-            po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
+            po_child = POChild.query.options(
+                joinedload(POChild.parent_cr)
+            ).filter_by(id=po_child_id, is_deleted=False).first()
             if not po_child:
                 return jsonify({"error": "Purchase order child not found"}), 404
 
-            # Get parent CR for project info
-            parent_cr = ChangeRequest.query.filter_by(cr_id=po_child.parent_cr_id, is_deleted=False).first()
+            # Get parent CR for project info (use preloaded relationship)
+            parent_cr = po_child.parent_cr
             if not parent_cr:
                 return jsonify({"error": "Parent purchase order not found"}), 404
 
@@ -6491,8 +6709,6 @@ def send_vendor_whatsapp(cr_id):
         include_lpo_pdf = data.get('include_lpo_pdf', True)  # Default to include PDF
         lpo_data = data.get('lpo_data')  # LPO customization data from frontend
         po_child_id = data.get('po_child_id')  # Optional: for POChild records
-        print(f"po_child_id: {po_child_id}")
-        print(f"po_child_id TYPE: {type(po_child_id)}")
 
         if not vendor_phone:
             return jsonify({"error": "Vendor phone number is required"}), 400
@@ -6508,14 +6724,7 @@ def send_vendor_whatsapp(cr_id):
 
         if po_child_id:
             # POChild specified directly
-            print(f">>> Looking for POChild with id={po_child_id}")
             po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
-            print(f">>> POChild found: {po_child is not None}")
-            if po_child:
-                print(f">>> POChild.id: {po_child.id}")
-                print(f">>> POChild.vendor_id: {po_child.vendor_id}")
-                print(f">>> POChild.materials_data: {po_child.materials_data}")
-                print(f">>> POChild.materials_data type: {type(po_child.materials_data)}")
             if po_child and po_child.vendor_id:
                 vendor_id = po_child.vendor_id
                 if po_child.vendor_selection_status != 'approved':
@@ -6586,11 +6795,9 @@ def send_vendor_whatsapp(cr_id):
                 })
                 po_total += mat_total
             cr_total = po_child.materials_total_cost or po_total
-            print(f"Using POChild materials: {len(materials_list)} items, total: {cr_total}")
         else:
             # Use parent CR's materials
             materials_list, cr_total = process_materials_with_negotiated_prices(cr)
-            print(f"Using parent CR materials: {len(materials_list)} items, total: {cr_total}")
 
         # Prepare data for message generation
         vendor_data = {
@@ -6742,13 +6949,6 @@ def send_vendor_whatsapp(cr_id):
                         "header_image": getattr(settings, 'lpo_header_image', None) if settings else None
                     }
 
-                print("Step 2: lpo_data prepared, generating PDF...")
-                print(f"lpo_data items count: {len(lpo_data.get('items', []))}")
-                print(f">>> LPO NUMBER in lpo_data: {lpo_data.get('lpo_info', {}).get('lpo_number', 'NOT SET')}")
-                print(f">>> po_child exists: {po_child is not None}")
-                if po_child:
-                    print(f">>> po_child.get_formatted_id(): {po_child.get_formatted_id()}")
-
                 generator = LPOPDFGenerator()
                 pdf_bytes = generator.generate_lpo_pdf(lpo_data)
                 log.debug(f"LPO PDF generated successfully, size: {len(pdf_bytes)} bytes")
@@ -6762,8 +6962,6 @@ def send_vendor_whatsapp(cr_id):
                 po_id_for_filename = po_child.get_formatted_id().replace('PO-', '') if po_child else str(cr_id)
                 pdf_filename = f"LPO-{po_id_for_filename}-{timestamp}.pdf"
                 pdf_path = f"whatsapp/lpo/{pdf_filename}"
-                print(f">>> PDF FILENAME: {pdf_filename}")
-                print(f">>> po_id_for_filename: {po_id_for_filename}")
 
                 # Upload the file with proper content-disposition for filename
                 upload_result = supabase.storage.from_(SUPABASE_BUCKET).upload(
@@ -8271,6 +8469,99 @@ def update_vendor_price(vendor_id):
         return jsonify({"error": f"Failed to update vendor price: {str(e)}"}), 500
 
 
+def save_supplier_notes(cr_id):
+    """
+    Save supplier notes for a specific material and vendor in CR's material_vendor_selections.
+    This allows buyers to add notes immediately without waiting to create POChild.
+    """
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
+
+        data = request.get_json()
+        material_name = data.get('material_name')
+        vendor_id = data.get('vendor_id')
+        supplier_notes = data.get('supplier_notes', '')
+
+        if not material_name:
+            return jsonify({"error": "material_name is required"}), 400
+
+        # Validate supplier_notes
+        if supplier_notes:
+            supplier_notes = supplier_notes.strip()
+            # Enforce length limit (5000 characters)
+            if len(supplier_notes) > 5000:
+                return jsonify({"error": "Supplier notes exceed maximum length of 5000 characters"}), 400
+            # Basic content validation (no control characters except newlines/tabs)
+            if any(ord(c) < 32 and c not in '\n\r\t' for c in supplier_notes):
+                return jsonify({"error": "Supplier notes contain invalid characters"}), 400
+            # Set to empty string if only whitespace
+            if not supplier_notes:
+                supplier_notes = ''
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Check role-based permissions (Buyer, TD, or Admin)
+        is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+        is_buyer = user_role == 'buyer'
+        is_admin = user_role == 'admin'
+
+        if not (is_buyer or is_td or is_admin):
+            return jsonify({"error": "Insufficient permissions"}), 403
+
+        # Initialize material_vendor_selections if it doesn't exist
+        if not cr.material_vendor_selections:
+            cr.material_vendor_selections = {}
+
+        # Update or create material vendor selection with supplier notes
+        if material_name in cr.material_vendor_selections:
+            # Update existing selection
+            cr.material_vendor_selections[material_name]['supplier_notes'] = supplier_notes
+        else:
+            # Create new selection with notes only (vendor may be selected later)
+            cr.material_vendor_selections[material_name] = {
+                'supplier_notes': supplier_notes,
+                'selected_by_user_id': user_id,
+                'selected_by_name': current_user.get('full_name', 'Unknown User'),
+                'selection_date': datetime.utcnow().isoformat()
+            }
+            # Add vendor info if provided
+            if vendor_id:
+                from models.vendor import Vendor
+                vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+                if vendor:
+                    cr.material_vendor_selections[material_name]['vendor_id'] = vendor_id
+                    cr.material_vendor_selections[material_name]['vendor_name'] = vendor.company_name
+
+        # Mark the JSONB field as modified
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(cr, 'material_vendor_selections')
+
+        cr.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        log.info(f"Supplier notes saved for material '{material_name}' in CR {cr_id} by user {user_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "Supplier notes saved successfully",
+            "cr_id": cr_id,
+            "material_name": material_name,
+            "supplier_notes": supplier_notes
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error saving supplier notes: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to save supplier notes: {str(e)}"}), 500
+
+
 # ============================================================================
 # LPO PDF Generation Functions
 # ============================================================================
@@ -8349,9 +8640,6 @@ def preview_lpo_pdf(cr_id):
         # Get POChild if specified
         if po_child_id:
             po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
-            print(f">>> preview_lpo_pdf: po_child_id={po_child_id}, po_child found={po_child is not None}")
-
-        print(f">>> preview_lpo_pdf: vendor_id from query={vendor_id}")
 
         # Get saved customizations if any (handle case where table doesn't exist yet)
         # Priority: 1) PO child specific, 2) CR-level, 3) Global default template
@@ -8370,13 +8658,6 @@ def preview_lpo_pdf(cr_id):
                 from models.lpo_default_template import LPODefaultTemplate
                 # Get the most recently updated default template (any user's)
                 default_template = LPODefaultTemplate.query.order_by(LPODefaultTemplate.updated_at.desc()).first()
-                print(f">>> preview_lpo_pdf: Using default template: {default_template is not None}")
-                if default_template:
-                    print(f">>> preview_lpo_pdf: Default template custom_terms: {default_template.custom_terms}")
-
-            print(f">>> preview_lpo_pdf: Found customization for cr_id={cr_id}, po_child_id={po_child_id}: {saved_customization is not None}")
-            if saved_customization:
-                print(f">>> preview_lpo_pdf: Customization custom_terms: {saved_customization.custom_terms}")
         except Exception as e:
             db.session.rollback()  # Rollback failed transaction
             log.warning(f"LPO customization table may not exist, creating it: {str(e)}")
@@ -8396,7 +8677,6 @@ def preview_lpo_pdf(cr_id):
         elif vendor_id:
             # Use vendor_id from query param (for pre-POChild preview)
             vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
-            print(f">>> preview_lpo_pdf: Using vendor from query param: {vendor.company_name if vendor else None}")
         elif cr.selected_vendor_id:
             vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
         else:
@@ -8413,9 +8693,6 @@ def preview_lpo_pdf(cr_id):
                     auto_detected_vendor_id = list(vendor_ids_in_selections)[0]
                     vendor = Vendor.query.filter_by(vendor_id=auto_detected_vendor_id, is_deleted=False).first()
                     vendor_id = auto_detected_vendor_id  # Set vendor_id for later use
-                    print(f">>> preview_lpo_pdf: Auto-detected single vendor: {vendor.company_name if vendor else None} (vendor_id={vendor_id})")
-                elif len(vendor_ids_in_selections) > 1:
-                    print(f">>> preview_lpo_pdf: Multiple vendors detected ({len(vendor_ids_in_selections)}), cannot auto-detect single vendor")
 
         # Get project details
         project = Project.query.get(cr.project_id)
@@ -8472,9 +8749,6 @@ def preview_lpo_pdf(cr_id):
                 # Lookup vendor product price as fallback
                 vendor_product_price = vendor_product_prices.get(mat_name.lower().strip(), 0)
 
-                # Debug logging
-                print(f">>> LPO Price Debug for '{mat_name}': stored={stored_unit_price}, negotiated={negotiated_price}, selection_vendor_rate={selection_vendor_rate}, vendor_product={vendor_product_price}")
-
                 # Use best available price with proper priority:
                 # 1. negotiated_price from material data (if > 0) - custom override
                 # 2. selection_vendor_rate from vendor selection (VENDOR RATE - if > 0) ← THE KEY!
@@ -8515,30 +8789,22 @@ def preview_lpo_pdf(cr_id):
                     'specification': final_specification
                 })
                 cr_total += mat_total
-                print(f">>> LPO Material Added: '{mat_name}' - Rate: {final_price}, Brand: '{final_brand}', Spec: '{final_specification}'")
             cr_total = po_child.materials_total_cost or cr_total or sum(m.get('total_price', 0) for m in materials_list)
-            print(f">>> preview_lpo_pdf: Using POChild materials: {len(materials_list)} items, total: {cr_total}")
         else:
             # Use parent CR's materials
             materials_list, cr_total = process_materials_with_negotiated_prices(cr)
 
             # If vendor_id is provided (pre-POChild preview), filter materials for that vendor only
-            print(f">>> preview_lpo_pdf: vendor_id={vendor_id}")
-            print(f">>> preview_lpo_pdf: material_vendor_selections type={type(cr.material_vendor_selections)}, value={cr.material_vendor_selections}")
-
             if vendor_id and cr.material_vendor_selections:
-                print(f">>> preview_lpo_pdf: Filtering and enriching materials for vendor_id={vendor_id}")
                 filtered_materials = []
                 filtered_total = 0
 
                 for material in materials_list:
                     mat_name = material.get('material_name', '')
                     vendor_selection = cr.material_vendor_selections.get(mat_name, {})
-                    print(f">>> preview_lpo_pdf: Material '{mat_name}' vendor_selection: {vendor_selection}")
 
                     if isinstance(vendor_selection, dict):
                         selected_vendor_id = vendor_selection.get('vendor_id')
-                        print(f">>> preview_lpo_pdf: Material '{mat_name}' has vendor_id={selected_vendor_id}, comparing with {vendor_id}")
 
                         if selected_vendor_id == vendor_id:
                             # Enrich material with vendor-specific data
@@ -8562,15 +8828,9 @@ def preview_lpo_pdf(cr_id):
 
                             filtered_materials.append(material)
                             filtered_total += material['total_price']
-                            print(f">>> preview_lpo_pdf: ✓ Including material '{mat_name}' with vendor rate {vendor_rate}, brand: {material.get('brand', 'N/A')}, spec: {material.get('specification', 'N/A')}")
-                        else:
-                            print(f">>> preview_lpo_pdf: ✗ Skipping '{mat_name}' (vendor {selected_vendor_id} != {vendor_id})")
 
                 materials_list = filtered_materials
                 cr_total = filtered_total
-                print(f">>> preview_lpo_pdf: FILTERED to {len(materials_list)} materials, total: {cr_total}")
-            else:
-                print(f">>> preview_lpo_pdf: NO FILTERING - Using all {len(materials_list)} materials")
 
         # Calculate totals
         subtotal = 0
@@ -8609,6 +8869,9 @@ def preview_lpo_pdf(cr_id):
                 if isinstance(vendor_selection, dict) and vendor_selection.get('vendor_material_name'):
                     vendor_material_name = vendor_selection['vendor_material_name']
 
+            # Get per-material supplier notes
+            material_supplier_notes = material.get('supplier_notes', '')
+
             items.append({
                 "sl_no": i,
                 "material_name": vendor_material_name,  # Use vendor's material name
@@ -8619,7 +8882,8 @@ def preview_lpo_pdf(cr_id):
                 "unit": material.get('unit', 'Nos'),
                 "rate": round(rate, 2),
                 "amount": round(amount, 2),
-                "boq_rate": round(float(boq_rate), 2) if boq_rate else 0
+                "boq_rate": round(float(boq_rate), 2) if boq_rate else 0,
+                "supplier_notes": material_supplier_notes  # Per-material notes for LPO display
             })
 
         # VAT - use saved customization, otherwise default to 5%
@@ -8700,7 +8964,9 @@ def preview_lpo_pdf(cr_id):
                 "stamp_image": getattr(settings, 'company_stamp_image', None) if settings else None,
                 "is_system_signature": True  # Mark as system-generated signature
             },
-            "header_image": getattr(settings, 'lpo_header_image', None) if settings else None
+            "header_image": getattr(settings, 'lpo_header_image', None) if settings else None,
+            # Include supplier notes - prioritize POChild notes if available, fallback to parent CR notes
+            "supplier_notes": po_child.supplier_notes if po_child and po_child.supplier_notes else cr.supplier_notes
         }
 
         return jsonify({
@@ -8735,7 +9001,6 @@ def save_lpo_customization(cr_id):
 
         # Get po_child_id from request data (if saving for specific PO child)
         po_child_id = data.get('po_child_id')
-        print(f">>> save_lpo_customization: cr_id={cr_id}, po_child_id={po_child_id}")
 
         # Get or create customization record - now with po_child_id support
         try:
@@ -9030,3 +9295,83 @@ def get_lpo_default_template():
     except Exception as e:
         log.error(f"Error getting LPO default template: {str(e)}")
         return jsonify({"error": f"Failed to get default template: {str(e)}"}), 500
+
+def update_supplier_notes(cr_id):
+    """Update supplier notes for a purchase order - works regardless of CR status"""
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
+
+        data = request.get_json()
+        supplier_notes = data.get('supplier_notes', '').strip() if data.get('supplier_notes') else None
+
+        # Validate supplier_notes
+        if supplier_notes:
+            if len(supplier_notes) > 5000:
+                return jsonify({"error": "Supplier notes cannot exceed 5000 characters"}), 400
+            import re
+            if re.search(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', supplier_notes):
+                return jsonify({"error": "Supplier notes contain invalid characters"}), 400
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Check permissions - allow buyer assigned to this CR, TD, or admin
+        is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
+        is_admin = user_role == 'admin'
+        is_buyer = 'buyer' in user_role
+
+        if not is_td and not is_admin:
+            if not is_buyer or cr.assigned_to_buyer_user_id != user_id:
+                return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Log the update for debugging
+        log.info(f"Updating supplier notes for CR-{cr_id} by user {user_id} (role: {user_role}), status: {cr.status}")
+
+        # Update supplier notes - NO STATUS RESTRICTIONS
+        # Buyer can update notes even after submitting to TD
+        cr.supplier_notes = supplier_notes
+        cr.updated_at = datetime.utcnow()
+
+        # CRITICAL: Also update POChildren if they exist
+        # This ensures notes are synced across parent CR and all child POs
+        if cr.po_children:
+            updated_po_count = 0
+            for po_child in cr.po_children:
+                # Only update POChildren that are still pending or can be edited
+                # Don't update already completed/vendor_approved POChildren
+                if po_child.vendor_selection_status in ['pending_td_approval', 'rejected', None]:
+                    po_child.supplier_notes = supplier_notes
+                    po_child.updated_at = datetime.utcnow()
+                    updated_po_count += 1
+
+            if updated_po_count > 0:
+                log.info(f"Updated supplier notes for {updated_po_count} POChildren under CR-{cr_id}")
+
+        db.session.commit()
+
+        # Return updated purchase data so frontend can update without separate API call
+        updated_purchase = cr.to_dict()
+
+        log.info(f"Successfully updated supplier notes for CR-{cr_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "Supplier notes updated successfully",
+            "supplier_notes": supplier_notes,
+            "purchase": updated_purchase  # Include full updated purchase object
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error updating supplier notes for CR-{cr_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to update supplier notes: {str(e)}"}), 500

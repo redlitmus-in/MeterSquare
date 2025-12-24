@@ -1,7 +1,21 @@
 from flask import Blueprint, g, jsonify
-from controllers.projectmanager_controller import *
+from controllers.projectmanager_controller import (
+    create_pm,
+    get_all_pm,
+    get_pm_id,
+    update_pm,
+    delete_pm,
+    assign_projects
+)
 from utils.authentication import jwt_required
-from controllers.techical_director_controller import *
+from controllers.techical_director_controller import (
+    get_all_td_boqs,
+    td_mail_send,
+    get_td_se_boq_vendor_requests,
+    get_td_dashboard_stats,
+    get_td_purchase_orders,
+    get_td_purchase_order_by_id
+)
 from utils.response_cache import cached_response, cache_dashboard_data
 
 technical_routes = Blueprint('technical_routes', __name__, url_prefix='/api')
@@ -203,5 +217,25 @@ def get_td_dashboard_stats_route():
     access_check = check_td_or_admin_access()
     if access_check:
         return access_check
-    return get_td_dashboard_stats() 
+    return get_td_dashboard_stats()
+
+# TD Purchase Orders - View-only access to purchase orders
+@technical_routes.route('/td-purchase-orders', methods=['GET'])
+@jwt_required
+@cached_response(timeout=15, key_prefix='td_purchases')
+def get_td_purchase_orders_route():
+    """Get all purchase orders for TD view (read-only)"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_purchase_orders()
+
+@technical_routes.route('/td-purchase-order/<int:cr_id>', methods=['GET'])
+@jwt_required
+def get_td_purchase_order_by_id_route(cr_id):
+    """Get specific purchase order details for TD view"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_purchase_order_by_id(cr_id) 
 

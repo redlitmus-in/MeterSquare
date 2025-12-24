@@ -26,7 +26,8 @@ import {
   CubeIcon,
   UserGroupIcon,
   PencilSquareIcon as PencilIcon,
-  BugAntIcon
+  BugAntIcon,
+  ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -39,7 +40,8 @@ import {
   BuildingOfficeIcon as BuildingOfficeSolid,
   ClipboardDocumentCheckIcon as ClipboardDocumentCheckSolid,
   CubeIcon as CubeSolid,
-  PencilSquareIcon as PencilSolid
+  PencilSquareIcon as PencilSolid,
+  ExclamationTriangleIcon as ExclamationTriangleSolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
@@ -334,8 +336,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
-    // Technical Director specific navigation items
+    // Technical Director specific navigation items - Streamlined ERP modules
     const technicalDirectorItems: NavigationItem[] = [
+      // ========== PROJECT MANAGEMENT ==========
       {
         name: 'Project Approvals',
         href: buildPath('/project-approvals'),
@@ -344,6 +347,14 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-green-600'
       },
       {
+        name: 'Disposal Approvals',
+        href: buildPath('/disposal-approvals'),
+        icon: ExclamationTriangleIcon,
+        iconSolid: ExclamationTriangleSolid,
+        color: 'text-red-600'
+      },
+      // ========== PROCUREMENT & SUPPLY CHAIN ==========
+      {
         name: 'Vendor Management',
         href: buildPath('/vendors'),
         icon: UsersIcon,
@@ -351,18 +362,19 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-purple-600'
       },
       {
-        name: 'Production Management',
-        href: buildPath('/record-material'),
-        icon: ShoppingCartIcon,
-        iconSolid: ShoppingCartIcon,
-        color: 'text-indigo-600'
-      },
-      {
         name: 'Purchase Orders',
-        href: buildPath('/change-requests'),
+        href: buildPath('/purchase-orders'),
         icon: DocumentPlusIcon,
         iconSolid: DocumentPlusSolid,
-        color: 'text-red-600'
+        color: 'text-amber-600'
+      },
+      // ========== OPERATIONS & PRODUCTION ==========
+      {
+        name: 'Material Procurement',
+        href: buildPath('/record-material'),
+        icon: ShoppingCartIcon,
+        iconSolid: ShoppingSolid,
+        color: 'text-indigo-600'
       }
     ];
 
@@ -401,7 +413,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-blue-600'
       },
       {
-        name: 'Purchase Orders',
+        name: 'Change Requests',
         href: buildPath('/change-requests'),
         icon: DocumentPlusIcon,
         iconSolid: DocumentPlusSolid,

@@ -34,7 +34,7 @@ def check_boq_access():
     """Check if current user can access BOQ operations"""
     current_user = g.user
     user_role = current_user.get('role', '').lower()
-    allowed_roles = ['estimator', 'projectmanager', 'mep', 'technicaldirector', 'admin', 'siteengineer', 'sitesupervisor']
+    allowed_roles = ['estimator', 'projectmanager', 'productionmanager', 'mep', 'technicaldirector', 'admin', 'siteengineer', 'sitesupervisor']
     if user_role not in allowed_roles:
         return jsonify({"error": "Access denied. Estimator, PM, MEP, SE, TD, or Admin role required."}), 403
     return None

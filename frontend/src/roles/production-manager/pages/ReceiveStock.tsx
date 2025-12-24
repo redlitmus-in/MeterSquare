@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Calendar, Package, CheckCircle, X, Save, RefreshCw, FileText, RotateCcw, AlertTriangle, Trash2 } from 'lucide-react';
+import { Plus, Search, Calendar, Package, CheckCircle, X, Save, RefreshCw, FileText, RotateCcw, AlertTriangle, Trash2, Eye, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { inventoryService, InventoryTransaction, InventoryMaterial, MaterialReturn, MaterialCondition, CreateMaterialReturnData } from '../services/inventoryService';
 
 type TabType = 'grn' | 'returns';
@@ -20,7 +20,10 @@ const ReceiveStock: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showReturnModal, setShowReturnModal] = useState(false);
+  const [showDisposalDetailModal, setShowDisposalDetailModal] = useState(false);
+  const [selectedDisposal, setSelectedDisposal] = useState<MaterialReturn | null>(null);
   const [saving, setSaving] = useState(false);
+  const [reviewNotes, setReviewNotes] = useState('');
 
   // Form state for new GRN
   const [formData, setFormData] = useState({
@@ -183,6 +186,63 @@ const ReceiveStock: React.FC = () => {
       ...returnFormData,
       inventory_material_id: materialId
     });
+  };
+
+  const handleViewDisposalDetails = (disposal: MaterialReturn) => {
+    setSelectedDisposal(disposal);
+    setReviewNotes('');
+    setShowDisposalDetailModal(true);
+  };
+
+  const handleApproveDisposal = async () => {
+    if (!selectedDisposal) return;
+
+    setSaving(true);
+    try {
+      await inventoryService.reviewDisposal(selectedDisposal.return_id, {
+        action: 'approve_disposal',
+        notes: reviewNotes || undefined
+      });
+
+      setShowDisposalDetailModal(false);
+      setSelectedDisposal(null);
+      setReviewNotes('');
+      fetchData();
+      alert('Disposal request approved successfully');
+    } catch (error: any) {
+      console.error('Error approving disposal:', error);
+      alert(error.message || 'Failed to approve disposal request');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRejectDisposal = async () => {
+    if (!selectedDisposal) return;
+
+    if (!reviewNotes.trim()) {
+      alert('Please provide a reason for rejection');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await inventoryService.reviewDisposal(selectedDisposal.return_id, {
+        action: 'add_to_backup',
+        notes: reviewNotes
+      });
+
+      setShowDisposalDetailModal(false);
+      setSelectedDisposal(null);
+      setReviewNotes('');
+      fetchData();
+      alert('Disposal request rejected - material added to backup stock');
+    } catch (error: any) {
+      console.error('Error rejecting disposal:', error);
+      alert(error.message || 'Failed to reject disposal request');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const getConditionBadge = (condition: MaterialCondition) => {
@@ -601,6 +661,7 @@ const ReceiveStock: React.FC = () => {
                     <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Stock Updated</th>
                     <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Date</th>
+                    <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
@@ -656,11 +717,23 @@ const ReceiveStock: React.FC = () => {
                             {ret.created_at ? new Date(ret.created_at).toLocaleDateString() : '-'}
                           </div>
                         </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                          {ret.disposal_status === 'pending_review' && (
+                            <button
+                              onClick={() => handleViewDisposalDetails(ret)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors text-sm font-medium"
+                              title="View disposal request details and approve/reject"
+                            >
+                              <Eye className="w-4 h-4" />
+                              Review
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={8} className="px-6 py-12 text-center">
+                      <td colSpan={9} className="px-6 py-12 text-center">
                         <RotateCcw className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                         <h3 className="text-lg font-medium text-gray-900 mb-1">No returns found</h3>
                         <p className="text-sm text-gray-500">
@@ -1016,6 +1089,233 @@ const ReceiveStock: React.FC = () => {
                     </>
                   )}
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Disposal Request Detail Modal */}
+      {showDisposalDetailModal && selectedDisposal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Material Disposal Request</h2>
+                <p className="text-sm text-gray-500 mt-1">Review and approve/reject the disposal request</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowDisposalDetailModal(false);
+                  setSelectedDisposal(null);
+                  setReviewNotes('');
+                }}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Request Status Banner */}
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-6 h-6 text-orange-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h3 className="font-semibold text-orange-900">Pending Your Review</h3>
+                    <p className="text-sm text-orange-700 mt-1">
+                      This disposal request requires your approval before the material quantity can be reduced from inventory.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Material Details */}
+              <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  <Package className="w-5 h-5 text-blue-600" />
+                  Material Information
+                </h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Material Name</p>
+                    <p className="text-base font-semibold text-gray-900 mt-1">
+                      {selectedDisposal.material_name || selectedDisposal.material_details?.material_name || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Material Code</p>
+                    <p className="text-base font-mono text-gray-900 mt-1">
+                      {selectedDisposal.material_code || selectedDisposal.material_details?.material_code || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Brand</p>
+                    <p className="text-base text-gray-900 mt-1">
+                      {selectedDisposal.material_details?.brand || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Current Stock</p>
+                    <p className="text-base font-semibold text-blue-600 mt-1">
+                      {selectedDisposal.material_details?.current_stock?.toFixed(2) || '0'} {selectedDisposal.unit || selectedDisposal.material_details?.unit || ''}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Disposal Request Details */}
+              <div className="bg-red-50 rounded-lg p-6 border border-red-200">
+                <h3 className="text-lg font-semibold text-red-900 mb-4 flex items-center gap-2">
+                  <Trash2 className="w-5 h-5 text-red-600" />
+                  Disposal Request Details
+                </h3>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <p className="text-sm font-medium text-red-700">Quantity to Dispose</p>
+                    <p className="text-xl font-bold text-red-900 mt-1">
+                      {selectedDisposal.quantity} {selectedDisposal.unit || selectedDisposal.material_details?.unit || ''}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-red-700">Estimated Value</p>
+                    <p className="text-xl font-bold text-red-900 mt-1">
+                      AED {selectedDisposal.disposal_value?.toLocaleString() || '0.00'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-red-700">Source</p>
+                    <p className="text-base text-red-900 mt-1">
+                      {selectedDisposal.project_details?.project_name || 'Materials Catalog'}
+                    </p>
+                    {selectedDisposal.project_details?.project_code && (
+                      <p className="text-sm font-mono text-red-700">
+                        {selectedDisposal.project_details.project_code}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-red-700">Disposal Reason</p>
+                    <p className="text-base text-red-900 mt-1">
+                      {selectedDisposal.return_reason?.replace('CATALOG_DISPOSAL: ', '').replace(/_/g, ' ').toUpperCase() || 'Damaged'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Justification */}
+                <div className="pt-4 border-t border-red-200">
+                  <p className="text-sm font-medium text-red-700 mb-2">Justification / Notes</p>
+                  <div className="bg-white rounded-lg p-4 border border-red-200">
+                    <p className="text-sm text-gray-900 whitespace-pre-wrap">
+                      {selectedDisposal.notes || 'No additional notes provided'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Requester Information */}
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                <h3 className="text-sm font-semibold text-blue-900 mb-2">Request Information</h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-blue-700">Requested By:</span>
+                    <span className="ml-2 font-medium text-blue-900">{selectedDisposal.created_by || 'Unknown'}</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-700">Request Date:</span>
+                    <span className="ml-2 font-medium text-blue-900">
+                      {selectedDisposal.created_at ? new Date(selectedDisposal.created_at).toLocaleString() : 'N/A'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-blue-700">Reference:</span>
+                    <span className="ml-2 font-mono text-blue-900">{selectedDisposal.reference_number || `RET-${selectedDisposal.return_id}`}</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-700">Condition:</span>
+                    <span className="ml-2">{getConditionBadge(selectedDisposal.condition)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Review Notes */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Your Review Notes {!reviewNotes.trim() && <span className="text-red-500">(Required for rejection)</span>}
+                </label>
+                <textarea
+                  rows={4}
+                  value={reviewNotes}
+                  onChange={(e) => setReviewNotes(e.target.value)}
+                  placeholder="Add your review comments here... (optional for approval, required for rejection)"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between gap-4 pt-6 border-t border-gray-200">
+                <button
+                  onClick={() => {
+                    setShowDisposalDetailModal(false);
+                    setSelectedDisposal(null);
+                    setReviewNotes('');
+                  }}
+                  className="px-6 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                >
+                  Cancel
+                </button>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleRejectDisposal}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  >
+                    {saving ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <ThumbsDown className="w-5 h-5" />
+                        Reject & Add to Backup Stock
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={handleApproveDisposal}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-sm"
+                  >
+                    {saving ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <ThumbsUp className="w-5 h-5" />
+                        Approve Disposal
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Warning Note */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex gap-2">
+                  <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-yellow-800">
+                    <p className="font-semibold">Important:</p>
+                    <ul className="mt-2 ml-4 list-disc space-y-1">
+                      <li><strong>Approve Disposal:</strong> The material quantity will be permanently reduced from inventory stock.</li>
+                      <li><strong>Reject & Add to Backup:</strong> The material will be marked for repair/reuse and added to backup stock.</li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

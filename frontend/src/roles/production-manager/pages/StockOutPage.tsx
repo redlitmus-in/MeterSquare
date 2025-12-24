@@ -110,6 +110,10 @@ const StockOutPage: React.FC = () => {
     notes: string;
     internal_request_id?: number;
     use_backup?: boolean;
+    // For vendor delivery materials (not yet in inventory)
+    material_name?: string;
+    brand?: string;
+    is_vendor_delivery?: boolean;
   }>>([]);
 
   // Fetch all data
@@ -234,20 +238,51 @@ const StockOutPage: React.FC = () => {
   const handleCreateDNFromRequest = (request: InternalMaterialRequest) => {
     setSelectedRequestForDN(request);
 
-    // Check if project has site engineers from the projects list
-    const projectData = projects.find(p => p.project_id === request.project_id);
-    const siteEngineers = projectData?.site_supervisors || [];
+    // Validate that project exists in projects list
+    if (!request.project_id) {
+      showError('Request is missing project information. Cannot create delivery note.');
+      return;
+    }
 
-    // Auto-select if only one site engineer, otherwise leave blank for user to select
+    // First check request's project_details for site engineer (from backend enrichment)
+    // Then fallback to projects list
+    const projectData = projects.find(p => p.project_id === request.project_id);
+
+    // If project not found in projects list, use data from request's project_details
+    if (!projectData && !request.project_details) {
+      showError(`Project not found (ID: ${request.project_id}). Please refresh the page and try again.`);
+      return;
+    }
+
+    // Determine site engineer with priority order:
+    // 1. Buyer-selected recipient (highest priority for vendor deliveries)
+    // 2. Site engineer from request's project_details
+    // 3. Fallback to project list if only one site engineer
     let attentionTo = '';
-    if (siteEngineers.length === 1) {
-      attentionTo = siteEngineers[0].full_name;
-    } else if (siteEngineers.length === 0) {
+    const siteEngineerFromRequest = request.project_details?.site_supervisor;
+    const siteEngineersFromProjectList = projectData?.site_supervisors || [];
+
+    if (request.intended_recipient_name) {
+      // HIGHEST PRIORITY: Use the site engineer selected by buyer when completing PO
+      attentionTo = request.intended_recipient_name;
+    } else if (siteEngineerFromRequest?.full_name) {
+      // Second priority: Use site engineer from the request's project details
+      attentionTo = siteEngineerFromRequest.full_name;
+    } else if (siteEngineersFromProjectList.length === 1) {
+      // Third priority: Fallback to project list if only one site engineer
+      attentionTo = siteEngineersFromProjectList[0].full_name;
+    } else if (siteEngineersFromProjectList.length === 0 && !siteEngineerFromRequest) {
       showWarning('No Site Engineer assigned to this project. Please assign one before creating the delivery note.');
     }
 
+    // For vendor deliveries, use final_destination_site if available for context
+    const isVendorDelivery = request.source_type === 'from_vendor_delivery';
+    const destinationNote = isVendorDelivery && request.final_destination_site
+      ? ` (Destination: ${request.final_destination_site})`
+      : '';
+
     setDnFormData({
-      project_id: request.project_id || 0,
+      project_id: request.project_id,
       delivery_date: new Date().toISOString().split('T')[0],
       attention_to: attentionTo,
       delivery_from: inventoryConfig.store_name,
@@ -255,14 +290,18 @@ const StockOutPage: React.FC = () => {
       vehicle_number: '',
       driver_name: '',
       driver_contact: '',
-      notes: `Material request #${request.request_number || request.request_id}`
+      notes: `Material request #${request.request_number || request.request_id}${destinationNote}`
     });
 
+    // For vendor delivery requests, store material info since it's not in inventory
     setDnItems([{
       inventory_material_id: request.inventory_material_id || 0,
       quantity: request.quantity || 0,
       notes: '',
-      internal_request_id: request.request_id
+      internal_request_id: request.request_id,
+      material_name: isVendorDelivery ? request.material_name : undefined,
+      brand: isVendorDelivery ? request.brand : undefined,
+      is_vendor_delivery: isVendorDelivery
     }]);
 
     setShowDeliveryNoteModal(true);
@@ -305,11 +344,16 @@ const StockOutPage: React.FC = () => {
       const newNote = await inventoryService.createDeliveryNote(dnFormData);
 
       // Use bulk endpoint to add all items in a single request (eliminates N+1 API calls)
+      // Include vendor delivery info for items that need inventory creation
       const itemsToAdd = dnItems.map(item => ({
         inventory_material_id: item.inventory_material_id,
         quantity: item.quantity,
         notes: item.notes,
-        internal_request_id: item.internal_request_id
+        internal_request_id: item.internal_request_id,
+        // For vendor delivery materials - include info for auto-creating inventory entry
+        is_vendor_delivery: item.is_vendor_delivery,
+        material_name: item.material_name,
+        brand: item.brand
       }));
 
       const bulkResult = await inventoryService.addDeliveryNoteItemsBulk(newNote.delivery_note_id!, itemsToAdd);
@@ -551,17 +595,33 @@ const StockOutPage: React.FC = () => {
     return { pending };
   }, [allRequests]);
 
-  const getAvailableRecipients = () => {
-    const selectedProject = projects.find(p => p.project_id === dnFormData.project_id);
-    if (!selectedProject) return [];
-
+  // Memoized recipients list for performance (avoids recalculation on every render)
+  const availableRecipients = useMemo(() => {
     const recipients: Array<{ name: string; role: string }> = [];
-    selectedProject.site_supervisors?.forEach(se => {
-      recipients.push({ name: se.full_name, role: 'Site Engineer' });
-    });
+    const seenNames = new Set<string>();
+
+    // First, check if we have site engineer from the selected request's project_details
+    // This is the most accurate source (enriched from backend)
+    if (selectedRequestForDN?.project_details?.site_supervisor?.full_name) {
+      const name = selectedRequestForDN.project_details.site_supervisor.full_name;
+      recipients.push({ name, role: 'Site Engineer' });
+      seenNames.add(name);
+    }
+
+    // Then add site engineers from the projects list (may have additional ones)
+    const selectedProject = projects.find(p => p.project_id === dnFormData.project_id);
+    if (selectedProject?.site_supervisors) {
+      selectedProject.site_supervisors.forEach(se => {
+        // Avoid duplicates using Set for O(1) lookup
+        if (!seenNames.has(se.full_name)) {
+          recipients.push({ name: se.full_name, role: 'Site Engineer' });
+          seenNames.add(se.full_name);
+        }
+      });
+    }
 
     return recipients;
-  };
+  }, [selectedRequestForDN, projects, dnFormData.project_id]);
 
   if (loading) {
     return (
@@ -684,7 +744,7 @@ const StockOutPage: React.FC = () => {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Requester</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock / Destination</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -719,15 +779,29 @@ const StockOutPage: React.FC = () => {
                         <div>
                           <div className="font-medium">{req.material_name}</div>
                           {req.brand && <div className="text-gray-500 text-xs">{req.brand}</div>}
+                          {/* Show source type badge for vendor deliveries */}
+                          {req.source_type === 'from_vendor_delivery' && (
+                            <span className="inline-flex items-center mt-1 px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 border border-orange-300">
+                              <Package className="w-3 h-3 mr-1" />
+                              Vendor Delivery
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-4 text-sm font-bold text-cyan-600">
                         {req.quantity} {req.material_details?.unit || ''}
                       </td>
                       <td className="px-4 py-4 text-sm">
-                        <span className={`font-medium ${(req.material_details?.current_stock || 0) >= (req.quantity || 0) ? 'text-green-600' : 'text-red-600'}`}>
-                          {req.material_details?.current_stock || 0} {req.material_details?.unit || ''}
-                        </span>
+                        {/* For vendor delivery, show destination instead of stock */}
+                        {req.source_type === 'from_vendor_delivery' ? (
+                          <span className="font-medium text-orange-600">
+                            → {req.final_destination_site || 'Site'}
+                          </span>
+                        ) : (
+                          <span className={`font-medium ${(req.material_details?.current_stock || 0) >= (req.quantity || 0) ? 'text-green-600' : 'text-red-600'}`}>
+                            {req.material_details?.current_stock || 0} {req.material_details?.unit || ''}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-4">
                         {getStatusBadge(req.status || 'PENDING')}
@@ -741,10 +815,16 @@ const StockOutPage: React.FC = () => {
                             <>
                               <button
                                 onClick={() => handleApproveRequest(req.request_id!)}
-                                className="px-3 py-1.5 text-xs bg-green-100 text-green-700 rounded-lg hover:bg-green-200 font-medium"
-                                aria-label={`Approve request ${req.request_number}`}
+                                className={`px-3 py-1.5 text-xs rounded-lg font-medium ${
+                                  req.source_type === 'from_vendor_delivery'
+                                    ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                }`}
+                                aria-label={req.source_type === 'from_vendor_delivery'
+                                  ? `Confirm vendor delivery ${req.request_number}`
+                                  : `Approve request ${req.request_number}`}
                               >
-                                Approve
+                                {req.source_type === 'from_vendor_delivery' ? 'Confirm Receipt' : 'Approve'}
                               </button>
                               <button
                                 onClick={() => handleRejectRequest(req.request_id!)}
@@ -981,24 +1061,128 @@ const StockOutPage: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Project *</label>
-                  <select
-                    value={dnFormData.project_id}
-                    onChange={(e) => handleDeliveryNoteProjectSelect(parseInt(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                    required
-                    aria-label="Select project"
-                  >
-                    <option value={0}>Select Project</option>
-                    {projects.map((proj) => (
-                      <option key={proj.project_id} value={proj.project_id}>
-                        {proj.project_name} ({proj.project_code})
-                      </option>
-                    ))}
-                  </select>
+              {/* Show project and site engineer info from request if available */}
+              {selectedRequestForDN?.project_details ? (
+                <>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <label className="block text-xs font-medium text-blue-700 mb-1">Project</label>
+                        <div className="text-sm font-semibold text-blue-900">
+                          {selectedRequestForDN.project_details.project_name}
+                        </div>
+                        <div className="text-xs text-blue-600">
+                          Code: {selectedRequestForDN.project_details.project_code}
+                          {selectedRequestForDN.project_details.location && ` • ${selectedRequestForDN.project_details.location}`}
+                        </div>
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs font-medium text-blue-700 mb-1">
+                          Assigned Site Engineers {selectedRequestForDN.project_details.site_supervisors && `(${selectedRequestForDN.project_details.site_supervisors.length})`}
+                        </label>
+                        {selectedRequestForDN.project_details.site_supervisors && selectedRequestForDN.project_details.site_supervisors.length > 0 ? (
+                          <div className="space-y-1">
+                            {selectedRequestForDN.project_details.site_supervisors.map((se, idx) => (
+                              <div key={se.user_id} className="text-xs">
+                                <span className="font-medium text-blue-900">{se.full_name}</span>
+                                <span className="text-blue-600 ml-1">({se.email})</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-orange-600 font-medium">
+                            ⚠️ No Site Engineers assigned
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Site Engineer Selection Dropdown */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Attention To (Site Engineer) *
+                    </label>
+                    {selectedRequestForDN.project_details.site_supervisors && selectedRequestForDN.project_details.site_supervisors.length > 0 ? (
+                      <select
+                        value={dnFormData.attention_to}
+                        onChange={(e) => setDnFormData({ ...dnFormData, attention_to: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                        required
+                        aria-label="Select site engineer"
+                      >
+                        <option value="">Select Site Engineer</option>
+                        {selectedRequestForDN.project_details.site_supervisors.map((se) => (
+                          <option key={se.user_id} value={se.full_name}>
+                            {se.full_name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <>
+                        <input
+                          type="text"
+                          value={dnFormData.attention_to}
+                          onChange={(e) => setDnFormData({ ...dnFormData, attention_to: e.target.value })}
+                          placeholder="Enter site engineer name or contact person"
+                          className="w-full px-3 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 bg-orange-50"
+                          required
+                          aria-label="Site engineer name"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          This project has no assigned site engineers. Please enter the recipient's name manually.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Project *</label>
+                    <select
+                      value={dnFormData.project_id}
+                      onChange={(e) => handleDeliveryNoteProjectSelect(parseInt(e.target.value))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                      required
+                      aria-label="Select project"
+                    >
+                      <option value={0}>Select Project</option>
+                      {projects.map((proj) => (
+                        <option key={proj.project_id} value={proj.project_id}>
+                          {proj.project_name} ({proj.project_code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Attention To (Site Engineer) *</label>
+                    {availableRecipients.length > 0 ? (
+                      <select
+                        value={dnFormData.attention_to}
+                        onChange={(e) => setDnFormData({ ...dnFormData, attention_to: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                        required
+                        aria-label="Select site engineer"
+                      >
+                        <option value="">Select Site Engineer</option>
+                        {availableRecipients.map((recipient, idx) => (
+                          <option key={idx} value={recipient.name}>
+                            {recipient.name} ({recipient.role})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="w-full px-3 py-2 border border-red-300 bg-red-50 rounded-lg text-red-700 text-sm">
+                        <span className="font-medium">⚠️ No Site Engineer assigned</span>
+                        <p className="text-xs mt-1 text-red-600">Please assign a Site Engineer to this project first.</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Date *</label>
                   <input
@@ -1010,159 +1194,135 @@ const StockOutPage: React.FC = () => {
                     aria-label="Delivery date"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Requested By</label>
+                  <input
+                    type="text"
+                    value={dnFormData.requested_by}
+                    onChange={(e) => setDnFormData({ ...dnFormData, requested_by: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                    aria-label="Requested by"
+                  />
+                </div>
               </div>
 
-              {dnFormData.project_id > 0 && (
-                <>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Attention To (Site Engineer) *</label>
-                      {getAvailableRecipients().length > 0 ? (
-                        <select
-                          value={dnFormData.attention_to}
-                          onChange={(e) => setDnFormData({ ...dnFormData, attention_to: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                          required
-                          aria-label="Select site engineer"
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number *</label>
+                  <input
+                    type="text"
+                    value={dnFormData.vehicle_number}
+                    onChange={(e) => setDnFormData({ ...dnFormData, vehicle_number: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                    required
+                    aria-label="Vehicle number"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name *</label>
+                  <input
+                    type="text"
+                    value={dnFormData.driver_name}
+                    onChange={(e) => setDnFormData({ ...dnFormData, driver_name: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                    required
+                    aria-label="Driver name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Driver Contact</label>
+                  <input
+                    type="text"
+                    value={dnFormData.driver_contact}
+                    onChange={(e) => setDnFormData({ ...dnFormData, driver_contact: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                    aria-label="Driver contact"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Items *</label>
+                  <button
+                    onClick={handleAddDnItem}
+                    className="px-3 py-1 text-sm bg-cyan-100 text-cyan-700 rounded-lg hover:bg-cyan-200"
+                    type="button"
+                  >
+                    + Add Item
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {dnItems.map((item, index) => (
+                    <div key={index} className={`grid grid-cols-12 gap-2 items-center p-2 rounded ${item.is_vendor_delivery ? 'bg-orange-50 border border-orange-200' : 'bg-gray-50'}`}>
+                      <div className="col-span-7">
+                        {/* Show material name directly for vendor deliveries, dropdown for store materials */}
+                        {item.is_vendor_delivery ? (
+                          <div className="px-2 py-1 text-sm">
+                            <div className="font-medium text-gray-900">{item.material_name}</div>
+                            {item.brand && <div className="text-xs text-gray-500">{item.brand}</div>}
+                            <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700">
+                              <Package className="w-2.5 h-2.5 mr-0.5" />
+                              Vendor Delivery
+                            </span>
+                          </div>
+                        ) : (
+                          <select
+                            value={item.inventory_material_id}
+                            onChange={(e) => handleDnItemChange(index, 'inventory_material_id', parseInt(e.target.value))}
+                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
+                            aria-label={`Material for item ${index + 1}`}
+                          >
+                            <option value={0}>Select Material</option>
+                            {materials.map((mat) => (
+                              <option key={mat.inventory_material_id} value={mat.inventory_material_id}>
+                                {mat.material_name} - Stock: {mat.current_stock} {mat.unit}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                      <div className="col-span-2">
+                        <input
+                          type="number"
+                          value={item.quantity}
+                          readOnly
+                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded bg-gray-100 cursor-not-allowed"
+                          aria-label={`Quantity for item ${index + 1}`}
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        {/* Show unit */}
+                        <div className="text-sm text-gray-700 px-2 py-1 font-medium">
+                          {item.unit || 'unit'}
+                        </div>
+                      </div>
+                      <div className="col-span-1 text-center">
+                        <button
+                          onClick={() => handleRemoveDnItem(index)}
+                          className="text-red-600 hover:text-red-800"
+                          type="button"
+                          aria-label={`Remove item ${index + 1}`}
                         >
-                          <option value="">Select Site Engineer</option>
-                          {getAvailableRecipients().map((recipient, idx) => (
-                            <option key={idx} value={recipient.name}>
-                              {recipient.name} ({recipient.role})
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <div className="w-full px-3 py-2 border border-red-300 bg-red-50 rounded-lg text-red-700 text-sm">
-                          <span className="font-medium">⚠️ No Site Engineer assigned</span>
-                          <p className="text-xs mt-1 text-red-600">Please assign a Site Engineer to this project first.</p>
-                        </div>
-                      )}
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Requested By</label>
-                      <input
-                        type="text"
-                        value={dnFormData.requested_by}
-                        onChange={(e) => setDnFormData({ ...dnFormData, requested_by: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                        aria-label="Requested by"
-                      />
-                    </div>
-                  </div>
+                  ))}
+                </div>
+              </div>
 
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number</label>
-                      <input
-                        type="text"
-                        value={dnFormData.vehicle_number}
-                        onChange={(e) => setDnFormData({ ...dnFormData, vehicle_number: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                        aria-label="Vehicle number"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
-                      <input
-                        type="text"
-                        value={dnFormData.driver_name}
-                        onChange={(e) => setDnFormData({ ...dnFormData, driver_name: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                        aria-label="Driver name"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Driver Contact</label>
-                      <input
-                        type="text"
-                        value={dnFormData.driver_contact}
-                        onChange={(e) => setDnFormData({ ...dnFormData, driver_contact: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                        aria-label="Driver contact"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <label className="block text-sm font-medium text-gray-700">Items *</label>
-                      <button
-                        onClick={handleAddDnItem}
-                        className="px-3 py-1 text-sm bg-cyan-100 text-cyan-700 rounded-lg hover:bg-cyan-200"
-                        type="button"
-                      >
-                        + Add Item
-                      </button>
-                    </div>
-
-                    <div className="space-y-2">
-                      {dnItems.map((item, index) => (
-                        <div key={index} className="grid grid-cols-12 gap-2 items-center bg-gray-50 p-2 rounded">
-                          <div className="col-span-5">
-                            <select
-                              value={item.inventory_material_id}
-                              onChange={(e) => handleDnItemChange(index, 'inventory_material_id', parseInt(e.target.value))}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                              aria-label={`Material for item ${index + 1}`}
-                            >
-                              <option value={0}>Select Material</option>
-                              {materials.map((mat) => (
-                                <option key={mat.inventory_material_id} value={mat.inventory_material_id}>
-                                  {mat.material_name} - Stock: {mat.current_stock} {mat.unit}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="col-span-2">
-                            <input
-                              type="number"
-                              value={item.quantity}
-                              onChange={(e) => handleDnItemChange(index, 'quantity', parseFloat(e.target.value) || 0)}
-                              placeholder="Qty"
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                              min="0"
-                              step="0.01"
-                              aria-label={`Quantity for item ${index + 1}`}
-                            />
-                          </div>
-                          <div className="col-span-4">
-                            <input
-                              type="text"
-                              value={item.notes}
-                              onChange={(e) => handleDnItemChange(index, 'notes', e.target.value)}
-                              placeholder="Notes (optional)"
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                              aria-label={`Notes for item ${index + 1}`}
-                            />
-                          </div>
-                          <div className="col-span-1 text-center">
-                            <button
-                              onClick={() => handleRemoveDnItem(index)}
-                              className="text-red-600 hover:text-red-800"
-                              type="button"
-                              aria-label={`Remove item ${index + 1}`}
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    <textarea
-                      value={dnFormData.notes}
-                      onChange={(e) => setDnFormData({ ...dnFormData, notes: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                      rows={3}
-                      aria-label="Delivery note notes"
-                    />
-                  </div>
-                </>
-              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <textarea
+                  value={dnFormData.notes}
+                  onChange={(e) => setDnFormData({ ...dnFormData, notes: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                  rows={3}
+                  aria-label="Delivery note notes"
+                />
+              </div>
 
               <div className="flex justify-end gap-3 pt-4">
                 <button
@@ -1175,8 +1335,12 @@ const StockOutPage: React.FC = () => {
                 <button
                   onClick={handleCreateDeliveryNote}
                   className="px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  disabled={saving || !dnFormData.attention_to}
-                  title={!dnFormData.attention_to ? 'Please select a Site Engineer first' : ''}
+                  disabled={saving || !dnFormData.attention_to || !dnFormData.vehicle_number || !dnFormData.driver_name}
+                  title={
+                    !dnFormData.attention_to ? 'Please select a Site Engineer first' :
+                    !dnFormData.vehicle_number ? 'Please enter Vehicle Number' :
+                    !dnFormData.driver_name ? 'Please enter Driver Name' : ''
+                  }
                 >
                   {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   {saving ? 'Creating...' : 'Create Delivery Note'}

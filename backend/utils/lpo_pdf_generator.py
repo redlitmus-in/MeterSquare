@@ -76,6 +76,16 @@ class LPOPDFGenerator:
             textColor=colors.HexColor('#333333')
         ))
 
+        # Small italic text for supplier notes
+        self.styles.add(ParagraphStyle(
+            name='LPOSmallItalic',
+            parent=self.styles['Normal'],
+            fontSize=7,
+            fontName='Helvetica-Oblique',
+            textColor=colors.HexColor('#4B5563'),
+            leading=9
+        ))
+
     def _get_image_from_base64(self, base64_string, width=None, height=None):
         """Convert base64 string to ReportLab Image"""
         try:
@@ -253,6 +263,16 @@ class LPOPDFGenerator:
             self.styles['LPONormal']
         ))
 
+        # === SUPPLIER NOTES (if provided) ===
+        supplier_notes = lpo_data.get('supplier_notes')
+        if supplier_notes and supplier_notes.strip():
+            elements.append(Spacer(1, 10))
+            elements.append(Paragraph('<b><u>Additional Requirements/Notes for Supplier:</u></b>', self.styles['SectionHeader']))
+            elements.append(Spacer(1, 5))
+            # Escape HTML entities and preserve line breaks
+            safe_notes = supplier_notes.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
+            elements.append(Paragraph(safe_notes, self.styles['LPONormal']))
+
         # === TERMS + SIGNATURES + FOOTER ===
         # Check both materials AND terms count to decide page layout
         terms = lpo_data.get('terms', {})
@@ -424,7 +444,9 @@ TRN# {company.get('trn', 'N/A')}'''
             material_name = item.get('material_name', '') or item.get('description', '')
             brand = item.get('brand', '') or '-'
             specification = item.get('specification', '') or '-'
-            
+            supplier_notes = item.get('supplier_notes', '').strip()
+
+            # Add main material row
             table_data.append([
                 str(item.get('sl_no', i)),
                 Paragraph(str(material_name), self.styles['LPOSmall']),
@@ -435,6 +457,21 @@ TRN# {company.get('trn', 'N/A')}'''
                 f"{item.get('rate', 0):,.2f}",
                 f"{item.get('amount', 0):,.2f}"
             ])
+
+            # Add supplier notes sub-row if notes exist
+            if supplier_notes:
+                # Escape HTML entities to prevent ReportLab parsing errors
+                safe_notes = supplier_notes.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                # Preserve line breaks
+                safe_notes = safe_notes.replace('\n', '<br/>')
+                table_data.append([
+                    '',  # Empty SI#
+                    Paragraph(
+                        f'<i>📝 <b>Note:</b> {safe_notes}</i>',
+                        self.styles['LPOSmallItalic']
+                    ),
+                    '', '', '', '', '', ''  # Empty other columns
+                ])
 
         # Add totals
         subtotal = totals.get('subtotal', 0)

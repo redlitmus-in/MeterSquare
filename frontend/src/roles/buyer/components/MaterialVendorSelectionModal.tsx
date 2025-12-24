@@ -38,6 +38,7 @@ interface MaterialVendorSelectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onVendorSelected?: () => void;
+  onNotesUpdated?: () => void; // Called when supplier notes are saved
   viewMode?: 'buyer' | 'td'; // 'buyer' = full edit mode, 'td' = simplified view for TD to change vendor
 }
 
@@ -75,6 +76,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   isOpen,
   onClose,
   onVendorSelected,
+  onNotesUpdated,
   viewMode = 'buyer' // Default to buyer mode
 }) => {
   const { user } = useAuthStore();
@@ -133,6 +135,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   // Track last initialized CR ID to avoid reinitializing with stale prop data
   const lastInitializedCrId = useRef<number | null>(null);
 
+  // Purchase summary note - single note for entire purchase (applies to all vendors)
+  const [purchaseSummaryNote, setPurchaseSummaryNote] = useState<string>('');
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [savedNote, setSavedNote] = useState<string>(''); // Track last saved version
+
+  // Per-material supplier notes - specific notes for each individual material
+  const [materialNotes, setMaterialNotes] = useState<Record<string, string>>({});
+  const [editingMaterialNote, setEditingMaterialNote] = useState<string | null>(null);
+  const [savingMaterialNote, setSavingMaterialNote] = useState<string | null>(null);
+
   // Check if current user is Technical Director
   const isTechnicalDirector = user?.role?.toLowerCase().includes('technical') ||
     user?.role?.toLowerCase().includes('director') ||
@@ -164,6 +176,31 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       );
     });
   };
+
+  // Initialize purchase summary note when modal opens
+  useEffect(() => {
+    if (!isOpen || !purchase) return;
+
+    // Load supplier notes from purchase data (single note for entire purchase)
+    const initialNote = purchase.supplier_notes || '';
+    setPurchaseSummaryNote(initialNote);
+    setSavedNote(initialNote);
+  }, [isOpen, purchase?.cr_id]);
+
+  // Initialize per-material notes from purchase data
+  useEffect(() => {
+    if (!isOpen || !purchase) return;
+
+    const notes: Record<string, string> = {};
+    if (purchase.material_vendor_selections) {
+      Object.entries(purchase.material_vendor_selections).forEach(([materialName, selection]: [string, any]) => {
+        if (selection.supplier_notes) {
+          notes[materialName] = selection.supplier_notes;
+        }
+      });
+    }
+    setMaterialNotes(notes);
+  }, [isOpen, purchase?.cr_id, purchase?.material_vendor_selections]);
 
   // Initialize material vendors state from purchase with auto-selection
   useEffect(() => {
@@ -967,6 +1004,60 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     });
   };
 
+  // Save purchase summary note
+  const handleSavePurchaseNote = async () => {
+    try {
+      setIsSavingNote(true);
+
+      // Call the backend API to update supplier notes
+      await buyerService.updateSupplierNotes(purchase.cr_id, purchaseSummaryNote.trim());
+
+      // Update saved state
+      setSavedNote(purchaseSummaryNote.trim());
+
+      toast.success('Purchase notes saved successfully');
+
+      // Notify parent to refresh data
+      if (onNotesUpdated) {
+        onNotesUpdated();
+      }
+    } catch (error: any) {
+      console.error('Error saving purchase notes:', error);
+      toast.error(error.response?.data?.error || 'Failed to save notes');
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
+
+  // Save per-material supplier notes
+  const handleSaveMaterialNote = async (materialName: string) => {
+    try {
+      setSavingMaterialNote(materialName);
+
+      const noteText = materialNotes[materialName] || '';
+      const selectedVendor = materialVendors.find(m => m.material_name === materialName)?.selected_vendors[0];
+
+      await buyerService.saveSupplierNotes(
+        purchase.cr_id,
+        materialName,
+        noteText,
+        selectedVendor?.vendor_id
+      );
+
+      toast.success('Material notes saved');
+      setEditingMaterialNote(null);
+
+      if (onNotesUpdated) {
+        onNotesUpdated(); // Refresh parent data
+      }
+    } catch (error: any) {
+      console.error('Error saving material notes:', error);
+      toast.error(error.message || 'Failed to save notes');
+    } finally {
+      setSavingMaterialNote(null);
+    }
+  };
+
   const handleSubmitVendorGroup = async (vendorId: number, vendorName: string, materials: string[]) => {
     try {
       setIsSubmitting(true);
@@ -982,6 +1073,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           unit: m.unit,
           negotiated_price: m.selected_vendors[0].negotiated_price,
           save_price_for_future: m.selected_vendors[0].save_price_for_future,
+          supplier_notes: materialNotes[m.material_name] || null, // Include per-material notes
           all_selected_vendors: m.selected_vendors.map(v => ({
             vendor_id: v.vendor_id,
             vendor_name: v.vendor_name,
@@ -1003,7 +1095,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
       const response = await buyerService.selectVendorForMaterial(
         purchase.cr_id,
-        vendorMaterialSelections
+        vendorMaterialSelections,
+        purchaseSummaryNote || undefined // Include purchase summary notes
       );
 
       toast.success(`${vendorMaterialSelections.length} material(s) sent to TD for ${vendorName}!`);
@@ -1066,9 +1159,19 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           return;
         }
 
+        // Prepare materials data for re-selection
+        const materialsData = selectedMaterials.map(m => ({
+          material_name: m.material_name,
+          quantity: m.quantity,
+          unit: m.unit,
+          negotiated_price: m.selected_vendors[0]?.negotiated_price,
+          save_price_for_future: m.selected_vendors[0]?.save_price_for_future
+        }));
+
         const response = await buyerService.reselectVendorForPOChild(
           purchase.po_child_id,
-          firstVendor.vendor_id
+          firstVendor.vendor_id,
+          materialsData
         );
 
         toast.success(response.message || 'Vendor re-selected! Awaiting TD approval.');
@@ -1118,6 +1221,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         const vendorGroups = Array.from(vendorGroupsMap.entries()).map(([vendorId, materials]) => ({
           vendor_id: vendorId,
           vendor_name: materials[0].selected_vendors[0].vendor_name,
+          supplier_notes: purchaseSummaryNote || undefined, // Include purchase summary notes
           materials: materials.map(m => {
             const selectedVendor = m.selected_vendors[0];
 
@@ -1150,7 +1254,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
               quantity: m.quantity,
               unit: m.unit,
               negotiated_price: vendorPrice, // Send actual vendor price, not null
-              save_price_for_future: selectedVendor.save_price_for_future
+              save_price_for_future: selectedVendor.save_price_for_future,
+              supplier_notes: materialNotes[m.material_name] || null // Include per-material notes
             };
           })
         }));
@@ -1206,6 +1311,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           // Include negotiated price information
           negotiated_price: m.selected_vendors[0].negotiated_price,
           save_price_for_future: m.selected_vendors[0].save_price_for_future,
+          supplier_notes: materialNotes[m.material_name] || null, // Include per-material notes
           // Include all selected vendors for reference
           all_selected_vendors: m.selected_vendors.map(v => ({
             vendor_id: v.vendor_id,
@@ -1221,9 +1327,11 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           item_name: purchase.item_name
         }));
 
+      // Use purchase summary notes for single-vendor scenario
       const response = await buyerService.selectVendorForMaterial(
         purchase.cr_id,
-        materialSelections
+        materialSelections,
+        purchaseSummaryNote || undefined // Include purchase summary notes
       );
 
       // Show different message based on mode and response type
@@ -1387,6 +1495,66 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     />
                   </div>
                 </div>
+
+                {/* Purchase Summary Note Section - Only for Buyer mode */}
+                {viewMode === 'buyer' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="mb-6 p-5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl shadow-sm"
+                  >
+                    <div className="flex items-start gap-3 mb-3">
+                      <FileText className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                          Purchase Summary / Notes to Supplier
+                        </h3>
+                        <p className="text-xs text-gray-600">
+                          Add general notes, requirements, or instructions for this purchase order. This will be included in the LPO PDF and vendor email.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <textarea
+                        value={purchaseSummaryNote}
+                        onChange={(e) => setPurchaseSummaryNote(e.target.value)}
+                        placeholder="Example: Please ensure materials are delivered by [date]. All items must comply with [specification]. Delivery address: [location]..."
+                        className="w-full min-h-[100px] px-4 py-3 text-sm border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-transparent resize-y bg-white placeholder:text-gray-400"
+                        rows={4}
+                      />
+
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-gray-500">
+                          {purchaseSummaryNote.length > 0 && (
+                            <span className={purchaseSummaryNote === savedNote ? 'text-green-600' : 'text-amber-600'}>
+                              {purchaseSummaryNote === savedNote ? '✓ Saved' : '• Unsaved changes'}
+                            </span>
+                          )}
+                        </div>
+
+                        <Button
+                          onClick={handleSavePurchaseNote}
+                          disabled={isSavingNote || purchaseSummaryNote === savedNote}
+                          className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          {isSavingNote ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4" />
+                              Save Notes
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
 
                 {/* AI-Powered Info Banner - Floating Light Navy & Red Theme - Only for Buyer mode */}
                 {viewMode === 'buyer' && (
@@ -1779,6 +1947,88 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                               </div>
                             </div>
                           </div>
+
+                          {/* Per-Material Supplier Notes Section */}
+                          {!isMaterialLocked && viewMode === 'buyer' && (
+                            <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-t border-blue-200">
+                              <div className="flex items-start gap-2">
+                                <FileText className="w-4 h-4 text-blue-600 mt-1 flex-shrink-0" />
+                                <div className="flex-1">
+                                  <label className="text-xs font-semibold text-blue-900 block mb-1 flex items-center gap-1">
+                                    Specifications / Cutting Details / Notes for Supplier
+                                    <span className="text-[10px] font-normal text-blue-600">(will be highlighted in LPO item description)</span>
+                                  </label>
+
+                                  {editingMaterialNote === material.material_name ? (
+                                    <div className="space-y-2">
+                                      <textarea
+                                        value={materialNotes[material.material_name] || ''}
+                                        onChange={(e) => setMaterialNotes({
+                                          ...materialNotes,
+                                          [material.material_name]: e.target.value
+                                        })}
+                                        placeholder="Example: Cut to exact 90cm x 210cm, RAL 9010 finish, include standard vision panel hardware, deliver by Friday..."
+                                        className="w-full px-3 py-2 text-sm border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-y bg-white"
+                                        rows={3}
+                                        maxLength={5000}
+                                      />
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] text-gray-500">
+                                          {(materialNotes[material.material_name] || '').length} / 5000 characters
+                                        </span>
+                                        <div className="flex gap-2">
+                                          <Button
+                                            size="sm"
+                                            onClick={() => handleSaveMaterialNote(material.material_name)}
+                                            disabled={savingMaterialNote === material.material_name}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs"
+                                          >
+                                            {savingMaterialNote === material.material_name ? (
+                                              <><Loader2 className="w-3 h-3 animate-spin mr-1" /> Saving...</>
+                                            ) : (
+                                              <><Save className="w-3 h-3 mr-1" /> Save</>
+                                            )}
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => {
+                                              setEditingMaterialNote(null);
+                                              // Reset to saved value
+                                              if (purchase.material_vendor_selections?.[material.material_name]?.supplier_notes) {
+                                                setMaterialNotes({
+                                                  ...materialNotes,
+                                                  [material.material_name]: purchase.material_vendor_selections[material.material_name].supplier_notes
+                                                });
+                                              }
+                                            }}
+                                            className="px-3 py-1.5 text-xs"
+                                          >
+                                            Cancel
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div
+                                      onClick={() => setEditingMaterialNote(material.material_name)}
+                                      className="cursor-pointer text-sm text-gray-700 hover:bg-blue-100 p-2.5 rounded-md border border-dashed border-blue-300 min-h-[44px] transition-colors"
+                                    >
+                                      {materialNotes[material.material_name] ? (
+                                        <div className="whitespace-pre-wrap text-gray-800">
+                                          {materialNotes[material.material_name]}
+                                        </div>
+                                      ) : (
+                                        <span className="text-gray-400 italic text-xs">
+                                          Click to add specifications, cutting details, sizes, or special requirements for this material...
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
                           {/* Vendor Selection Panel - Only show if not locked */}
                           <AnimatePresence>
@@ -3956,13 +4206,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             const submissionGroupId = `${Date.now()}-${Math.random().toString(36).slice(2, 2 + SUBMISSION_ID_LENGTH)}`;
 
                             // Note: material_vendor_selections already saved when "Send This Vendor to TD" was clicked
-                            console.log('>>> [Final Send] Creating POChild (vendor selections already saved)');
+
+                            // Include purchase summary notes
+                            console.log('🔍 [DEBUG] Including purchase summary notes for vendor', sentVendorId, ':', purchaseSummaryNote);
 
                             const response = await buyerService.createPOChildren(
                               purchase.cr_id,
                               [{
                                 vendor_id: sentVendorId,
                                 vendor_name: sentVendorName,
+                                supplier_notes: purchaseSummaryNote || undefined,  // Include purchase summary notes
                                 materials: materials
                               }],
                               submissionGroupId

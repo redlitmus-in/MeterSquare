@@ -1,4 +1,5 @@
 from flask import jsonify, request, g, send_file
+from sqlalchemy import func
 from config.db import db
 from models.inventory import *
 from models.project import Project
@@ -178,17 +179,71 @@ def get_mep_supervisors(project):
     return supervisors
 
 
-def get_site_supervisor(project):
-    """Extract site supervisor/engineer from project object"""
+def get_site_supervisors(project):
+    """Extract all site supervisors/engineers assigned to this project
+
+    Checks three sources:
+    1. project.site_supervisor_id (single SE from Project table)
+    2. PMAssignSS.ss_ids (array of SE IDs)
+    3. PMAssignSS.assigned_to_se_id (single SE assignment)
+
+    Returns array of site supervisor objects with user details
+    """
+    from models.pm_assign_ss import PMAssignSS
+
+    supervisors = []
+    seen_ids = set()
+
+    # First, check if project has direct site_supervisor_id
     if project and project.site_supervisor_id:
         site_user = User.query.get(project.site_supervisor_id)
         if site_user:
-            return {
+            supervisors.append({
                 'user_id': site_user.user_id,
                 'full_name': site_user.full_name,
                 'email': site_user.email
-            }
-    return None
+            })
+            seen_ids.add(site_user.user_id)
+
+    # Then, check PMAssignSS table for additional site supervisors
+    if project:
+        assignments = PMAssignSS.query.filter_by(
+            project_id=project.project_id,
+            is_deleted=False
+        ).all()
+
+        for assignment in assignments:
+            # Check ss_ids array
+            if assignment.ss_ids:  # ss_ids is an array
+                for ss_id in assignment.ss_ids:
+                    if ss_id not in seen_ids:
+                        ss_user = User.query.get(ss_id)
+                        if ss_user:
+                            supervisors.append({
+                                'user_id': ss_user.user_id,
+                                'full_name': ss_user.full_name,
+                                'email': ss_user.email
+                            })
+                            seen_ids.add(ss_user.user_id)
+
+            # Also check assigned_to_se_id (single SE assignment)
+            if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in seen_ids:
+                se_user = User.query.get(assignment.assigned_to_se_id)
+                if se_user:
+                    supervisors.append({
+                        'user_id': se_user.user_id,
+                        'full_name': se_user.full_name,
+                        'email': se_user.email
+                    })
+                    seen_ids.add(se_user.user_id)
+
+    return supervisors if supervisors else None
+
+
+def get_site_supervisor(project):
+    """Legacy function - returns first site supervisor for backward compatibility"""
+    supervisors = get_site_supervisors(project)
+    return supervisors[0] if supervisors else None
 
 
 def enrich_project_details(project, include_mep=True):
@@ -201,7 +256,8 @@ def enrich_project_details(project, include_mep=True):
         'project_code': project.project_code,
         'location': project.location,
         'project_managers': get_project_managers(project),
-        'site_supervisor': get_site_supervisor(project)
+        'site_supervisor': get_site_supervisor(project),  # First SE for backward compatibility
+        'site_supervisors': get_site_supervisors(project)  # All SEs - NEW
     }
     if include_mep:
         details['mep_managers'] = get_mep_supervisors(project)
@@ -222,9 +278,50 @@ def create_inventory_item():
             if not data.get(field):
                 return jsonify({'error': f'{field} is required'}), 400
 
+        # Check for duplicate materials (case-insensitive comparison)
+        material_name = data['material_name'].strip().lower()
+        brand = (data.get('brand') or '').strip().lower()
+        size = (data.get('size') or '').strip().lower()
+
+        # Build duplicate query - match on material_name, brand, and size
+        duplicate_query = InventoryMaterial.query.filter(
+            db.func.lower(InventoryMaterial.material_name) == material_name
+        )
+
+        # Add brand filter
+        if brand:
+            duplicate_query = duplicate_query.filter(
+                db.func.lower(InventoryMaterial.brand) == brand
+            )
+        else:
+            duplicate_query = duplicate_query.filter(
+                (InventoryMaterial.brand == None) | (InventoryMaterial.brand == '')
+            )
+
+        # Add size filter
+        if size:
+            duplicate_query = duplicate_query.filter(
+                db.func.lower(InventoryMaterial.size) == size
+            )
+        else:
+            duplicate_query = duplicate_query.filter(
+                (InventoryMaterial.size == None) | (InventoryMaterial.size == '')
+            )
+
+        existing_material = duplicate_query.first()
+
+        if existing_material:
+            return jsonify({
+                'error': f'Material already exists: {existing_material.material_code} - {existing_material.material_name}' +
+                         (f' ({existing_material.brand})' if existing_material.brand else '') +
+                         (f' - {existing_material.size}' if existing_material.size else ''),
+                'existing_material': existing_material.to_dict()
+            }), 409
+
         # Auto-generate material code
         material_code = generate_material_code()
 
+        # unit_price defaults to 0.0 and will be updated from first Stock In transaction
         new_material = InventoryMaterial(
             material_code=material_code,
             material_name=data['material_name'],
@@ -234,7 +331,7 @@ def create_inventory_item():
             unit=data['unit'],
             current_stock=data.get('current_stock', 0.0),
             min_stock_level=data.get('min_stock_level', 0.0),
-            unit_price=data.get('unit_price', 0.0),
+            unit_price=0.0,  # Will be set from first purchase transaction
             description=data.get('description'),
             is_active=data.get('is_active', True),
             created_by=current_user,
@@ -421,9 +518,18 @@ def delete_inventory_item(inventory_material_id):
 # ==================== INVENTORY TRANSACTION APIs ====================
 
 def create_inventory_transaction():
-    """Create a new material transaction (purchase or withdrawal)"""
+    """Create a new material transaction (purchase or withdrawal) with optional file upload"""
     try:
-        data = request.get_json()
+        # Check if request has FormData (with file) or JSON
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # Handle FormData (with file upload)
+            data = request.form.to_dict()
+            delivery_note_file = request.files.get('delivery_note_file')
+        else:
+            # Handle JSON (backward compatibility)
+            data = request.get_json()
+            delivery_note_file = None
+
         current_user = g.user.get('email', 'system')
 
         # Validate required fields
@@ -456,6 +562,69 @@ def create_inventory_transaction():
         # Calculate total amount
         total_amount = quantity * unit_price
 
+        # Handle file upload to Supabase if provided
+        delivery_note_url = None
+        if delivery_note_file:
+            try:
+                import os
+                from datetime import datetime as dt
+                from supabase import create_client
+
+                # Get Supabase credentials based on environment
+                # Use SERVICE_ROLE key for server-side uploads (has admin privileges)
+                environment = os.environ.get('ENVIRONMENT', 'production')
+                if environment == 'development':
+                    supabase_url = os.environ.get('DEV_SUPABASE_URL')
+                    supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')  # SERVICE_ROLE key
+                else:
+                    supabase_url = os.environ.get('SUPABASE_URL')
+                    supabase_key = os.environ.get('SUPABASE_ANON_KEY')  # SERVICE_ROLE key
+
+                if not supabase_url or not supabase_key:
+                    raise Exception('Supabase credentials must be set in environment variables')
+
+                # Create Supabase client with service role key
+                print(f"[DEBUG] Environment: {environment}")
+                print(f"[DEBUG] Supabase URL: {supabase_url}")
+                print(f"[DEBUG] Using service role key: {supabase_key[:20]}...")
+
+                supabase = create_client(supabase_url, supabase_key)
+
+                # Generate unique filename
+                timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
+                original_filename = delivery_note_file.filename
+                file_extension = os.path.splitext(original_filename)[1]
+                unique_filename = f"delivery-notes/{timestamp}_{original_filename}"
+
+                print(f"[DEBUG] Uploading file: {unique_filename}")
+                print(f"[DEBUG] Content type: {delivery_note_file.content_type}")
+
+                # Upload to Supabase Storage
+                file_data = delivery_note_file.read()
+
+                # Use the correct API format for supabase-py
+                # The upload method signature: upload(path, file, file_options=None)
+                bucket = supabase.storage.from_('inventory-files')
+
+                try:
+                    response = bucket.upload(
+                        unique_filename,  # path (positional)
+                        file_data,  # file bytes (positional)
+                        {"content-type": delivery_note_file.content_type, "upsert": "false"}  # file_options (positional)
+                    )
+                    print(f"[DEBUG] Upload response: {response}")
+                except Exception as e:
+                    print(f"[DEBUG] Upload error details: {e}")
+                    print(f"[DEBUG] Error type: {type(e)}")
+                    raise
+
+                # Get public URL
+                delivery_note_url = bucket.get_public_url(unique_filename)
+                print(f"[DEBUG] Public URL: {delivery_note_url}")
+
+            except Exception as upload_error:
+                return jsonify({'error': f'File upload failed: {str(upload_error)}'}), 500
+
         # Create transaction
         new_transaction = InventoryTransaction(
             inventory_material_id=data['inventory_material_id'],
@@ -466,12 +635,16 @@ def create_inventory_transaction():
             reference_number=data.get('reference_number'),
             project_id=data.get('project_id'),
             notes=data.get('notes'),
+            delivery_note_url=delivery_note_url,
             created_by=current_user
         )
 
         # Update material stock
         if transaction_type == 'PURCHASE':
             material.current_stock += quantity
+            # Auto-update reference price if this is the first purchase (unit_price is 0.0)
+            if material.unit_price == 0.0:
+                material.unit_price = unit_price
         else:  # WITHDRAWAL
             material.current_stock -= quantity
 
@@ -1155,9 +1328,20 @@ def get_all_internal_material_requests():
 
 
 def approve_internal_request(request_id):
-    """Approve an internal material request and deduct material from inventory"""
+    """Approve an internal material request and deduct material from inventory
+
+    For 'from_vendor_delivery' requests:
+    - Materials are coming from vendor, not from existing inventory
+    - PM confirms vendor delivery receipt and routes to site
+    - No inventory deduction needed (materials go directly to site)
+
+    For regular store requests:
+    - Deduct material from existing inventory stock
+    - Create withdrawal transaction
+    """
     try:
-        internal_req = InternalMaterialRequest.query.get(request_id)
+        # Use row locking to prevent race conditions on concurrent approvals
+        internal_req = InternalMaterialRequest.query.with_for_update().get(request_id)
 
         if not internal_req:
             return jsonify({'error': 'Internal request not found'}), 404
@@ -1165,7 +1349,43 @@ def approve_internal_request(request_id):
         if internal_req.status not in ['pending', 'PENDING', 'send_request', 'awaiting_vendor_delivery']:
             return jsonify({'error': f'Request is already {internal_req.status}'}), 400
 
-        # Validate that inventory_material_id exists
+        current_user = g.user.get('email', 'system')
+
+        # Handle vendor delivery requests differently
+        # These are materials coming from vendor, not from existing inventory
+        if internal_req.source_type == 'from_vendor_delivery':
+            # Validate destination site exists for vendor deliveries
+            if not internal_req.final_destination_site or not internal_req.final_destination_site.strip():
+                return jsonify({'error': 'Final destination site is required for vendor deliveries'}), 400
+
+            # Vendor delivery confirmation - no inventory deduction needed
+            # Materials go directly from vendor to site
+            internal_req.status = 'APPROVED'
+            internal_req.approved_by = current_user
+            internal_req.approved_at = datetime.utcnow()
+            internal_req.vendor_delivery_confirmed = True
+            internal_req.last_modified_by = current_user
+
+            db.session.commit()
+
+            print(f"Vendor delivery confirmed: request_id={request_id}, material={internal_req.material_name}, "
+                  f"quantity={internal_req.quantity}, destination={internal_req.final_destination_site}, "
+                  f"approved_by={current_user}")
+
+            return jsonify({
+                'success': True,
+                'message': 'Vendor delivery confirmed! Materials routed to site.',
+                'request': internal_req.to_dict(),
+                'source_type': 'from_vendor_delivery',
+                'material_details': {
+                    'material_name': internal_req.material_name,
+                    'quantity': internal_req.quantity,
+                    'destination': internal_req.final_destination_site,
+                    'routed_from': 'Vendor Delivery'
+                }
+            }), 200
+
+        # Regular store request - validate and deduct from inventory
         if not internal_req.inventory_material_id:
             return jsonify({'error': 'inventory_material_id is required for approval'}), 400
 
@@ -1179,8 +1399,6 @@ def approve_internal_request(request_id):
             return jsonify({
                 'error': f'Insufficient stock. Available: {material.current_stock} {material.unit}, Requested: {internal_req.quantity}'
             }), 400
-
-        current_user = g.user.get('email', 'system')
 
         # Deduct material from inventory
         material.current_stock -= internal_req.quantity
@@ -1212,6 +1430,7 @@ def approve_internal_request(request_id):
         db.session.commit()
 
         return jsonify({
+            'success': True,
             'message': 'Internal request approved successfully and material deducted from inventory',
             'request': internal_req.to_dict(),
             'transaction': new_transaction.to_dict(),
@@ -1775,13 +1994,32 @@ def get_pending_disposal_returns():
         for ret in returns:
             ret_data = ret.to_dict()
 
-            # Get project details
-            project = Project.query.get(ret.project_id)
-            if project:
+            # Get project details (skip for catalog disposals where project_id = 0)
+            if ret.project_id and ret.project_id > 0:
+                project = Project.query.get(ret.project_id)
+                if project:
+                    ret_data['project_details'] = {
+                        'project_id': project.project_id,
+                        'project_name': project.project_name,
+                        'project_code': project.project_code
+                    }
+            else:
+                # Catalog disposal (not from a project)
                 ret_data['project_details'] = {
-                    'project_id': project.project_id,
-                    'project_name': project.project_name,
-                    'project_code': project.project_code
+                    'project_id': 0,
+                    'project_name': 'Materials Catalog',
+                    'project_code': 'CATALOG'
+                }
+
+            # Get material details
+            material = InventoryMaterial.query.get(ret.inventory_material_id)
+            if material:
+                ret_data['material_details'] = {
+                    'material_code': material.material_code,
+                    'material_name': material.material_name,
+                    'brand': material.brand,
+                    'unit': material.unit,
+                    'current_stock': material.current_stock
                 }
 
             result.append(ret_data)
@@ -1896,9 +2134,20 @@ def review_disposal(return_id):
             # Mark for disposal (original behavior)
             # Get material info for notification
             material = InventoryMaterial.query.get(material_return.inventory_material_id)
+            if not material:
+                return jsonify({'error': 'Material not found in inventory'}), 404
+
+            # For catalog disposals (project_id = 0), reduce stock immediately
+            if material_return.project_id == 0:
+                if material.current_stock < material_return.quantity:
+                    return jsonify({'error': f'Insufficient stock. Available: {material.current_stock}, Requested: {material_return.quantity}'}), 400
+
+                material.current_stock -= material_return.quantity
+                material.last_modified_by = current_user
+                material.last_modified_at = datetime.utcnow()
 
             material_return.disposal_status = DISPOSAL_APPROVED_DISPOSAL
-            material_return.disposal_value = data.get('disposal_value', 0)
+            material_return.disposal_value = data.get('disposal_value', material_return.disposal_value or 0)
             material_return.disposal_reviewed_by = current_user
             material_return.disposal_reviewed_at = datetime.utcnow()
             material_return.disposal_notes = data.get('notes')
@@ -2504,7 +2753,12 @@ def add_item_to_delivery_note(delivery_note_id):
 
 
 def add_items_to_delivery_note_bulk(delivery_note_id):
-    """Add multiple items to a delivery note in a single request (batch operation)"""
+    """Add multiple items to a delivery note in a single request (batch operation)
+
+    For vendor delivery items (is_vendor_delivery=True):
+    - Auto-creates inventory material entry if material_name provided
+    - Links delivery note item to newly created inventory entry
+    """
     try:
         note = MaterialDeliveryNote.query.get(delivery_note_id)
 
@@ -2525,13 +2779,11 @@ def add_items_to_delivery_note_bulk(delivery_note_id):
 
         added_items = []
         errors = []
+        current_user = g.user.get('email', 'system')
 
         for idx, item_data in enumerate(items):
             try:
-                if not item_data.get('inventory_material_id'):
-                    errors.append(f"Item {idx + 1}: inventory_material_id is required")
-                    continue
-
+                # Validate quantity first
                 try:
                     quantity = float(item_data.get('quantity', 0))
                     if quantity <= 0:
@@ -2541,14 +2793,76 @@ def add_items_to_delivery_note_bulk(delivery_note_id):
                     errors.append(f"Item {idx + 1}: Quantity must be a valid number")
                     continue
 
-                material = InventoryMaterial.query.get(item_data['inventory_material_id'])
-                if not material:
-                    errors.append(f"Item {idx + 1}: Material not found in inventory")
+                material = None
+                inventory_material_id = item_data.get('inventory_material_id')
+
+                # Handle vendor delivery items - auto-create inventory entry if needed
+                if item_data.get('is_vendor_delivery') and not inventory_material_id:
+                    material_name = (item_data.get('material_name') or '').strip()
+                    brand = (item_data.get('brand') or '').strip()
+
+                    # Validate material_name
+                    if not material_name:
+                        errors.append(f"Item {idx + 1}: material_name is required for vendor delivery items")
+                        continue
+                    if len(material_name) > 255:
+                        errors.append(f"Item {idx + 1}: material_name too long (max 255 characters)")
+                        continue
+
+                    # Validate brand
+                    if len(brand) > 100:
+                        errors.append(f"Item {idx + 1}: brand too long (max 100 characters)")
+                        continue
+
+                    # Check if material already exists in inventory by name (case-insensitive exact match)
+                    existing_material = InventoryMaterial.query.filter(
+                        func.lower(InventoryMaterial.material_name) == material_name.lower()
+                    ).first()
+
+                    if existing_material:
+                        # Use existing material
+                        material = existing_material
+                        inventory_material_id = existing_material.inventory_material_id
+                    else:
+                        # Create new inventory material entry for vendor delivery
+                        try:
+                            material_code = generate_material_code()
+                        except Exception as code_gen_error:
+                            errors.append(f"Item {idx + 1}: Failed to generate material code: {str(code_gen_error)}")
+                            continue
+
+                        new_material = InventoryMaterial(
+                            material_code=material_code,
+                            material_name=material_name,
+                            brand=brand,
+                            category='Vendor Delivery',  # Category for vendor-delivered materials
+                            unit='pcs',  # Default unit
+                            current_stock=0,  # Not adding to stock, just creating catalog entry
+                            unit_price=0.0,  # Price to be updated later if needed
+                            description=f'Auto-created from vendor delivery - DN #{note.delivery_note_number}',
+                            created_by=current_user,
+                            last_modified_by=current_user
+                        )
+                        db.session.add(new_material)
+                        db.session.flush()  # Get the ID without committing
+
+                        material = new_material
+                        inventory_material_id = new_material.inventory_material_id
+                        print(f"Auto-created inventory material: {material_name} (ID: {inventory_material_id})")
+
+                elif inventory_material_id:
+                    material = InventoryMaterial.query.get(inventory_material_id)
+                    if not material:
+                        errors.append(f"Item {idx + 1}: Material not found in inventory")
+                        continue
+                else:
+                    errors.append(f"Item {idx + 1}: inventory_material_id is required")
                     continue
 
+                # Check for duplicate in delivery note
                 existing_item = DeliveryNoteItem.query.filter_by(
                     delivery_note_id=delivery_note_id,
-                    inventory_material_id=item_data['inventory_material_id']
+                    inventory_material_id=inventory_material_id
                 ).first()
 
                 if existing_item:
@@ -2557,10 +2871,10 @@ def add_items_to_delivery_note_bulk(delivery_note_id):
 
                 new_item = DeliveryNoteItem(
                     delivery_note_id=delivery_note_id,
-                    inventory_material_id=item_data['inventory_material_id'],
+                    inventory_material_id=inventory_material_id,
                     internal_request_id=item_data.get('internal_request_id'),
                     quantity=quantity,
-                    unit_price=material.unit_price,
+                    unit_price=material.unit_price if material else 0.0,
                     notes=item_data.get('notes'),
                     use_backup=item_data.get('use_backup', False)
                 )
@@ -2568,12 +2882,16 @@ def add_items_to_delivery_note_bulk(delivery_note_id):
                 db.session.add(new_item)
                 added_items.append(new_item)
 
-                # If linked to a request, update the request status
+                # If linked to a request, update the request status and link inventory material
                 if item_data.get('internal_request_id'):
                     internal_req = InternalMaterialRequest.query.get(item_data['internal_request_id'])
-                    if internal_req and internal_req.status in ['APPROVED', 'approved']:
-                        internal_req.status = 'DN_PENDING'
-                        internal_req.last_modified_by = g.user.get('email', 'system')
+                    if internal_req:
+                        if internal_req.status in ['APPROVED', 'approved']:
+                            internal_req.status = 'DN_PENDING'
+                        # Link the inventory material to the request for future reference
+                        if not internal_req.inventory_material_id:
+                            internal_req.inventory_material_id = inventory_material_id
+                        internal_req.last_modified_by = current_user
 
             except Exception as item_error:
                 errors.append(f"Item {idx + 1}: {str(item_error)}")
@@ -4139,6 +4457,108 @@ def download_rdn_pdf(return_note_id):
         return response
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def request_material_disposal(material_id):
+    """
+    Create disposal request for damaged/wasted material from catalog
+    PM/Production Manager requests TD approval to dispose material
+    """
+    try:
+        data = request.get_json()
+
+        # Get current user
+        current_user = g.user.get('email', 'system')
+
+        # Validate material exists
+        material = InventoryMaterial.query.get(material_id)
+        if not material:
+            return jsonify({'error': 'Material not found'}), 404
+
+        # Validate quantity
+        quantity = float(data.get('quantity', 0))
+        if quantity <= 0 or quantity > material.current_stock:
+            return jsonify({'error': f'Invalid quantity. Must be between 1 and {material.current_stock}'}), 400
+
+        # Get disposal details
+        reason = data.get('reason', 'damaged')
+        notes = data.get('notes', '')
+        estimated_value = float(data.get('estimated_value', quantity * material.unit_price))
+
+        if not notes.strip():
+            return jsonify({'error': 'Notes/explanation is required for disposal requests'}), 400
+
+        # Create MaterialReturn record for disposal request
+        # Using MaterialReturn model with special flags to indicate it's from catalog
+        disposal_return = MaterialReturn(
+            inventory_material_id=material_id,
+            project_id=0,  # 0 indicates it's from catalog, not project return
+            quantity=quantity,
+            condition='Damaged',  # Use Damaged for all disposal reasons
+            add_to_stock=False,
+            return_reason=f"CATALOG_DISPOSAL: {reason}",  # Prefix to identify catalog disposals
+            notes=notes,
+            disposal_status=DISPOSAL_PENDING_REVIEW,  # Requires TD approval
+            disposal_value=estimated_value,
+            created_by=current_user
+        )
+
+        db.session.add(disposal_return)
+        db.session.commit()
+
+        # Notify TD for approval
+        try:
+            # Get all TDs
+            tds = User.query.filter_by(user_role='Technical Director').all()
+
+            for td in tds:
+                ComprehensiveNotificationService.send_email_notification(
+                    recipient=td.email,
+                    subject=f'Material Disposal Request - {material.material_name}',
+                    message=f'''
+                    <p>A material disposal request has been submitted and requires your review.</p>
+
+                    <h3>Material Details:</h3>
+                    <ul>
+                        <li>Material: {material.material_name} ({material.material_code})</li>
+                        <li>Brand: {material.brand or 'N/A'}</li>
+                        <li>Quantity: {quantity} {material.unit}</li>
+                        <li>Estimated Value: AED {estimated_value:.2f}</li>
+                        <li>Reason: {reason.replace('_', ' ').title()}</li>
+                    </ul>
+
+                    <h3>Justification:</h3>
+                    <p>{notes}</p>
+
+                    <p>Please review and approve/reject this disposal request in the system.</p>
+
+                    <p>Requested by: {current_user}</p>
+                    ''',
+                    notification_type='disposal_request',
+                    action_url=f'/inventory/disposal-requests'
+                )
+
+            print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
+
+        except Exception as notif_error:
+            print(f"Error sending disposal request notification: {notif_error}")
+            # Don't fail the request if notification fails
+
+        return jsonify({
+            'message': 'Disposal request submitted for TD approval',
+            'return_id': disposal_return.return_id,
+            'material_name': material.material_name,
+            'quantity': quantity,
+            'estimated_value': estimated_value,
+            'status': disposal_return.disposal_status
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error creating disposal request: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

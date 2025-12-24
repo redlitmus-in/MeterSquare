@@ -25,6 +25,13 @@ class ModernBOQPDFGenerator:
         self._setup_styles()
         self.image_cache = {}  # Cache for downloaded images
 
+        # Get Supabase URL based on environment
+        environment = os.environ.get('ENVIRONMENT', 'production')
+        if environment == 'development':
+            self.supabase_url = os.environ.get('DEV_SUPABASE_URL')
+        else:
+            self.supabase_url = os.environ.get('SUPABASE_URL')
+
     def _setup_styles(self):
         """Setup modern professional styles"""
         # Clean header style
@@ -519,7 +526,7 @@ class ModernBOQPDFGenerator:
         try:
             # Ensure URL is absolute
             if not image_url.startswith('http'):
-                image_url = f'https://wgddnoiakkoskbbkbygw.supabase.co/storage/v1/object/public/boq_file/{image_url}'
+                image_url = f'{self.supabase_url}/storage/v1/object/public/boq_file/{image_url}'
 
             # Fetch image with aggressive timeout (1 second max)
             import urllib3
@@ -553,7 +560,7 @@ class ModernBOQPDFGenerator:
                                 url = img_obj.get('url', '')
                                 if url:
                                     if not url.startswith('http'):
-                                        url = f'https://wgddnoiakkoskbbkbygw.supabase.co/storage/v1/object/public/boq_file/{url}'
+                                        url = f'{self.supabase_url}/storage/v1/object/public/boq_file/{url}'
                                     image_urls.append(url)
 
         # Fetch all images in parallel (max 50 concurrent requests for maximum speed)
@@ -680,7 +687,7 @@ class ModernBOQPDFGenerator:
                                     if image_url:
                                         # Normalize URL
                                         if not image_url.startswith('http'):
-                                            image_url = f'https://wgddnoiakkoskbbkbygw.supabase.co/storage/v1/object/public/boq_file/{image_url}'
+                                            image_url = f'{self.supabase_url}/storage/v1/object/public/boq_file/{image_url}'
 
                                         # Get from cache
                                         img = self.image_cache.get(image_url)
@@ -982,7 +989,7 @@ class ModernBOQPDFGenerator:
                                 if image_url:
                                     # Normalize URL
                                     if not image_url.startswith('http'):
-                                        image_url = f'https://wgddnoiakkoskbbkbygw.supabase.co/storage/v1/object/public/boq_file/{image_url}'
+                                        image_url = f'{self.supabase_url}/storage/v1/object/public/boq_file/{image_url}'
 
                                     # Get from cache
                                     img = self.image_cache.get(image_url)

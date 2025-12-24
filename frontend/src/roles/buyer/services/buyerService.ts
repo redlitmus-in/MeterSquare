@@ -19,6 +19,7 @@ export interface MaterialVendorSelection {
   rejection_reason?: string | null;
   negotiated_price?: number | null;
   save_price_for_future?: boolean;
+  supplier_notes?: string;
 }
 
 export interface PurchaseMaterial {
@@ -45,6 +46,9 @@ export interface POChild {
   item_id?: string | null;
   item_name?: string | null;
   submission_group_id?: string | null;
+  requested_by_user_id?: number | null;
+  requested_by_name?: string | null;
+  requested_by_role?: string | null;
   vendor_id?: number | null;
   vendor_name?: string | null;
   vendor_phone?: string | null;
@@ -91,6 +95,7 @@ export interface POChild {
   }>;
   materials_count?: number;
   materials_total_cost?: number;
+  supplier_notes?: string | null;
   created_at?: string;
   updated_at?: string;
   // Extra fields from API with project info
@@ -121,6 +126,9 @@ export interface Purchase {
   materials: PurchaseMaterial[];
   materials_count: number;
   total_cost: number;
+  requested_by_user_id?: number | null;
+  requested_by_name?: string | null;
+  requested_by_role?: string | null;
   approved_by: number;
   approved_at: string | null;
   created_at: string;
@@ -153,6 +161,7 @@ export interface Purchase {
   vendor_whatsapp_sent?: boolean;
   vendor_whatsapp_sent_at?: string | null;
   po_child_id?: number;  // If this is a POChild record, this is its ID
+  supplier_notes?: string | null;  // Notes from buyer to supplier
   use_per_material_vendors?: boolean;
   material_vendor_selections?: Record<string, MaterialVendorSelection>;
   has_store_requests?: boolean;
@@ -319,6 +328,7 @@ export interface LPOData {
   terms: LPOTerms;
   signatures: LPOSignatures;
   header_image?: string | null;
+  supplier_notes?: string | null; // Notes from buyer to supplier (displayed in LPO PDF)
 }
 
 export interface LPOSettings {
@@ -609,12 +619,16 @@ class BuyerService {
   // Select vendor for specific material(s) in purchase (NEW - per-material vendor selection)
   async selectVendorForMaterial(
     cr_id: number,
-    materialSelections: Array<{ material_name: string; vendor_id: number }>
+    materialSelections: Array<{ material_name: string; vendor_id: number }>,
+    supplier_notes?: string
   ): Promise<SelectVendorResponse> {
     try {
       const response = await apiClient.post<SelectVendorResponse>(
         `/buyer/purchase/${cr_id}/select-vendor-for-material`,
-        { material_selections: materialSelections }
+        {
+          material_selections: materialSelections,
+          supplier_notes: supplier_notes
+        }
       );
 
       if (response.data.success) {
@@ -1292,6 +1306,7 @@ class BuyerService {
         negotiated_price?: number | null;
         save_price_for_future?: boolean;
       }>;
+      supplier_notes?: string | null;
     }>,
     submissionGroupId: string
   ): Promise<{
@@ -1309,6 +1324,7 @@ class BuyerService {
     }>;
   }> {
     try {
+
       const response = await apiClient.post(
         `/buyer/purchase/${crId}/create-po-children`,
         {
@@ -1330,6 +1346,45 @@ class BuyerService {
         throw new Error('Purchase not found');
       }
       throw new Error(error.response?.data?.error || 'Failed to create separate purchase orders');
+    }
+  }
+
+  // Save supplier notes for a specific material
+  async saveSupplierNotes(
+    crId: number,
+    materialName: string,
+    supplierNotes: string,
+    vendorId?: number
+  ): Promise<{
+    success: boolean;
+    message: string;
+    cr_id: number;
+    material_name: string;
+    supplier_notes: string;
+  }> {
+    try {
+      const response = await apiClient.post(
+        `/buyer/purchase/${crId}/save-supplier-notes`,
+        {
+          material_name: materialName,
+          supplier_notes: supplierNotes,
+          vendor_id: vendorId
+        }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to save supplier notes');
+    } catch (error: any) {
+      console.error('Error saving supplier notes:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to save supplier notes');
     }
   }
 
@@ -1485,8 +1540,18 @@ class BuyerService {
     }
   }
 
-  // Re-select vendor for a TD-rejected POChild
-  async reselectVendorForPOChild(poChildId: number, vendorId: number): Promise<{
+  // Re-select vendor for a TD-rejected POChild (with full material data and prices)
+  async reselectVendorForPOChild(
+    poChildId: number,
+    vendorId: number,
+    materials: Array<{
+      material_name: string;
+      quantity: number;
+      unit: string;
+      negotiated_price?: number | null;
+      save_price_for_future?: boolean;
+    }>
+  ): Promise<{
     success: boolean;
     message: string;
     po_child: POChild;
@@ -1494,7 +1559,10 @@ class BuyerService {
     try {
       const response = await apiClient.post(
         `/buyer/po-child/${poChildId}/reselect-vendor`,
-        { vendor_id: vendorId }
+        {
+          vendor_id: vendorId,
+          materials: materials
+        }
       );
 
       if (response.data.success) {
@@ -1514,7 +1582,11 @@ class BuyerService {
   }
 
   // Complete POChild purchase
-  async completePOChildPurchase(poChildId: number, notes?: string): Promise<{
+  async completePOChildPurchase(
+    poChildId: number,
+    notes?: string,
+    intendedRecipientName?: string
+  ): Promise<{
     success: boolean;
     message: string;
     po_child: POChild;
@@ -1523,7 +1595,10 @@ class BuyerService {
     try {
       const response = await apiClient.post(
         `/buyer/po-child/${poChildId}/complete`,
-        { notes: notes || '' }
+        {
+          notes: notes || '',
+          intended_recipient_name: intendedRecipientName || ''
+        }
       );
 
       if (response.data.success) {
@@ -1539,6 +1614,37 @@ class BuyerService {
         throw new Error('PO child not found');
       }
       throw new Error(error.response?.data?.error || 'Failed to complete purchase');
+    }
+  }
+
+  // Get site engineers for a project (for buyer to select recipient when completing PO)
+  async getProjectSiteEngineers(projectId: number): Promise<{
+    success: boolean;
+    project_id: number;
+    project_name: string;
+    project_code: string;
+    site_engineers: Array<{
+      user_id: number;
+      full_name: string;
+      email: string;
+    }>;
+  }> {
+    try {
+      const response = await apiClient.get(`/buyer/project/${projectId}/site-engineers`);
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to fetch site engineers');
+    } catch (error: any) {
+      console.error('Error fetching site engineers:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Project not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to fetch site engineers');
     }
   }
 
@@ -1599,6 +1705,36 @@ class BuyerService {
         throw new Error(error.response?.data?.error || 'Invalid request');
       }
       throw new Error(error.response?.data?.error || 'Failed to update prices');
+    }
+  }
+
+  // Update supplier notes for purchase order
+  async updateSupplierNotes(
+    crId: number,
+    supplierNotes: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    supplier_notes: string | null;
+    purchase?: Purchase;
+  }> {
+    try {
+      const response = await apiClient.put(
+        `/buyer/purchase/${crId}/supplier-notes`,
+        {
+          supplier_notes: supplierNotes
+        }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to update supplier notes');
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to update supplier notes');
     }
   }
 }
