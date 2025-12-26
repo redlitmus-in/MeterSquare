@@ -114,7 +114,15 @@
       "Bash(DATABASE_URL='postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres' python -c \"\nfrom sqlalchemy import create_engine, text\nimport os\n\nengine = create_engine\\(os.environ[''DATABASE_URL'']\\)\nwith engine.connect\\(\\) as conn:\n    result = conn.execute\\(text\\(''SELECT cr.cr_id, cr.assigned_to_buyer_user_id, cr.assigned_to_buyer_name FROM change_requests cr WHERE cr.cr_id = 41''\\)\\)\n    row = result.fetchone\\(\\)\n    if row:\n        print\\(f''CR-{row[0]} assigned to buyer_id={row[1]}, buyer_name={row[2]}''\\)\n    else:\n        print\\(''CR not found''\\)\n\")",
       "Bash(python app.py:*)",
       "Bash(timeout 10 npm run dev:*)",
-      "Bash(git diff:*)"
+      "Bash(git diff:*)",
+      "Bash(python migrations/drop_supplier_notes_columns.py:*)",
+      "Bash(wc:*)",
+      "Bash(for f in utils/*.py)",
+      "Bash(do python3 -m py_compile \"$f\")",
+      "Bash(for f in models/*.py routes/*.py services/*.py)",
+      "Bash(git -C /home/development1/Desktop/MeterSquare ls-files:*)",
+      "Bash(PGPASSWORD='Rameshdev$08' psql:*)",
+      "Bash(venv/bin/python3:*)"
     ],
     "deny": [],
     "ask": []

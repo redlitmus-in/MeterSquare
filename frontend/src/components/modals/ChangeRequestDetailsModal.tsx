@@ -91,42 +91,86 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     setShowBOQModal(true);
   };
 
-  // Initialize edited materials when modal opens or changeRequest changes
-  // Use isOpen and changeRequest as dependencies to ensure fresh data on every open
+  // State to hold the latest change request data (refreshable)
+  const [latestChangeRequest, setLatestChangeRequest] = React.useState<ChangeRequestItem | null>(null);
+
+  // Fetch fresh change request data from API when modal opens
   React.useEffect(() => {
-    if (isOpen && changeRequest) {
-      const rawMaterials = changeRequest.sub_items_data || changeRequest.materials_data || [];
-      // Enrich materials with vendor negotiated prices from material_vendor_selections
+    const fetchFreshData = async () => {
+      if (isOpen && changeRequest?.cr_id) {
+        // Check if this is a POChild - POChildren already have materials with supplier_notes from backend
+        const isPOChild = !!(changeRequest as any).po_child_id;
+
+        if (isPOChild) {
+          // This is a POChild - materials already enriched by backend, use prop data directly
+          setLatestChangeRequest(changeRequest);
+          return;
+        }
+
+        try {
+          // This is a parent CR - fetch latest material_vendor_selections with supplier_notes
+          const response = await buyerService.getPurchaseById(changeRequest.cr_id);
+          // Merge the fresh data with the prop data
+          setLatestChangeRequest({
+            ...changeRequest,
+            material_vendor_selections: response.material_vendor_selections || {}
+          } as ChangeRequestItem);
+        } catch (error) {
+          console.error('Error fetching fresh CR data:', error);
+          // Fall back to prop data if fetch fails
+          setLatestChangeRequest(changeRequest);
+        }
+      }
+    };
+
+    fetchFreshData();
+  }, [isOpen, changeRequest?.cr_id]);
+
+  // Initialize edited materials when modal opens or changeRequest changes
+  // Use isOpen and latestChangeRequest as dependencies to ensure fresh data on every open
+  React.useEffect(() => {
+    if (isOpen && latestChangeRequest) {
+      const rawMaterials = latestChangeRequest.sub_items_data || latestChangeRequest.materials_data || latestChangeRequest.materials || [];
+      // Enrich materials with vendor negotiated prices and supplier notes from material_vendor_selections
       const materials = rawMaterials.map((mat: any) => {
         const materialName = mat.material_name || mat.sub_item_name || '';
-        const vendorSelection = (changeRequest as any).material_vendor_selections?.[materialName];
+        const vendorSelection = (latestChangeRequest as any).material_vendor_selections?.[materialName];
 
-        // If we have a negotiated price from vendor selection, use it
+        // Build enriched material object
+        const enrichedMaterial = { ...mat };
+
+        // Add negotiated price if available
         if (vendorSelection?.negotiated_price != null && vendorSelection.negotiated_price > 0) {
-          return {
-            ...mat,
-            negotiated_price: vendorSelection.negotiated_price,
-            unit_price: vendorSelection.negotiated_price,
-            total_price: vendorSelection.negotiated_price * (mat.quantity || 0)
-          };
+          enrichedMaterial.negotiated_price = vendorSelection.negotiated_price;
+          enrichedMaterial.unit_price = vendorSelection.negotiated_price;
+          enrichedMaterial.total_price = vendorSelection.negotiated_price * (mat.quantity || 0);
         }
-        return mat;
+
+        // Add supplier notes if available from material_vendor_selections OR preserve existing notes from material
+        if (vendorSelection?.supplier_notes) {
+          enrichedMaterial.supplier_notes = vendorSelection.supplier_notes;
+        } else if (mat.supplier_notes) {
+          // POChild materials already have supplier_notes from backend - preserve them
+          enrichedMaterial.supplier_notes = mat.supplier_notes;
+        }
+
+        return enrichedMaterial;
       });
       setEditedMaterials(JSON.parse(JSON.stringify(materials))); // Deep copy
       // Reset LPO data when modal opens with new request
       setLpoData(null);
       setIsLPOExpanded(false);
     }
-  }, [isOpen, changeRequest]);
+  }, [isOpen, latestChangeRequest]);
 
   // Auto-fetch LPO data to get prices when materials have 0 prices and vendor is selected
   React.useEffect(() => {
     const fetchLPOForPrices = async () => {
-      if (!isOpen || !changeRequest || lpoData) return;
+      if (!isOpen || !latestChangeRequest || lpoData) return;
 
       // Check if we need prices (materials have 0 prices AND no vendor negotiated price)
-      const materials = changeRequest.sub_items_data || changeRequest.materials_data || [];
-      const materialVendorSelections = (changeRequest as any).material_vendor_selections || {};
+      const materials = latestChangeRequest.sub_items_data || latestChangeRequest.materials_data || [];
+      const materialVendorSelections = (latestChangeRequest as any).material_vendor_selections || {};
 
       const needsPrices = materials.some((m: any) => {
         const materialName = m.material_name || m.sub_item_name || '';
@@ -137,10 +181,10 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       });
 
       // Only fetch if vendor is selected and we need prices
-      if (needsPrices && changeRequest.selected_vendor_name) {
+      if (needsPrices && latestChangeRequest.selected_vendor_name) {
         try {
-          const poChildId = (changeRequest as any).po_child_id;
-          const response = await buyerService.previewLPOPdf(changeRequest.cr_id, poChildId);
+          const poChildId = (latestChangeRequest as any).po_child_id;
+          const response = await buyerService.previewLPOPdf(latestChangeRequest.cr_id, poChildId);
           const lpoDataFromResponse = response.lpo_data || response;
           setLpoData(lpoDataFromResponse);
         } catch (error) {
@@ -150,13 +194,13 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     };
 
     fetchLPOForPrices();
-  }, [isOpen, changeRequest, lpoData]);
+  }, [isOpen, latestChangeRequest, lpoData]);
 
   // Memoize material data for vendor comparison to avoid recalculation on every render
   // MUST be before early return to avoid "Rendered more hooks than during the previous render" error
   const requestMaterialsForComparison = useMemo(() =>
-    changeRequest ? (changeRequest.sub_items_data || changeRequest.materials_data || []) : [],
-    [changeRequest]
+    latestChangeRequest ? (latestChangeRequest.sub_items_data || latestChangeRequest.materials_data || []) : [],
+    [latestChangeRequest]
   );
 
   const requestMaterialNamesSet = useMemo(() =>
@@ -1391,10 +1435,11 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       {materialsData?.map((material: any, idx: number) => {
                         // Use is_new_material flag from backend (set when material doesn't exist in BOQ)
                         // Fallback to checking master_material_id only if flag is not present
-                        const isNewMaterial = material.is_new_material === true || 
+                        const isNewMaterial = material.is_new_material === true ||
                                               (material.is_new_material === undefined && material.master_material_id === null);
                         return (
-                          <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                          <React.Fragment key={idx}>
+                          <tr className="hover:bg-gray-50 transition-colors">
                             {/* Material Name */}
                             <td className="px-4 py-3 text-sm text-gray-900">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -1566,6 +1611,19 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             );
                             })()}
                           </tr>
+
+                          {/* Supplier Notes Sub-Row */}
+                          {material.supplier_notes && material.supplier_notes.trim().length > 0 && (
+                            <tr>
+                              <td colSpan={hasNewMaterials ? (shouldShowPricing ? 10 : 7) : (shouldShowPricing ? 9 : 6)} className="px-4 py-2 bg-blue-50 border-t-0">
+                                <div className="flex items-start gap-2 text-xs">
+                                  <span className="font-semibold text-blue-700 whitespace-nowrap">📝 Note:</span>
+                                  <span className="text-blue-800">{material.supplier_notes}</span>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                         );
                       })}
                       {shouldShowPricing && (() => {

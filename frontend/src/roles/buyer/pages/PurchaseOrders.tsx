@@ -1440,6 +1440,23 @@ const PurchaseOrders: React.FC = () => {
 
                     {/* Action Buttons */}
                     <div className="flex flex-col gap-1.5 mt-auto">
+                      {/* POChildren Pending TD Approval Status - Show prominently */}
+                      {purchase.po_children && purchase.po_children.length > 0 && purchase.po_children.some((poChild: any) => poChild.vendor_selection_status === 'pending_td_approval') && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-1">
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-amber-600" />
+                            <div>
+                              <div className="text-xs font-semibold text-amber-900">
+                                Vendor Pending TD Approval
+                              </div>
+                              <div className="text-xs text-amber-700">
+                                {purchase.po_children.filter((pc: any) => pc.vendor_selection_status === 'pending_td_approval').length} vendor(s) sent to TD for approval
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Pending Approval Status */}
                       {purchase.vendor_selection_pending_td_approval && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-1">

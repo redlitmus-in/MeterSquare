@@ -31,9 +31,6 @@ class POChild(db.Model):
     materials_data = db.Column(JSONB, nullable=False)
     materials_total_cost = db.Column(db.Float, default=0.0)
 
-    # Supplier notes - additional specifications/requirements for supplier
-    supplier_notes = db.Column(db.Text, nullable=True)
-
     # Vendor info
     vendor_id = db.Column(db.Integer, db.ForeignKey('vendors.vendor_id'), nullable=True, index=True)
     vendor_name = db.Column(db.String(255), nullable=True)
@@ -103,7 +100,6 @@ class POChild(db.Model):
             'materials': self.materials_data,  # Alias for frontend compatibility
             'materials_count': len(self.materials_data) if self.materials_data else 0,
             'materials_total_cost': round(self.materials_total_cost, 2) if self.materials_total_cost else 0,
-            'supplier_notes': self.supplier_notes,
             'vendor_id': self.vendor_id,
             'vendor_name': self.vendor_name,
             'vendor_selected_by_buyer_id': self.vendor_selected_by_buyer_id,

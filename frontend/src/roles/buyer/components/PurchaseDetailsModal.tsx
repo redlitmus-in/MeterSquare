@@ -45,13 +45,67 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
 
   // Update local purchase when purchase changes or modal opens
   useEffect(() => {
+    // Debug logging for POChild
+    if ((purchase as any).po_child_id) {
+      console.log('[PurchaseDetailsModal] Viewing POChild:', {
+        po_child_id: (purchase as any).po_child_id,
+        materials_count: purchase.materials?.length,
+        first_material_has_notes: purchase.materials?.[0] ? !!(purchase.materials[0] as any).supplier_notes : false
+      });
+    }
+
     // CRITICAL FIX: When vendor is approved, calculate total_cost from materials' vendor prices
     // instead of using the BOQ total_cost that comes from backend
     let updatedPurchase = { ...purchase };
 
+    // Enrich materials with supplier notes from material_vendor_selections OR po_children
+    if (purchase.materials && purchase.materials.length > 0) {
+      const materialVendorSelections = (purchase as any).material_vendor_selections || {};
+
+      // Check if we have PO children (approved state)
+      const poChildren = purchase.po_children || [];
+
+      updatedPurchase.materials = purchase.materials.map(mat => {
+        const materialName = mat.material_name || '';
+
+        // First try material_vendor_selections (parent CR notes)
+        let supplierNotes = materialVendorSelections[materialName]?.supplier_notes || '';
+
+        // If not found and we have PO children, get notes from PO child materials
+        if (!supplierNotes && poChildren.length > 0) {
+          for (const poChild of poChildren) {
+            if (poChild.materials) {
+              const poChildMaterial = poChild.materials.find((m: any) =>
+                m.material_name === materialName
+              );
+              if (poChildMaterial?.supplier_notes) {
+                supplierNotes = poChildMaterial.supplier_notes;
+                break;
+              }
+            }
+          }
+        }
+
+        const enrichedMaterial = {
+          ...mat,
+          supplier_notes: supplierNotes || (mat as any).supplier_notes || ''
+        };
+
+        // Debug logging
+        const finalNotes = enrichedMaterial.supplier_notes;
+        if (finalNotes) {
+          console.log(`[PurchaseDetailsModal] Material "${materialName}" has supplier notes:`, finalNotes.substring(0, 50));
+        } else {
+          console.log(`[PurchaseDetailsModal] Material "${materialName}" has NO supplier notes (mat.supplier_notes=${(mat as any).supplier_notes})`);
+        }
+
+        return enrichedMaterial;
+      });
+    }
+
     // If vendor is approved, recalculate total_cost from materials (which have vendor prices)
     if (purchase.vendor_selection_status === 'approved' && purchase.materials && purchase.materials.length > 0) {
-      const vendorTotalCost = purchase.materials.reduce((sum, mat) => {
+      const vendorTotalCost = updatedPurchase.materials.reduce((sum, mat) => {
         return sum + (mat.total_price || (mat.unit_price * mat.quantity) || 0);
       }, 0);
       updatedPurchase.total_cost = vendorTotalCost;
@@ -397,27 +451,6 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         )}
                       </div>
                     </div>
-
-                    {/* Supplier Notes */}
-                    {purchase.supplier_notes && (
-                      <div className="mt-4 pt-4 border-t border-gray-200">
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                          <div className="flex items-start gap-2">
-                            <div className="w-5 h-5 rounded bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <svg className="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs font-semibold text-blue-900 mb-1">Notes for Supplier</div>
-                              <div className="text-sm text-blue-800 whitespace-pre-wrap break-words">
-                                {purchase.supplier_notes}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -475,60 +508,73 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                                             isApprovedByTD ? 'bg-green-50' : '';
 
                           return (
-                            <TableRow key={idx} className={`hover:bg-gray-50 ${rowBgClass}`}>
-                              <TableCell className="font-medium text-sm">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className={isSentToStore ? 'text-purple-700' : isPendingTD ? 'text-amber-700' : isApprovedByTD ? 'text-green-700' : ''}>
-                                    {material.material_name}
-                                  </span>
-                                  {isNewMaterial && (
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
-                                      NEW
+                            <React.Fragment key={idx}>
+                              <TableRow className={`hover:bg-gray-50 ${rowBgClass}`}>
+                                <TableCell className="font-medium text-sm">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={isSentToStore ? 'text-purple-700' : isPendingTD ? 'text-amber-700' : isApprovedByTD ? 'text-green-700' : ''}>
+                                      {material.material_name}
+                                    </span>
+                                    {isNewMaterial && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
+                                        NEW
+                                      </span>
+                                    )}
+                                    {isSentToStore && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-purple-100 text-purple-800 border border-purple-300">
+                                        <Store className="w-3 h-3" />
+                                        STORE
+                                      </span>
+                                    )}
+                                    {isPendingTD && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                                        <Hourglass className="w-3 h-3" />
+                                        PENDING TD
+                                      </span>
+                                    )}
+                                    {isApprovedByTD && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
+                                        <Truck className="w-3 h-3" />
+                                        VENDOR
+                                      </span>
+                                    )}
+                                    {vendorName && (isPendingTD || isApprovedByTD) && (
+                                      <span className="text-[10px] text-gray-500">
+                                        ({vendorName})
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                  {material.sub_item_name && (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                      {material.sub_item_name}
                                     </span>
                                   )}
-                                  {isSentToStore && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-purple-100 text-purple-800 border border-purple-300">
-                                      <Store className="w-3 h-3" />
-                                      STORE
-                                    </span>
-                                  )}
-                                  {isPendingTD && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-                                      <Hourglass className="w-3 h-3" />
-                                      PENDING TD
-                                    </span>
-                                  )}
-                                  {isApprovedByTD && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
-                                      <Truck className="w-3 h-3" />
-                                      VENDOR
-                                    </span>
-                                  )}
-                                  {vendorName && (isPendingTD || isApprovedByTD) && (
-                                    <span className="text-[10px] text-gray-500">
-                                      ({vendorName})
-                                    </span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm">
-                                {material.sub_item_name && (
-                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                    {material.sub_item_name}
-                                  </span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-sm">{(material as any).brand || '-'}</TableCell>
-                              <TableCell className="text-sm">{(material as any).size || (material as any).specification || '-'}</TableCell>
-                              <TableCell className="text-sm">{material.quantity}</TableCell>
-                              <TableCell className="text-sm">{material.unit}</TableCell>
-                              <TableCell className={`text-sm ${isSentToStore ? 'text-purple-600' : ''}`}>
-                                {isSentToStore ? 'From Store' : formatCurrency(material.unit_price)}
-                              </TableCell>
-                              <TableCell className={`text-right font-bold text-sm ${isSentToStore ? 'text-purple-600' : 'text-green-600'}`}>
-                                {isSentToStore ? '-' : formatCurrency(material.total_price)}
-                              </TableCell>
-                            </TableRow>
+                                </TableCell>
+                                <TableCell className="text-sm">{(material as any).brand || '-'}</TableCell>
+                                <TableCell className="text-sm">{(material as any).size || (material as any).specification || '-'}</TableCell>
+                                <TableCell className="text-sm">{material.quantity}</TableCell>
+                                <TableCell className="text-sm">{material.unit}</TableCell>
+                                <TableCell className={`text-sm ${isSentToStore ? 'text-purple-600' : ''}`}>
+                                  {isSentToStore ? 'From Store' : formatCurrency(material.unit_price)}
+                                </TableCell>
+                                <TableCell className={`text-right font-bold text-sm ${isSentToStore ? 'text-purple-600' : 'text-green-600'}`}>
+                                  {isSentToStore ? '-' : formatCurrency(material.total_price)}
+                                </TableCell>
+                              </TableRow>
+                              {/* Per-Material Supplier Notes Row */}
+                              {(material as any).supplier_notes && (material as any).supplier_notes.trim().length > 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={8} className="bg-blue-50/50 py-2 px-4 border-t-0">
+                                    <div className="flex items-start gap-2 text-xs">
+                                      <span className="font-semibold text-blue-700 whitespace-nowrap">📝 Note:</span>
+                                      <span className="text-blue-800">{(material as any).supplier_notes}</span>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </React.Fragment>
                           );
                         })}
                         {/* Show separate totals if there are store materials */}

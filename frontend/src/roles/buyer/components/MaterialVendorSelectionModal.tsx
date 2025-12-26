@@ -184,8 +184,14 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         }
       });
     }
-    setMaterialNotes(notes);
-  }, [isOpen, purchase?.cr_id, purchase?.material_vendor_selections]);
+
+    // ✅ FIX: Only set notes if we don't already have them (preserve user's typed notes)
+    // This prevents the modal from resetting notes when parent data refreshes
+    setMaterialNotes(prevNotes => {
+      // Merge: keep existing notes, only add new ones from backend
+      return { ...notes, ...prevNotes };
+    });
+  }, [isOpen, purchase?.cr_id]);
 
   // Initialize material vendors state from purchase with auto-selection
   useEffect(() => {
@@ -1007,9 +1013,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       toast.success('Material notes saved');
       setEditingMaterialNote(null);
 
-      if (onNotesUpdated) {
-        onNotesUpdated(); // Refresh parent data
-      }
+      // ✅ FIX: Don't refresh parent data here - it causes the modal to reload and lose state
+      // Notes are already in materialNotes state and will be sent when user clicks "Send to TD"
+      // Only refresh parent after successfully sending to TD, not after each note save
+      // if (onNotesUpdated) {
+      //   onNotesUpdated(); // Refresh parent data
+      // }
     } catch (error: any) {
       console.error('Error saving material notes:', error);
       toast.error(error.message || 'Failed to save notes');

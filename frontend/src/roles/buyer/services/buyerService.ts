@@ -33,6 +33,7 @@ export interface PurchaseMaterial {
   negotiated_price?: number;  // Negotiated price for this material (used in PO children)
   boq_unit_price?: number;  // BOQ unit price for comparison (used in PO children)
   boq_total_price?: number;  // BOQ total price for comparison (used in PO children)
+  supplier_notes?: string | null;  // Per-material notes from vendor selection
 }
 
 // POChild type for tracking vendor-specific purchase order splits
@@ -92,6 +93,7 @@ export interface POChild {
     negotiated_price?: number;
     justification?: string;
     reason?: string;
+    supplier_notes?: string | null;  // Per-material notes from vendor selection
   }>;
   materials_count?: number;
   materials_total_cost?: number;
@@ -1708,35 +1710,6 @@ class BuyerService {
     }
   }
 
-  // Update supplier notes for purchase order
-  async updateSupplierNotes(
-    crId: number,
-    supplierNotes: string
-  ): Promise<{
-    success: boolean;
-    message: string;
-    supplier_notes: string | null;
-    purchase?: Purchase;
-  }> {
-    try {
-      const response = await apiClient.put(
-        `/buyer/purchase/${crId}/supplier-notes`,
-        {
-          supplier_notes: supplierNotes
-        }
-      );
-
-      if (response.data.success) {
-        return response.data;
-      }
-      throw new Error(response.data.error || 'Failed to update supplier notes');
-    } catch (error: any) {
-      if (error.response?.status === 401) {
-        throw new Error('Authentication required. Please login again.');
-      }
-      throw new Error(error.response?.data?.error || 'Failed to update supplier notes');
-    }
-  }
 }
 
 // Response type for POChild price update

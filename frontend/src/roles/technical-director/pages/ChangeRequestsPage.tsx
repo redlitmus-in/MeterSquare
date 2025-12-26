@@ -1634,6 +1634,11 @@ const ChangeRequestsPage: React.FC = () => {
                                           )}
                                         </div>
                                       </div>
+                                      {material.supplier_notes && material.supplier_notes.trim().length > 0 && (
+                                        <div className="mt-1 text-[8px] text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                                          <span className="font-semibold">📝 Note:</span> {material.supplier_notes}
+                                        </div>
+                                      )}
                                     </div>
                                   );
                                 })}
@@ -1783,6 +1788,11 @@ const ChangeRequestsPage: React.FC = () => {
                                           <span className="text-amber-600 italic text-[8px]">-</span>
                                         )}
                                       </div>
+                                      {material.supplier_notes && material.supplier_notes.trim().length > 0 && (
+                                        <div className="mt-1 text-[8px] text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                                          <span className="font-semibold">📝 Note:</span> {material.supplier_notes}
+                                        </div>
+                                      )}
                                     </div>
                                   );
                                 })}
@@ -2207,6 +2217,11 @@ const ChangeRequestsPage: React.FC = () => {
                                               )}
                                             </div>
                                           </div>
+                                          {material.supplier_notes && material.supplier_notes.trim().length > 0 && (
+                                            <div className="mt-1 text-[8px] text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                                              <span className="font-semibold">📝 Note:</span> {material.supplier_notes}
+                                            </div>
+                                          )}
                                         </div>
                                       );
                                     })}

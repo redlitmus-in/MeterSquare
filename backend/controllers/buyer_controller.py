@@ -292,6 +292,9 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         final_brand = vendor_brand or material.get('brand', '')
                         final_specification = vendor_specification or material.get('specification', '')
 
+                        # ✅ Get supplier notes from vendor selection or material data
+                        supplier_notes = vendor_selection.get('supplier_notes', '') if isinstance(vendor_selection, dict) else ''
+
                         materials_list.append({
                             "material_name": material_name,
                             "master_material_id": master_material_id,
@@ -306,7 +309,8 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                             "original_unit_price": original_unit_price,  # Add original for reference
                             "boq_unit_price": original_unit_price,  # For PDF comparison
                             "brand": final_brand,  # ✅ Brand from vendor selection (same as POChild)
-                            "specification": final_specification  # ✅ Specification from vendor selection (same as POChild)
+                            "specification": final_specification,  # ✅ Specification from vendor selection (same as POChild)
+                            "supplier_notes": supplier_notes  # ✅ Supplier notes from vendor selection
                         })
                 else:
                     material_name = sub_item.get('material_name', '')
@@ -372,6 +376,9 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                     final_brand = vendor_brand or sub_item.get('brand', '')
                     final_specification = vendor_specification or sub_item.get('specification', '')
 
+                    # ✅ Get supplier notes from vendor selection
+                    supplier_notes = vendor_selection.get('supplier_notes', '') if isinstance(vendor_selection, dict) else ''
+
                     materials_list.append({
                         "material_name": material_name,
                         "master_material_id": master_material_id,
@@ -388,6 +395,7 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         "negotiated_price": effective_price if effective_price != original_unit_price else None,
                         "vendor_product_price": vendor_product_price,
                         "original_unit_price": original_unit_price,  # Add original for reference
+                        "supplier_notes": supplier_notes,  # ✅ Supplier notes from vendor selection
                         "boq_unit_price": original_unit_price  # For PDF comparison
                     })
     else:
@@ -2580,19 +2588,9 @@ def select_vendor_for_purchase(cr_id):
 
         data = request.get_json()
         vendor_id = data.get('vendor_id')
-        supplier_notes = data.get('supplier_notes', '').strip() if data.get('supplier_notes') else None
 
         if not vendor_id:
             return jsonify({"error": "Vendor ID is required"}), 400
-
-        # Validate supplier_notes if provided
-        if supplier_notes:
-            if len(supplier_notes) > 5000:
-                return jsonify({"error": "Supplier notes cannot exceed 5000 characters"}), 400
-            # Check for control characters (except newlines and tabs)
-            import re
-            if re.search(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', supplier_notes):
-                return jsonify({"error": "Supplier notes contain invalid characters"}), 400
 
         # Get the change request
         cr = ChangeRequest.query.filter_by(
@@ -2637,7 +2635,6 @@ def select_vendor_for_purchase(cr_id):
         # Update the change request with vendor selection
         cr.selected_vendor_id = vendor_id
         cr.selected_vendor_name = vendor.company_name
-        cr.supplier_notes = supplier_notes  # Add supplier notes
         cr.updated_at = datetime.utcnow()
 
         # Set status and fields based on user role
@@ -3213,19 +3210,9 @@ def select_vendor_for_material(cr_id):
 
         data = request.get_json()
         material_selections = data.get('material_selections')  # Array of {material_name, vendor_id}
-        supplier_notes = data.get('supplier_notes', '').strip() if data.get('supplier_notes') else None
-
 
         if not material_selections or not isinstance(material_selections, list):
             return jsonify({"error": "material_selections array is required"}), 400
-
-        # Validate supplier_notes if provided
-        if supplier_notes:
-            if len(supplier_notes) > 5000:
-                return jsonify({"error": "Supplier notes cannot exceed 5000 characters"}), 400
-            import re
-            if re.search(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', supplier_notes):
-                return jsonify({"error": "Supplier notes contain invalid characters"}), 400
 
         # Get the change request
         cr = ChangeRequest.query.filter_by(
@@ -3304,7 +3291,6 @@ def select_vendor_for_material(cr_id):
                     # Update sub-CR's main vendor fields (vendor changed, but NOT auto-approved)
                     cr.selected_vendor_id = new_vendor_id
                     cr.selected_vendor_name = new_vendor.company_name
-                    cr.supplier_notes = supplier_notes  # Add supplier notes
                     # Keep status as pending_td_approval - TD needs to explicitly approve
                     cr.vendor_selection_status = 'pending_td_approval'
                     cr.approval_required_from = 'technical_director'  # Set approval_required_from to TD
@@ -3363,6 +3349,7 @@ def select_vendor_for_material(cr_id):
             vendor_id = selection.get('vendor_id')
             negotiated_price = selection.get('negotiated_price')
             save_price_for_future = selection.get('save_price_for_future', False)
+            supplier_notes_from_selection = selection.get('supplier_notes')  # Get notes from selection
 
             # Get vendor's material name from their catalog/product list
             vendor_material_name = None
@@ -3448,6 +3435,14 @@ def select_vendor_for_material(cr_id):
                 'rejection_reason': None
             }
 
+            # CRITICAL: Include supplier_notes - use new notes from selection OR preserve existing ones
+            if supplier_notes_from_selection is not None:
+                # Use notes from current selection (buyer may have updated them)
+                vendor_selection_data['supplier_notes'] = supplier_notes_from_selection.strip() if supplier_notes_from_selection else ''
+            elif material_name in cr.material_vendor_selections and 'supplier_notes' in cr.material_vendor_selections[material_name]:
+                # Preserve existing notes if not provided in current selection
+                vendor_selection_data['supplier_notes'] = cr.material_vendor_selections[material_name]['supplier_notes']
+
             # Add negotiated price information if provided
             if negotiated_price is not None:
                 vendor_selection_data['negotiated_price'] = float(negotiated_price)
@@ -3527,7 +3522,6 @@ def select_vendor_for_material(cr_id):
                 cr.vendor_selected_by_buyer_id = user_id
                 cr.vendor_selected_by_buyer_name = user_name
                 cr.vendor_selection_date = datetime.utcnow()
-                cr.supplier_notes = supplier_notes  # Add supplier notes for single-vendor scenario
 
         cr.updated_at = datetime.utcnow()
         db.session.commit()
@@ -3986,24 +3980,6 @@ def create_po_children(cr_id):
             vendor_id = vendor_group.get('vendor_id')
             vendor_name = vendor_group.get('vendor_name')
             materials = vendor_group.get('materials')
-            supplier_notes = vendor_group.get('supplier_notes')  # Notes for supplier
-
-            # Validate supplier_notes
-            if supplier_notes:
-                supplier_notes = supplier_notes.strip()
-                # Enforce length limit (5000 characters)
-                if len(supplier_notes) > 5000:
-                    return jsonify({
-                        "error": "Supplier notes exceed maximum length of 5000 characters"
-                    }), 400
-                # Basic content validation (no control characters except newlines/tabs)
-                if any(ord(c) < 32 and c not in '\n\r\t' for c in supplier_notes):
-                    return jsonify({
-                        "error": "Supplier notes contain invalid characters"
-                    }), 400
-                # Set to None if empty after stripping
-                if not supplier_notes:
-                    supplier_notes = None
 
             if not vendor_id or not materials:
                 continue
@@ -4087,6 +4063,15 @@ def create_po_children(cr_id):
                         negotiated_price = vendor_selection.get('negotiated_price')
                         if negotiated_price:
                             log.info(f"Using vendor price from parent CR material_vendor_selections for '{material_name}': {negotiated_price}")
+
+                # ✅ CRITICAL FIX: If supplier_notes not provided, check parent CR's material_vendor_selections
+                # This is where the buyer stores the supplier notes when selecting vendors
+                if not supplier_notes_for_material and parent_cr.material_vendor_selections:
+                    vendor_selection = parent_cr.material_vendor_selections.get(material_name, {})
+                    if isinstance(vendor_selection, dict):
+                        supplier_notes_for_material = vendor_selection.get('supplier_notes', '')
+                        if supplier_notes_for_material:
+                            log.info(f"✅ Using supplier notes from parent CR material_vendor_selections for '{material_name}': {supplier_notes_for_material[:50]}...")
 
                 # Lookup vendor product price as fallback
                 vendor_product_price = vendor_product_prices.get(material_name.lower().strip() if material_name else '', 0)
@@ -4186,9 +4171,6 @@ def create_po_children(cr_id):
                 existing_po_child.vendor_selection_status = 'pending_td_approval'
                 existing_po_child.status = 'pending_td_approval'
                 existing_po_child.updated_at = datetime.utcnow()
-                # Update supplier notes (allow clearing with empty string)
-                if supplier_notes is not None:
-                    existing_po_child.supplier_notes = supplier_notes if supplier_notes.strip() else None
                 # Clear any previous rejection
                 existing_po_child.rejection_reason = None
 
@@ -4222,7 +4204,6 @@ def create_po_children(cr_id):
                     submission_group_id=submission_group_id,
                     materials_data=po_materials,
                     materials_total_cost=total_cost,
-                    supplier_notes=supplier_notes,  # Add supplier notes
                     vendor_id=vendor_id,
                     vendor_name=vendor.company_name,
                     vendor_selected_by_buyer_id=user_id,
@@ -5433,6 +5414,8 @@ def get_pending_po_children():
                             break
 
                 negotiated_from_selection = selection.get('negotiated_price') if isinstance(selection, dict) else None
+                # ✅ Get supplier notes from vendor selection
+                supplier_notes_from_selection = selection.get('supplier_notes', '') if isinstance(selection, dict) else ''
 
                 # Check negotiated_price_lookup from sub_items_data
                 negotiated_from_sub_items = negotiated_price_lookup.get(mat_name, 0)
@@ -5497,6 +5480,18 @@ def get_pending_po_children():
                 # Ensure total_price is calculated if unit_price exists but total_price is missing
                 if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
                     mat_copy['total_price'] = mat_copy['unit_price'] * quantity
+
+                # ✅ Add supplier notes - prioritize selection, then preserve existing material notes
+                # CRITICAL FIX: Material may already have supplier_notes from POChild creation
+                existing_supplier_notes = material.get('supplier_notes', '')
+                final_supplier_notes = supplier_notes_from_selection or existing_supplier_notes
+
+                if final_supplier_notes:
+                    mat_copy['supplier_notes'] = final_supplier_notes
+                    source = "vendor_selection" if supplier_notes_from_selection else "po_material_data"
+                    log.info(f"✅ Added supplier notes for '{mat_name_original}' from {source}: {final_supplier_notes[:50]}...")
+                else:
+                    mat_copy['supplier_notes'] = ''  # Ensure field exists even if empty
 
                 enriched_materials.append(mat_copy)
 
@@ -5650,6 +5645,8 @@ def get_rejected_po_children():
                             break
 
                 negotiated_price = selection.get('negotiated_price') if isinstance(selection, dict) else None
+                # ✅ Get supplier notes from vendor selection
+                supplier_notes = selection.get('supplier_notes', '') if isinstance(selection, dict) else ''
 
                 # Check vendor product catalog
                 vendor_product_price = vendor_product_prices.get(mat_name, 0)
@@ -5682,6 +5679,10 @@ def get_rejected_po_children():
                 # Ensure total_price is calculated
                 if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
                     mat_copy['total_price'] = mat_copy['unit_price'] * quantity
+
+                # ✅ Add supplier notes from vendor selection if available
+                if supplier_notes:
+                    mat_copy['supplier_notes'] = supplier_notes
 
                 enriched_materials.append(mat_copy)
 
@@ -5779,9 +5780,11 @@ def get_buyer_pending_po_children():
             ).all()
 
         # DEBUG: Log query results
-        log.info(f"🔍 Found {len(pending_po_children)} POChildren pending TD approval")
+        log.info(f"🔍 Found {len(pending_po_children)} POChildren pending TD approval for buyer {user_id}")
         for poc in pending_po_children:
-            log.info(f"  - POChild ID={poc.id}, parent_cr_id={poc.parent_cr_id}, vendor={poc.vendor_name}")
+            parent_cr = ChangeRequest.query.get(poc.parent_cr_id) if poc.parent_cr_id else None
+            assigned_buyer = parent_cr.assigned_to_buyer_user_id if parent_cr else None
+            log.info(f"  - POChild ID={poc.id}, formatted_id={poc.get_formatted_id()}, parent_cr_id={poc.parent_cr_id}, vendor={poc.vendor_name}, vendor_selection_status={poc.vendor_selection_status}, assigned_buyer={assigned_buyer}")
 
         result = []
         for po_child in pending_po_children:
@@ -5825,8 +5828,22 @@ def get_buyer_pending_po_children():
             for material in po_materials:
                 mat_copy = dict(material)
                 mat_name = material.get('material_name', '').lower().strip()
+                mat_name_original = material.get('material_name', '')
                 boq_price = boq_price_lookup.get(mat_name, 0)
                 quantity = material.get('quantity', 0)
+
+                # Get supplier notes from material_vendor_selections
+                selection = (material_vendor_selections.get(mat_name_original) or
+                           material_vendor_selections.get(mat_name) or {})
+                if not selection or not isinstance(selection, dict):
+                    for key, val in material_vendor_selections.items():
+                        if key.lower() == mat_name:
+                            selection = val
+                            break
+
+                supplier_notes = selection.get('supplier_notes', '') if isinstance(selection, dict) else ''
+                if supplier_notes:
+                    log.info(f"✅ Buyer POChild: Found supplier notes for '{mat_name_original}': {supplier_notes[:50]}...")
 
                 # If unit_price is 0 or missing, use BOQ price as fallback
                 if not mat_copy.get('unit_price') or mat_copy.get('unit_price') == 0:
@@ -5836,6 +5853,15 @@ def get_buyer_pending_po_children():
                 # Ensure total_price is calculated
                 if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
                     mat_copy['total_price'] = mat_copy['unit_price'] * quantity
+
+                # ✅ Add supplier notes from vendor selection if available
+                if supplier_notes:
+                    mat_copy['supplier_notes'] = supplier_notes
+                    log.info(f"✅ [get_approved_po_children] Added supplier notes to material '{mat_name_original}': {supplier_notes[:50]}...")
+                else:
+                    # Ensure supplier_notes field exists even if empty (for frontend consistency)
+                    mat_copy['supplier_notes'] = ''
+                    log.info(f"⚠️ [get_approved_po_children] No supplier notes for material '{mat_name_original}'")
 
                 enriched_materials.append(mat_copy)
 
@@ -6015,6 +6041,8 @@ def get_approved_po_children():
                             break
 
                 negotiated_price = selection.get('negotiated_price') if isinstance(selection, dict) else None
+                # ✅ Get supplier notes from vendor selection
+                supplier_notes = selection.get('supplier_notes', '') if isinstance(selection, dict) else ''
 
                 # Check vendor product catalog
                 vendor_product_price = vendor_product_prices.get(mat_name, 0)
@@ -6048,6 +6076,10 @@ def get_approved_po_children():
                 # Ensure total_price is calculated
                 if mat_copy.get('unit_price') and (not mat_copy.get('total_price') or mat_copy.get('total_price') == 0):
                     mat_copy['total_price'] = mat_copy['unit_price'] * quantity
+
+                # ✅ Add supplier notes from vendor selection if available
+                if supplier_notes:
+                    mat_copy['supplier_notes'] = supplier_notes
 
                 enriched_materials.append(mat_copy)
 
@@ -8542,16 +8574,42 @@ def save_supplier_notes(cr_id):
         flag_modified(cr, 'material_vendor_selections')
 
         cr.updated_at = datetime.utcnow()
+
+        # ✅ CRITICAL FIX: Also update POChild materials_data if POChild already exists
+        # This handles the case where buyer saves notes AFTER sending to TD
+        from models.po_child import POChild
+        po_children = POChild.query.filter_by(
+            parent_cr_id=cr_id,
+            is_deleted=False
+        ).all()
+
+        po_children_updated = 0
+        for po_child in po_children:
+            if po_child.materials_data:
+                materials_updated = False
+                for material in po_child.materials_data:
+                    if material.get('material_name') == material_name:
+                        # Update supplier notes in POChild material
+                        material['supplier_notes'] = supplier_notes
+                        materials_updated = True
+                        log.info(f"Updated supplier notes for '{material_name}' in POChild {po_child.id}")
+
+                if materials_updated:
+                    flag_modified(po_child, 'materials_data')
+                    po_child.updated_at = datetime.utcnow()
+                    po_children_updated += 1
+
         db.session.commit()
 
-        log.info(f"Supplier notes saved for material '{material_name}' in CR {cr_id} by user {user_id}")
+        log.info(f"Supplier notes saved for material '{material_name}' in CR {cr_id} by user {user_id}. Updated {po_children_updated} POChild record(s).")
 
         return jsonify({
             "success": True,
             "message": "Supplier notes saved successfully",
             "cr_id": cr_id,
             "material_name": material_name,
-            "supplier_notes": supplier_notes
+            "supplier_notes": supplier_notes,
+            "po_children_updated": po_children_updated
         }), 200
 
     except Exception as e:
@@ -8775,6 +8833,13 @@ def preview_lpo_pdf(cr_id):
                 final_brand = vendor_brand or material.get('brand', '')
                 final_specification = vendor_specification or material.get('specification', '')
 
+                # Get supplier notes from vendor selection or material data
+                supplier_notes = ''
+                if isinstance(selection, dict):
+                    supplier_notes = selection.get('supplier_notes', '') or material.get('supplier_notes', '')
+                else:
+                    supplier_notes = material.get('supplier_notes', '')
+
                 materials_list.append({
                     'material_name': mat_name,
                     'sub_item_name': material.get('sub_item_name', ''),
@@ -8786,7 +8851,8 @@ def preview_lpo_pdf(cr_id):
                     'boq_unit_price': float(boq_unit_price) if boq_unit_price else 0,
                     'original_unit_price': float(boq_unit_price) if boq_unit_price else 0,
                     'brand': final_brand,
-                    'specification': final_specification
+                    'specification': final_specification,
+                    'supplier_notes': supplier_notes
                 })
                 cr_total += mat_total
             cr_total = po_child.materials_total_cost or cr_total or sum(m.get('total_price', 0) for m in materials_list)
@@ -8964,9 +9030,7 @@ def preview_lpo_pdf(cr_id):
                 "stamp_image": getattr(settings, 'company_stamp_image', None) if settings else None,
                 "is_system_signature": True  # Mark as system-generated signature
             },
-            "header_image": getattr(settings, 'lpo_header_image', None) if settings else None,
-            # Include supplier notes - prioritize POChild notes if available, fallback to parent CR notes
-            "supplier_notes": po_child.supplier_notes if po_child and po_child.supplier_notes else cr.supplier_notes
+            "header_image": getattr(settings, 'lpo_header_image', None) if settings else None
         }
 
         return jsonify({
@@ -9295,83 +9359,3 @@ def get_lpo_default_template():
     except Exception as e:
         log.error(f"Error getting LPO default template: {str(e)}")
         return jsonify({"error": f"Failed to get default template: {str(e)}"}), 500
-
-def update_supplier_notes(cr_id):
-    """Update supplier notes for a purchase order - works regardless of CR status"""
-    try:
-        current_user = g.user
-        user_id = current_user['user_id']
-        user_role = current_user.get('role', '').lower()
-
-        data = request.get_json()
-        supplier_notes = data.get('supplier_notes', '').strip() if data.get('supplier_notes') else None
-
-        # Validate supplier_notes
-        if supplier_notes:
-            if len(supplier_notes) > 5000:
-                return jsonify({"error": "Supplier notes cannot exceed 5000 characters"}), 400
-            import re
-            if re.search(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', supplier_notes):
-                return jsonify({"error": "Supplier notes contain invalid characters"}), 400
-
-        # Get the change request
-        cr = ChangeRequest.query.filter_by(
-            cr_id=cr_id,
-            is_deleted=False
-        ).first()
-
-        if not cr:
-            return jsonify({"error": "Purchase not found"}), 404
-
-        # Check permissions - allow buyer assigned to this CR, TD, or admin
-        is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
-        is_admin = user_role == 'admin'
-        is_buyer = 'buyer' in user_role
-
-        if not is_td and not is_admin:
-            if not is_buyer or cr.assigned_to_buyer_user_id != user_id:
-                return jsonify({"error": "This purchase is not assigned to you"}), 403
-
-        # Log the update for debugging
-        log.info(f"Updating supplier notes for CR-{cr_id} by user {user_id} (role: {user_role}), status: {cr.status}")
-
-        # Update supplier notes - NO STATUS RESTRICTIONS
-        # Buyer can update notes even after submitting to TD
-        cr.supplier_notes = supplier_notes
-        cr.updated_at = datetime.utcnow()
-
-        # CRITICAL: Also update POChildren if they exist
-        # This ensures notes are synced across parent CR and all child POs
-        if cr.po_children:
-            updated_po_count = 0
-            for po_child in cr.po_children:
-                # Only update POChildren that are still pending or can be edited
-                # Don't update already completed/vendor_approved POChildren
-                if po_child.vendor_selection_status in ['pending_td_approval', 'rejected', None]:
-                    po_child.supplier_notes = supplier_notes
-                    po_child.updated_at = datetime.utcnow()
-                    updated_po_count += 1
-
-            if updated_po_count > 0:
-                log.info(f"Updated supplier notes for {updated_po_count} POChildren under CR-{cr_id}")
-
-        db.session.commit()
-
-        # Return updated purchase data so frontend can update without separate API call
-        updated_purchase = cr.to_dict()
-
-        log.info(f"Successfully updated supplier notes for CR-{cr_id}")
-
-        return jsonify({
-            "success": True,
-            "message": "Supplier notes updated successfully",
-            "supplier_notes": supplier_notes,
-            "purchase": updated_purchase  # Include full updated purchase object
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        log.error(f"Error updating supplier notes for CR-{cr_id}: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"error": f"Failed to update supplier notes: {str(e)}"}), 500

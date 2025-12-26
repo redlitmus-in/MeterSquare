@@ -113,7 +113,6 @@ class ChangeRequest(db.Model):
     vendor_email_sent = db.Column(db.Boolean, default=False)  # Track if PO email sent to vendor
     vendor_email_sent_date = db.Column(db.DateTime, nullable=True)
     vendor_email_sent_by_user_id = db.Column(db.Integer, nullable=True)
-    supplier_notes = db.Column(db.Text, nullable=True)  # Notes from buyer to supplier for single-vendor purchases
 
     # WhatsApp tracking
     vendor_whatsapp_sent = db.Column(db.Boolean, default=False)  # Track if PO WhatsApp sent to vendor
@@ -323,7 +322,6 @@ class ChangeRequest(db.Model):
             'vendor_approved_by_td_name': self.vendor_approved_by_td_name,
             'vendor_approval_date': self.vendor_approval_date.isoformat() if self.vendor_approval_date else None,
             'vendor_rejection_reason': self.vendor_rejection_reason,
-            'supplier_notes': self.supplier_notes,
 
             # Per-Material Vendor Selection (New)
             'use_per_material_vendors': self.use_per_material_vendors,

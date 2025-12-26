@@ -263,16 +263,6 @@ class LPOPDFGenerator:
             self.styles['LPONormal']
         ))
 
-        # === SUPPLIER NOTES (if provided) ===
-        supplier_notes = lpo_data.get('supplier_notes')
-        if supplier_notes and supplier_notes.strip():
-            elements.append(Spacer(1, 10))
-            elements.append(Paragraph('<b><u>Additional Requirements/Notes for Supplier:</u></b>', self.styles['SectionHeader']))
-            elements.append(Spacer(1, 5))
-            # Escape HTML entities and preserve line breaks
-            safe_notes = supplier_notes.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
-            elements.append(Paragraph(safe_notes, self.styles['LPONormal']))
-
         # === TERMS + SIGNATURES + FOOTER ===
         # Check both materials AND terms count to decide page layout
         terms = lpo_data.get('terms', {})

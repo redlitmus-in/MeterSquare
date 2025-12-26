@@ -1,4 +1,3 @@
-from flask import g
 import os
 from flask import g, jsonify, make_response, request, session, url_for
 import smtplib
@@ -9,7 +8,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
 from email.header import Header
 from email.utils import formataddr
-from datetime import datetime
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import jwt
