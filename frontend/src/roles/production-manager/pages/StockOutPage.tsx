@@ -2,10 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Package, CheckCircle, X, Save, FileText,
-  ArrowUpCircle, RefreshCw, Eye, Printer, Download
+  ArrowUpCircle, RefreshCw, Download, Printer
 } from 'lucide-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import {
   inventoryService,
   InternalMaterialRequest,
@@ -54,10 +52,6 @@ const StockOutPage: React.FC = () => {
   const [dnStatusFilter, setDnStatusFilter] = useState<string>('DRAFT');
   const [showDeliveryNoteModal, setShowDeliveryNoteModal] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  // Print preview state
-  const [showPrintPreview, setShowPrintPreview] = useState(false);
-  const [selectedDeliveryNote, setSelectedDeliveryNote] = useState<MaterialDeliveryNote | null>(null);
 
   // Selected request for creating DN
   const [selectedRequestForDN, setSelectedRequestForDN] = useState<InternalMaterialRequest | null>(null);
@@ -390,14 +384,6 @@ const StockOutPage: React.FC = () => {
     setSelectedRequestForDN(null);
   };
 
-  const handleAddDnItem = () => {
-    setDnItems([...dnItems, { inventory_material_id: 0, quantity: 0, notes: '' }]);
-  };
-
-  const handleRemoveDnItem = (index: number) => {
-    setDnItems(dnItems.filter((_, i) => i !== index));
-  };
-
   const handleDnItemChange = (index: number, field: string, value: unknown) => {
     setDnItems(dnItems.map((item, i) =>
       i === index ? { ...item, [field]: value } : item
@@ -468,101 +454,80 @@ const StockOutPage: React.FC = () => {
     );
   };
 
-  const handlePrintDeliveryNote = (dn: MaterialDeliveryNote) => {
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Material Delivery Note - ${dn.delivery_note_number}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            .header { text-align: center; margin-bottom: 30px; }
-            .info { margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            th, td { border: 1px solid #000; padding: 8px; text-align: left; }
-            th { background-color: #f0f0f0; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>MATERIAL DELIVERY NOTE</h1>
-            <p>${dn.delivery_note_number}</p>
-          </div>
-          <div class="info">
-            <p><strong>Project:</strong> ${dn.project_details?.project_name || ''}</p>
-            <p><strong>Delivery Date:</strong> ${new Date(dn.delivery_date || '').toLocaleDateString()}</p>
-            <p><strong>Attention To:</strong> ${dn.attention_to || ''}</p>
-            <p><strong>Vehicle:</strong> ${dn.vehicle_number || '-'} / ${dn.driver_name || '-'}</p>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Sr No.</th>
-                <th>Description</th>
-                <th>Quantity</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${(dn.items || []).map((item, i) => `
-                <tr>
-                  <td>${i + 1}</td>
-                  <td>${item.material_name || ''}${item.brand ? ` (${item.brand})` : ''}</td>
-                  <td>${item.quantity} ${item.unit || ''}</td>
-                  <td>${item.notes || ''}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.onload = () => {
-        printWindow.print();
-      };
+  const handleDownloadDeliveryNote = async (dn: MaterialDeliveryNote) => {
+    try {
+      // Use backend PDF generation for professional format
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        showError('Please log in to download delivery notes');
+        return;
+      }
+
+      // Use correct API base URL from environment (VITE_API_BASE_URL includes /api)
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
+      const response = await fetch(`${baseUrl}/delivery_note/${dn.delivery_note_id}/download`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to download delivery note');
+      }
+
+      // Download the PDF file
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${dn.delivery_note_number || 'delivery-note'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error downloading DN:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to download delivery note PDF';
+      showError(errorMessage);
     }
   };
 
-  const handleDownloadDeliveryNote = async (dn: MaterialDeliveryNote) => {
-    const doc = new jsPDF();
+  const handlePrintDeliveryNote = async (dn: MaterialDeliveryNote) => {
+    try {
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        showError('Please log in to print delivery notes');
+        return;
+      }
 
-    doc.setFontSize(16);
-    doc.setFont('helvetica', 'bold');
-    doc.text('MATERIAL DELIVERY NOTE', 105, 20, { align: 'center' });
+      // Use correct API base URL from environment (VITE_API_BASE_URL includes /api)
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
+      const response = await fetch(`${baseUrl}/delivery_note/${dn.delivery_note_id}/download`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(dn.delivery_note_number || '', 105, 28, { align: 'center' });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to load delivery note for printing');
+      }
 
-    doc.setFontSize(10);
-    let y = 40;
-    doc.text(`Project: ${dn.project_details?.project_name || ''}`, 14, y);
-    y += 7;
-    doc.text(`Delivery Date: ${new Date(dn.delivery_date || '').toLocaleDateString()}`, 14, y);
-    y += 7;
-    doc.text(`Attention To: ${dn.attention_to || ''}`, 14, y);
-    y += 7;
-    doc.text(`Vehicle: ${dn.vehicle_number || '-'} / Driver: ${dn.driver_name || '-'}`, 14, y);
-
-    const tableData = (dn.items || []).map((item, i) => [
-      i + 1,
-      `${item.material_name || ''}${item.brand ? ` (${item.brand})` : ''}`,
-      `${item.quantity} ${item.unit || ''}`,
-      item.notes || ''
-    ]);
-
-    autoTable(doc, {
-      startY: y + 10,
-      head: [['Sr No.', 'Description', 'Quantity', 'Notes']],
-      body: tableData,
-      theme: 'grid',
-      headStyles: { fillColor: [100, 100, 100] }
-    });
-
-    doc.save(`${dn.delivery_note_number || 'delivery-note'}.pdf`);
+      // Open PDF in new tab for printing
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const printWindow = window.open(url, '_blank');
+      if (printWindow) {
+        printWindow.onload = () => {
+          printWindow.print();
+        };
+      }
+    } catch (error) {
+      console.error('Error printing DN:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to print delivery note';
+      showError(errorMessage);
+    }
   };
 
   // Memoized filtered data
@@ -988,12 +953,12 @@ const StockOutPage: React.FC = () => {
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => { setSelectedDeliveryNote(dn); setShowPrintPreview(true); }}
-                              className="p-1 text-gray-600 hover:bg-gray-100 rounded"
-                              title="Print Preview"
-                              aria-label={`Preview ${dn.delivery_note_number}`}
+                              onClick={() => handleDownloadDeliveryNote(dn)}
+                              className="p-1 text-green-600 hover:bg-green-100 rounded"
+                              title="Download PDF"
+                              aria-label={`Download ${dn.delivery_note_number}`}
                             >
-                              <Eye className="w-4 h-4" />
+                              <Download className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handlePrintDeliveryNote(dn)}
@@ -1002,14 +967,6 @@ const StockOutPage: React.FC = () => {
                               aria-label={`Print ${dn.delivery_note_number}`}
                             >
                               <Printer className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDownloadDeliveryNote(dn)}
-                              className="p-1 text-green-600 hover:bg-green-100 rounded"
-                              title="Download PDF"
-                              aria-label={`Download ${dn.delivery_note_number}`}
-                            >
-                              <Download className="w-4 h-4" />
                             </button>
                             {dn.status === 'DRAFT' && (
                               <>
@@ -1244,13 +1201,6 @@ const StockOutPage: React.FC = () => {
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-sm font-medium text-gray-700">Items *</label>
-                  <button
-                    onClick={handleAddDnItem}
-                    className="px-3 py-1 text-sm bg-cyan-100 text-cyan-700 rounded-lg hover:bg-cyan-200"
-                    type="button"
-                  >
-                    + Add Item
-                  </button>
                 </div>
 
                 <div className="space-y-2">
@@ -1284,29 +1234,15 @@ const StockOutPage: React.FC = () => {
                         )}
                       </div>
                       <div className="col-span-2">
-                        <input
-                          type="number"
-                          value={item.quantity}
-                          readOnly
-                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded bg-gray-100 cursor-not-allowed"
-                          aria-label={`Quantity for item ${index + 1}`}
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        {/* Show unit */}
-                        <div className="text-sm text-gray-700 px-2 py-1 font-medium">
-                          {item.unit || 'unit'}
+                        <div className="px-2 py-1 text-sm text-gray-900 font-medium">
+                          {item.quantity}
                         </div>
                       </div>
-                      <div className="col-span-1 text-center">
-                        <button
-                          onClick={() => handleRemoveDnItem(index)}
-                          className="text-red-600 hover:text-red-800"
-                          type="button"
-                          aria-label={`Remove item ${index + 1}`}
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
+                      <div className="col-span-3">
+                        {/* Show unit */}
+                        <div className="text-sm text-gray-700 px-2 py-1">
+                          {item.unit || 'unit'}
+                        </div>
                       </div>
                     </div>
                   ))}

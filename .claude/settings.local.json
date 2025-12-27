@@ -122,7 +122,8 @@
       "Bash(for f in models/*.py routes/*.py services/*.py)",
       "Bash(git -C /home/development1/Desktop/MeterSquare ls-files:*)",
       "Bash(PGPASSWORD='Rameshdev$08' psql:*)",
-      "Bash(venv/bin/python3:*)"
+      "Bash(venv/bin/python3:*)",
+      "Bash(python check_delivery_notes.py:*)"
     ],
     "deny": [],
     "ask": []

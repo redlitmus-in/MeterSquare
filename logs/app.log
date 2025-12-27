@@ -1,3 +1,7 @@
 2025-12-19 18:23:24,777 - INFO - Supabase client initialized successfully
 2025-12-19 18:23:24,777 - INFO - Using bucket: file_upload
 2025-12-19 18:23:25,548 - INFO - Supabase client initialized for support tickets
+2025-12-26 17:55:08,630 - WARNING - SMS_ACCESS_TOKEN not set in environment variables - SMS functionality will be disabled
+2025-12-26 17:55:09,432 - INFO - Supabase client initialized successfully
+2025-12-26 17:55:09,432 - INFO - Using bucket: file_upload
+2025-12-26 17:55:09,467 - INFO - Supabase client initialized for support tickets

@@ -3214,24 +3214,56 @@ def delete_delivery_note(delivery_note_id):
 
 
 def get_delivery_notes_for_se():
-    """Get delivery notes for Site Engineer's assigned projects"""
+    """Get delivery notes for Site Engineer's assigned projects
+
+    Checks three sources for SE assignment:
+    1. Project.site_supervisor_id (direct assignment)
+    2. PMAssignSS.ss_ids (array of SE IDs)
+    3. PMAssignSS.assigned_to_se_id (single SE assignment)
+    """
     try:
         current_user_id = g.user.get('user_id')
-
-        # Get projects where user is site supervisor (site_supervisor_id is an integer column)
         from models.project import Project
-        assigned_projects = Project.query.filter(
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import or_, any_
+
+        # Collect all project IDs from multiple sources
+        project_ids = set()
+
+        # Source 1: Direct assignment via Project.site_supervisor_id
+        direct_projects = Project.query.filter(
             Project.site_supervisor_id == current_user_id,
             Project.is_deleted == False
         ).all()
+        for p in direct_projects:
+            project_ids.add(p.project_id)
 
-        project_ids = [p.project_id for p in assigned_projects]
+        # Source 2 & 3: Assignment via pm_assign_ss table
+        pm_assignments = PMAssignSS.query.filter(
+            PMAssignSS.is_deleted == False,
+            or_(
+                PMAssignSS.assigned_to_se_id == current_user_id,
+                PMAssignSS.ss_ids.any(current_user_id)
+            )
+        ).all()
+
+        for assignment in pm_assignments:
+            if assignment.project_id:
+                project_ids.add(assignment.project_id)
+
+        project_ids = list(project_ids)
 
         if not project_ids:
             return jsonify({
                 'delivery_notes': [],
                 'message': 'No assigned projects found'
             }), 200
+
+        # Get project details for all assigned projects
+        assigned_projects = Project.query.filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).all()
 
         # Get delivery notes for these projects that have been dispatched or in transit
         status_filter = request.args.get('status')
@@ -3274,13 +3306,50 @@ def get_returnable_materials_for_se():
 
     Returns materials from delivered delivery notes that can still be returned,
     tracked per delivery note item and grouped by project.
+
+    Checks three sources for SE assignment:
+    1. Project.site_supervisor_id (direct assignment)
+    2. PMAssignSS.ss_ids (array of SE IDs)
+    3. PMAssignSS.assigned_to_se_id (single SE assignment)
     """
     try:
         current_user_id = g.user.get('user_id')
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import or_
 
-        # Get projects where user is site supervisor
-        assigned_projects = Project.query.filter(
+        # Collect all project IDs from multiple sources
+        project_ids = set()
+
+        # Source 1: Direct assignment via Project.site_supervisor_id
+        direct_projects = Project.query.filter(
             Project.site_supervisor_id == current_user_id,
+            Project.is_deleted == False
+        ).all()
+        for p in direct_projects:
+            project_ids.add(p.project_id)
+
+        # Source 2 & 3: Assignment via pm_assign_ss table
+        pm_assignments = PMAssignSS.query.filter(
+            PMAssignSS.is_deleted == False,
+            or_(
+                PMAssignSS.assigned_to_se_id == current_user_id,
+                PMAssignSS.ss_ids.any(current_user_id)
+            )
+        ).all()
+
+        for assignment in pm_assignments:
+            if assignment.project_id:
+                project_ids.add(assignment.project_id)
+
+        if not project_ids:
+            return jsonify({
+                'projects': [],
+                'message': 'No assigned projects found'
+            }), 200
+
+        # Get project details for all assigned projects
+        assigned_projects = Project.query.filter(
+            Project.project_id.in_(list(project_ids)),
             Project.is_deleted == False
         ).all()
 
@@ -3341,24 +3410,56 @@ def get_returnable_materials_for_se():
 
 
 def get_material_returns_for_se():
-    """Get all material returns submitted by or for Site Engineer's assigned projects."""
+    """Get all material returns submitted by or for Site Engineer's assigned projects.
+
+    Checks three sources for SE assignment:
+    1. Project.site_supervisor_id (direct assignment)
+    2. PMAssignSS.ss_ids (array of SE IDs)
+    3. PMAssignSS.assigned_to_se_id (single SE assignment)
+    """
     try:
         current_user_id = g.user.get('user_id')
-
-        # Get projects where user is site supervisor
         from models.project import Project
-        assigned_projects = Project.query.filter(
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import or_
+
+        # Collect all project IDs from multiple sources
+        project_ids = set()
+
+        # Source 1: Direct assignment via Project.site_supervisor_id
+        direct_projects = Project.query.filter(
             Project.site_supervisor_id == current_user_id,
             Project.is_deleted == False
         ).all()
+        for p in direct_projects:
+            project_ids.add(p.project_id)
 
-        project_ids = [p.project_id for p in assigned_projects]
+        # Source 2 & 3: Assignment via pm_assign_ss table
+        pm_assignments = PMAssignSS.query.filter(
+            PMAssignSS.is_deleted == False,
+            or_(
+                PMAssignSS.assigned_to_se_id == current_user_id,
+                PMAssignSS.ss_ids.any(current_user_id)
+            )
+        ).all()
+
+        for assignment in pm_assignments:
+            if assignment.project_id:
+                project_ids.add(assignment.project_id)
+
+        project_ids = list(project_ids)
 
         if not project_ids:
             return jsonify({
                 'returns': [],
                 'message': 'No assigned projects found'
             }), 200
+
+        # Get project details for all assigned projects
+        assigned_projects = Project.query.filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).all()
 
         # Get all returns for these projects
         returns = MaterialReturn.query.filter(
@@ -4251,23 +4352,55 @@ def process_all_return_delivery_items(return_note_id):
 
 
 def get_return_delivery_notes_for_se():
-    """Get return delivery notes for Site Engineer's assigned projects"""
+    """Get return delivery notes for Site Engineer's assigned projects
+
+    Checks three sources for SE assignment:
+    1. Project.site_supervisor_id (direct assignment)
+    2. PMAssignSS.ss_ids (array of SE IDs)
+    3. PMAssignSS.assigned_to_se_id (single SE assignment)
+    """
     try:
         current_user_id = g.user.get('user_id')
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import or_
 
-        # Get projects where user is site supervisor
-        assigned_projects = Project.query.filter(
+        # Collect all project IDs from multiple sources
+        project_ids = set()
+
+        # Source 1: Direct assignment via Project.site_supervisor_id
+        direct_projects = Project.query.filter(
             Project.site_supervisor_id == current_user_id,
             Project.is_deleted == False
         ).all()
+        for p in direct_projects:
+            project_ids.add(p.project_id)
 
-        project_ids = [p.project_id for p in assigned_projects]
+        # Source 2 & 3: Assignment via pm_assign_ss table
+        pm_assignments = PMAssignSS.query.filter(
+            PMAssignSS.is_deleted == False,
+            or_(
+                PMAssignSS.assigned_to_se_id == current_user_id,
+                PMAssignSS.ss_ids.any(current_user_id)
+            )
+        ).all()
+
+        for assignment in pm_assignments:
+            if assignment.project_id:
+                project_ids.add(assignment.project_id)
+
+        project_ids = list(project_ids)
 
         if not project_ids:
             return jsonify({
                 'return_delivery_notes': [],
                 'message': 'No assigned projects found'
             }), 200
+
+        # Get project details for all assigned projects
+        assigned_projects = Project.query.filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).all()
 
         # Get RDNs for these projects
         status_filter = request.args.get('status')
@@ -4341,6 +4474,150 @@ def get_return_delivery_notes_for_pm():
         return jsonify({'error': str(e)}), 500
 
 
+def download_dn_pdf(delivery_note_id):
+    """Download Material Delivery Note as PDF"""
+    import re
+    from flask import send_file
+    from config.constants import is_admin_role, is_project_manager_role, is_buyer_role, is_site_engineer_role, DefaultValues, ErrorMessages
+
+    try:
+        current_user_email = g.user.get('email')
+        current_user_id = g.user.get('user_id')
+        user_role = g.user.get('role')
+
+        dn = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not dn:
+            return jsonify({'error': ErrorMessages.NOT_FOUND}), 404
+
+        # Get project details
+        project = Project.query.get(dn.project_id)
+        if not project:
+            return jsonify({'error': ErrorMessages.NOT_FOUND}), 404
+
+        # Helper to check if role is Production Manager
+        def is_production_manager_role(role):
+            if not role:
+                return False
+            normalized = role.lower().strip().replace(' ', '').replace('_', '').replace('-', '')
+            return normalized in ['productionmanager', 'pm']
+
+        # Authorization check using centralized role helpers
+        # Admin, PM, Production Manager, and Buyer have full access
+        has_full_access = (
+            is_admin_role(user_role) or
+            is_project_manager_role(user_role) or
+            is_production_manager_role(user_role) or
+            is_buyer_role(user_role)
+        )
+
+        if not has_full_access:
+            # Site Engineers/Supervisors can only access DNs for their assigned projects
+            if is_site_engineer_role(user_role):
+                # Check BOTH site_supervisor_id AND site_supervisors relationship (multi-SE support)
+                is_assigned = False
+
+                # Check primary supervisor
+                if project.site_supervisor_id == current_user_id:
+                    is_assigned = True
+
+                # Check site_supervisors relationship (many-to-many)
+                if hasattr(project, 'site_supervisors') and project.site_supervisors:
+                    assigned_se_ids = [se.user_id for se in project.site_supervisors]
+                    if current_user_id in assigned_se_ids:
+                        is_assigned = True
+
+                if not is_assigned:
+                    return jsonify({'error': ErrorMessages.UNAUTHORIZED}), 403
+            else:
+                return jsonify({'error': ErrorMessages.UNAUTHORIZED}), 403
+
+        # Get company name from system settings using centralized default
+        settings = SystemSettings.query.first()
+        company_name = getattr(settings, 'company_name', None) or DefaultValues.DEFAULT_COMPANY_NAME
+
+        # Prepare DN data using centralized defaults (no hardcoded values!)
+        dn_data = {
+            'delivery_note_number': dn.delivery_note_number,
+            'status': dn.status,
+            'delivery_date': dn.delivery_date,
+            'attention_to': dn.attention_to,
+            'delivery_from': dn.delivery_from or DefaultValues.DEFAULT_STORE_NAME,
+            'vehicle_number': dn.vehicle_number,
+            'driver_name': dn.driver_name,
+            'driver_contact': dn.driver_contact,
+            'notes': dn.notes,
+            'prepared_by': dn.prepared_by,
+            'created_by': dn.created_by,
+            'requested_by': dn.requested_by,
+            'request_date': dn.request_date
+        }
+
+        # Prepare project data
+        project_data = {
+            'project_id': project.project_id,
+            'project_name': project.project_name,
+            'project_code': project.project_code,
+            'location': project.location
+        }
+
+        # Prepare items data - PERFORMANCE: Batch load materials to avoid N+1 query
+        material_ids = [item.inventory_material_id for item in dn.items]
+        materials = {
+            m.inventory_material_id: m
+            for m in InventoryMaterial.query.filter(
+                InventoryMaterial.inventory_material_id.in_(material_ids)
+            ).all()
+        } if material_ids else {}
+
+        items_data = []
+        for item in dn.items:
+            material = materials.get(item.inventory_material_id)
+            items_data.append({
+                'material_name': material.material_name if material else 'Unknown Material',
+                'brand': material.brand if material else None,
+                'quantity': item.quantity,
+                'unit': material.unit if material else '',
+                'notes': item.notes
+            })
+
+        # Generate PDF
+        from utils.dn_pdf_generator import DNPDFGenerator
+        pdf_generator = DNPDFGenerator()
+        pdf_buffer = pdf_generator.generate_pdf(dn_data, project_data, items_data, company_name)
+
+        # Verify PDF was generated successfully
+        # Check buffer size, not position (tell() returns 0 after seek(0) which is correct)
+        if not pdf_buffer:
+            return jsonify({'error': 'PDF generation failed: no buffer returned'}), 500
+
+        # Check actual content size
+        pdf_buffer.seek(0, 2)  # Seek to end
+        size = pdf_buffer.tell()
+        pdf_buffer.seek(0)  # Seek back to start
+
+        if size == 0:
+            return jsonify({'error': 'PDF generation failed: empty buffer'}), 500
+
+        # Clean filename for safe download
+        safe_filename = re.sub(r'[^a-zA-Z0-9-]', '-', dn.delivery_note_number)
+        filename = f"{safe_filename}.pdf"
+
+        # Send PDF file
+        return send_file(
+            pdf_buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        print(f"Error downloading DN PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 def download_rdn_pdf(return_note_id):
     """Download RDN as PDF"""
     import re
@@ -4369,8 +4646,30 @@ def download_rdn_pdf(return_note_id):
         if normalized_role not in ['admin', 'productionmanager', 'production_manager']:
             # Site Engineers/Supervisors can only access RDNs for their assigned projects
             if normalized_role in ['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']:
-                # Check if SE/SS is assigned to this project
-                if project.site_supervisor_id != current_user_id:
+                # Check if SE/SS is assigned to this project via multiple sources
+                from models.pm_assign_ss import PMAssignSS
+                from sqlalchemy import or_
+
+                is_assigned = False
+
+                # Source 1: Direct assignment via Project.site_supervisor_id
+                if project.site_supervisor_id == current_user_id:
+                    is_assigned = True
+
+                # Source 2 & 3: Assignment via pm_assign_ss table
+                if not is_assigned:
+                    pm_assignment = PMAssignSS.query.filter(
+                        PMAssignSS.project_id == project.project_id,
+                        PMAssignSS.is_deleted == False,
+                        or_(
+                            PMAssignSS.assigned_to_se_id == current_user_id,
+                            PMAssignSS.ss_ids.any(current_user_id)
+                        )
+                    ).first()
+                    if pm_assignment:
+                        is_assigned = True
+
+                if not is_assigned:
                     return jsonify({'error': 'Unauthorized: You are not assigned to this project'}), 403
             else:
                 return jsonify({'error': 'Unauthorized: Insufficient permissions'}), 403
@@ -4383,12 +4682,19 @@ def download_rdn_pdf(return_note_id):
             print(f"Warning: Failed to load company name from settings: {e}")
             company_name = "MeterSquare"
 
+        # Get the user's full name from email (created_by stores email)
+        created_by_name = rdn.created_by  # Fallback to email
+        if rdn.created_by:
+            created_by_user = User.query.filter_by(email=rdn.created_by).first()
+            if created_by_user and created_by_user.full_name:
+                created_by_name = created_by_user.full_name
+
         # Prepare RDN data
         rdn_data = {
             'return_note_number': rdn.return_note_number,
             'status': rdn.status,
             'return_date': rdn.return_date.strftime('%d %B %Y') if rdn.return_date else 'N/A',
-            'created_by': rdn.created_by,
+            'created_by': created_by_name,
             'issued_at': rdn.issued_at.strftime('%d %B %Y %I:%M %p') if rdn.issued_at else None,
             'issued_by': rdn.issued_by,
             'dispatched_at': rdn.dispatched_at.strftime('%d %B %Y %I:%M %p') if rdn.dispatched_at else None,

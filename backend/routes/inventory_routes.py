@@ -479,6 +479,13 @@ def get_pm_return_delivery_notes_route():
     return get_return_delivery_notes_for_pm()
 
 
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>/download', methods=['GET'])
+@jwt_required
+def download_dn_pdf_route(delivery_note_id):
+    """Download Material Delivery Note as PDF"""
+    return download_dn_pdf(delivery_note_id)
+
+
 @inventory_routes.route('/return_delivery_note/<int:return_note_id>/download', methods=['GET'])
 @jwt_required
 def download_rdn_pdf_route(return_note_id):

@@ -1,7 +1,7 @@
 """
-Return Delivery Note PDF Generator
-Generates professional return delivery note PDFs with company branding
-Matches the exact format of Material Delivery Note: Logo + Title header, info grid, items table, signatures, footer
+Material Delivery Note PDF Generator
+Generates professional delivery note PDFs with company branding
+Matches the exact format: Logo + Title header, info grid, items table, signatures, footer
 """
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -20,8 +20,8 @@ from config.constants import DefaultValues
 logger = logging.getLogger(__name__)
 
 
-class RDNPDFGenerator:
-    """Return Delivery Note PDF Generator - Professional format matching Material Delivery Note template"""
+class DNPDFGenerator:
+    """Material Delivery Note PDF Generator - Professional format matching exact template"""
 
     def __init__(self, logo_path=None):
         self.styles = getSampleStyleSheet()
@@ -53,10 +53,10 @@ class RDNPDFGenerator:
         return escape(str(text))
 
     def _setup_styles(self):
-        """Setup professional styles for RDN"""
+        """Setup professional styles for DN"""
         # Main title - large bold
         self.styles.add(ParagraphStyle(
-            name='RDNTitle',
+            name='DNTitle',
             parent=self.styles['Normal'],
             fontSize=16,
             fontName='Helvetica-Bold',
@@ -65,9 +65,9 @@ class RDNPDFGenerator:
             spaceAfter=2,
         ))
 
-        # RDN Number subtitle
+        # DN Number subtitle
         self.styles.add(ParagraphStyle(
-            name='RDNSubtitle',
+            name='DNSubtitle',
             parent=self.styles['Normal'],
             fontSize=11,
             fontName='Helvetica',
@@ -77,7 +77,7 @@ class RDNPDFGenerator:
 
         # Normal text
         self.styles.add(ParagraphStyle(
-            name='RDNNormal',
+            name='DNNormal',
             parent=self.styles['Normal'],
             fontSize=9,
             textColor=colors.black,
@@ -85,7 +85,7 @@ class RDNPDFGenerator:
 
         # Bold label
         self.styles.add(ParagraphStyle(
-            name='RDNLabel',
+            name='DNLabel',
             parent=self.styles['Normal'],
             fontSize=9,
             fontName='Helvetica-Bold',
@@ -94,28 +94,28 @@ class RDNPDFGenerator:
 
         # Small text for footer
         self.styles.add(ParagraphStyle(
-            name='RDNFooter',
+            name='DNFooter',
             parent=self.styles['Normal'],
             fontSize=8,
             textColor=colors.HexColor('#666666'),
             alignment=TA_CENTER,
         ))
 
-    def generate_pdf(self, rdn_data, project_data, items_data, company_name=None):
+    def generate_pdf(self, dn_data, project_data, items_data, company_name=None):
         """
-        Generate Return Delivery Note PDF matching Material Delivery Note format
+        Generate Material Delivery Note PDF matching exact template format
 
         Args:
-            rdn_data: dict - Return delivery note details
+            dn_data: dict - Delivery note details
             project_data: dict - Project details
-            items_data: list[dict] - List of return items
+            items_data: list[dict] - List of items
             company_name: str - Company name for header
 
         Returns:
             BytesIO: PDF content
         """
-        if not isinstance(rdn_data, dict):
-            raise ValueError("rdn_data must be a dictionary")
+        if not isinstance(dn_data, dict):
+            raise ValueError("dn_data must be a dictionary")
         if not isinstance(project_data, dict):
             raise ValueError("project_data must be a dictionary")
         if not isinstance(items_data, list):
@@ -137,19 +137,19 @@ class RDNPDFGenerator:
         content_width = self.page_width - 40*mm  # Total content width
 
         # ==================== HEADER SECTION ====================
-        # Logo on left, Title + RDN Number on right
-        rdn_number = self._escape_html(rdn_data.get('return_note_number', 'N/A'))
+        # Logo on left, Title + DN Number on right
+        dn_number = self._escape_html(dn_data.get('delivery_note_number', 'N/A'))
 
-        # Create title block (right side) with spacing between title and RDN number
-        title_para = Paragraph('<b>RETURN DELIVERY NOTE</b>', self.styles['RDNTitle'])
-        spacer_para = Spacer(1, 3*mm)  # Space between title and RDN number
-        rdn_num_para = Paragraph(rdn_number, self.styles['RDNSubtitle'])
+        # Create title block (right side) with spacing between title and DN number
+        title_para = Paragraph('<b>MATERIAL DELIVERY NOTE</b>', self.styles['DNTitle'])
+        spacer_para = Spacer(1, 3*mm)  # Space between title and DN number
+        dn_num_para = Paragraph(dn_number, self.styles['DNSubtitle'])
 
         if self.logo_path and os.path.exists(self.logo_path):
             try:
                 logo = Image(self.logo_path, width=35*mm, height=35*mm, kind='proportional')
                 # Header table: Logo | Title with spacing
-                header_data = [[logo, [title_para, spacer_para, rdn_num_para]]]
+                header_data = [[logo, [title_para, spacer_para, dn_num_para]]]
                 header_table = Table(header_data, colWidths=[45*mm, content_width - 45*mm])
                 header_table.setStyle(TableStyle([
                     ('ALIGN', (0, 0), (0, 0), 'LEFT'),
@@ -161,11 +161,11 @@ class RDNPDFGenerator:
                 logger.warning(f"Failed to load logo: {e}")
                 story.append(title_para)
                 story.append(Spacer(1, 3*mm))
-                story.append(rdn_num_para)
+                story.append(dn_num_para)
         else:
             story.append(title_para)
             story.append(Spacer(1, 3*mm))
-            story.append(rdn_num_para)
+            story.append(dn_num_para)
 
         # Red separator line
         story.append(Spacer(1, 5*mm))
@@ -177,35 +177,42 @@ class RDNPDFGenerator:
         story.append(Spacer(1, 5*mm))
 
         # ==================== INFO GRID SECTION ====================
-        # 2-column layout matching the MDN template exactly
-        # This is for materials being returned FROM Site TO Store
+        # 2-column layout matching the template exactly
 
         # Format values
-        project_location = f"{self._escape_html(project_data.get('project_name', 'N/A'))}, {self._escape_html(project_data.get('project_location', ''))}"
-        return_date = self._format_date(rdn_data.get('return_date'))
-        returned_by = self._escape_html(rdn_data.get('created_by', '-'))
-        return_to = 'Store / Production Manager'
-        vehicle_driver = f"{self._escape_html(rdn_data.get('vehicle_number', '-'))} / {self._escape_html(rdn_data.get('driver_name', '-'))}"
+        project_location = f"{self._escape_html(project_data.get('project_name', 'N/A'))}, {self._escape_html(project_data.get('location', ''))}"
+        delivery_date = self._format_date(dn_data.get('delivery_date'))
+        attention_to = self._escape_html(dn_data.get('attention_to', '-'))
+        delivery_from = self._escape_html(dn_data.get('delivery_from', DefaultValues.DEFAULT_STORE_NAME))
+        requested_by = self._escape_html(dn_data.get('requested_by')) if dn_data.get('requested_by') else '-'
+        request_date = self._format_date(dn_data.get('request_date')) if dn_data.get('request_date') else '-'
+        vehicle_driver = f"{self._escape_html(dn_data.get('vehicle_number', '-'))} / {self._escape_html(dn_data.get('driver_name', '-'))}"
 
         # Create info grid with proper formatting
         info_data = [
             [
-                Paragraph('<b>Project & Location:</b>', self.styles['RDNLabel']),
-                Paragraph(project_location, self.styles['RDNNormal']),
-                Paragraph('<b>Return Date:</b>', self.styles['RDNLabel']),
-                Paragraph(return_date, self.styles['RDNNormal']),
+                Paragraph('<b>Project & Location:</b>', self.styles['DNLabel']),
+                Paragraph(project_location, self.styles['DNNormal']),
+                Paragraph('<b>Delivery Date:</b>', self.styles['DNLabel']),
+                Paragraph(delivery_date, self.styles['DNNormal']),
             ],
             [
-                Paragraph('<b>Returned By:</b>', self.styles['RDNLabel']),
-                Paragraph(returned_by, self.styles['RDNNormal']),
-                Paragraph('<b>Return To:</b>', self.styles['RDNLabel']),
-                Paragraph(return_to, self.styles['RDNNormal']),
+                Paragraph('<b>Attention to:</b>', self.styles['DNLabel']),
+                Paragraph(attention_to, self.styles['DNNormal']),
+                Paragraph('<b>Delivery From:</b>', self.styles['DNLabel']),
+                Paragraph(delivery_from, self.styles['DNNormal']),
             ],
             [
-                Paragraph('<b>Vehicle & Driver:</b>', self.styles['RDNLabel']),
-                Paragraph(vehicle_driver, self.styles['RDNNormal']),
-                Paragraph('<b>Name & Signature:</b>', self.styles['RDNLabel']),
-                Paragraph('', self.styles['RDNNormal']),
+                Paragraph('<b>Materials Requested By:</b>', self.styles['DNLabel']),
+                Paragraph(requested_by, self.styles['DNNormal']),
+                Paragraph('<b>Name & Signature:</b>', self.styles['DNLabel']),
+                Paragraph('', self.styles['DNNormal']),
+            ],
+            [
+                Paragraph('<b>Request Date:</b>', self.styles['DNLabel']),
+                Paragraph(request_date, self.styles['DNNormal']),
+                Paragraph('<b>Vehicle & Driver:</b>', self.styles['DNLabel']),
+                Paragraph(vehicle_driver, self.styles['DNNormal']),
             ],
         ]
 
@@ -232,19 +239,18 @@ class RDNPDFGenerator:
         # ==================== ITEMS TABLE ====================
         # Header row
         items_header = [
-            Paragraph('<b>#</b>', self.styles['RDNLabel']),
-            Paragraph('<b>Material Description</b>', self.styles['RDNLabel']),
-            Paragraph('<b>Quantity</b>', self.styles['RDNLabel']),
-            Paragraph('<b>Condition</b>', self.styles['RDNLabel']),
-            Paragraph('<b>Reason</b>', self.styles['RDNLabel']),
+            Paragraph('<b>#</b>', self.styles['DNLabel']),
+            Paragraph('<b>Material Description</b>', self.styles['DNLabel']),
+            Paragraph('<b>Quantity</b>', self.styles['DNLabel']),
+            Paragraph('<b>Notes</b>', self.styles['DNLabel']),
         ]
         items_table_data = [items_header]
 
         # Item rows
         for idx, item in enumerate(items_data, 1):
             desc = item.get('material_name', '')
-            if item.get('material_code'):
-                desc += f" ({item.get('material_code')})"
+            if item.get('brand'):
+                desc += f" ({item.get('brand')})"
 
             # Format quantity
             qty = item.get('quantity', 0)
@@ -254,22 +260,20 @@ class RDNPDFGenerator:
             else:
                 qty_str = f"{qty} {unit}"
 
-            condition = item.get('condition', 'Good')
-            reason = item.get('return_reason', '') or '-'
+            notes = item.get('notes', '') or '-'
 
             items_table_data.append([
-                Paragraph(str(idx), self.styles['RDNNormal']),
-                Paragraph(self._escape_html(desc), self.styles['RDNNormal']),
-                Paragraph(qty_str, self.styles['RDNNormal']),
-                Paragraph(self._escape_html(condition), self.styles['RDNNormal']),
-                Paragraph(self._escape_html(reason), self.styles['RDNNormal']),
+                Paragraph(str(idx), self.styles['DNNormal']),
+                Paragraph(self._escape_html(desc), self.styles['DNNormal']),
+                Paragraph(qty_str, self.styles['DNNormal']),
+                Paragraph(self._escape_html(notes), self.styles['DNNormal']),
             ])
 
         # Items table styling
-        items_col_widths = [12*mm, 65*mm, 30*mm, 28*mm, 35*mm]
+        items_col_widths = [12*mm, 90*mm, 35*mm, 33*mm]
         items_table = Table(items_table_data, colWidths=items_col_widths)
         items_table.setStyle(TableStyle([
-            # Header row - Green background matching MDN
+            # Header row
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E8F5E9')),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             # Grid
@@ -282,17 +286,16 @@ class RDNPDFGenerator:
             # Alignment
             ('ALIGN', (0, 0), (0, -1), 'CENTER'),  # # column centered
             ('ALIGN', (2, 0), (2, -1), 'CENTER'),  # Quantity centered
-            ('ALIGN', (3, 0), (3, -1), 'CENTER'),  # Condition centered
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
         story.append(items_table)
 
         # ==================== NOTES SECTION ====================
-        if rdn_data.get('notes'):
+        if dn_data.get('notes'):
             story.append(Spacer(1, 5*mm))
             notes_para = Paragraph(
-                f"<b>Notes:</b><br/>{self._escape_html(rdn_data.get('notes'))}",
-                self.styles['RDNNormal']
+                f"<b>Notes:</b><br/>{self._escape_html(dn_data.get('notes'))}",
+                self.styles['DNNormal']
             )
             story.append(notes_para)
 
@@ -301,20 +304,20 @@ class RDNPDFGenerator:
 
         sig_data = [
             [
-                Paragraph('<b>Prepared By:</b>', self.styles['RDNLabel']),
-                Paragraph('<b>Received By:</b>', self.styles['RDNLabel']),
+                Paragraph('<b>Prepared By:</b>', self.styles['DNLabel']),
+                Paragraph('<b>Checked By:</b>', self.styles['DNLabel']),
             ],
             [
-                Paragraph('Site Engineer', self.styles['RDNNormal']),
-                Paragraph('Production Manager', self.styles['RDNNormal']),
+                Paragraph('Production manager', self.styles['DNNormal']),
+                Paragraph('________________', self.styles['DNNormal']),
             ],
             [
-                Paragraph('Signature: ________________', self.styles['RDNNormal']),
-                Paragraph('Signature: ________________', self.styles['RDNNormal']),
+                Paragraph('Signature: ________________', self.styles['DNNormal']),
+                Paragraph('Signature: ________________', self.styles['DNNormal']),
             ],
             [
-                Paragraph('Date: ________________', self.styles['RDNNormal']),
-                Paragraph('Date: ________________', self.styles['RDNNormal']),
+                Paragraph('Date: ________________', self.styles['DNNormal']),
+                Paragraph('Date: ________________', self.styles['DNNormal']),
             ],
         ]
 
@@ -329,7 +332,7 @@ class RDNPDFGenerator:
         # ==================== FOOTER ====================
         story.append(Spacer(1, 20*mm))
         footer_text = f"Generated on {datetime.now().strftime('%m/%d/%Y, %I:%M:%S %p')}"
-        footer_para = Paragraph(footer_text, self.styles['RDNFooter'])
+        footer_para = Paragraph(footer_text, self.styles['DNFooter'])
         story.append(footer_para)
 
         # Build PDF

@@ -51,6 +51,7 @@ interface MaterialSelectionModalProps {
   returnableProjects: ReturnableProject[];
   selectedMaterialsCart: Material[];
   onSaveSelection: (materials: Material[]) => void;
+  selectedProjectId?: number | null;
 }
 
 interface RDNCreationModalProps {
@@ -81,14 +82,24 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
   returnableProjects,
   selectedMaterialsCart,
   onSaveSelection,
+  selectedProjectId,
 }) => {
-  const [tempSelection, setTempSelection] = React.useState<Material[]>(selectedMaterialsCart);
+  // Filter selection to only show materials for the selected project
+  const initialSelection = selectedProjectId
+    ? selectedMaterialsCart.filter(m => m.project_id === selectedProjectId)
+    : selectedMaterialsCart;
+
+  const [tempSelection, setTempSelection] = React.useState<Material[]>(initialSelection);
 
   React.useEffect(() => {
     if (show) {
-      setTempSelection(selectedMaterialsCart);
+      // When modal opens, filter to selected project's materials only
+      const filtered = selectedProjectId
+        ? selectedMaterialsCart.filter(m => m.project_id === selectedProjectId)
+        : selectedMaterialsCart;
+      setTempSelection(filtered);
     }
-  }, [show, selectedMaterialsCart]);
+  }, [show, selectedMaterialsCart, selectedProjectId]);
 
   const handleToggleSelect = (project: ReturnableProject, material: ReturnableProject['materials'][0]) => {
     const existing = tempSelection.find(m => m.delivery_note_item_id === material.delivery_note_item_id);
@@ -135,7 +146,13 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
       return;
     }
 
-    onSaveSelection(tempSelection);
+    // Merge with existing selections from OTHER projects (keep them, update this project's selections)
+    if (selectedProjectId) {
+      const otherProjectSelections = selectedMaterialsCart.filter(m => m.project_id !== selectedProjectId);
+      onSaveSelection([...otherProjectSelections, ...tempSelection]);
+    } else {
+      onSaveSelection(tempSelection);
+    }
     showSuccess(`${tempSelection.length} material(s) saved to cart`);
     onClose();
   };
@@ -205,8 +222,7 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
                         return (
                           <div
                             key={material.delivery_note_item_id}
-                            onClick={() => handleToggleSelect(project, material)}
-                            className={`bg-white p-3 rounded border-2 transition-all cursor-pointer ${
+                            className={`bg-white p-3 rounded border-2 transition-all ${
                               isSelected
                                 ? 'border-purple-400 bg-purple-50'
                                 : 'border-gray-200 hover:border-purple-300 hover:bg-purple-50/50'
@@ -216,15 +232,14 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
                               <input
                                 type="checkbox"
                                 checked={isSelected}
-                                onChange={(e) => {
-                                  e.stopPropagation();
-                                  handleToggleSelect(project, material);
-                                }}
-                                onClick={(e) => e.stopPropagation()}
+                                onChange={() => handleToggleSelect(project, material)}
                                 className="mt-1 w-4 h-4 text-purple-600 cursor-pointer"
                               />
                               <div className="flex-1">
-                                <div className="flex items-center justify-between mb-2">
+                                <div
+                                  className="flex items-center justify-between mb-2 cursor-pointer"
+                                  onClick={() => handleToggleSelect(project, material)}
+                                >
                                   <div>
                                     <p className="font-medium text-gray-900">{material.material_name}</p>
                                     <p className="text-xs text-gray-500">

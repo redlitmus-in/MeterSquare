@@ -200,6 +200,7 @@ def build_returnable_material_item(delivery_note, item, material):
         'delivery_note_number': delivery_note.delivery_note_number,
         'delivery_date': delivery_note.delivery_date.isoformat() if delivery_note.delivery_date else None,
         'item_id': item.item_id,
+        'delivery_note_item_id': item.item_id,  # Alias for frontend compatibility
         'inventory_material_id': material.inventory_material_id,
         'material_code': material.material_code,
         'material_name': material.material_name,

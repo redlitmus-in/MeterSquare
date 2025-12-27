@@ -250,6 +250,11 @@ class DefaultValues:
     DEFAULT_VAT_RATE = 0.05  # 5%
     DEFAULT_CURRENCY = 'AED'
 
+    # Company/Store defaults
+    DEFAULT_COMPANY_NAME = 'MeterSquare'
+    DEFAULT_STORE_NAME = 'M2 Store'
+    DEFAULT_SITE_ENGINEER_TITLE = 'Site Engineer'
+
 
 # ==================== VALIDATION PATTERNS ====================
 
