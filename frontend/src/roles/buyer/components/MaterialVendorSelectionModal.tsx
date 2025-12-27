@@ -52,6 +52,11 @@ const MIN_CATEGORY_LENGTH = 3;
 const MAX_VISIBLE_PRODUCTS = 3;
 const SUBMISSION_ID_LENGTH = 9;
 
+// Helper function to normalize strings for comparison (removes extra internal spaces)
+const normalizeForComparison = (str: string): string => {
+  return str.toLowerCase().trim().replace(/\s+/g, ' ');
+};
+
 interface SelectedVendorInfo {
   vendor_id: number;
   vendor_name: string;
@@ -157,7 +162,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const isMaterialInApprovedPOChild = (materialName: string): boolean => {
     if (!purchase.po_children || purchase.po_children.length === 0) return false;
 
-    const materialNameLower = materialName.toLowerCase().trim();
+    const materialNormalized = normalizeForComparison(materialName);
     return purchase.po_children.some(poChild => {
       // Check if POChild is approved or completed
       const isApproved = poChild.vendor_selection_status === 'approved' ||
@@ -167,7 +172,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
       // Check if this material is in the POChild
       return poChild.materials?.some(mat =>
-        mat.material_name?.toLowerCase().trim() === materialNameLower
+        normalizeForComparison(mat.material_name || '') === materialNormalized
       );
     });
   };
@@ -639,41 +644,45 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     vendorCategory: string,
     material: string
   ): boolean => {
+    // Normalize spaces (convert multiple spaces to single space)
+    const normalizedProduct = productName.replace(/\s+/g, ' ').trim();
+    const normalizedMaterial = material.replace(/\s+/g, ' ').trim();
+
     // Handle very short material names (1-2 characters) with exact matching
     // First check for EXACT match (case-insensitive) - highest priority
-    if (productName === material) {
+    if (normalizedProduct === normalizedMaterial) {
       return true;
     }
 
     // Check if material is contained in product name or vice versa
-    if (productName.includes(material) || material.includes(productName)) {
+    if (normalizedProduct.includes(normalizedMaterial) || normalizedMaterial.includes(normalizedProduct)) {
       return true;
     }
 
-    if (material.length <= SHORT_MATERIAL_MAX_LENGTH) {
+    if (normalizedMaterial.length <= SHORT_MATERIAL_MAX_LENGTH) {
       // For very short materials (1-2 chars), check if product name contains the exact material as a standalone word
-      const escapedMaterial = material.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escapedMaterial = normalizedMaterial.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const materialRegex = new RegExp(`\\b${escapedMaterial}\\b`, 'i');
-      const exactMatch = materialRegex.test(productName);
+      const exactMatch = materialRegex.test(normalizedProduct);
 
       // Also check if material is at start or end of product name
-      const startsOrEndsWith = productName.toLowerCase().startsWith(material) ||
-        productName.toLowerCase().endsWith(material);
+      const startsOrEndsWith = normalizedProduct.toLowerCase().startsWith(normalizedMaterial) ||
+        normalizedProduct.toLowerCase().endsWith(normalizedMaterial);
 
       return exactMatch || startsOrEndsWith;
     }
 
     // For longer material names, use word-based matching
     // Keep all words (don't filter by length) to handle cases like "de 01"
-    const materialWords = material.split(/\s+/).filter(w => w.length > 0);
-    const productWords = productName.split(/\s+/).filter(w => w.length > 0);
+    const materialWords = normalizedMaterial.split(/\s+/).filter(w => w.length > 0);
+    const productWords = normalizedProduct.split(/\s+/).filter(w => w.length > 0);
 
     let matchingWords = 0;
     let totalWords = materialWords.length;
 
     // If no words after split, fallback to direct contains check
     if (totalWords === 0) {
-      return productName.includes(material) || material.includes(productName);
+      return normalizedProduct.includes(normalizedMaterial) || normalizedMaterial.includes(normalizedProduct);
     }
 
     materialWords.forEach(matWord => {
@@ -705,8 +714,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     const hasGoodWordMatch = matchingWords >= matchThreshold;
 
     const categoryMatch = !!(
-      (productCategory && material.includes(productCategory) && productCategory.length > MIN_CATEGORY_LENGTH) ||
-      (vendorCategory && material.includes(vendorCategory) && vendorCategory.length > MIN_CATEGORY_LENGTH)
+      (productCategory && normalizedMaterial.includes(productCategory) && productCategory.length > MIN_CATEGORY_LENGTH) ||
+      (vendorCategory && normalizedMaterial.includes(vendorCategory) && vendorCategory.length > MIN_CATEGORY_LENGTH)
     );
 
     return hasGoodWordMatch || categoryMatch;
@@ -748,16 +757,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
   // Helper to check if we have actual product matches or using fallback
   const getVendorsForMaterialWithFallbackInfo = (materialName: string): { vendors: Vendor[], isFallback: boolean } => {
-    const materialLower = materialName.toLowerCase().trim();
+    const materialNormalized = normalizeForComparison(materialName);
 
-    // EXACT MATCH ONLY: Find vendors with products that exactly match the material name
+    // EXACT MATCH ONLY: Find vendors with products that exactly match the material name (normalized)
     const matchedVendors = vendors.filter(vendor => {
       if (!vendor.vendor_id) return false;
       const products = vendorProducts.get(vendor.vendor_id) || [];
 
       return products.some(product => {
-        const productName = product.product_name?.toLowerCase().trim() || '';
-        return productName === materialLower;  // EXACT MATCH ONLY
+        const productNormalized = normalizeForComparison(product.product_name || '');
+        return productNormalized === materialNormalized;  // EXACT MATCH ONLY (with normalized spaces)
       });
     });
 
@@ -782,17 +791,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
   // Get vendors with cost information for auto-selection
   const getVendorsForMaterialWithCost = (materialName: string): (Vendor & { lowestPrice?: number; exactProductName?: string })[] => {
-    const materialLower = materialName.toLowerCase().trim();
+    const materialNormalized = normalizeForComparison(materialName);
 
     return vendors
       .filter(vendor => {
         if (!vendor.vendor_id) return false;
         const products = vendorProducts.get(vendor.vendor_id) || [];
 
-        // EXACT MATCH ONLY: Check if vendor has product with exact name (case-insensitive)
+        // EXACT MATCH ONLY: Check if vendor has product with exact name (normalized spaces)
         return products.some(product => {
-          const productName = product.product_name?.toLowerCase().trim() || '';
-          return productName === materialLower;
+          const productNormalized = normalizeForComparison(product.product_name || '');
+          return productNormalized === materialNormalized;
         });
       })
       .map(vendor => {
@@ -800,8 +809,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         const products = vendorProducts.get(vendor.vendor_id!) || [];
 
         const exactMatchProduct = products.find(product => {
-          const productName = product.product_name?.toLowerCase().trim() || '';
-          return productName === materialLower;
+          const productNormalized = normalizeForComparison(product.product_name || '');
+          return productNormalized === materialNormalized;
         });
 
         const lowestPrice = exactMatchProduct?.unit_price || undefined;
@@ -2011,10 +2020,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                             : 0;
                                           const totalEstimate = lowestPrice > 0 ? lowestPrice * material.quantity : 0;
 
-                                          // Get vendor's EXACT product name (exact match only)
-                                          const materialNameLower = material.material_name.toLowerCase().trim();
+                                          // Get vendor's EXACT product name (exact match only, normalized spaces)
+                                          const materialNormalized = normalizeForComparison(material.material_name);
                                           const exactMatchProduct = vendorProductsList.find(p =>
-                                            p.product_name?.toLowerCase().trim() === materialNameLower
+                                            normalizeForComparison(p.product_name || '') === materialNormalized
                                           );
                                           // Always use vendor's product name if there's an exact match
                                           const vendorMaterialName = exactMatchProduct?.product_name;
@@ -4127,6 +4136,25 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                               }],
                               submissionGroupId
                             );
+
+                            // After POChild is created, save supplier notes for each material that has notes
+                            for (const mat of materials) {
+                              const noteText = materialNotes[mat.material_name];
+                              if (noteText && noteText.trim()) {
+                                try {
+                                  await buyerService.saveSupplierNotes(
+                                    purchase.cr_id,
+                                    mat.material_name,
+                                    noteText,
+                                    sentVendorId
+                                  );
+                                  console.log(`✅ Saved supplier notes for material '${mat.material_name}' to POChild`);
+                                } catch (noteError) {
+                                  console.error(`Failed to save supplier notes for ${mat.material_name}:`, noteError);
+                                  // Don't fail the whole operation if note save fails
+                                }
+                              }
+                            }
 
                             // Show success immediately
                             toast.success(response.message || `Sent to TD for approval: ${sentVendorName}!`);

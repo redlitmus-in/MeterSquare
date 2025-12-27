@@ -379,11 +379,30 @@ const ChangeRequestsPage: React.FC = () => {
     // Map materials to match ChangeRequestItem format
     // Ensure prices are calculated even if missing from backend
     // The backend enriches materials with vendor prices in unit_price field
+    const childNotes = (poChild as any).child_notes || '';
+
     const mappedMaterials = (poChild.materials || []).map(m => {
       // unit_price from backend should already be vendor negotiated price
       const unitPrice = m.unit_price || m.boq_unit_price || 0;
       const quantity = m.quantity || 0;
       const totalPrice = m.total_price || m.boq_total_price || (unitPrice * quantity) || 0;
+
+      // Extract supplier_notes from child_notes if available
+      let supplierNotes = m.supplier_notes || '';
+      if (!supplierNotes && childNotes) {
+        const materialPrefix = `[${m.material_name}]: `;
+        if (childNotes.includes(materialPrefix)) {
+          // Extract notes for this specific material (format: "[material_name]: notes")
+          const startIdx = childNotes.indexOf(materialPrefix) + materialPrefix.length;
+          const endIdx = childNotes.indexOf('\n\n', startIdx);
+          supplierNotes = endIdx > startIdx
+            ? childNotes.substring(startIdx, endIdx)
+            : childNotes.substring(startIdx);
+        } else if (!childNotes.includes('[')) {
+          // Plain notes without prefix - apply to all materials
+          supplierNotes = childNotes;
+        }
+      }
 
       return {
         material_name: m.material_name,
@@ -404,6 +423,7 @@ const ChangeRequestsPage: React.FC = () => {
         size: m.size,
         specification: m.specification,
         sub_item_name: m.sub_item_name,
+        supplier_notes: supplierNotes,
       };
     });
 
@@ -460,6 +480,8 @@ const ChangeRequestsPage: React.FC = () => {
       vendor_gst_number: poChild.vendor_gst_number,
       // Material vendor selections from parent CR for vendor comparison display
       material_vendor_selections: poChild.material_vendor_selections || {},
+      // Child notes from POChild for supplier notes display
+      child_notes: (poChild as any).child_notes || '',
     };
 
     // Debug: Log the data being set to verify vendor fields are present
@@ -1946,6 +1968,25 @@ const ChangeRequestsPage: React.FC = () => {
                           <div className="border-t border-orange-200 p-1.5 flex flex-col gap-1">
                             <button
                               onClick={() => {
+                                // Extract supplier_notes from child_notes for each material
+                                const childNotesVal = (poChild as any).child_notes || '';
+                                const mappedMaterials = (poChild.materials || []).map((m: any) => {
+                                  let supplierNotes = m.supplier_notes || '';
+                                  if (!supplierNotes && childNotesVal) {
+                                    const materialPrefix = `[${m.material_name}]: `;
+                                    if (childNotesVal.includes(materialPrefix)) {
+                                      const startIdx = childNotesVal.indexOf(materialPrefix) + materialPrefix.length;
+                                      const endIdx = childNotesVal.indexOf('\n\n', startIdx);
+                                      supplierNotes = endIdx > startIdx
+                                        ? childNotesVal.substring(startIdx, endIdx)
+                                        : childNotesVal.substring(startIdx);
+                                    } else if (!childNotesVal.includes('[')) {
+                                      supplierNotes = childNotesVal;
+                                    }
+                                  }
+                                  return { ...m, supplier_notes: supplierNotes };
+                                });
+
                                 const mappedPOChild: ChangeRequestItem = {
                                   cr_id: poChild.parent_cr_id || 0,
                                   po_child_id: poChild.id,
@@ -1954,7 +1995,7 @@ const ChangeRequestsPage: React.FC = () => {
                                   created_at: poChild.created_at,
                                   status: poChild.status,
                                   item_name: poChild.item_name || '',
-                                  materials_data: poChild.materials || [],
+                                  materials_data: mappedMaterials,
                                   materials_count: poChild.materials?.length || 0,
                                   materials_total_cost: poChild.materials_total_cost || 0,
                                   vendor_selection_status: poChild.vendor_selection_status,
@@ -1992,7 +2033,10 @@ const ChangeRequestsPage: React.FC = () => {
                                   justification: (poChild as any).justification,
 
                                   // Material vendor selections for competitor comparison
-                                  material_vendor_selections: (poChild as any).material_vendor_selections || {}
+                                  material_vendor_selections: (poChild as any).material_vendor_selections || {},
+
+                                  // Child notes from POChild
+                                  child_notes: childNotesVal,
                                 };
                                 setSelectedChangeRequest(mappedPOChild);
                                 setShowDetailsModal(true);

@@ -58,12 +58,15 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
     // instead of using the BOQ total_cost that comes from backend
     let updatedPurchase = { ...purchase };
 
-    // Enrich materials with supplier notes from material_vendor_selections OR po_children
+    // Enrich materials with supplier notes from material_vendor_selections OR po_children OR child_notes
     if (purchase.materials && purchase.materials.length > 0) {
       const materialVendorSelections = (purchase as any).material_vendor_selections || {};
 
       // Check if we have PO children (approved state)
       const poChildren = purchase.po_children || [];
+
+      // Check if this purchase itself is a POChild with child_notes
+      const purchaseChildNotes = (purchase as any).child_notes || '';
 
       updatedPurchase.materials = purchase.materials.map(mat => {
         const materialName = mat.material_name || '';
@@ -71,9 +74,15 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
         // First try material_vendor_selections (parent CR notes)
         let supplierNotes = materialVendorSelections[materialName]?.supplier_notes || '';
 
-        // If not found and we have PO children, get notes from PO child materials
+        // If not found, check if material already has supplier_notes
+        if (!supplierNotes && (mat as any).supplier_notes) {
+          supplierNotes = (mat as any).supplier_notes;
+        }
+
+        // If not found and we have PO children, get notes from PO child materials or child_notes
         if (!supplierNotes && poChildren.length > 0) {
           for (const poChild of poChildren) {
+            // First check materials array for per-material notes
             if (poChild.materials) {
               const poChildMaterial = poChild.materials.find((m: any) =>
                 m.material_name === materialName
@@ -83,12 +92,50 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                 break;
               }
             }
+            // Then check child_notes column (format: "[material_name]: notes" or plain text)
+            if (!supplierNotes && (poChild as any).child_notes) {
+              const childNotes = (poChild as any).child_notes;
+              // Check if child_notes contains notes for this material
+              const materialPrefix = `[${materialName}]: `;
+              if (childNotes.includes(materialPrefix)) {
+                // Extract the note for this material (format: "[material_name]: notes")
+                const startIdx = childNotes.indexOf(materialPrefix) + materialPrefix.length;
+                const endIdx = childNotes.indexOf('\n\n', startIdx);
+                supplierNotes = endIdx > startIdx ? childNotes.substring(startIdx, endIdx) : childNotes.substring(startIdx);
+                break;
+              } else if (!childNotes.includes('[')) {
+                // Plain notes without prefix (legacy format) - show for all materials in this POChild
+                // Check if this material belongs to this POChild
+                const poChildMaterialNames = (poChild.materials || []).map((m: any) => m.material_name);
+                if (poChildMaterialNames.includes(materialName)) {
+                  supplierNotes = childNotes;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        // If still not found, check purchaseChildNotes (when viewing a single POChild)
+        if (!supplierNotes && purchaseChildNotes) {
+          const materialPrefix = `[${materialName}]: `;
+          if (purchaseChildNotes.includes(materialPrefix)) {
+            // Notes are in format "[material_name]: notes"
+            const startIdx = purchaseChildNotes.indexOf(materialPrefix) + materialPrefix.length;
+            const endIdx = purchaseChildNotes.indexOf('\n\n', startIdx);
+            supplierNotes = endIdx > startIdx ? purchaseChildNotes.substring(startIdx, endIdx) : purchaseChildNotes.substring(startIdx);
+          } else if (!purchaseChildNotes.includes('[') && purchase.materials && purchase.materials.length === 1) {
+            // Plain notes without prefix (legacy format) - apply to single material
+            supplierNotes = purchaseChildNotes;
+          } else if (!purchaseChildNotes.includes('[')) {
+            // Plain notes without any prefix - show for all materials
+            supplierNotes = purchaseChildNotes;
           }
         }
 
         const enrichedMaterial = {
           ...mat,
-          supplier_notes: supplierNotes || (mat as any).supplier_notes || ''
+          supplier_notes: supplierNotes
         };
 
         // Debug logging
@@ -96,7 +143,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
         if (finalNotes) {
           console.log(`[PurchaseDetailsModal] Material "${materialName}" has supplier notes:`, finalNotes.substring(0, 50));
         } else {
-          console.log(`[PurchaseDetailsModal] Material "${materialName}" has NO supplier notes (mat.supplier_notes=${(mat as any).supplier_notes})`);
+          console.log(`[PurchaseDetailsModal] Material "${materialName}" has NO supplier notes`);
         }
 
         return enrichedMaterial;

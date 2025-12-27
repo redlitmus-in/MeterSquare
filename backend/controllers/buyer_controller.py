@@ -8,7 +8,7 @@ from models.po_child import POChild
 from models.user import User
 from models.role import Role
 from models.vendor import Vendor
-from models.inventory import InventoryMaterial, InternalMaterialRequest
+from models.inventory import *
 from config.logging import get_logger
 from datetime import datetime
 import os
@@ -3984,6 +3984,31 @@ def create_po_children(cr_id):
             if not vendor_id or not materials:
                 continue
 
+            # Extract child_notes from material_vendor_selections for this vendor
+            # Look for any material assigned to this vendor that has supplier_notes
+            child_notes_for_vendor = None
+            if parent_cr.material_vendor_selections:
+                for mat_name, selection in parent_cr.material_vendor_selections.items():
+                    if isinstance(selection, dict):
+                        selection_vendor_id = selection.get('vendor_id')
+                        # Compare as integers to handle both string and int types
+                        if selection_vendor_id is not None and int(selection_vendor_id) == int(vendor_id):
+                            if selection.get('supplier_notes'):
+                                child_notes_for_vendor = selection.get('supplier_notes')
+                                log.info(f"Found child_notes for vendor {vendor_id} from material '{mat_name}': {child_notes_for_vendor[:50] if child_notes_for_vendor else ''}...")
+                                break
+
+            # Also check materials in vendor_group payload for supplier_notes
+            if not child_notes_for_vendor:
+                for material in materials:
+                    mat_name = material.get('material_name')
+                    if mat_name and parent_cr.material_vendor_selections:
+                        selection = parent_cr.material_vendor_selections.get(mat_name, {})
+                        if isinstance(selection, dict) and selection.get('supplier_notes'):
+                            child_notes_for_vendor = selection.get('supplier_notes')
+                            log.info(f"Found child_notes from material '{mat_name}' selection: {child_notes_for_vendor[:50] if child_notes_for_vendor else ''}...")
+                            break
+
             # CRITICAL FIX: Filter out materials that are already in approved POChildren
             # This prevents duplicate ordering of the same materials
             filtered_materials = []
@@ -4173,6 +4198,9 @@ def create_po_children(cr_id):
                 existing_po_child.updated_at = datetime.utcnow()
                 # Clear any previous rejection
                 existing_po_child.rejection_reason = None
+                # Update child_notes if provided
+                if child_notes_for_vendor:
+                    existing_po_child.child_notes = child_notes_for_vendor
 
                 # Mark JSON field as modified for SQLAlchemy
                 from sqlalchemy.orm.attributes import flag_modified
@@ -4204,6 +4232,7 @@ def create_po_children(cr_id):
                     submission_group_id=submission_group_id,
                     materials_data=po_materials,
                     materials_total_cost=total_cost,
+                    child_notes=child_notes_for_vendor,  # Copy supplier notes to child_notes column
                     vendor_id=vendor_id,
                     vendor_name=vendor.company_name,
                     vendor_selected_by_buyer_id=user_id,
@@ -4222,7 +4251,7 @@ def create_po_children(cr_id):
                 existing_vendor_po_children[vendor_id] = po_child
                 next_suffix_number += 1
 
-                log.info(f"📦 Created new POChild {po_child.get_formatted_id()} for vendor {vendor.company_name}")
+                log.info(f"📦 Created new POChild {po_child.get_formatted_id()} for vendor {vendor.company_name}, child_notes: {child_notes_for_vendor[:50] if child_notes_for_vendor else 'None'}")
 
                 created_po_children.append({
                     'id': po_child.id,
@@ -8575,33 +8604,80 @@ def save_supplier_notes(cr_id):
 
         cr.updated_at = datetime.utcnow()
 
-        # ✅ CRITICAL FIX: Also update POChild materials_data if POChild already exists
-        # This handles the case where buyer saves notes AFTER sending to TD
+        # Update POChild child_notes column directly
+        # Find POChild by parent_cr_id and vendor_id OR by material_name in materials_data
         from models.po_child import POChild
-        po_children = POChild.query.filter_by(
-            parent_cr_id=cr_id,
-            is_deleted=False
-        ).all()
 
-        po_children_updated = 0
-        for po_child in po_children:
-            if po_child.materials_data:
-                materials_updated = False
-                for material in po_child.materials_data:
-                    if material.get('material_name') == material_name:
-                        # Update supplier notes in POChild material
-                        material['supplier_notes'] = supplier_notes
-                        materials_updated = True
-                        log.info(f"Updated supplier notes for '{material_name}' in POChild {po_child.id}")
+        po_child_updated = None
+        po_child = None
 
-                if materials_updated:
-                    flag_modified(po_child, 'materials_data')
-                    po_child.updated_at = datetime.utcnow()
-                    po_children_updated += 1
+        # Method 1: Find by vendor_id
+        if vendor_id:
+            # Convert vendor_id to int for consistent comparison
+            vendor_id_int = int(vendor_id)
+
+            po_child = POChild.query.filter_by(
+                parent_cr_id=cr_id,
+                vendor_id=vendor_id_int,
+                is_deleted=False
+            ).first()
+
+            log.info(f"Looking for POChild with parent_cr_id={cr_id}, vendor_id={vendor_id_int}, found: {po_child}")
+
+        # Method 2: If not found by vendor_id, find by material_name in materials_data
+        if not po_child and material_name:
+            # Find all POChildren for this CR and check if any has this material
+            all_po_children = POChild.query.filter_by(
+                parent_cr_id=cr_id,
+                is_deleted=False
+            ).all()
+
+            for pc in all_po_children:
+                if pc.materials_data:
+                    for mat in pc.materials_data:
+                        if mat.get('material_name') == material_name:
+                            po_child = pc
+                            log.info(f"Found POChild {pc.id} by material_name '{material_name}'")
+                            break
+                    if po_child:
+                        break
+
+        if po_child:
+            # Store notes in child_notes column
+            # If there are existing notes, append the new note with material name prefix
+            if po_child.child_notes and supplier_notes:
+                # Check if this material's note already exists (avoid duplicates)
+                material_prefix = f"[{material_name}]: "
+                if material_prefix not in po_child.child_notes:
+                    # Append new note with material name prefix
+                    po_child.child_notes = f"{po_child.child_notes}\n\n{material_prefix}{supplier_notes}"
+                else:
+                    # Update existing note for this material
+                    lines = po_child.child_notes.split('\n\n')
+                    updated_lines = []
+                    found = False
+                    for line in lines:
+                        if line.startswith(material_prefix):
+                            updated_lines.append(f"{material_prefix}{supplier_notes}")
+                            found = True
+                        else:
+                            updated_lines.append(line)
+                    if not found:
+                        updated_lines.append(f"{material_prefix}{supplier_notes}")
+                    po_child.child_notes = '\n\n'.join(updated_lines)
+            elif supplier_notes:
+                # First note for this POChild - add with material name prefix
+                po_child.child_notes = f"[{material_name}]: {supplier_notes}"
+
+            po_child.updated_at = datetime.utcnow()
+            po_child_updated = po_child.id
+            log.info(f"✅ Updated child_notes for POChild {po_child.id}: {po_child.child_notes[:100] if po_child.child_notes else 'empty'}")
+        else:
+            log.warning(f"⚠️ No POChild found for CR {cr_id} with vendor_id={vendor_id} or material_name={material_name}")
 
         db.session.commit()
 
-        log.info(f"Supplier notes saved for material '{material_name}' in CR {cr_id} by user {user_id}. Updated {po_children_updated} POChild record(s).")
+        log.info(f"Supplier notes saved for material '{material_name}' in CR {cr_id} by user {user_id}. POChild updated: {po_child_updated}")
 
         return jsonify({
             "success": True,
@@ -8609,7 +8685,7 @@ def save_supplier_notes(cr_id):
             "cr_id": cr_id,
             "material_name": material_name,
             "supplier_notes": supplier_notes,
-            "po_children_updated": po_children_updated
+            "po_child_id": po_child_updated
         }), 200
 
     except Exception as e:

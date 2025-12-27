@@ -154,6 +154,24 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
           enrichedMaterial.supplier_notes = mat.supplier_notes;
         }
 
+        // Check for child_notes at POChild level (new format)
+        if (!enrichedMaterial.supplier_notes && (latestChangeRequest as any).child_notes) {
+          const childNotes = (latestChangeRequest as any).child_notes;
+          const materialPrefix = `[${materialName}]: `;
+
+          if (childNotes.includes(materialPrefix)) {
+            // Extract notes for this specific material (format: "[material_name]: notes")
+            const startIdx = childNotes.indexOf(materialPrefix) + materialPrefix.length;
+            const endIdx = childNotes.indexOf('\n\n', startIdx);
+            enrichedMaterial.supplier_notes = endIdx > startIdx
+              ? childNotes.substring(startIdx, endIdx)
+              : childNotes.substring(startIdx);
+          } else if (!childNotes.includes('[')) {
+            // Plain notes without prefix (legacy format) - apply to all materials
+            enrichedMaterial.supplier_notes = childNotes;
+          }
+        }
+
         return enrichedMaterial;
       });
       setEditedMaterials(JSON.parse(JSON.stringify(materials))); // Deep copy

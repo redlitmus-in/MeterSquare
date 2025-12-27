@@ -1137,7 +1137,8 @@ const PurchaseOrders: React.FC = () => {
                                         vendor_selection_pending_td_approval: false,
                                         item_name: poChild.item_name || '',
                                         po_child_id: poChild.id,
-                                      };
+                                        child_notes: (poChild as any).child_notes || '',
+                                      } as any;
                                       setSelectedPurchase(purchaseLike);
                                       setIsVendorEmailModalOpen(true);
                                     }}
@@ -1224,7 +1225,8 @@ const PurchaseOrders: React.FC = () => {
                                 vendor_selection_pending_td_approval: false,
                                 item_name: poChild.item_name || '',
                                 po_child_id: poChild.id,
-                              };
+                                child_notes: (poChild as any).child_notes || '',
+                              } as any;
                               handleViewDetails(purchaseLike);
                             }}
                             variant="outline"
@@ -1902,7 +1904,8 @@ const PurchaseOrders: React.FC = () => {
                                 supplier_notes: poChild.supplier_notes,
                                 vendor_selection_status: poChild.vendor_selection_status,
                                 po_child_id: poChild.id,  // Pass POChild ID for email API
-                              };
+                                child_notes: (poChild as any).child_notes || '',
+                              } as any;
                               setSelectedPurchase(purchaseLike);
                               setIsVendorEmailModalOpen(true);
                             }}
@@ -2047,7 +2050,8 @@ const PurchaseOrders: React.FC = () => {
                             status: 'pending',
                             vendor_id: poChild.vendor_id,
                             vendor_name: poChild.vendor_name,
-                          };
+                            child_notes: (poChild as any).child_notes || '',
+                          } as any;
                           setSelectedPurchase(purchaseLike);
                           setIsDetailsModalOpen(true);
                         }}
@@ -2207,7 +2211,8 @@ const PurchaseOrders: React.FC = () => {
                             status: 'pending',
                             vendor_id: poChild.vendor_id,
                             vendor_name: poChild.vendor_name,
-                          };
+                            child_notes: (poChild as any).child_notes || '',
+                          } as any;
                           setSelectedPurchase(purchaseLike);
                           setIsDetailsModalOpen(true);
                         }}
@@ -2372,7 +2377,8 @@ const PurchaseOrders: React.FC = () => {
                             status: 'completed',
                             vendor_id: poChild.vendor_id,
                             vendor_name: poChild.vendor_name,
-                          };
+                            child_notes: (poChild as any).child_notes || '',
+                          } as any;
                           setSelectedPurchase(purchaseLike);
                           setIsDetailsModalOpen(true);
                         }}
@@ -2517,7 +2523,8 @@ const PurchaseOrders: React.FC = () => {
                             created_at: poChild.created_at || '',
                             status: 'pending',
                             po_child_id: poChild.po_child_id,  // Pass POChild ID for re-selection
-                          };
+                            child_notes: (poChild as any).child_notes || '',
+                          } as any;
                           setSelectedPurchase(purchaseLike);
                           setIsVendorSelectionModalOpen(true);
                         }}
@@ -2550,7 +2557,8 @@ const PurchaseOrders: React.FC = () => {
                             approved_at: null,
                             created_at: poChild.created_at || '',
                             status: 'rejected',
-                          };
+                            child_notes: (poChild as any).child_notes || '',
+                          } as any;
                           setSelectedPurchase(purchaseLike);
                           setIsDetailsModalOpen(true);
                         }}
@@ -2662,7 +2670,8 @@ const PurchaseOrders: React.FC = () => {
                                       vendor_selection_pending_td_approval: false,
                                       item_name: poChild.item_name || '',
                                       po_child_id: poChild.id,
-                                    };
+                                      child_notes: (poChild as any).child_notes || '',
+                                    } as any;
                                     handleViewDetails(purchaseLike);
                                   }}
                                   variant="outline"
