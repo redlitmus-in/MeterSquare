@@ -775,6 +775,8 @@ def get_sitesupervisor_dashboard():
 
 def get_all_sitesupervisor():
     try:
+        from models.pm_assign_ss import PMAssignSS
+
         role = Role.query.filter_by(role='siteEngineer').first()
         if not role:
             return jsonify({"error": "Role 'siteEngineer' not found"}), 404
@@ -792,6 +794,42 @@ def get_all_sitesupervisor():
             Project.site_supervisor_id.in_(supervisor_ids),
             Project.is_deleted == False
         ).all()
+
+        # ✅ Query ongoing item assignments for all SEs in ONE query
+        # Ongoing items = assigned but NOT yet confirmed completed by PM
+        # Fetch item_indices count and item_details in a single query
+        ongoing_assignments_query = db.session.query(
+            PMAssignSS.assigned_to_se_id,
+            PMAssignSS.item_indices,
+            PMAssignSS.item_details
+        ).filter(
+            PMAssignSS.assigned_to_se_id.in_(supervisor_ids),
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.pm_confirmed_completion == False  # Not yet completed
+        ).all()
+
+        # Calculate ongoing items count and amount per SE in memory
+        ongoing_items_by_se = {}
+        ongoing_amount_by_se = {}
+        for row in ongoing_assignments_query:
+            se_id = row.assigned_to_se_id
+            if se_id not in ongoing_items_by_se:
+                ongoing_items_by_se[se_id] = 0
+                ongoing_amount_by_se[se_id] = 0
+
+            # Count items from item_indices array
+            if row.item_indices and isinstance(row.item_indices, list):
+                ongoing_items_by_se[se_id] += len(row.item_indices)
+
+            # Sum amounts from item_details JSONB with type safety
+            if row.item_details and isinstance(row.item_details, list):
+                for item in row.item_details:
+                    if isinstance(item, dict):
+                        amount = item.get('amount') or item.get('totalAmount') or 0
+                        try:
+                            ongoing_amount_by_se[se_id] += float(amount)
+                        except (ValueError, TypeError):
+                            pass  # Skip invalid amount values
 
         # Group projects by supervisor_id in memory
         projects_by_supervisor = {}
@@ -828,6 +866,10 @@ def get_all_sitesupervisor():
             # Count only ongoing projects for assignment limit
             ongoing_count = len(ongoing_projects)
 
+            # Get ongoing items count and amount for this SE
+            se_ongoing_items = ongoing_items_by_se.get(sitesupervisor.user_id, 0)
+            se_ongoing_amount = ongoing_amount_by_se.get(sitesupervisor.user_id, 0)
+
             if all_projects and len(all_projects) > 0:
                 # Add single entry for this sitesupervisor with all their projects
                 assigned_list.append({
@@ -839,7 +881,9 @@ def get_all_sitesupervisor():
                     "projects": all_project_list,
                     "project_count": ongoing_count,  # Only count ongoing projects
                     "total_projects": len(all_projects),
-                    "completed_projects_count": len(completed_projects)
+                    "completed_projects_count": len(completed_projects),
+                    "ongoing_items_count": se_ongoing_items,  # Count of assigned items not yet completed
+                    "ongoing_items_amount": se_ongoing_amount  # Total amount of ongoing items
                 })
             else:
                 # sitesupervisor without project assignment
@@ -852,7 +896,9 @@ def get_all_sitesupervisor():
                     "projects": [],
                     "project_count": 0,
                     "total_projects": 0,
-                    "completed_projects_count": 0
+                    "completed_projects_count": 0,
+                    "ongoing_items_count": se_ongoing_items,  # May have items from other projects
+                    "ongoing_items_amount": se_ongoing_amount
                 })
 
         return jsonify({

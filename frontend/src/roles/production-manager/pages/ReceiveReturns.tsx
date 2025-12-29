@@ -60,6 +60,8 @@ interface ItemAction {
   item_id: number;
   action: string;
   notes?: string;
+  processed?: boolean;
+  processing?: boolean;
 }
 
 type TabType = 'pending' | 'received' | 'all';
@@ -76,6 +78,8 @@ const ReceiveReturns: React.FC = () => {
   const [itemActions, setItemActions] = useState<Map<number, ItemAction>>(new Map());
   const [acceptanceNotes, setAcceptanceNotes] = useState('');
   const [confirming, setConfirming] = useState(false);
+  const [receiptConfirmed, setReceiptConfirmed] = useState(false);
+  const confirmingReceiptRef = React.useRef(false);
 
   const fetchReturnDeliveryNotes = useCallback(async () => {
     try {
@@ -117,7 +121,9 @@ const ReceiveReturns: React.FC = () => {
       initialActions.set(item.item_id, {
         item_id: item.item_id,
         action: defaultAction,
-        notes: ''
+        notes: '',
+        processed: false,
+        processing: false
       });
     });
 
@@ -130,6 +136,7 @@ const ReceiveReturns: React.FC = () => {
     setSelectedRDN(null);
     setItemActions(new Map());
     setAcceptanceNotes('');
+    setReceiptConfirmed(false);
   };
 
   const updateItemAction = (itemId: number, action: string) => {
@@ -154,30 +161,119 @@ const ReceiveReturns: React.FC = () => {
     });
   };
 
+  // Process a single item
+  const handleProcessSingleItem = async (itemId: number) => {
+    if (!selectedRDN) return;
+
+    const itemAction = itemActions.get(itemId);
+    if (!itemAction) return;
+
+    // Set processing state for this item
+    setItemActions((prev) => {
+      const newMap = new Map(prev);
+      const existing = newMap.get(itemId);
+      if (existing) {
+        newMap.set(itemId, { ...existing, processing: true });
+      }
+      return newMap;
+    });
+
+    try {
+      // If receipt not yet confirmed, confirm it first (use ref to prevent race condition)
+      if (!receiptConfirmed && !confirmingReceiptRef.current) {
+        confirmingReceiptRef.current = true;
+        try {
+          await apiClient.post(`/return_delivery_note/${selectedRDN.return_note_id}/confirm`, {
+            acceptance_notes: acceptanceNotes
+          });
+          setReceiptConfirmed(true);
+        } finally {
+          confirmingReceiptRef.current = false;
+        }
+      }
+
+      // Process this single item
+      await apiClient.post(
+        `/return_delivery_note/${selectedRDN.return_note_id}/items/${itemId}/process`,
+        {
+          action: itemAction.action,
+          notes: itemAction.notes || ''
+        }
+      );
+
+      // Mark item as processed and check if all done
+      setItemActions((prev) => {
+        const newMap = new Map(prev);
+        const existing = newMap.get(itemId);
+        if (existing) {
+          newMap.set(itemId, { ...existing, processed: true, processing: false });
+        }
+
+        // Check if all items are now processed
+        const allProcessed = Array.from(newMap.values()).every(ia => ia.processed);
+        if (allProcessed) {
+          setTimeout(() => {
+            showSuccess('All items processed! Return delivery complete.');
+            closeConfirmModal();
+            fetchReturnDeliveryNotes();
+          }, 100);
+        }
+
+        return newMap;
+      });
+
+      showSuccess('Item processed successfully!');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      showError(error.response?.data?.error || 'Failed to process item');
+      // Reset processing state using functional update to avoid stale closure
+      setItemActions((prev) => {
+        const newMap = new Map(prev);
+        const existing = newMap.get(itemId);
+        if (existing) {
+          newMap.set(itemId, { ...existing, processing: false });
+        }
+        return newMap;
+      });
+    }
+  };
+
   const handleConfirmReceipt = async () => {
     if (!selectedRDN) return;
 
     setConfirming(true);
     try {
       // STEP 1: Confirm receipt (status: IN_TRANSIT → RECEIVED)
-      await apiClient.post(`/return_delivery_note/${selectedRDN.return_note_id}/confirm`, {
-        acceptance_notes: acceptanceNotes
-      });
+      if (!receiptConfirmed && !confirmingReceiptRef.current) {
+        confirmingReceiptRef.current = true;
+        try {
+          await apiClient.post(`/return_delivery_note/${selectedRDN.return_note_id}/confirm`, {
+            acceptance_notes: acceptanceNotes
+          });
+          setReceiptConfirmed(true);
+        } finally {
+          confirmingReceiptRef.current = false;
+        }
+      }
 
-      // STEP 2: Process all items with their actions using batch endpoint (eliminates N+1 API calls)
-      const itemActionsArray = Array.from(itemActions.values()).map(item => ({
-        item_id: item.item_id,
-        action: item.action,
-        notes: item.notes || ''
-      }));
+      // STEP 2: Process all unprocessed items with their actions using batch endpoint
+      const unprocessedItems = Array.from(itemActions.values())
+        .filter(item => !item.processed)
+        .map(item => ({
+          item_id: item.item_id,
+          action: item.action,
+          notes: item.notes || ''
+        }));
 
-      const result = await apiClient.post(
-        `/return_delivery_note/${selectedRDN.return_note_id}/process_all_items`,
-        { items: itemActionsArray }
-      );
+      if (unprocessedItems.length > 0) {
+        const result = await apiClient.post(
+          `/return_delivery_note/${selectedRDN.return_note_id}/process_all_items`,
+          { items: unprocessedItems }
+        );
 
-      if (result.data.errors && result.data.errors.length > 0) {
-        showError(`Some items had issues: ${result.data.errors.join(', ')}`);
+        if (result.data.errors && result.data.errors.length > 0) {
+          showError(`Some items had issues: ${result.data.errors.join(', ')}`);
+        }
       }
 
       showSuccess('Return delivery processed successfully!');
@@ -504,12 +600,28 @@ const ReceiveReturns: React.FC = () => {
                   {selectedRDN.items.map((item) => {
                     const itemAction = itemActions.get(item.item_id);
                     const needsNotes = itemAction?.action !== RETURN_ACTIONS.ADD_TO_STOCK;
+                    const isProcessed = itemAction?.processed;
+                    const isProcessing = itemAction?.processing;
 
                     return (
-                      <div key={item.item_id} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                      <div
+                        key={item.item_id}
+                        className={`border rounded-lg p-4 ${
+                          isProcessed
+                            ? 'border-green-300 bg-green-50'
+                            : 'border-gray-200 bg-gray-50'
+                        }`}
+                      >
                         <div className="flex items-start justify-between mb-3">
                           <div className="flex-1">
-                            <p className="font-medium text-gray-900">{item.material_name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-gray-900">{item.material_name}</p>
+                              {isProcessed && (
+                                <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                                  ✓ Processed
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-gray-500">{item.material_code}</p>
                             <div className="flex items-center gap-3 mt-2">
                               <span className="text-xs text-gray-600">
@@ -523,65 +635,95 @@ const ReceiveReturns: React.FC = () => {
                               )}
                             </div>
                           </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="block text-xs font-medium text-gray-700">Action</label>
-                          <div className="grid grid-cols-3 gap-2">
-                            {Object.values(RETURN_ACTIONS).map((action) => {
-                              // Filter actions based on condition
-                              const isGoodCondition = item.condition.toLowerCase() === 'good';
-                              const shouldShowAction =
-                                (isGoodCondition && action === RETURN_ACTIONS.ADD_TO_STOCK) ||
-                                (!isGoodCondition && action !== RETURN_ACTIONS.ADD_TO_STOCK);
-
-                              if (!shouldShowAction) return null;
-
-                              const actionLabel = RETURN_ACTION_LABELS[action];
-                              return (
-                                <label
-                                  key={action}
-                                  className={`flex items-center p-2 border rounded-lg cursor-pointer transition-colors ${
-                                    itemAction?.action === action
-                                      ? 'border-blue-500 bg-blue-50'
-                                      : 'border-gray-300 hover:bg-gray-100'
-                                  }`}
-                                >
-                                  <input
-                                    type="radio"
-                                    value={action}
-                                    checked={itemAction?.action === action}
-                                    onChange={(e) => updateItemAction(item.item_id, e.target.value)}
-                                    className="w-3 h-3"
-                                  />
-                                  <span className="ml-2 text-xs">
-                                    <span className={`font-medium ${actionLabel.color}`}>
-                                      {actionLabel.label}
-                                    </span>
-                                  </span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                          {itemAction && (
-                            <p className="text-xs text-gray-500 mt-1">
-                              {RETURN_ACTION_LABELS[itemAction.action as keyof typeof RETURN_ACTION_LABELS].description}
-                            </p>
+                          {/* Process button for individual item */}
+                          {!isProcessed && (
+                            <button
+                              onClick={() => handleProcessSingleItem(item.item_id)}
+                              disabled={isProcessing || confirming}
+                              className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                            >
+                              {isProcessing ? (
+                                <>
+                                  <ClockIcon className="w-3 h-3 animate-spin" />
+                                  Processing...
+                                </>
+                              ) : (
+                                'Process'
+                              )}
+                            </button>
                           )}
                         </div>
 
-                        {needsNotes && (
-                          <div className="mt-3">
-                            <label className="block text-xs font-medium text-gray-700 mb-1">
-                              Notes (Optional)
-                            </label>
-                            <textarea
-                              value={itemAction?.notes || ''}
-                              onChange={(e) => updateItemNotes(item.item_id, e.target.value)}
-                              rows={2}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              placeholder="Additional notes for this action..."
-                            />
+                        {!isProcessed && (
+                          <>
+                            <div className="space-y-2">
+                              <label className="block text-xs font-medium text-gray-700">Action</label>
+                              <div className="grid grid-cols-3 gap-2">
+                                {Object.values(RETURN_ACTIONS).map((action) => {
+                                  // Filter actions based on condition
+                                  const isGoodCondition = item.condition.toLowerCase() === 'good';
+                                  const shouldShowAction =
+                                    (isGoodCondition && action === RETURN_ACTIONS.ADD_TO_STOCK) ||
+                                    (!isGoodCondition && action !== RETURN_ACTIONS.ADD_TO_STOCK);
+
+                                  if (!shouldShowAction) return null;
+
+                                  const actionLabel = RETURN_ACTION_LABELS[action];
+                                  return (
+                                    <label
+                                      key={action}
+                                      className={`flex items-center p-2 border rounded-lg cursor-pointer transition-colors ${
+                                        itemAction?.action === action
+                                          ? 'border-blue-500 bg-blue-50'
+                                          : 'border-gray-300 hover:bg-gray-100'
+                                      }`}
+                                    >
+                                      <input
+                                        type="radio"
+                                        value={action}
+                                        checked={itemAction?.action === action}
+                                        onChange={(e) => updateItemAction(item.item_id, e.target.value)}
+                                        className="w-3 h-3"
+                                        disabled={isProcessing}
+                                      />
+                                      <span className="ml-2 text-xs">
+                                        <span className={`font-medium ${actionLabel.color}`}>
+                                          {actionLabel.label}
+                                        </span>
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                              {itemAction && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {RETURN_ACTION_LABELS[itemAction.action as keyof typeof RETURN_ACTION_LABELS].description}
+                                </p>
+                              )}
+                            </div>
+
+                            {needsNotes && (
+                              <div className="mt-3">
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  Notes (Optional)
+                                </label>
+                                <textarea
+                                  value={itemAction?.notes || ''}
+                                  onChange={(e) => updateItemNotes(item.item_id, e.target.value)}
+                                  rows={2}
+                                  disabled={isProcessing}
+                                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+                                  placeholder="Additional notes for this action..."
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {isProcessed && itemAction && (
+                          <div className="mt-2 text-xs text-green-700">
+                            Action taken: <span className="font-medium">{RETURN_ACTION_LABELS[itemAction.action as keyof typeof RETURN_ACTION_LABELS].label}</span>
+                            {itemAction.notes && <span className="text-gray-500 ml-2">• {itemAction.notes}</span>}
                           </div>
                         )}
                       </div>
@@ -604,31 +746,57 @@ const ReceiveReturns: React.FC = () => {
                 </div>
               </div>
 
-              <div className="sticky bottom-0 bg-white border-t border-gray-200 p-6 flex gap-3">
-                <button
-                  onClick={closeConfirmModal}
-                  disabled={confirming}
-                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleConfirmReceipt}
-                  disabled={confirming}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-                >
-                  {confirming ? (
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 p-6">
+                {/* Progress indicator */}
+                {(() => {
+                  const processedCount = Array.from(itemActions.values()).filter(ia => ia.processed).length;
+                  const totalCount = itemActions.size;
+                  const allProcessed = processedCount === totalCount;
+                  const unprocessedCount = totalCount - processedCount;
+
+                  return (
                     <>
-                      <ClockIcon className="w-4 h-4 animate-spin" />
-                      Processing...
+                      {processedCount > 0 && !allProcessed && (
+                        <div className="mb-4 text-center">
+                          <span className="text-sm text-gray-600">
+                            <span className="font-medium text-green-600">{processedCount}</span> of{' '}
+                            <span className="font-medium">{totalCount}</span> items processed
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex gap-3">
+                        <button
+                          onClick={closeConfirmModal}
+                          disabled={confirming}
+                          className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+                        >
+                          {allProcessed ? 'Close' : 'Cancel'}
+                        </button>
+                        {!allProcessed && (
+                          <button
+                            onClick={handleConfirmReceipt}
+                            disabled={confirming}
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                          >
+                            {confirming ? (
+                              <>
+                                <ClockIcon className="w-4 h-4 animate-spin" />
+                                Processing...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircleIcon className="w-4 h-4" />
+                                {unprocessedCount === totalCount
+                                  ? 'Confirm & Process All'
+                                  : `Process Remaining (${unprocessedCount})`}
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </>
-                  ) : (
-                    <>
-                      <CheckCircleIcon className="w-4 h-4" />
-                      Confirm & Process All
-                    </>
-                  )}
-                </button>
+                  );
+                })()}
               </div>
             </motion.div>
           </motion.div>

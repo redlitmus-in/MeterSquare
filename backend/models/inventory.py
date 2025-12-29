@@ -65,6 +65,7 @@ class InventoryTransaction(db.Model):
     reference_number = db.Column(db.Text, nullable=True)
     project_id = db.Column(db.Integer, nullable=True)
     notes = db.Column(db.Text, nullable=True)
+    delivery_note_url = db.Column(db.Text, nullable=True)  # URL to delivery note/invoice file
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
 
@@ -79,6 +80,7 @@ class InventoryTransaction(db.Model):
             'reference_number': self.reference_number,
             'project_id': self.project_id,
             'notes': self.notes,
+            'delivery_note_url': self.delivery_note_url,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by
         }
@@ -115,6 +117,7 @@ class InternalMaterialRequest(db.Model):
     source_type = db.Column(db.String(50), default='manual')  # 'manual' or 'from_vendor_delivery'
     vendor_delivery_confirmed = db.Column(db.Boolean, default=False)  # Vendor delivered to store
     final_destination_site = db.Column(db.String(255), nullable=True)  # Which site gets materials
+    intended_recipient_name = db.Column(db.String(255), nullable=True)  # Site engineer who will receive delivery
     routed_by_buyer_id = db.Column(db.Integer, nullable=True)  # Buyer who routed this
     routed_to_store_at = db.Column(db.DateTime, nullable=True)  # When buyer completed routing
 
@@ -150,6 +153,13 @@ class InternalMaterialRequest(db.Model):
             'rejection_reason': self.rejection_reason,
             'notes': self.notes,
             'request_send': self.request_send,
+            # Vendor Delivery Routing fields
+            'source_type': self.source_type,
+            'vendor_delivery_confirmed': self.vendor_delivery_confirmed,
+            'final_destination_site': self.final_destination_site,
+            'intended_recipient_name': self.intended_recipient_name,
+            'routed_by_buyer_id': self.routed_by_buyer_id,
+            'routed_to_store_at': self.routed_to_store_at.isoformat() if self.routed_to_store_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by,
             'last_modified_at': self.last_modified_at.isoformat() if self.last_modified_at else None,

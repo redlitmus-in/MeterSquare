@@ -53,8 +53,8 @@ const TechnicalDirectorHub = lazy(() => import('@/roles/technical-director/pages
 
 // Technical Director Pages
 const ProjectApprovals = lazy(() => import('@/roles/technical-director/pages/ProjectApprovals'));
-const TeamAssignment = lazy(() => import('@/roles/technical-director/pages/TeamAssignment'));
-const ProjectsOverview = lazy(() => import('@/roles/technical-director/pages/ProjectsOverview'));
+const DisposalApprovals = lazy(() => import('@/roles/technical-director/pages/DisposalApprovals'));
+const ChangeRequestsPage = lazy(() => import('@/roles/technical-director/pages/ChangeRequestsPage'));
 
 // Project Manager Pages
 const MyProjects = lazy(() => import('@/roles/project-manager/pages/MyProjects'));
@@ -111,7 +111,7 @@ const MaterialDispatchSitePage = lazy(() => import('@/pages/workflows/MaterialDi
 // const PMVendorManagement = lazy(() => import('@/roles/project-manager/pages/PMVendorManagement'));
 // const ProcurementVendorReview = lazy(() => import('@/roles/procurement/pages/ProcurementVendorReview'));
 // const EstimationVendorCheck = lazy(() => import('@/roles/estimation/pages/EstimationVendorCheck'));
-const TDVendorApproval = lazy(() => import('@/roles/technical-director/pages/TDVendorApproval'));
+// const TDVendorApproval - REMOVED - replaced by ChangeRequestsPage
 // const AccountsVendorPayment = lazy(() => import('@/roles/accounts/pages/AccountsVendorPayment'));
 
 // Vendor forms - Temporarily commented out
@@ -407,7 +407,12 @@ const RoleSpecificPurchaseOrders: React.FC = () => {
                              roleId === 'technicalDirector' ||
                              roleIdLower === 'technical_director';
 
-  if (isBuyer || isTechnicalDirector || isAdmin) {
+  // TD gets their own dedicated page (ChangeRequestsPage with Vendor Approvals tab), Buyer/Admin get the buyer page
+  if (isTechnicalDirector && !isAdmin) {
+    return <ChangeRequestsPage />;
+  }
+
+  if (isBuyer || isAdmin) {
     return <PurchaseOrders />;
   }
 
@@ -937,21 +942,15 @@ function App() {
                 <ProjectApprovals />
               </TechnicalDirectorRoute>
             } />
-            <Route path="vendor-approval" element={
+            <Route path="disposal-approvals" element={
               <TechnicalDirectorRoute>
-                <TDVendorApproval />
+                <DisposalApprovals />
               </TechnicalDirectorRoute>
             } />
-            <Route path="team-assignment" element={
-              <TechnicalDirectorRoute>
-                <TeamAssignment />
-              </TechnicalDirectorRoute>
-            } />
-            <Route path="projects-overview" element={
-              <TechnicalDirectorRoute>
-                <ProjectsOverview />
-              </TechnicalDirectorRoute>
-            } />
+            {/* purchase-orders route moved to general routes (line 916 - RoleSpecificPurchaseOrders) */}
+            {/* vendor-approval route REMOVED - old page replaced by ChangeRequestsPage */}
+            {/* team-assignment route REMOVED - not needed */}
+            {/* projects-overview route REMOVED - not needed */}
             {/* Technical Director materials, purchase-orders, and vendor routes moved to general routes above (lines 826-832) */}
             {/* <Route path="materials" element={
               <TechnicalDirectorRoute>
@@ -1121,11 +1120,7 @@ function App() {
                 <ProjectApprovals />
               </AdminRoute>
             } />
-            <Route path="projects-overview" element={
-              <AdminRoute>
-                <ProjectsOverview />
-              </AdminRoute>
-            } />
+            {/* projects-overview route REMOVED - not needed */}
             <Route path="record-material" element={
               <AdminRoute>
                 <RecordMaterialPurchase />

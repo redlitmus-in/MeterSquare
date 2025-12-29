@@ -43,6 +43,8 @@ interface SiteEngineer {
   items_assigned_count?: number;
   profile_image?: string;
   completed_projects_count?: number;
+  ongoing_items_count?: number;  // Count of assigned BOQ items not yet completed
+  ongoing_items_amount?: number;  // Total amount of ongoing items
   projects?: Array<{
     project_id: number;
     project_name: string;
@@ -500,22 +502,48 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
     return item.description || item.briefDescription || item.itemDescription || item.scope || 'No description';
   }, []);
 
-  // Helper: Get item quantity
+  // Helper: Get item quantity - for items with sub_items, count sub_items
   const getItemQuantity = useCallback((item: BOQItem | undefined) => {
     if (!item) return 0;
+
+    // If item has sub_items, return the count of sub_items
+    if (item.sub_items && Array.isArray(item.sub_items) && item.sub_items.length > 0) {
+      return item.sub_items.length;
+    }
+
     return item.quantity || item.qty || 1;
   }, []);
 
-  // Helper: Get item unit
+  // Helper: Get item unit - for items with sub_items, show "sub items"
   const getItemUnit = useCallback((item: BOQItem | undefined) => {
     if (!item) return 'nos';
+
+    // If item has sub_items, show "sub items" as unit
+    if (item.sub_items && Array.isArray(item.sub_items) && item.sub_items.length > 0) {
+      return item.sub_items.length === 1 ? 'sub item' : 'sub items';
+    }
+
     return item.unit || 'nos';
   }, []);
 
-  // Helper: Get item rate
+  // Helper: Get item rate - for items with sub_items, calculate from sub_items total
   const getItemRate = useCallback((item: BOQItem | undefined) => {
     if (!item) return 0;
-    return item.rate || item.unitRate || item.base_cost || item.actualItemCost || 0;
+
+    // Check direct rate fields first
+    const directRate = item.rate || item.unitRate || item.base_cost || item.actualItemCost;
+    if (directRate) return directRate;
+
+    // For items with sub_items, sum up sub_item rates/amounts
+    if (item.sub_items && Array.isArray(item.sub_items) && item.sub_items.length > 0) {
+      const totalSubItemRate = item.sub_items.reduce((sum: number, subItem: any) => {
+        const subRate = subItem.rate || subItem.unitRate || subItem.amount || subItem.totalAmount || 0;
+        return sum + (typeof subRate === 'number' ? subRate : 0);
+      }, 0);
+      return totalSubItemRate;
+    }
+
+    return 0;
   }, []);
 
   // Helper: Get item amount
@@ -722,18 +750,18 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                                           </div>
                                         )}
 
-                                        {/* Detailed Project Stats */}
+                                        {/* Ongoing Items Stats */}
                                         <div className="flex items-center gap-2">
-                                          <Briefcase className="w-3.5 h-3.5" />
+                                          <Package className="w-3.5 h-3.5" />
                                           <div className="flex items-center gap-1.5">
                                             <span className="font-medium text-blue-600">
-                                              {ongoingProjects.length} ongoing
+                                              {se.ongoing_items_count || 0} ongoing
                                             </span>
-                                            {completedProjects.length > 0 && (
+                                            {(se.ongoing_items_amount || 0) > 0 && (
                                               <>
                                                 <span className="text-gray-400">•</span>
-                                                <span className="text-green-600">
-                                                  {completedProjects.length} completed
+                                                <span className="text-orange-600">
+                                                  ₹{(se.ongoing_items_amount || 0).toLocaleString()}
                                                 </span>
                                               </>
                                             )}

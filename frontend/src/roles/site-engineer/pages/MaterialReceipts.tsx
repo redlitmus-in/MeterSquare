@@ -158,6 +158,7 @@ const MaterialReceipts: React.FC = () => {
 
   // STAGE 1: Material Selection Cart State
   const [showMaterialSelectionModal, setShowMaterialSelectionModal] = useState(false);
+  const [selectedProjectForModal, setSelectedProjectForModal] = useState<number | null>(null);
   const [selectedMaterialsCart, setSelectedMaterialsCart] = useState<Array<{
     delivery_note_item_id: number;
     inventory_material_id: number;
@@ -590,6 +591,7 @@ const MaterialReceipts: React.FC = () => {
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    setSelectedProjectForModal(project.project_id);
                                     setShowMaterialSelectionModal(true);
                                   }}
                                   className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors font-medium"
@@ -610,6 +612,7 @@ const MaterialReceipts: React.FC = () => {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  setSelectedProjectForModal(project.project_id);
                                   setShowMaterialSelectionModal(true);
                                 }}
                                 className="px-3 py-1.5 text-xs bg-purple-500 hover:bg-purple-600 text-white rounded transition-colors font-medium"
@@ -1444,10 +1447,17 @@ const MaterialReceipts: React.FC = () => {
       {/* NEW WORKFLOW: Material Selection Modal (STEP 1) */}
       <MaterialSelectionModal
         show={showMaterialSelectionModal}
-        onClose={() => setShowMaterialSelectionModal(false)}
-        returnableProjects={returnableProjects}
+        onClose={() => {
+          setShowMaterialSelectionModal(false);
+          setSelectedProjectForModal(null);
+        }}
+        returnableProjects={selectedProjectForModal
+          ? returnableProjects.filter(p => p.project_id === selectedProjectForModal)
+          : returnableProjects
+        }
         selectedMaterialsCart={selectedMaterialsCart}
         onSaveSelection={(materials) => setSelectedMaterialsCart(materials)}
+        selectedProjectId={selectedProjectForModal}
       />
 
       {/* NEW WORKFLOW: RDN Creation Modal (STEP 2) */}

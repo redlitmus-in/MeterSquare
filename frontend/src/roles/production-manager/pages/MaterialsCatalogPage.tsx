@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Search, Package, CheckCircle, X, RefreshCw, Edit2, Trash2
+  Search, Package, CheckCircle, X, RefreshCw, Edit2, Trash2, AlertTriangle
 } from 'lucide-react';
 import {
   inventoryService,
@@ -27,6 +27,7 @@ const MaterialsCatalogPage: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showDisposalModal, setShowDisposalModal] = useState(false);
   const [selectedMaterial, setSelectedMaterial] = useState<InventoryMaterial | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -41,6 +42,13 @@ const MaterialsCatalogPage: React.FC = () => {
     unit_price: 0,
     description: '',
     is_active: true
+  });
+
+  const [disposalFormData, setDisposalFormData] = useState({
+    quantity: 0,
+    reason: 'damaged',
+    notes: '',
+    estimated_value: 0
   });
 
   const [confirmModal, setConfirmModal] = useState<{
@@ -190,6 +198,64 @@ const MaterialsCatalogPage: React.FC = () => {
       'Delete',
       'DELETE'
     );
+  };
+
+  const handleDisposalRequest = (material: InventoryMaterial) => {
+    setSelectedMaterial(material);
+    setDisposalFormData({
+      quantity: material.current_stock,
+      reason: 'damaged',
+      notes: '',
+      estimated_value: material.current_stock * (material.unit_price || 0)
+    });
+    setShowDisposalModal(true);
+  };
+
+  const handleDisposalInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setDisposalFormData(prev => {
+      const updated = {
+        ...prev,
+        [name]: ['quantity', 'estimated_value'].includes(name) ? parseFloat(value) || 0 : value
+      };
+
+      // Auto-calculate estimated value when quantity changes
+      if (name === 'quantity' && selectedMaterial) {
+        updated.estimated_value = parseFloat(value) * (selectedMaterial.unit_price || 0);
+      }
+
+      return updated;
+    });
+  };
+
+  const handleSubmitDisposalRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedMaterial?.inventory_material_id) return;
+
+    if (disposalFormData.quantity <= 0 || disposalFormData.quantity > (selectedMaterial.current_stock || 0)) {
+      showError(`Quantity must be between 1 and ${selectedMaterial.current_stock}`);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await inventoryService.requestMaterialDisposal(selectedMaterial.inventory_material_id, {
+        quantity: disposalFormData.quantity,
+        reason: disposalFormData.reason,
+        notes: disposalFormData.notes,
+        estimated_value: disposalFormData.estimated_value
+      });
+      setShowDisposalModal(false);
+      setSelectedMaterial(null);
+      fetchData();
+      showSuccess('Disposal request submitted for TD approval');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to submit disposal request';
+      console.error('Error submitting disposal request:', error);
+      showError(errorMessage);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const filteredMaterials = useMemo(() => {
@@ -346,22 +412,39 @@ const MaterialsCatalogPage: React.FC = () => {
                     {inventoryConfig.currency} {material.unit_price?.toFixed(2)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <button
-                      onClick={() => handleEditClick(material)}
-                      className="text-indigo-600 hover:text-indigo-900 mr-3"
-                      title="Edit material"
-                      aria-label={`Edit ${material.material_name}`}
-                    >
-                      <Edit2 className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteMaterial(material)}
-                      className="text-red-600 hover:text-red-900"
-                      title="Delete material"
-                      aria-label={`Delete ${material.material_name}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {/* Commented out for now - Edit functionality
+                      <button
+                        onClick={() => handleEditClick(material)}
+                        className="text-indigo-600 hover:text-indigo-900"
+                        title="Edit material"
+                        aria-label={`Edit ${material.material_name}`}
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </button>
+                      */}
+
+                      {/* Request Disposal for damaged/wasted materials */}
+                      {material.current_stock > 0 && (
+                        <button
+                          onClick={() => handleDisposalRequest(material)}
+                          className="text-orange-600 hover:text-orange-900"
+                          title="Request disposal for damaged/wasted material"
+                          aria-label={`Request disposal for ${material.material_name}`}
+                        >
+                          <AlertTriangle className="h-4 w-4" />
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => handleDeleteMaterial(material)}
+                        className="text-red-600 hover:text-red-900"
+                        title="Delete material"
+                        aria-label={`Delete ${material.material_name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -533,6 +616,141 @@ const MaterialsCatalogPage: React.FC = () => {
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                   >
                     {saving ? 'Saving...' : 'Update Material'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Disposal Request Modal */}
+      {showDisposalModal && selectedMaterial && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="disposal-request-title"
+        >
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <AlertTriangle className="w-6 h-6 text-orange-600" />
+                <h2 id="disposal-request-title" className="text-xl font-bold text-gray-900">
+                  Request Material Disposal
+                </h2>
+              </div>
+
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
+                <p className="text-sm text-orange-800">
+                  This will create a disposal request for TD approval. Upon approval, the material quantity will be reduced from inventory and recorded in disposal history.
+                </p>
+              </div>
+
+              <div className="bg-gray-50 rounded-lg p-4 mb-6">
+                <h3 className="font-semibold text-gray-900 mb-2">Material Details</h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-600">Name:</span>
+                    <span className="ml-2 font-medium">{selectedMaterial.material_name}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Code:</span>
+                    <span className="ml-2 font-mono">{selectedMaterial.material_code}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Available Stock:</span>
+                    <span className="ml-2 font-medium">{selectedMaterial.current_stock} {selectedMaterial.unit}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Unit Price:</span>
+                    <span className="ml-2 font-medium">{inventoryConfig.currency} {selectedMaterial.unit_price?.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleSubmitDisposalRequest} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Quantity to Dispose* <span className="text-xs text-gray-500">(Max: {selectedMaterial.current_stock})</span>
+                    </label>
+                    <input
+                      type="number"
+                      name="quantity"
+                      value={disposalFormData.quantity}
+                      onChange={handleDisposalInputChange}
+                      required
+                      min="0.01"
+                      max={selectedMaterial.current_stock}
+                      step="0.01"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Value*</label>
+                    <input
+                      type="number"
+                      name="estimated_value"
+                      value={disposalFormData.estimated_value}
+                      onChange={handleDisposalInputChange}
+                      required
+                      min="0"
+                      step="0.01"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 bg-gray-50"
+                      readOnly
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Reason for Disposal*</label>
+                  <select
+                    name="reason"
+                    value={disposalFormData.reason}
+                    onChange={handleDisposalInputChange}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="damaged">Damaged/Defective</option>
+                    <option value="expired">Expired</option>
+                    <option value="wasted">Wasted</option>
+                    <option value="obsolete">Obsolete</option>
+                    <option value="lost">Lost/Missing</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Additional Notes*</label>
+                  <textarea
+                    name="notes"
+                    value={disposalFormData.notes}
+                    onChange={handleDisposalInputChange}
+                    required
+                    rows={4}
+                    placeholder="Provide detailed explanation for the disposal request..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDisposalModal(false);
+                      setSelectedMaterial(null);
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {saving ? 'Submitting...' : 'Submit for TD Approval'}
                   </button>
                 </div>
               </form>

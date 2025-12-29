@@ -38,6 +38,7 @@ interface MaterialVendorSelectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onVendorSelected?: () => void;
+  onNotesUpdated?: () => void; // Called when supplier notes are saved
   viewMode?: 'buyer' | 'td'; // 'buyer' = full edit mode, 'td' = simplified view for TD to change vendor
 }
 
@@ -50,6 +51,11 @@ const SHORT_WORD_MAX_LENGTH = 3;
 const MIN_CATEGORY_LENGTH = 3;
 const MAX_VISIBLE_PRODUCTS = 3;
 const SUBMISSION_ID_LENGTH = 9;
+
+// Helper function to normalize strings for comparison (removes extra internal spaces)
+const normalizeForComparison = (str: string): string => {
+  return str.toLowerCase().trim().replace(/\s+/g, ' ');
+};
 
 interface SelectedVendorInfo {
   vendor_id: number;
@@ -75,6 +81,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   isOpen,
   onClose,
   onVendorSelected,
+  onNotesUpdated,
   viewMode = 'buyer' // Default to buyer mode
 }) => {
   const { user } = useAuthStore();
@@ -133,6 +140,11 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   // Track last initialized CR ID to avoid reinitializing with stale prop data
   const lastInitializedCrId = useRef<number | null>(null);
 
+  // Per-material supplier notes - specific notes for each individual material
+  const [materialNotes, setMaterialNotes] = useState<Record<string, string>>({});
+  const [editingMaterialNote, setEditingMaterialNote] = useState<string | null>(null);
+  const [savingMaterialNote, setSavingMaterialNote] = useState<string | null>(null);
+
   // Check if current user is Technical Director
   const isTechnicalDirector = user?.role?.toLowerCase().includes('technical') ||
     user?.role?.toLowerCase().includes('director') ||
@@ -150,7 +162,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   const isMaterialInApprovedPOChild = (materialName: string): boolean => {
     if (!purchase.po_children || purchase.po_children.length === 0) return false;
 
-    const materialNameLower = materialName.toLowerCase().trim();
+    const materialNormalized = normalizeForComparison(materialName);
     return purchase.po_children.some(poChild => {
       // Check if POChild is approved or completed
       const isApproved = poChild.vendor_selection_status === 'approved' ||
@@ -160,10 +172,31 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
       // Check if this material is in the POChild
       return poChild.materials?.some(mat =>
-        mat.material_name?.toLowerCase().trim() === materialNameLower
+        normalizeForComparison(mat.material_name || '') === materialNormalized
       );
     });
   };
+
+  // Initialize per-material notes from purchase data
+  useEffect(() => {
+    if (!isOpen || !purchase) return;
+
+    const notes: Record<string, string> = {};
+    if (purchase.material_vendor_selections) {
+      Object.entries(purchase.material_vendor_selections).forEach(([materialName, selection]: [string, any]) => {
+        if (selection.supplier_notes) {
+          notes[materialName] = selection.supplier_notes;
+        }
+      });
+    }
+
+    // ✅ FIX: Only set notes if we don't already have them (preserve user's typed notes)
+    // This prevents the modal from resetting notes when parent data refreshes
+    setMaterialNotes(prevNotes => {
+      // Merge: keep existing notes, only add new ones from backend
+      return { ...notes, ...prevNotes };
+    });
+  }, [isOpen, purchase?.cr_id]);
 
   // Initialize material vendors state from purchase with auto-selection
   useEffect(() => {
@@ -611,41 +644,45 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     vendorCategory: string,
     material: string
   ): boolean => {
+    // Normalize spaces (convert multiple spaces to single space)
+    const normalizedProduct = productName.replace(/\s+/g, ' ').trim();
+    const normalizedMaterial = material.replace(/\s+/g, ' ').trim();
+
     // Handle very short material names (1-2 characters) with exact matching
     // First check for EXACT match (case-insensitive) - highest priority
-    if (productName === material) {
+    if (normalizedProduct === normalizedMaterial) {
       return true;
     }
 
     // Check if material is contained in product name or vice versa
-    if (productName.includes(material) || material.includes(productName)) {
+    if (normalizedProduct.includes(normalizedMaterial) || normalizedMaterial.includes(normalizedProduct)) {
       return true;
     }
 
-    if (material.length <= SHORT_MATERIAL_MAX_LENGTH) {
+    if (normalizedMaterial.length <= SHORT_MATERIAL_MAX_LENGTH) {
       // For very short materials (1-2 chars), check if product name contains the exact material as a standalone word
-      const escapedMaterial = material.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escapedMaterial = normalizedMaterial.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const materialRegex = new RegExp(`\\b${escapedMaterial}\\b`, 'i');
-      const exactMatch = materialRegex.test(productName);
+      const exactMatch = materialRegex.test(normalizedProduct);
 
       // Also check if material is at start or end of product name
-      const startsOrEndsWith = productName.toLowerCase().startsWith(material) ||
-        productName.toLowerCase().endsWith(material);
+      const startsOrEndsWith = normalizedProduct.toLowerCase().startsWith(normalizedMaterial) ||
+        normalizedProduct.toLowerCase().endsWith(normalizedMaterial);
 
       return exactMatch || startsOrEndsWith;
     }
 
     // For longer material names, use word-based matching
     // Keep all words (don't filter by length) to handle cases like "de 01"
-    const materialWords = material.split(/\s+/).filter(w => w.length > 0);
-    const productWords = productName.split(/\s+/).filter(w => w.length > 0);
+    const materialWords = normalizedMaterial.split(/\s+/).filter(w => w.length > 0);
+    const productWords = normalizedProduct.split(/\s+/).filter(w => w.length > 0);
 
     let matchingWords = 0;
     let totalWords = materialWords.length;
 
     // If no words after split, fallback to direct contains check
     if (totalWords === 0) {
-      return productName.includes(material) || material.includes(productName);
+      return normalizedProduct.includes(normalizedMaterial) || normalizedMaterial.includes(normalizedProduct);
     }
 
     materialWords.forEach(matWord => {
@@ -677,8 +714,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     const hasGoodWordMatch = matchingWords >= matchThreshold;
 
     const categoryMatch = !!(
-      (productCategory && material.includes(productCategory) && productCategory.length > MIN_CATEGORY_LENGTH) ||
-      (vendorCategory && material.includes(vendorCategory) && vendorCategory.length > MIN_CATEGORY_LENGTH)
+      (productCategory && normalizedMaterial.includes(productCategory) && productCategory.length > MIN_CATEGORY_LENGTH) ||
+      (vendorCategory && normalizedMaterial.includes(vendorCategory) && vendorCategory.length > MIN_CATEGORY_LENGTH)
     );
 
     return hasGoodWordMatch || categoryMatch;
@@ -720,16 +757,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
   // Helper to check if we have actual product matches or using fallback
   const getVendorsForMaterialWithFallbackInfo = (materialName: string): { vendors: Vendor[], isFallback: boolean } => {
-    const materialLower = materialName.toLowerCase().trim();
+    const materialNormalized = normalizeForComparison(materialName);
 
-    // EXACT MATCH ONLY: Find vendors with products that exactly match the material name
+    // EXACT MATCH ONLY: Find vendors with products that exactly match the material name (normalized)
     const matchedVendors = vendors.filter(vendor => {
       if (!vendor.vendor_id) return false;
       const products = vendorProducts.get(vendor.vendor_id) || [];
 
       return products.some(product => {
-        const productName = product.product_name?.toLowerCase().trim() || '';
-        return productName === materialLower;  // EXACT MATCH ONLY
+        const productNormalized = normalizeForComparison(product.product_name || '');
+        return productNormalized === materialNormalized;  // EXACT MATCH ONLY (with normalized spaces)
       });
     });
 
@@ -754,17 +791,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
   // Get vendors with cost information for auto-selection
   const getVendorsForMaterialWithCost = (materialName: string): (Vendor & { lowestPrice?: number; exactProductName?: string })[] => {
-    const materialLower = materialName.toLowerCase().trim();
+    const materialNormalized = normalizeForComparison(materialName);
 
     return vendors
       .filter(vendor => {
         if (!vendor.vendor_id) return false;
         const products = vendorProducts.get(vendor.vendor_id) || [];
 
-        // EXACT MATCH ONLY: Check if vendor has product with exact name (case-insensitive)
+        // EXACT MATCH ONLY: Check if vendor has product with exact name (normalized spaces)
         return products.some(product => {
-          const productName = product.product_name?.toLowerCase().trim() || '';
-          return productName === materialLower;
+          const productNormalized = normalizeForComparison(product.product_name || '');
+          return productNormalized === materialNormalized;
         });
       })
       .map(vendor => {
@@ -772,8 +809,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         const products = vendorProducts.get(vendor.vendor_id!) || [];
 
         const exactMatchProduct = products.find(product => {
-          const productName = product.product_name?.toLowerCase().trim() || '';
-          return productName === materialLower;
+          const productNormalized = normalizeForComparison(product.product_name || '');
+          return productNormalized === materialNormalized;
         });
 
         const lowestPrice = exactMatchProduct?.unit_price || undefined;
@@ -967,6 +1004,38 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     });
   };
 
+  // Save per-material supplier notes
+  const handleSaveMaterialNote = async (materialName: string) => {
+    try {
+      setSavingMaterialNote(materialName);
+
+      const noteText = materialNotes[materialName] || '';
+      const selectedVendor = materialVendors.find(m => m.material_name === materialName)?.selected_vendors[0];
+
+      await buyerService.saveSupplierNotes(
+        purchase.cr_id,
+        materialName,
+        noteText,
+        selectedVendor?.vendor_id
+      );
+
+      toast.success('Material notes saved');
+      setEditingMaterialNote(null);
+
+      // ✅ FIX: Don't refresh parent data here - it causes the modal to reload and lose state
+      // Notes are already in materialNotes state and will be sent when user clicks "Send to TD"
+      // Only refresh parent after successfully sending to TD, not after each note save
+      // if (onNotesUpdated) {
+      //   onNotesUpdated(); // Refresh parent data
+      // }
+    } catch (error: any) {
+      console.error('Error saving material notes:', error);
+      toast.error(error.message || 'Failed to save notes');
+    } finally {
+      setSavingMaterialNote(null);
+    }
+  };
+
   const handleSubmitVendorGroup = async (vendorId: number, vendorName: string, materials: string[]) => {
     try {
       setIsSubmitting(true);
@@ -982,6 +1051,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           unit: m.unit,
           negotiated_price: m.selected_vendors[0].negotiated_price,
           save_price_for_future: m.selected_vendors[0].save_price_for_future,
+          supplier_notes: materialNotes[m.material_name] || null, // Include per-material notes
           all_selected_vendors: m.selected_vendors.map(v => ({
             vendor_id: v.vendor_id,
             vendor_name: v.vendor_name,
@@ -1003,7 +1073,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
       const response = await buyerService.selectVendorForMaterial(
         purchase.cr_id,
-        vendorMaterialSelections
+        vendorMaterialSelections,
+        undefined // No purchase-level notes, only per-material notes
       );
 
       toast.success(`${vendorMaterialSelections.length} material(s) sent to TD for ${vendorName}!`);
@@ -1066,9 +1137,19 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           return;
         }
 
+        // Prepare materials data for re-selection
+        const materialsData = selectedMaterials.map(m => ({
+          material_name: m.material_name,
+          quantity: m.quantity,
+          unit: m.unit,
+          negotiated_price: m.selected_vendors[0]?.negotiated_price,
+          save_price_for_future: m.selected_vendors[0]?.save_price_for_future
+        }));
+
         const response = await buyerService.reselectVendorForPOChild(
           purchase.po_child_id,
-          firstVendor.vendor_id
+          firstVendor.vendor_id,
+          materialsData
         );
 
         toast.success(response.message || 'Vendor re-selected! Awaiting TD approval.');
@@ -1118,6 +1199,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         const vendorGroups = Array.from(vendorGroupsMap.entries()).map(([vendorId, materials]) => ({
           vendor_id: vendorId,
           vendor_name: materials[0].selected_vendors[0].vendor_name,
+          supplier_notes: undefined, // No purchase-level notes, only per-material notes
           materials: materials.map(m => {
             const selectedVendor = m.selected_vendors[0];
 
@@ -1150,7 +1232,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
               quantity: m.quantity,
               unit: m.unit,
               negotiated_price: vendorPrice, // Send actual vendor price, not null
-              save_price_for_future: selectedVendor.save_price_for_future
+              save_price_for_future: selectedVendor.save_price_for_future,
+              supplier_notes: materialNotes[m.material_name] || null // Include per-material notes
             };
           })
         }));
@@ -1206,6 +1289,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           // Include negotiated price information
           negotiated_price: m.selected_vendors[0].negotiated_price,
           save_price_for_future: m.selected_vendors[0].save_price_for_future,
+          supplier_notes: materialNotes[m.material_name] || null, // Include per-material notes
           // Include all selected vendors for reference
           all_selected_vendors: m.selected_vendors.map(v => ({
             vendor_id: v.vendor_id,
@@ -1221,9 +1305,11 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           item_name: purchase.item_name
         }));
 
+      // Single-vendor scenario
       const response = await buyerService.selectVendorForMaterial(
         purchase.cr_id,
-        materialSelections
+        materialSelections,
+        undefined // No purchase-level notes, only per-material notes
       );
 
       // Show different message based on mode and response type
@@ -1387,6 +1473,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     />
                   </div>
                 </div>
+
 
                 {/* AI-Powered Info Banner - Floating Light Navy & Red Theme - Only for Buyer mode */}
                 {viewMode === 'buyer' && (
@@ -1780,6 +1867,88 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             </div>
                           </div>
 
+                          {/* Per-Material Supplier Notes Section */}
+                          {!isMaterialLocked && viewMode === 'buyer' && (
+                            <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-t border-blue-200">
+                              <div className="flex items-start gap-2">
+                                <FileText className="w-4 h-4 text-blue-600 mt-1 flex-shrink-0" />
+                                <div className="flex-1">
+                                  <label className="text-xs font-semibold text-blue-900 block mb-1 flex items-center gap-1">
+                                    Specifications / Cutting Details / Notes for Supplier
+                                    <span className="text-[10px] font-normal text-blue-600">(will be highlighted in LPO item description)</span>
+                                  </label>
+
+                                  {editingMaterialNote === material.material_name ? (
+                                    <div className="space-y-2">
+                                      <textarea
+                                        value={materialNotes[material.material_name] || ''}
+                                        onChange={(e) => setMaterialNotes({
+                                          ...materialNotes,
+                                          [material.material_name]: e.target.value
+                                        })}
+                                        placeholder="Example: Cut to exact 90cm x 210cm, RAL 9010 finish, include standard vision panel hardware, deliver by Friday..."
+                                        className="w-full px-3 py-2 text-sm border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-y bg-white"
+                                        rows={3}
+                                        maxLength={5000}
+                                      />
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] text-gray-500">
+                                          {(materialNotes[material.material_name] || '').length} / 5000 characters
+                                        </span>
+                                        <div className="flex gap-2">
+                                          <Button
+                                            size="sm"
+                                            onClick={() => handleSaveMaterialNote(material.material_name)}
+                                            disabled={savingMaterialNote === material.material_name}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs"
+                                          >
+                                            {savingMaterialNote === material.material_name ? (
+                                              <><Loader2 className="w-3 h-3 animate-spin mr-1" /> Saving...</>
+                                            ) : (
+                                              <><Save className="w-3 h-3 mr-1" /> Save</>
+                                            )}
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => {
+                                              setEditingMaterialNote(null);
+                                              // Reset to saved value
+                                              if (purchase.material_vendor_selections?.[material.material_name]?.supplier_notes) {
+                                                setMaterialNotes({
+                                                  ...materialNotes,
+                                                  [material.material_name]: purchase.material_vendor_selections[material.material_name].supplier_notes
+                                                });
+                                              }
+                                            }}
+                                            className="px-3 py-1.5 text-xs"
+                                          >
+                                            Cancel
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div
+                                      onClick={() => setEditingMaterialNote(material.material_name)}
+                                      className="cursor-pointer text-sm text-gray-700 hover:bg-blue-100 p-2.5 rounded-md border border-dashed border-blue-300 min-h-[44px] transition-colors"
+                                    >
+                                      {materialNotes[material.material_name] ? (
+                                        <div className="whitespace-pre-wrap text-gray-800">
+                                          {materialNotes[material.material_name]}
+                                        </div>
+                                      ) : (
+                                        <span className="text-gray-400 italic text-xs">
+                                          Click to add specifications, cutting details, sizes, or special requirements for this material...
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
                           {/* Vendor Selection Panel - Only show if not locked */}
                           <AnimatePresence>
                             {isExpanded && !isMaterialLocked && (
@@ -1851,10 +2020,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                             : 0;
                                           const totalEstimate = lowestPrice > 0 ? lowestPrice * material.quantity : 0;
 
-                                          // Get vendor's EXACT product name (exact match only)
-                                          const materialNameLower = material.material_name.toLowerCase().trim();
+                                          // Get vendor's EXACT product name (exact match only, normalized spaces)
+                                          const materialNormalized = normalizeForComparison(material.material_name);
                                           const exactMatchProduct = vendorProductsList.find(p =>
-                                            p.product_name?.toLowerCase().trim() === materialNameLower
+                                            normalizeForComparison(p.product_name || '') === materialNormalized
                                           );
                                           // Always use vendor's product name if there's an exact match
                                           const vendorMaterialName = exactMatchProduct?.product_name;
@@ -3956,17 +4125,36 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             const submissionGroupId = `${Date.now()}-${Math.random().toString(36).slice(2, 2 + SUBMISSION_ID_LENGTH)}`;
 
                             // Note: material_vendor_selections already saved when "Send This Vendor to TD" was clicked
-                            console.log('>>> [Final Send] Creating POChild (vendor selections already saved)');
 
                             const response = await buyerService.createPOChildren(
                               purchase.cr_id,
                               [{
                                 vendor_id: sentVendorId,
                                 vendor_name: sentVendorName,
+                                supplier_notes: undefined,  // No purchase-level notes, only per-material notes
                                 materials: materials
                               }],
                               submissionGroupId
                             );
+
+                            // After POChild is created, save supplier notes for each material that has notes
+                            for (const mat of materials) {
+                              const noteText = materialNotes[mat.material_name];
+                              if (noteText && noteText.trim()) {
+                                try {
+                                  await buyerService.saveSupplierNotes(
+                                    purchase.cr_id,
+                                    mat.material_name,
+                                    noteText,
+                                    sentVendorId
+                                  );
+                                  console.log(`✅ Saved supplier notes for material '${mat.material_name}' to POChild`);
+                                } catch (noteError) {
+                                  console.error(`Failed to save supplier notes for ${mat.material_name}:`, noteError);
+                                  // Don't fail the whole operation if note save fails
+                                }
+                              }
+                            }
 
                             // Show success immediately
                             toast.success(response.message || `Sent to TD for approval: ${sentVendorName}!`);

@@ -1071,3 +1071,229 @@ def get_td_dashboard_stats():
             "error": f"Failed to fetch dashboard statistics: {str(e)}",
             "error_type": type(e).__name__
         }), 500
+
+
+def get_td_purchase_orders():
+    """Get all purchase orders for TD (read-only view)"""
+    try:
+        from models.change_request import ChangeRequest
+        from models.po_child import POChild
+        from sqlalchemy import or_, and_
+
+        current_user = g.user
+        td_id = current_user['user_id']
+        user_role = current_user.get('role_name', '').lower()
+
+        # Get pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 50, type=int), 100)
+        status_filter = request.args.get('status', 'all')  # all, pending, approved, completed, rejected
+
+        # Build base query - TD sees ALL change requests (read-only)
+        # Include both change requests and PO children
+        base_query = db.session.query(ChangeRequest).options(
+            selectinload(ChangeRequest.project),
+            selectinload(ChangeRequest.boq),
+            selectinload(ChangeRequest.vendor)
+        ).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status.in_([
+                'vendor_approval_pending',
+                'pending_td_approval',
+                'vendor_approved',
+                'purchase_completed',
+                'rejected'
+            ])
+        )
+
+        # Apply status filter
+        if status_filter == 'pending':
+            base_query = base_query.filter(ChangeRequest.status == 'pending_td_approval')
+        elif status_filter == 'approved':
+            base_query = base_query.filter(ChangeRequest.status == 'vendor_approved')
+        elif status_filter == 'completed':
+            base_query = base_query.filter(ChangeRequest.status == 'purchase_completed')
+        elif status_filter == 'rejected':
+            base_query = base_query.filter(ChangeRequest.status == 'rejected')
+
+        # Order by created_at desc
+        base_query = base_query.order_by(ChangeRequest.created_at.desc())
+
+        # Paginate
+        paginated = base_query.paginate(page=page, per_page=per_page, error_out=False)
+
+        # Build response
+        purchases_list = []
+        for cr in paginated.items:
+            project = cr.project
+            boq = cr.boq
+            vendor = cr.vendor
+
+            # Get materials from sub_items_data or materials_data
+            materials_list = cr.sub_items_data or cr.materials_data or []
+
+            purchase_data = {
+                'cr_id': cr.cr_id,
+                'formatted_cr_id': f"CR-{cr.cr_id}",
+                'project_id': cr.project_id,
+                'project_name': project.project_name if project else None,
+                'project_code': project.project_code if project else None,
+                'client': project.client if project else None,
+                'location': project.location if project else None,
+                'boq_id': cr.boq_id,
+                'boq_name': boq.boq_name if boq else None,
+                'item_name': cr.item_id,
+                'request_type': cr.request_type,
+                'status': cr.status,
+                'materials': materials_list if isinstance(materials_list, list) else [],
+                'materials_count': len(materials_list) if isinstance(materials_list, list) else 0,
+                'total_cost': float(cr.materials_total_cost) if cr.materials_total_cost else 0,
+                'requested_by_name': cr.requested_by_name,
+                'created_at': cr.created_at.isoformat() if cr.created_at else None,
+                'vendor_id': cr.selected_vendor_id,
+                'vendor_name': vendor.company_name if vendor else None,
+                'vendor_selection_status': cr.vendor_selection_status,
+                'vendor_approved_by_td_name': cr.vendor_approved_by_td_name,
+                'vendor_approval_date': cr.vendor_approval_date.isoformat() if cr.vendor_approval_date else None,
+                'purchase_completed_by_name': cr.purchase_completed_by_name,
+                'purchase_completion_date': cr.purchase_completion_date.isoformat() if cr.purchase_completion_date else None
+            }
+            purchases_list.append(purchase_data)
+
+        # Get summary counts
+        pending_count = db.session.query(ChangeRequest).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status == 'pending_td_approval'
+        ).count()
+
+        approved_count = db.session.query(ChangeRequest).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status == 'vendor_approved'
+        ).count()
+
+        completed_count = db.session.query(ChangeRequest).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status == 'purchase_completed'
+        ).count()
+
+        rejected_count = db.session.query(ChangeRequest).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status == 'rejected'
+        ).count()
+
+        return jsonify({
+            'success': True,
+            'purchases': purchases_list,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': paginated.total,
+                'pages': paginated.pages,
+                'has_prev': paginated.has_prev,
+                'has_next': paginated.has_next
+            },
+            'summary': {
+                'pending_count': pending_count,
+                'approved_count': approved_count,
+                'completed_count': completed_count,
+                'rejected_count': rejected_count,
+                'total_count': pending_count + approved_count + completed_count + rejected_count
+            }
+        }), 200
+
+    except Exception as e:
+        import traceback
+        log.error(f"Error fetching TD purchase orders: {str(e)}")
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to fetch purchase orders: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
+
+
+def get_td_purchase_order_by_id(cr_id):
+    """Get specific purchase order details for TD view"""
+    try:
+        from models.change_request import ChangeRequest
+
+        current_user = g.user
+        td_id = current_user['user_id']
+
+        # Get change request with relationships
+        cr = db.session.query(ChangeRequest).options(
+            selectinload(ChangeRequest.project),
+            selectinload(ChangeRequest.boq),
+            selectinload(ChangeRequest.vendor)
+        ).filter(
+            ChangeRequest.cr_id == cr_id,
+            ChangeRequest.is_deleted == False
+        ).first()
+
+        if not cr:
+            return jsonify({
+                "success": False,
+                "error": "Purchase order not found"
+            }), 404
+
+        project = cr.project
+        boq = cr.boq
+        vendor = cr.vendor
+
+        # Get materials from sub_items_data or materials_data
+        materials_list = cr.sub_items_data or cr.materials_data or []
+
+        purchase_data = {
+            'cr_id': cr.cr_id,
+            'formatted_cr_id': f"CR-{cr.cr_id}",
+            'project_id': cr.project_id,
+            'project_name': project.project_name if project else None,
+            'project_code': project.project_code if project else None,
+            'client': project.client if project else None,
+            'location': project.location if project else None,
+            'boq_id': cr.boq_id,
+            'boq_name': boq.boq_name if boq else None,
+            'item_name': cr.item_id,
+            'sub_item_name': cr.sub_item_id,
+            'request_type': cr.request_type,
+            'reason': cr.justification,
+            'status': cr.status,
+            'materials': materials_list if isinstance(materials_list, list) else [],
+            'materials_count': len(materials_list) if isinstance(materials_list, list) else 0,
+            'total_cost': float(cr.materials_total_cost) if cr.materials_total_cost else 0,
+            'requested_by_user_id': cr.requested_by_user_id,
+            'requested_by_name': cr.requested_by_name,
+            'requested_by_role': cr.requested_by_role,
+            'created_at': cr.created_at.isoformat() if cr.created_at else None,
+            'approved_by': cr.approved_by,
+            'approved_at': cr.approved_at.isoformat() if cr.approved_at else None,
+            'vendor_id': cr.selected_vendor_id,
+            'vendor_name': vendor.company_name if vendor else None,
+            'vendor_phone': vendor.phone if vendor else None,
+            'vendor_email': vendor.email if vendor else None,
+            'vendor_selection_status': cr.vendor_selection_status,
+            'vendor_selected_by_buyer_name': cr.vendor_selected_by_buyer_name,
+            'vendor_selection_date': cr.vendor_selection_date.isoformat() if cr.vendor_selection_date else None,
+            'vendor_approved_by_td_id': cr.vendor_approved_by_td_id,
+            'vendor_approved_by_td_name': cr.vendor_approved_by_td_name,
+            'vendor_approval_date': cr.vendor_approval_date.isoformat() if cr.vendor_approval_date else None,
+            'vendor_rejection_reason': cr.vendor_rejection_reason,
+            'purchase_completed_by_user_id': cr.purchase_completed_by_user_id,
+            'purchase_completed_by_name': cr.purchase_completed_by_name,
+            'purchase_completion_date': cr.purchase_completion_date.isoformat() if cr.purchase_completion_date else None,
+            'purchase_notes': cr.purchase_notes
+        }
+
+        return jsonify({
+            'success': True,
+            'purchase': purchase_data
+        }), 200
+
+    except Exception as e:
+        import traceback
+        log.error(f"Error fetching TD purchase order details: {str(e)}")
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "success": False,
+            "error": f"Failed to fetch purchase order details: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500

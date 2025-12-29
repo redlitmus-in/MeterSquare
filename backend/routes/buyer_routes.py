@@ -196,16 +196,6 @@ def update_purchase_order_route(cr_id):
     return update_purchase_order(cr_id)
 
 
-@buyer_routes.route('/purchase/<int:cr_id>/notes', methods=['PUT'])
-@jwt_required
-def update_purchase_notes_route(cr_id):
-    """Update purchase notes (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
-    if access_check:
-        return access_check
-    return update_purchase_notes(cr_id)
-
-
 @buyer_routes.route('/purchase/<int:cr_id>/td-approve-vendor', methods=['POST'])
 @jwt_required
 def td_approve_vendor_route(cr_id):
@@ -503,25 +493,25 @@ def send_se_boq_vendor_email_route(assignment_id):
 
 # File Management routes
 @buyer_routes.route('/upload/<int:cr_id>', methods=['POST'])
-# @jwt_required
+@jwt_required
 def upload_files_route(cr_id):
     return buyer_upload_files(cr_id)
 
 
 @buyer_routes.route('/files/<int:cr_id>', methods=['GET'])
-# @jwt_required
+@jwt_required
 def view_files_route(cr_id):
     return buyer_view_files(cr_id)
 
 
 @buyer_routes.route('/files/<int:cr_id>', methods=['DELETE'])
-# @jwt_required
+@jwt_required
 def delete_files_route(cr_id):
     return buyer_delete_files(cr_id)
 
 
 @buyer_routes.route('/files/all/<int:cr_id>', methods=['DELETE'])
-# @jwt_required
+@jwt_required
 def delete_all_files_route(cr_id):
     return buyer_delete_all_files(cr_id)
 
@@ -617,6 +607,16 @@ def update_vendor_price_route(vendor_id):
     return update_vendor_price(vendor_id)
 
 
+@buyer_routes.route('/purchase/<int:cr_id>/save-supplier-notes', methods=['POST'])
+@jwt_required
+def save_supplier_notes_route(cr_id):
+    """Save supplier notes for a specific material (Buyer, TD, or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return save_supplier_notes(cr_id)
+
+
 @buyer_routes.route('/debug/cr/<int:cr_id>/material-selections', methods=['GET'])
 @jwt_required
 def debug_material_selections(cr_id):
@@ -631,4 +631,5 @@ def debug_material_selections(cr_id):
         }), 200
     else:
         return jsonify({"error": "CR not found"}), 404
+
 

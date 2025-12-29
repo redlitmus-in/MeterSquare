@@ -16,7 +16,22 @@ __pycache__/
 
 # Environment variables
 .env
+.env.*
+.env.local
+.env.*.local
 **/.env
+backend/.env
+frontend/.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+backend/**/__pycache__/
+backend/**/*.pyc
 
 # IDE
 .vscode/
@@ -25,3 +40,8 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Backup files
+*.backup
+*.backup.*
+*.bak

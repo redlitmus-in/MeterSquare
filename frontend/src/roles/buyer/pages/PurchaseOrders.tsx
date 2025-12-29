@@ -68,6 +68,16 @@ const PurchaseOrders: React.FC = () => {
   const [sendingWhatsAppId, setSendingWhatsAppId] = useState<number | null>(null);
   const [isEditPricesModalOpen, setIsEditPricesModalOpen] = useState(false);
   const [selectedPurchaseForPriceEdit, setSelectedPurchaseForPriceEdit] = useState<Purchase | null>(null);
+  // Site Engineer Selection for Vendor Delivery
+  const [isSiteEngineerModalOpen, setIsSiteEngineerModalOpen] = useState(false);
+  const [selectedPOChildForCompletion, setSelectedPOChildForCompletion] = useState<POChild | null>(null);
+  const [siteEngineersForProject, setSiteEngineersForProject] = useState<Array<{
+    user_id: number;
+    full_name: string;
+    email: string;
+  }>>([]);
+  const [selectedSiteEngineer, setSelectedSiteEngineer] = useState<string>('');
+  const [loadingSiteEngineers, setLoadingSiteEngineers] = useState(false);
 
   // ✅ PERFORMANCE: Add pagination state
   const [pendingPage, setPendingPage] = useState(1);
@@ -259,13 +269,17 @@ const PurchaseOrders: React.FC = () => {
       return vendorApprovedItems;
     } else if (activeTab === 'pending_approval') {
       // Sub-tabs for pending approval
-      return pendingApprovalSubTab === 'store_requests' ? storeRequestsPending : vendorPendingApproval;
+      // For vendor_approval subtab, return BOTH parent CRs pending approval AND POChild records
+      if (pendingApprovalSubTab === 'vendor_approval') {
+        return [...vendorPendingApproval, ...pendingPOChildren];
+      }
+      return storeRequestsPending;
     } else if (activeTab === 'rejected') {
       return rejectedPurchases;
     } else {
       return completedPurchases;
     }
-  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, storeRequestsPending, vendorPendingApproval, completedPurchases, rejectedPurchases]);
+  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, storeRequestsPending, vendorPendingApproval, pendingPOChildren, completedPurchases, rejectedPurchases]);
 
   const filteredPurchases = useMemo(() => {
     return currentPurchases
@@ -845,7 +859,7 @@ const PurchaseOrders: React.FC = () => {
         {/* Content */}
         <div className="space-y-4">
           {/* Check for empty state - use merged arrays for special tabs */}
-          {(activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved' ? mergedVendorApprovedItems.length === 0 : filteredPurchases.length === 0) && !(activeTab === 'completed' && completedPOChildren.length > 0) && !(activeTab === 'pending_approval' && pendingApprovalSubTab === 'vendor_approval' && pendingPOChildren.length > 0) && !(activeTab === 'rejected' && tdRejectedPOChildren.length > 0) ? (
+          {(activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved' ? mergedVendorApprovedItems.length === 0 : filteredPurchases.length === 0) && !(activeTab === 'completed' && completedPOChildren.length > 0) && !(activeTab === 'rejected' && tdRejectedPOChildren.length > 0) ? (
             <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-12 text-center">
               <ShoppingCart className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 text-lg">
@@ -865,9 +879,7 @@ const PurchaseOrders: React.FC = () => {
               {(
                 activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved'
                   ? mergedVendorApprovedItems
-                  : activeTab === 'pending_approval' && pendingApprovalSubTab === 'vendor_approval'
-                    ? pendingPOChildren
-                    : filteredPurchases
+                  : filteredPurchases
               ).map((item) => {
                 // Check if this is a POChild or Purchase
                 if (isPOChild(item)) {
@@ -979,6 +991,16 @@ const PurchaseOrders: React.FC = () => {
                             <span className="text-xs text-gray-500">Total Cost</span>
                             <span className="text-sm font-bold text-green-700">{formatCurrency(poChild.materials_total_cost || 0)}</span>
                           </div>
+
+                          {/* Supplier Notes */}
+                          {poChild.supplier_notes && (
+                            <div className="pt-2 border-t border-gray-100">
+                              <div className="text-xs text-gray-500 mb-1">Supplier Notes</div>
+                              <div className="text-xs text-gray-700 bg-blue-50 border border-blue-200 rounded p-2 italic line-clamp-2">
+                                "{poChild.supplier_notes}"
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* Status Banner */}
@@ -1033,15 +1055,38 @@ const PurchaseOrders: React.FC = () => {
                                   {/* Complete & Send to Store button */}
                                   <Button
                                     onClick={async () => {
-                                      try {
-                                        setCompletingPurchaseId(poChild.id);
-                                        await buyerService.completePOChildPurchase(poChild.id);
-                                        showSuccess('Purchase marked as complete!');
-                                        refetchApprovedPOChildren();
-                                      } catch (error: any) {
-                                        showError(error.message || 'Failed to complete purchase');
-                                      } finally {
-                                        setCompletingPurchaseId(null);
+                                      // If project has a project_id, fetch site engineers first
+                                      if (poChild.project_id) {
+                                        try {
+                                          setSelectedPOChildForCompletion(poChild);
+                                          setLoadingSiteEngineers(true);
+                                          setIsSiteEngineerModalOpen(true);
+
+                                          const result = await buyerService.getProjectSiteEngineers(poChild.project_id);
+                                          setSiteEngineersForProject(result.site_engineers || []);
+
+                                          // Auto-select if only one site engineer
+                                          if (result.site_engineers?.length === 1) {
+                                            setSelectedSiteEngineer(result.site_engineers[0].full_name);
+                                          }
+                                        } catch (error: any) {
+                                          showError(error.message || 'Failed to fetch site engineers');
+                                          setIsSiteEngineerModalOpen(false);
+                                        } finally {
+                                          setLoadingSiteEngineers(false);
+                                        }
+                                      } else {
+                                        // No project_id, complete directly
+                                        try {
+                                          setCompletingPurchaseId(poChild.id);
+                                          await buyerService.completePOChildPurchase(poChild.id);
+                                          showSuccess('Purchase marked as complete!');
+                                          refetchApprovedPOChildren();
+                                        } catch (error: any) {
+                                          showError(error.message || 'Failed to complete purchase');
+                                        } finally {
+                                          setCompletingPurchaseId(null);
+                                        }
                                       }
                                     }}
                                     disabled={completingPurchaseId === poChild.id}
@@ -1092,7 +1137,8 @@ const PurchaseOrders: React.FC = () => {
                                         vendor_selection_pending_td_approval: false,
                                         item_name: poChild.item_name || '',
                                         po_child_id: poChild.id,
-                                      };
+                                        child_notes: (poChild as any).child_notes || '',
+                                      } as any;
                                       setSelectedPurchase(purchaseLike);
                                       setIsVendorEmailModalOpen(true);
                                     }}
@@ -1179,7 +1225,8 @@ const PurchaseOrders: React.FC = () => {
                                 vendor_selection_pending_td_approval: false,
                                 item_name: poChild.item_name || '',
                                 po_child_id: poChild.id,
-                              };
+                                child_notes: (poChild as any).child_notes || '',
+                              } as any;
                               handleViewDetails(purchaseLike);
                             }}
                             variant="outline"
@@ -1395,6 +1442,23 @@ const PurchaseOrders: React.FC = () => {
 
                     {/* Action Buttons */}
                     <div className="flex flex-col gap-1.5 mt-auto">
+                      {/* POChildren Pending TD Approval Status - Show prominently */}
+                      {purchase.po_children && purchase.po_children.length > 0 && purchase.po_children.some((poChild: any) => poChild.vendor_selection_status === 'pending_td_approval') && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-1">
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-amber-600" />
+                            <div>
+                              <div className="text-xs font-semibold text-amber-900">
+                                Vendor Pending TD Approval
+                              </div>
+                              <div className="text-xs text-amber-700">
+                                {purchase.po_children.filter((pc: any) => pc.vendor_selection_status === 'pending_td_approval').length} vendor(s) sent to TD for approval
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Pending Approval Status */}
                       {purchase.vendor_selection_pending_td_approval && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-1">
@@ -1781,6 +1845,16 @@ const PurchaseOrders: React.FC = () => {
                         <span className="text-xs text-gray-500">Total Cost</span>
                         <span className="text-sm font-bold text-green-700">{formatCurrency(poChild.materials_total_cost || 0)}</span>
                       </div>
+
+                      {/* Supplier Notes */}
+                      {poChild.supplier_notes && (
+                        <div className="pt-2 border-t border-gray-100">
+                          <div className="text-xs text-gray-500 mb-1">Supplier Notes</div>
+                          <div className="text-xs text-gray-700 bg-blue-50 border border-blue-200 rounded p-2 italic line-clamp-2">
+                            "{poChild.supplier_notes}"
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* TD Approved Status */}
@@ -1827,9 +1901,11 @@ const PurchaseOrders: React.FC = () => {
                                 vendor_name: poChild.vendor_name,
                                 vendor_phone: poChild.vendor_phone,
                                 vendor_email: poChild.vendor_email,
+                                supplier_notes: poChild.supplier_notes,
                                 vendor_selection_status: poChild.vendor_selection_status,
                                 po_child_id: poChild.id,  // Pass POChild ID for email API
-                              };
+                                child_notes: (poChild as any).child_notes || '',
+                              } as any;
                               setSelectedPurchase(purchaseLike);
                               setIsVendorEmailModalOpen(true);
                             }}
@@ -1895,15 +1971,38 @@ const PurchaseOrders: React.FC = () => {
                           {/* Complete & Send to Store Button */}
                           <Button
                             onClick={async () => {
-                              try {
-                                setCompletingPurchaseId(poChild.id);
-                                await buyerService.completePOChildPurchase(poChild.id);
-                                showSuccess('Purchase marked as complete!');
-                                refetchApprovedPOChildren();
-                              } catch (error: any) {
-                                showError(error.message || 'Failed to complete purchase');
-                              } finally {
-                                setCompletingPurchaseId(null);
+                              // If project has a project_id, fetch site engineers first
+                              if (poChild.project_id) {
+                                try {
+                                  setSelectedPOChildForCompletion(poChild);
+                                  setLoadingSiteEngineers(true);
+                                  setIsSiteEngineerModalOpen(true);
+
+                                  const result = await buyerService.getProjectSiteEngineers(poChild.project_id);
+                                  setSiteEngineersForProject(result.site_engineers || []);
+
+                                  // Auto-select if only one site engineer
+                                  if (result.site_engineers?.length === 1) {
+                                    setSelectedSiteEngineer(result.site_engineers[0].full_name);
+                                  }
+                                } catch (error: any) {
+                                  showError(error.message || 'Failed to fetch site engineers');
+                                  setIsSiteEngineerModalOpen(false);
+                                } finally {
+                                  setLoadingSiteEngineers(false);
+                                }
+                              } else {
+                                // No project_id, complete directly
+                                try {
+                                  setCompletingPurchaseId(poChild.id);
+                                  await buyerService.completePOChildPurchase(poChild.id);
+                                  showSuccess('Purchase marked as complete!');
+                                  refetchApprovedPOChildren();
+                                } catch (error: any) {
+                                  showError(error.message || 'Failed to complete purchase');
+                                } finally {
+                                  setCompletingPurchaseId(null);
+                                }
                               }
                             }}
                             disabled={completingPurchaseId === poChild.id}
@@ -1951,7 +2050,8 @@ const PurchaseOrders: React.FC = () => {
                             status: 'pending',
                             vendor_id: poChild.vendor_id,
                             vendor_name: poChild.vendor_name,
-                          };
+                            child_notes: (poChild as any).child_notes || '',
+                          } as any;
                           setSelectedPurchase(purchaseLike);
                           setIsDetailsModalOpen(true);
                         }}
@@ -2111,7 +2211,8 @@ const PurchaseOrders: React.FC = () => {
                             status: 'pending',
                             vendor_id: poChild.vendor_id,
                             vendor_name: poChild.vendor_name,
-                          };
+                            child_notes: (poChild as any).child_notes || '',
+                          } as any;
                           setSelectedPurchase(purchaseLike);
                           setIsDetailsModalOpen(true);
                         }}
@@ -2276,7 +2377,8 @@ const PurchaseOrders: React.FC = () => {
                             status: 'completed',
                             vendor_id: poChild.vendor_id,
                             vendor_name: poChild.vendor_name,
-                          };
+                            child_notes: (poChild as any).child_notes || '',
+                          } as any;
                           setSelectedPurchase(purchaseLike);
                           setIsDetailsModalOpen(true);
                         }}
@@ -2421,7 +2523,8 @@ const PurchaseOrders: React.FC = () => {
                             created_at: poChild.created_at || '',
                             status: 'pending',
                             po_child_id: poChild.po_child_id,  // Pass POChild ID for re-selection
-                          };
+                            child_notes: (poChild as any).child_notes || '',
+                          } as any;
                           setSelectedPurchase(purchaseLike);
                           setIsVendorSelectionModalOpen(true);
                         }}
@@ -2454,7 +2557,8 @@ const PurchaseOrders: React.FC = () => {
                             approved_at: null,
                             created_at: poChild.created_at || '',
                             status: 'rejected',
-                          };
+                            child_notes: (poChild as any).child_notes || '',
+                          } as any;
                           setSelectedPurchase(purchaseLike);
                           setIsDetailsModalOpen(true);
                         }}
@@ -2566,7 +2670,8 @@ const PurchaseOrders: React.FC = () => {
                                       vendor_selection_pending_td_approval: false,
                                       item_name: poChild.item_name || '',
                                       po_child_id: poChild.id,
-                                    };
+                                      child_notes: (poChild as any).child_notes || '',
+                                    } as any;
                                     handleViewDetails(purchaseLike);
                                   }}
                                   variant="outline"
@@ -2578,15 +2683,38 @@ const PurchaseOrders: React.FC = () => {
                                 </Button>
                                 <Button
                                   onClick={async () => {
-                                    try {
-                                      setCompletingPurchaseId(poChild.id);
-                                      await buyerService.completePOChildPurchase(poChild.id);
-                                      showSuccess('Purchase marked as complete!');
-                                      refetchApprovedPOChildren();
-                                    } catch (error: any) {
-                                      showError(error.message || 'Failed to complete purchase');
-                                    } finally {
-                                      setCompletingPurchaseId(null);
+                                    // If project has a project_id, fetch site engineers first
+                                    if (poChild.project_id) {
+                                      try {
+                                        setSelectedPOChildForCompletion(poChild);
+                                        setLoadingSiteEngineers(true);
+                                        setIsSiteEngineerModalOpen(true);
+
+                                        const result = await buyerService.getProjectSiteEngineers(poChild.project_id);
+                                        setSiteEngineersForProject(result.site_engineers || []);
+
+                                        // Auto-select if only one site engineer
+                                        if (result.site_engineers?.length === 1) {
+                                          setSelectedSiteEngineer(result.site_engineers[0].full_name);
+                                        }
+                                      } catch (error: any) {
+                                        showError(error.message || 'Failed to fetch site engineers');
+                                        setIsSiteEngineerModalOpen(false);
+                                      } finally {
+                                        setLoadingSiteEngineers(false);
+                                      }
+                                    } else {
+                                      // No project_id, complete directly
+                                      try {
+                                        setCompletingPurchaseId(poChild.id);
+                                        await buyerService.completePOChildPurchase(poChild.id);
+                                        showSuccess('Purchase marked as complete!');
+                                        refetchApprovedPOChildren();
+                                      } catch (error: any) {
+                                        showError(error.message || 'Failed to complete purchase');
+                                      } finally {
+                                        setCompletingPurchaseId(null);
+                                      }
                                     }
                                   }}
                                   disabled={completingPurchaseId === poChild.id}
@@ -2961,6 +3089,45 @@ const PurchaseOrders: React.FC = () => {
             // Switch to pending approval tab to see the submitted vendor selection
             setActiveTab('pending_approval');
           }}
+          onNotesUpdated={async () => {
+            try {
+              // Optimized: Only refetch the relevant query instead of all queries
+              // This provides instant UI update without 3 separate API calls
+
+              // Only clear and refetch the specific purchase lists that might contain this purchase
+              removeQueries(['buyer-pending-purchases', pendingPage]);
+              removeQueries(['buyer-completed-purchases']);
+              removeQueries(['buyer-pending-po-children']);
+
+              // Refetch only the current tab's data for instant update
+              if (activeTab === 'pending' || activeTab === 'pending_approval') {
+                const pendingResult = await refetchPending();
+
+                // Update selectedPurchase with fresh data
+                if (selectedPurchase && pendingResult.data?.pending_purchases) {
+                  const updatedPurchase = pendingResult.data.pending_purchases.find(
+                    (p: Purchase) => p.cr_id === selectedPurchase.cr_id
+                  );
+                  if (updatedPurchase) {
+                    setSelectedPurchase(updatedPurchase);
+                  }
+                }
+              } else if (activeTab === 'completed') {
+                await refetchCompleted();
+              }
+
+              // Only refetch POChildren if we're on that tab
+              if (activeTab === 'pending_po_children' || activeTab === 'approved_po_children') {
+                await refetchPendingPOChildren();
+              }
+
+              // DON'T switch tabs - stay on current tab so user sees notes updated
+            } catch (error) {
+              console.error('Failed to refresh after notes update:', error);
+              // Notes are still saved on backend, just UI refresh failed
+              // User can manually refresh page if needed
+            }
+          }}
         />
       )}
 
@@ -3003,6 +3170,251 @@ const PurchaseOrders: React.FC = () => {
           }}
         />
       )}
+
+      {/* Site Engineer Selection Modal */}
+      <AnimatePresence>
+        {isSiteEngineerModalOpen && selectedPOChildForCompletion && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => {
+              if (!completingPurchaseId) {
+                setIsSiteEngineerModalOpen(false);
+                setSelectedPOChildForCompletion(null);
+                setSiteEngineersForProject([]);
+                setSelectedSiteEngineer('');
+              }
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-2xl shadow-2xl max-w-md w-full"
+            >
+              {/* Modal Header */}
+              <div className="bg-gradient-to-r from-cyan-600 to-blue-600 px-6 py-4 rounded-t-2xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+                      <Package className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-white">Select Site Engineer</h2>
+                      <p className="text-xs text-cyan-100">
+                        Who will receive this delivery?
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setIsSiteEngineerModalOpen(false);
+                      setSelectedPOChildForCompletion(null);
+                      setSiteEngineersForProject([]);
+                      setSelectedSiteEngineer('');
+                    }}
+                    disabled={completingPurchaseId !== null}
+                    className="text-white hover:bg-white/20 p-2 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 space-y-4">
+                {/* Project Info */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="text-sm">
+                    <span className="text-gray-600">Project:</span>
+                    <span className="font-semibold text-gray-900 ml-2">
+                      {selectedPOChildForCompletion.project_name}
+                    </span>
+                  </div>
+                  {selectedPOChildForCompletion.project_code && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      Code: {selectedPOChildForCompletion.project_code}
+                    </div>
+                  )}
+                </div>
+
+                {/* Requested By Info */}
+                {selectedPOChildForCompletion.requested_by_name && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div className="text-sm">
+                      <span className="text-gray-600">Requested By:</span>
+                      <span className="font-semibold text-gray-900 ml-2">
+                        {selectedPOChildForCompletion.requested_by_name}
+                      </span>
+                      {selectedPOChildForCompletion.requested_by_role && (
+                        <span className="text-xs text-gray-500 ml-1">
+                          ({selectedPOChildForCompletion.requested_by_role.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())})
+                        </span>
+                      )}
+                    </div>
+                    {selectedPOChildForCompletion.requested_by_role &&
+                     (selectedPOChildForCompletion.requested_by_role.toLowerCase().includes('site') ||
+                      selectedPOChildForCompletion.requested_by_role.toLowerCase() === 'se') && (
+                      <div className="mt-2 text-xs text-green-700 bg-green-100 px-3 py-2 rounded">
+                        💡 Tip: Consider delivering to <strong>{selectedPOChildForCompletion.requested_by_name}</strong> since they requested these materials
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Materials Summary */}
+                {selectedPOChildForCompletion.materials && selectedPOChildForCompletion.materials.length > 0 && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-2">Materials to be delivered:</h3>
+                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                      {selectedPOChildForCompletion.materials.map((mat, idx) => (
+                        <div key={idx} className="flex justify-between items-start text-xs bg-white p-2 rounded border border-gray-100">
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900">{mat.material_name}</div>
+                            {mat.sub_item_name && (
+                              <div className="text-gray-500 text-xs">{mat.sub_item_name}</div>
+                            )}
+                          </div>
+                          <div className="text-right ml-2">
+                            <div className="font-semibold text-gray-900">
+                              {mat.quantity} {mat.unit}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Loading state */}
+                {loadingSiteEngineers && (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="w-8 h-8 border-4 border-cyan-200 border-t-cyan-600 rounded-full animate-spin" />
+                  </div>
+                )}
+
+                {/* Site Engineer Selection */}
+                {!loadingSiteEngineers && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Site Engineer / Recipient *
+                    </label>
+
+                    {siteEngineersForProject.length > 0 ? (
+                      <select
+                        value={selectedSiteEngineer}
+                        onChange={(e) => setSelectedSiteEngineer(e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                        disabled={completingPurchaseId !== null}
+                      >
+                        <option value="">Select Site Engineer</option>
+                        {siteEngineersForProject.map((se) => (
+                          <option key={se.user_id} value={se.full_name}>
+                            {se.full_name} ({se.email})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <>
+                        <input
+                          type="text"
+                          value={selectedSiteEngineer}
+                          onChange={(e) => setSelectedSiteEngineer(e.target.value)}
+                          placeholder={selectedPOChildForCompletion.requested_by_name || "Enter site engineer name"}
+                          className="w-full px-4 py-3 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 bg-orange-50"
+                          disabled={completingPurchaseId !== null}
+                        />
+                        <div className="mt-2 space-y-2">
+                          <p className="text-xs text-orange-600">
+                            ⚠️ No site engineers assigned to this project. Please enter a name manually.
+                          </p>
+                          {selectedPOChildForCompletion.requested_by_name &&
+                           selectedPOChildForCompletion.requested_by_role &&
+                           (selectedPOChildForCompletion.requested_by_role.toLowerCase().includes('site') ||
+                            selectedPOChildForCompletion.requested_by_role.toLowerCase() === 'se') && (
+                            <div className="text-xs bg-blue-50 border border-blue-200 text-blue-700 px-3 py-2 rounded">
+                              💡 <strong>Suggestion:</strong> Materials were requested by{' '}
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSiteEngineer(selectedPOChildForCompletion.requested_by_name!)}
+                                className="underline font-semibold hover:text-blue-900"
+                              >
+                                {selectedPOChildForCompletion.requested_by_name}
+                              </button>
+                              {' '}(Site Engineer)
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="bg-gray-50 px-6 py-4 rounded-b-2xl flex justify-end gap-3">
+                <Button
+                  onClick={() => {
+                    setIsSiteEngineerModalOpen(false);
+                    setSelectedPOChildForCompletion(null);
+                    setSiteEngineersForProject([]);
+                    setSelectedSiteEngineer('');
+                  }}
+                  disabled={completingPurchaseId !== null}
+                  variant="outline"
+                  className="px-4 py-2"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (!selectedSiteEngineer) {
+                      showWarning('Please select or enter a site engineer name');
+                      return;
+                    }
+
+                    try {
+                      setCompletingPurchaseId(selectedPOChildForCompletion.id);
+                      await buyerService.completePOChildPurchase(
+                        selectedPOChildForCompletion.id,
+                        '',
+                        selectedSiteEngineer
+                      );
+                      showSuccess('Purchase marked as complete and routed to Production Manager!');
+                      setIsSiteEngineerModalOpen(false);
+                      setSelectedPOChildForCompletion(null);
+                      setSiteEngineersForProject([]);
+                      setSelectedSiteEngineer('');
+                      refetchApprovedPOChildren();
+                    } catch (error: any) {
+                      showError(error.message || 'Failed to complete purchase');
+                    } finally {
+                      setCompletingPurchaseId(null);
+                    }
+                  }}
+                  disabled={completingPurchaseId !== null || !selectedSiteEngineer}
+                  className="px-6 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-700 hover:to-blue-700"
+                >
+                  {completingPurchaseId === selectedPOChildForCompletion.id ? (
+                    <>
+                      <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Completing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Complete & Send to Store
+                    </>
+                  )}
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Store Availability Modal */}
       <AnimatePresence>

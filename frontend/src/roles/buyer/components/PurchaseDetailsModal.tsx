@@ -45,13 +45,114 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
 
   // Update local purchase when purchase changes or modal opens
   useEffect(() => {
+    // Debug logging for POChild
+    if ((purchase as any).po_child_id) {
+      console.log('[PurchaseDetailsModal] Viewing POChild:', {
+        po_child_id: (purchase as any).po_child_id,
+        materials_count: purchase.materials?.length,
+        first_material_has_notes: purchase.materials?.[0] ? !!(purchase.materials[0] as any).supplier_notes : false
+      });
+    }
+
     // CRITICAL FIX: When vendor is approved, calculate total_cost from materials' vendor prices
     // instead of using the BOQ total_cost that comes from backend
     let updatedPurchase = { ...purchase };
 
+    // Enrich materials with supplier notes from material_vendor_selections OR po_children OR child_notes
+    if (purchase.materials && purchase.materials.length > 0) {
+      const materialVendorSelections = (purchase as any).material_vendor_selections || {};
+
+      // Check if we have PO children (approved state)
+      const poChildren = purchase.po_children || [];
+
+      // Check if this purchase itself is a POChild with child_notes
+      const purchaseChildNotes = (purchase as any).child_notes || '';
+
+      updatedPurchase.materials = purchase.materials.map(mat => {
+        const materialName = mat.material_name || '';
+
+        // First try material_vendor_selections (parent CR notes)
+        let supplierNotes = materialVendorSelections[materialName]?.supplier_notes || '';
+
+        // If not found, check if material already has supplier_notes
+        if (!supplierNotes && (mat as any).supplier_notes) {
+          supplierNotes = (mat as any).supplier_notes;
+        }
+
+        // If not found and we have PO children, get notes from PO child materials or child_notes
+        if (!supplierNotes && poChildren.length > 0) {
+          for (const poChild of poChildren) {
+            // First check materials array for per-material notes
+            if (poChild.materials) {
+              const poChildMaterial = poChild.materials.find((m: any) =>
+                m.material_name === materialName
+              );
+              if (poChildMaterial?.supplier_notes) {
+                supplierNotes = poChildMaterial.supplier_notes;
+                break;
+              }
+            }
+            // Then check child_notes column (format: "[material_name]: notes" or plain text)
+            if (!supplierNotes && (poChild as any).child_notes) {
+              const childNotes = (poChild as any).child_notes;
+              // Check if child_notes contains notes for this material
+              const materialPrefix = `[${materialName}]: `;
+              if (childNotes.includes(materialPrefix)) {
+                // Extract the note for this material (format: "[material_name]: notes")
+                const startIdx = childNotes.indexOf(materialPrefix) + materialPrefix.length;
+                const endIdx = childNotes.indexOf('\n\n', startIdx);
+                supplierNotes = endIdx > startIdx ? childNotes.substring(startIdx, endIdx) : childNotes.substring(startIdx);
+                break;
+              } else if (!childNotes.includes('[')) {
+                // Plain notes without prefix (legacy format) - show for all materials in this POChild
+                // Check if this material belongs to this POChild
+                const poChildMaterialNames = (poChild.materials || []).map((m: any) => m.material_name);
+                if (poChildMaterialNames.includes(materialName)) {
+                  supplierNotes = childNotes;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        // If still not found, check purchaseChildNotes (when viewing a single POChild)
+        if (!supplierNotes && purchaseChildNotes) {
+          const materialPrefix = `[${materialName}]: `;
+          if (purchaseChildNotes.includes(materialPrefix)) {
+            // Notes are in format "[material_name]: notes"
+            const startIdx = purchaseChildNotes.indexOf(materialPrefix) + materialPrefix.length;
+            const endIdx = purchaseChildNotes.indexOf('\n\n', startIdx);
+            supplierNotes = endIdx > startIdx ? purchaseChildNotes.substring(startIdx, endIdx) : purchaseChildNotes.substring(startIdx);
+          } else if (!purchaseChildNotes.includes('[') && purchase.materials && purchase.materials.length === 1) {
+            // Plain notes without prefix (legacy format) - apply to single material
+            supplierNotes = purchaseChildNotes;
+          } else if (!purchaseChildNotes.includes('[')) {
+            // Plain notes without any prefix - show for all materials
+            supplierNotes = purchaseChildNotes;
+          }
+        }
+
+        const enrichedMaterial = {
+          ...mat,
+          supplier_notes: supplierNotes
+        };
+
+        // Debug logging
+        const finalNotes = enrichedMaterial.supplier_notes;
+        if (finalNotes) {
+          console.log(`[PurchaseDetailsModal] Material "${materialName}" has supplier notes:`, finalNotes.substring(0, 50));
+        } else {
+          console.log(`[PurchaseDetailsModal] Material "${materialName}" has NO supplier notes`);
+        }
+
+        return enrichedMaterial;
+      });
+    }
+
     // If vendor is approved, recalculate total_cost from materials (which have vendor prices)
     if (purchase.vendor_selection_status === 'approved' && purchase.materials && purchase.materials.length > 0) {
-      const vendorTotalCost = purchase.materials.reduce((sum, mat) => {
+      const vendorTotalCost = updatedPurchase.materials.reduce((sum, mat) => {
         return sum + (mat.total_price || (mat.unit_price * mat.quantity) || 0);
       }, 0);
       updatedPurchase.total_cost = vendorTotalCost;
@@ -454,60 +555,73 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                                             isApprovedByTD ? 'bg-green-50' : '';
 
                           return (
-                            <TableRow key={idx} className={`hover:bg-gray-50 ${rowBgClass}`}>
-                              <TableCell className="font-medium text-sm">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className={isSentToStore ? 'text-purple-700' : isPendingTD ? 'text-amber-700' : isApprovedByTD ? 'text-green-700' : ''}>
-                                    {material.material_name}
-                                  </span>
-                                  {isNewMaterial && (
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
-                                      NEW
+                            <React.Fragment key={idx}>
+                              <TableRow className={`hover:bg-gray-50 ${rowBgClass}`}>
+                                <TableCell className="font-medium text-sm">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={isSentToStore ? 'text-purple-700' : isPendingTD ? 'text-amber-700' : isApprovedByTD ? 'text-green-700' : ''}>
+                                      {material.material_name}
+                                    </span>
+                                    {isNewMaterial && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
+                                        NEW
+                                      </span>
+                                    )}
+                                    {isSentToStore && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-purple-100 text-purple-800 border border-purple-300">
+                                        <Store className="w-3 h-3" />
+                                        STORE
+                                      </span>
+                                    )}
+                                    {isPendingTD && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                                        <Hourglass className="w-3 h-3" />
+                                        PENDING TD
+                                      </span>
+                                    )}
+                                    {isApprovedByTD && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
+                                        <Truck className="w-3 h-3" />
+                                        VENDOR
+                                      </span>
+                                    )}
+                                    {vendorName && (isPendingTD || isApprovedByTD) && (
+                                      <span className="text-[10px] text-gray-500">
+                                        ({vendorName})
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                  {material.sub_item_name && (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                      {material.sub_item_name}
                                     </span>
                                   )}
-                                  {isSentToStore && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-purple-100 text-purple-800 border border-purple-300">
-                                      <Store className="w-3 h-3" />
-                                      STORE
-                                    </span>
-                                  )}
-                                  {isPendingTD && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-                                      <Hourglass className="w-3 h-3" />
-                                      PENDING TD
-                                    </span>
-                                  )}
-                                  {isApprovedByTD && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
-                                      <Truck className="w-3 h-3" />
-                                      VENDOR
-                                    </span>
-                                  )}
-                                  {vendorName && (isPendingTD || isApprovedByTD) && (
-                                    <span className="text-[10px] text-gray-500">
-                                      ({vendorName})
-                                    </span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm">
-                                {material.sub_item_name && (
-                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                    {material.sub_item_name}
-                                  </span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-sm">{(material as any).brand || '-'}</TableCell>
-                              <TableCell className="text-sm">{(material as any).size || (material as any).specification || '-'}</TableCell>
-                              <TableCell className="text-sm">{material.quantity}</TableCell>
-                              <TableCell className="text-sm">{material.unit}</TableCell>
-                              <TableCell className={`text-sm ${isSentToStore ? 'text-purple-600' : ''}`}>
-                                {isSentToStore ? 'From Store' : formatCurrency(material.unit_price)}
-                              </TableCell>
-                              <TableCell className={`text-right font-bold text-sm ${isSentToStore ? 'text-purple-600' : 'text-green-600'}`}>
-                                {isSentToStore ? '-' : formatCurrency(material.total_price)}
-                              </TableCell>
-                            </TableRow>
+                                </TableCell>
+                                <TableCell className="text-sm">{(material as any).brand || '-'}</TableCell>
+                                <TableCell className="text-sm">{(material as any).size || (material as any).specification || '-'}</TableCell>
+                                <TableCell className="text-sm">{material.quantity}</TableCell>
+                                <TableCell className="text-sm">{material.unit}</TableCell>
+                                <TableCell className={`text-sm ${isSentToStore ? 'text-purple-600' : ''}`}>
+                                  {isSentToStore ? 'From Store' : formatCurrency(material.unit_price)}
+                                </TableCell>
+                                <TableCell className={`text-right font-bold text-sm ${isSentToStore ? 'text-purple-600' : 'text-green-600'}`}>
+                                  {isSentToStore ? '-' : formatCurrency(material.total_price)}
+                                </TableCell>
+                              </TableRow>
+                              {/* Per-Material Supplier Notes Row */}
+                              {(material as any).supplier_notes && (material as any).supplier_notes.trim().length > 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={8} className="bg-blue-50/50 py-2 px-4 border-t-0">
+                                    <div className="flex items-start gap-2 text-xs">
+                                      <span className="font-semibold text-blue-700 whitespace-nowrap">📝 Note:</span>
+                                      <span className="text-blue-800">{(material as any).supplier_notes}</span>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </React.Fragment>
                           );
                         })}
                         {/* Show separate totals if there are store materials */}

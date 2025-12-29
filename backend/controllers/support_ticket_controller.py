@@ -19,9 +19,14 @@ from socketio_server import emit_support_ticket_event
 
 log = get_logger()
 
-# Supabase configuration
-supabase_url = os.environ.get('SUPABASE_URL')
-supabase_key = os.environ.get('SUPABASE_KEY')
+# Supabase configuration based on environment
+environment = os.environ.get('ENVIRONMENT', 'production')
+if environment == 'development':
+    supabase_url = os.environ.get('DEV_SUPABASE_URL')
+    supabase_key = os.environ.get('DEV_SUPABASE_KEY')
+else:
+    supabase_url = os.environ.get('SUPABASE_URL')
+    supabase_key = os.environ.get('SUPABASE_KEY')
 SUPABASE_BUCKET = "file_upload"
 
 # Upload configuration

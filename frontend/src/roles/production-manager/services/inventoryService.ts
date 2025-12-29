@@ -34,6 +34,15 @@ export interface InventoryTransaction {
   reference_number?: string;
   project_id?: number;
   notes?: string;
+  delivery_note_url?: string;  // URL to delivery note/invoice file
+  created_at?: string;
+  created_by?: string;
+}
+
+export interface CustomUnit {
+  unit_id?: number;
+  value: string;
+  label: string;
   created_at?: string;
   created_by?: string;
 }
@@ -47,7 +56,7 @@ export interface InternalMaterialRequest {
   quantity: number;
   brand?: string;
   size?: string;
-  status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISPATCHED' | 'FULFILLED' | 'PROCUREMENT_INITIATED' | 'send_request' | 'approved' | 'rejected';
+  status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISPATCHED' | 'FULFILLED' | 'PROCUREMENT_INITIATED' | 'DN_PENDING' | 'send_request' | 'awaiting_vendor_delivery' | 'approved' | 'rejected' | 'dn_pending' | 'dispatched' | 'fulfilled';
   inventory_material_id?: number;
   inventory_transaction_id?: number;
   approved_by?: string;
@@ -64,17 +73,30 @@ export interface InternalMaterialRequest {
   created_by?: string;
   last_modified_at?: string;
   last_modified_by?: string;
+  // Vendor Delivery Routing fields (from buyer completing PO)
+  source_type?: 'manual' | 'from_vendor_delivery';
+  vendor_delivery_confirmed?: boolean;
+  final_destination_site?: string;
+  intended_recipient_name?: string;  // Site engineer selected by buyer
+  routed_by_buyer_id?: number;
+  routed_to_store_at?: string;
+  cr_id?: number;  // Change Request ID linked to this request
   // Enriched fields from backend
   project_details?: {
     project_id: number;
     project_name: string;
     project_code: string;
     location?: string;
-    site_supervisor?: {
+    site_supervisor?: {  // First/primary site supervisor (for backward compatibility)
       user_id: number;
       full_name: string;
       email: string;
     };
+    site_supervisors?: Array<{  // All site supervisors assigned to this project
+      user_id: number;
+      full_name: string;
+      email: string;
+    }>;
     project_managers?: Array<{
       user_id: number;
       full_name: string;
@@ -552,6 +574,58 @@ class InventoryService {
       console.error('Error creating transaction:', axiosError);
       throw new Error(
         (axiosError.response?.data as any)?.error || 'Failed to create transaction'
+      );
+    }
+  }
+
+  /**
+   * Create a transaction with file upload
+   * Uploads delivery note to Supabase Storage and creates transaction with file URL
+   */
+  async createTransactionWithFile(
+    transaction: Omit<InventoryTransaction, 'inventory_transaction_id' | 'delivery_note_url'>,
+    deliveryNoteFile: File | null
+  ): Promise<InventoryTransaction> {
+    try {
+      // Create FormData to send file and transaction data to backend
+      const formData = new FormData();
+
+      // Add all transaction fields to FormData
+      formData.append('inventory_material_id', transaction.inventory_material_id.toString());
+      formData.append('transaction_type', transaction.transaction_type);
+      formData.append('quantity', transaction.quantity.toString());
+      formData.append('unit_price', transaction.unit_price.toString());
+      formData.append('total_amount', transaction.total_amount.toString());
+
+      if (transaction.reference_number) {
+        formData.append('reference_number', transaction.reference_number);
+      }
+      if (transaction.notes) {
+        formData.append('notes', transaction.notes);
+      }
+
+      // Add file if provided
+      if (deliveryNoteFile) {
+        formData.append('delivery_note_file', deliveryNoteFile);
+      }
+
+      // Send to backend - backend will handle Supabase upload
+      const response = await apiClient.post(
+        `/transactions`,
+        formData,
+        {
+          headers: {
+            ...this.getAuthHeader(),
+            // Don't set Content-Type - let browser set it with boundary for multipart/form-data
+          }
+        }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error creating transaction with file:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to create transaction with file'
       );
     }
   }
@@ -1594,6 +1668,71 @@ class InventoryService {
       console.error('Error updating stock:', axiosError);
       throw new Error(
         (axiosError.response?.data as any)?.error || 'Failed to update stock'
+      );
+    }
+  }
+
+  /**
+   * Get all custom units from database
+   */
+  async getCustomUnits(): Promise<CustomUnit[]> {
+    try {
+      const response = await apiClient.get('/boq/custom-units');
+      return response.data.custom_units || [];
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error fetching custom units:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to fetch custom units'
+      );
+    }
+  }
+
+  /**
+   * Create a new custom unit
+   */
+  async createCustomUnit(unitValue: string, unitLabel: string): Promise<CustomUnit> {
+    try {
+      const response = await apiClient.post('/boq/custom-units', {
+        unit_value: unitValue,
+        unit_label: unitLabel
+      });
+      return response.data.unit || response.data.custom_unit;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error creating custom unit:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to create custom unit'
+      );
+    }
+  }
+
+  /**
+   * Request disposal for damaged/wasted materials from catalog
+   */
+  async requestMaterialDisposal(
+    materialId: number,
+    disposalData: {
+      quantity: number;
+      reason: string;
+      notes: string;
+      estimated_value: number;
+    }
+  ): Promise<any> {
+    try {
+      const response = await apiClient.post(
+        `/inventory/materials/${materialId}/request-disposal`,
+        disposalData,
+        {
+          headers: this.getAuthHeader()
+        }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error submitting disposal request:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to submit disposal request'
       );
     }
   }

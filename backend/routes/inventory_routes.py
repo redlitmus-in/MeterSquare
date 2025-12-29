@@ -479,8 +479,24 @@ def get_pm_return_delivery_notes_route():
     return get_return_delivery_notes_for_pm()
 
 
+@inventory_routes.route('/delivery_note/<int:delivery_note_id>/download', methods=['GET'])
+@jwt_required
+def download_dn_pdf_route(delivery_note_id):
+    """Download Material Delivery Note as PDF"""
+    return download_dn_pdf(delivery_note_id)
+
+
 @inventory_routes.route('/return_delivery_note/<int:return_note_id>/download', methods=['GET'])
 @jwt_required
 def download_rdn_pdf_route(return_note_id):
     """Download RDN as PDF"""
     return download_rdn_pdf(return_note_id)
+
+
+# ==================== DISPOSAL REQUEST ROUTES ====================
+
+@inventory_routes.route('/inventory/materials/<int:material_id>/request-disposal', methods=['POST'])
+@jwt_required
+def request_material_disposal_route(material_id):
+    """Request disposal for damaged/wasted material from catalog"""
+    return request_material_disposal(material_id)
