@@ -562,6 +562,7 @@ const EstimatorHub: React.FC = () => {
   // Reset BOQ pagination when tab changes
   useEffect(() => {
     setBoqCurrentPage(1);
+    setCurrentPage(1); // Also reset project pagination
   }, [activeTab]);
 
   // Sync activeTab with URL when URL changes (e.g., from notification click)
@@ -3293,44 +3294,54 @@ const EstimatorHub: React.FC = () => {
                   </div>
                 )}
 
-                {/* Pagination */}
-                <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
-                  <div className="text-sm text-gray-600 font-medium">
-                    Showing {totalProjects > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + filteredProjects.length, totalProjects)} of {totalProjects} projects
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                      disabled={currentPage === 1}
-                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      style={{ color: 'rgb(36, 61, 138)' }}
-                    >
-                      Previous
-                    </button>
-                    {Array.from({ length: totalPages || 1 }, (_, i) => i + 1).map(page => (
-                      <button
-                        key={page}
-                        onClick={() => setCurrentPage(page)}
-                        className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                          currentPage === page
-                            ? 'border-[rgb(36,61,138)] bg-blue-50'
-                            : 'border-gray-300 hover:bg-gray-50'
-                        }`}
-                        style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
-                      >
-                        {page}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                      disabled={currentPage === totalPages || totalPages === 0}
-                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      style={{ color: 'rgb(36, 61, 138)' }}
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
+                {/* Pagination - Use filteredProjects.length for current tab count */}
+                {(() => {
+                  const tabTotalItems = filteredProjects.length;
+                  const tabTotalPages = Math.ceil(tabTotalItems / itemsPerPage) || 1;
+                  const tabStartIndex = (currentPage - 1) * itemsPerPage;
+                  const tabHasNext = currentPage < tabTotalPages;
+                  const tabHasPrev = currentPage > 1;
+
+                  return (
+                    <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                      <div className="text-sm text-gray-600 font-medium">
+                        Showing {tabTotalItems > 0 ? tabStartIndex + 1 : 0} to {Math.min(tabStartIndex + itemsPerPage, tabTotalItems)} of {tabTotalItems} projects
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                          disabled={!tabHasPrev}
+                          className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          style={{ color: 'rgb(36, 61, 138)' }}
+                        >
+                          Previous
+                        </button>
+                        {Array.from({ length: tabTotalPages }, (_, i) => i + 1).map(page => (
+                          <button
+                            key={page}
+                            onClick={() => setCurrentPage(page)}
+                            className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                              currentPage === page
+                                ? 'border-[rgb(36,61,138)] bg-blue-50'
+                                : 'border-gray-300 hover:bg-gray-50'
+                            }`}
+                            style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                          >
+                            {page}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.min(tabTotalPages, prev + 1))}
+                          disabled={!tabHasNext}
+                          className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          style={{ color: 'rgb(36, 61, 138)' }}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
                     </>
                   );
                 })()}
@@ -3364,45 +3375,43 @@ const EstimatorHub: React.FC = () => {
                       )}
 
                       {/* Pagination Controls */}
-                      {totalBoqPages > 1 && (
-                        <div className="flex items-center justify-between border-t border-gray-200 pt-4">
-                          <div className="text-sm text-gray-600">
-                            Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
-                              disabled={boqCurrentPage === 1}
-                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                              style={{ color: 'rgb(36, 61, 138)' }}
-                            >
-                              Previous
-                            </button>
-                            {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
-                              <button
-                                key={page}
-                                onClick={() => setBoqCurrentPage(page)}
-                                className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                                  boqCurrentPage === page
-                                    ? 'border-[rgb(36,61,138)] bg-blue-50'
-                                    : 'border-gray-300 hover:bg-gray-50'
-                                }`}
-                                style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
-                              >
-                                {page}
-                              </button>
-                            ))}
-                            <button
-                              onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
-                              disabled={boqCurrentPage === totalBoqPages}
-                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                              style={{ color: 'rgb(36, 61, 138)' }}
-                            >
-                              Next
-                            </button>
-                          </div>
+                      <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                        <div className="text-sm text-gray-600 font-medium">
+                          Showing {filteredBOQs.length > 0 ? startIndex + 1 : 0} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
                         </div>
-                      )}
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+                            disabled={boqCurrentPage === 1}
+                            className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            style={{ color: 'rgb(36, 61, 138)' }}
+                          >
+                            Previous
+                          </button>
+                          {Array.from({ length: totalBoqPages || 1 }, (_, i) => i + 1).map(page => (
+                            <button
+                              key={page}
+                              onClick={() => setBoqCurrentPage(page)}
+                              className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                                boqCurrentPage === page
+                                  ? 'border-[rgb(36,61,138)] bg-blue-50'
+                                  : 'border-gray-300 hover:bg-gray-50'
+                              }`}
+                              style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                            >
+                              {page}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+                            disabled={boqCurrentPage === totalBoqPages || totalBoqPages === 0}
+                            className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            style={{ color: 'rgb(36, 61, 138)' }}
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
                     </>
                   );
                 })()}
@@ -3436,45 +3445,43 @@ const EstimatorHub: React.FC = () => {
                       )}
 
                       {/* Pagination Controls */}
-                      {totalBoqPages > 1 && (
-                        <div className="flex items-center justify-between border-t border-gray-200 pt-4">
-                          <div className="text-sm text-gray-600">
-                            Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
-                              disabled={boqCurrentPage === 1}
-                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                              style={{ color: 'rgb(36, 61, 138)' }}
-                            >
-                              Previous
-                            </button>
-                            {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
-                              <button
-                                key={page}
-                                onClick={() => setBoqCurrentPage(page)}
-                                className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                                  boqCurrentPage === page
-                                    ? 'border-[rgb(36,61,138)] bg-blue-50'
-                                    : 'border-gray-300 hover:bg-gray-50'
-                                }`}
-                                style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
-                              >
-                                {page}
-                              </button>
-                            ))}
-                            <button
-                              onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
-                              disabled={boqCurrentPage === totalBoqPages}
-                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                              style={{ color: 'rgb(36, 61, 138)' }}
-                            >
-                              Next
-                            </button>
-                          </div>
+                      <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                        <div className="text-sm text-gray-600 font-medium">
+                          Showing {filteredBOQs.length > 0 ? startIndex + 1 : 0} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
                         </div>
-                      )}
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+                            disabled={boqCurrentPage === 1}
+                            className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            style={{ color: 'rgb(36, 61, 138)' }}
+                          >
+                            Previous
+                          </button>
+                          {Array.from({ length: totalBoqPages || 1 }, (_, i) => i + 1).map(page => (
+                            <button
+                              key={page}
+                              onClick={() => setBoqCurrentPage(page)}
+                              className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                                boqCurrentPage === page
+                                  ? 'border-[rgb(36,61,138)] bg-blue-50'
+                                  : 'border-gray-300 hover:bg-gray-50'
+                              }`}
+                              style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                            >
+                              {page}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+                            disabled={boqCurrentPage === totalBoqPages || totalBoqPages === 0}
+                            className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            style={{ color: 'rgb(36, 61, 138)' }}
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
                     </>
                   );
                 })()}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
@@ -317,6 +317,35 @@ const ChangeRequestsPage: React.FC = () => {
     rejected: changeRequests.filter(r => r.status === 'rejected').length
   };
 
+  // ✅ Client-side pagination per tab
+  const tabItemsPerPage = 20;
+  const [tabPage, setTabPage] = useState(1);
+
+  // Reset page when tab changes
+  useEffect(() => {
+    setTabPage(1);
+  }, [activeTab]);
+
+  // Get paginated items for current tab
+  const paginatedRequests = useMemo(() => {
+    const startIndex = (tabPage - 1) * tabItemsPerPage;
+    return filteredRequests.slice(startIndex, startIndex + tabItemsPerPage);
+  }, [filteredRequests, tabPage, tabItemsPerPage]);
+
+  // Get pagination info for current tab
+  const getTabPaginationInfo = () => {
+    const totalItems = filteredRequests.length;
+    const totalPages = Math.ceil(totalItems / tabItemsPerPage) || 1;
+    const startIndex = (tabPage - 1) * tabItemsPerPage;
+    return {
+      totalItems,
+      totalPages,
+      startIndex,
+      hasNext: tabPage < totalPages,
+      hasPrev: tabPage > 1
+    };
+  };
+
   if (initialLoad) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -485,10 +514,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No purchase requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -600,10 +629,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No approved requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -681,10 +710,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No completed requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -759,10 +788,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No rejected requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -829,46 +858,51 @@ const ChangeRequestsPage: React.FC = () => {
             </TabsContent>
           </Tabs>
 
-          {/* ✅ PERFORMANCE: Pagination Controls */}
-          {pagination && (
-            <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
-              <div className="text-sm text-gray-600 font-medium">
-                Showing {pagination.total_count > 0 ? Math.min((currentPage - 1) * perPage + 1, pagination.total_count) : 0} to {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={!pagination.has_prev}
-                  className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  style={{ color: 'rgb(36, 61, 138)' }}
-                >
-                  Previous
-                </button>
-                {Array.from({ length: pagination.total_pages || 1 }, (_, i) => i + 1).map(page => (
+          {/* ✅ PERFORMANCE: Pagination Controls - Per Tab */}
+          {(() => {
+            const tabPagination = getTabPaginationInfo();
+            const { totalItems, totalPages, startIndex, hasNext, hasPrev } = tabPagination;
+
+            return (
+              <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                <div className="text-sm text-gray-600 font-medium">
+                  Showing {totalItems > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + tabItemsPerPage, totalItems)} of {totalItems} results
+                </div>
+                <div className="flex items-center gap-2">
                   <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                      currentPage === page
-                        ? 'border-[rgb(36,61,138)] bg-blue-50'
-                        : 'border-gray-300 hover:bg-gray-50'
-                    }`}
-                    style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                    onClick={() => setTabPage(prev => Math.max(1, prev - 1))}
+                    disabled={!hasPrev}
+                    className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    style={{ color: 'rgb(36, 61, 138)' }}
                   >
-                    {page}
+                    Previous
                   </button>
-                ))}
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
-                  disabled={!pagination.has_next}
-                  className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  style={{ color: 'rgb(36, 61, 138)' }}
-                >
-                  Next
-                </button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                    <button
+                      key={page}
+                      onClick={() => setTabPage(page)}
+                      className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                        tabPage === page
+                          ? 'border-[rgb(36,61,138)] bg-blue-50'
+                          : 'border-gray-300 hover:bg-gray-50'
+                      }`}
+                      style={{ color: tabPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setTabPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={!hasNext}
+                    className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    style={{ color: 'rgb(36, 61, 138)' }}
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </div>
 

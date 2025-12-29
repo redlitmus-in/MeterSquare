@@ -15,6 +15,7 @@ import uuid
 from werkzeug.utils import secure_filename
 from supabase import create_client, Client
 from utils.comprehensive_notification_service import ComprehensiveNotificationService
+from socketio_server import emit_support_ticket_event
 
 log = get_logger()
 
@@ -362,18 +363,13 @@ def public_submit_ticket(ticket_id):
         ticket.updated_at = datetime.utcnow()
         db.session.commit()
 
-        # Notify dev team about new ticket submission
+        # Emit real-time event to support-management page
         try:
-            ComprehensiveNotificationService.notify_ticket_submitted(
-                ticket_id=ticket.ticket_id,
-                ticket_number=ticket.ticket_number,
-                client_name=ticket.reporter_name,
-                client_email=ticket.reporter_email,
-                subject=ticket.subject,
-                priority=ticket.priority
-            )
+            emit_support_ticket_event('ticket_submitted', ticket.to_dict())
         except Exception as e:
-            log.error(f"Failed to send ticket submission notification: {e}")
+            log.error(f"Failed to emit ticket submitted event: {e}")
+
+        log.info(f"New support ticket submitted: {ticket.ticket_number} by {ticket.reporter_name}")
 
         return jsonify({
             "success": True,
@@ -461,7 +457,7 @@ def public_confirm_resolution(ticket_id):
             ComprehensiveNotificationService.notify_ticket_closed_by_client(
                 ticket_id=ticket.ticket_id,
                 ticket_number=ticket.ticket_number,
-                subject=ticket.subject,
+                subject=ticket.title,
                 client_name=ticket.reporter_name,
                 client_feedback=client_feedback
             )
@@ -590,9 +586,9 @@ def admin_approve_ticket(ticket_id):
             ComprehensiveNotificationService.notify_ticket_approved(
                 ticket_id=ticket.ticket_id,
                 ticket_number=ticket.ticket_number,
-                client_user_id=ticket.user_id,
+                client_user_id=ticket.reporter_user_id,
                 client_email=ticket.reporter_email,
-                subject=ticket.subject,
+                subject=ticket.title,
                 approved_by_name=ticket.approved_by_name
             )
         except Exception as e:
@@ -655,9 +651,9 @@ def admin_reject_ticket(ticket_id):
             ComprehensiveNotificationService.notify_ticket_rejected(
                 ticket_id=ticket.ticket_id,
                 ticket_number=ticket.ticket_number,
-                client_user_id=ticket.user_id,
+                client_user_id=ticket.reporter_user_id,
                 client_email=ticket.reporter_email,
-                subject=ticket.subject,
+                subject=ticket.title,
                 rejection_reason=ticket.rejection_reason,
                 rejected_by_name=ticket.rejected_by_name
             )
@@ -737,9 +733,9 @@ def admin_resolve_ticket(ticket_id):
             ComprehensiveNotificationService.notify_ticket_resolved(
                 ticket_id=ticket.ticket_id,
                 ticket_number=ticket.ticket_number,
-                client_user_id=ticket.user_id,
+                client_user_id=ticket.reporter_user_id,
                 client_email=ticket.reporter_email,
-                subject=ticket.subject,
+                subject=ticket.title,
                 resolution_notes=ticket.resolution_notes,
                 resolved_by_name=ticket.resolved_by_name
             )
@@ -804,9 +800,9 @@ def admin_update_status(ticket_id):
                 ComprehensiveNotificationService.notify_ticket_status_updated(
                     ticket_id=ticket.ticket_id,
                     ticket_number=ticket.ticket_number,
-                    client_user_id=ticket.user_id,
+                    client_user_id=ticket.reporter_user_id,
                     client_email=ticket.reporter_email,
-                    subject=ticket.subject,
+                    subject=ticket.title,
                     new_status=new_status,
                     updated_by_name=ticket.admin_name
                 )
@@ -986,6 +982,16 @@ def add_comment(ticket_id):
 
         db.session.commit()
         log.info(f"Comment added to ticket {ticket.ticket_number} by {sender_name} ({sender_type})")
+
+        # Only emit real-time event when CLIENT adds comment (not dev team's own actions)
+        if sender_type == 'client':
+            try:
+                emit_support_ticket_event('ticket_comment', {
+                    **ticket.to_dict(),
+                    'new_comment': comment
+                })
+            except Exception as e:
+                log.error(f"Failed to emit ticket comment event: {e}")
 
         return jsonify({
             "success": True,

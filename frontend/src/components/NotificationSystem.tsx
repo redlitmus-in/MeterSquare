@@ -626,6 +626,39 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                   )}
                 </div>
                 <div className="flex items-center gap-0.5 sm:gap-1">
+                  {counts.unread > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={markAllAsRead}
+                      className="text-white hover:bg-white/10 h-6 sm:h-7 px-1.5 sm:px-2 text-[10px] sm:text-xs"
+                      title="Mark all as read"
+                    >
+                      <Check className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      if (notifications.length === 0) {
+                        return;
+                      }
+                      if (window.confirm('Are you sure you want to clear all notifications?')) {
+                        clearAll();
+                      }
+                    }}
+                    disabled={notifications.length === 0}
+                    className={`h-6 sm:h-7 px-1.5 sm:px-2 text-[10px] sm:text-xs ${
+                      notifications.length > 0
+                        ? 'text-white hover:bg-red-500/80'
+                        : 'text-white/50 cursor-not-allowed'
+                    }`}
+                    title={notifications.length > 0 ? "Clear all notifications" : "No notifications to clear"}
+                  >
+                    <Trash2 className="w-3 sm:w-3.5 h-3 sm:h-3.5 mr-1" />
+                    Clear All
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"

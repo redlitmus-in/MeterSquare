@@ -78,6 +78,7 @@ const ChangeRequestsPage: React.FC = () => {
 
   // ✅ PERFORMANCE: Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const [vendorPage, setVendorPage] = useState(1); // Separate pagination for vendor approvals tab
   const [pagination, setPagination] = useState<{
     total_count: number;
     total_pages: number;
@@ -854,6 +855,48 @@ const ChangeRequestsPage: React.FC = () => {
     });
   }, [vendorApprovalsSubTab, filteredVendorApprovals, filteredRejectedPOChildren]);
 
+  // ✅ Reset vendor page when switching sub-tabs
+  React.useEffect(() => {
+    setVendorPage(1);
+  }, [vendorApprovalsSubTab]);
+
+  // ✅ Paginated vendor approval items
+  const paginatedPendingItems = React.useMemo(() => {
+    const startIndex = (vendorPage - 1) * perPage;
+    return mergedPendingItems.slice(startIndex, startIndex + perPage);
+  }, [mergedPendingItems, vendorPage, perPage]);
+
+  const paginatedApprovedItems = React.useMemo(() => {
+    const startIndex = (vendorPage - 1) * perPage;
+    return mergedApprovedItems.slice(startIndex, startIndex + perPage);
+  }, [mergedApprovedItems, vendorPage, perPage]);
+
+  const paginatedRejectedItems = React.useMemo(() => {
+    const startIndex = (vendorPage - 1) * perPage;
+    return mergedRejectedItems.slice(startIndex, startIndex + perPage);
+  }, [mergedRejectedItems, vendorPage, perPage]);
+
+  // ✅ Get current tab's total items and pagination info
+  const getVendorPaginationInfo = () => {
+    let totalItems = 0;
+    if (vendorApprovalsSubTab === 'pending') {
+      totalItems = mergedPendingItems.length;
+    } else if (vendorApprovalsSubTab === 'approved') {
+      totalItems = mergedApprovedItems.length;
+    } else if (vendorApprovalsSubTab === 'rejected') {
+      totalItems = mergedRejectedItems.length;
+    }
+    const totalPages = Math.ceil(totalItems / perPage) || 1;
+    const startIndex = (vendorPage - 1) * perPage;
+    return {
+      totalItems,
+      totalPages,
+      startIndex,
+      hasNext: vendorPage < totalPages,
+      hasPrev: vendorPage > 1
+    };
+  };
+
   // Calculate vendor totals for change requests
   const enrichedChangeRequests = filteredRequests.map(request => {
     const vendorTotalCost = (request.materials_data || []).reduce((sum, mat) => {
@@ -1542,7 +1585,7 @@ const ChangeRequestsPage: React.FC = () => {
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                     {/* 🔥 MIXED ORDERING: Render merged array for approved tab */}
-                    {vendorApprovalsSubTab === 'approved' && mergedApprovedItems.map((item, index) => {
+                    {vendorApprovalsSubTab === 'approved' && paginatedApprovedItems.map((item, index) => {
                       if (isPOChild(item)) {
                         // Render PO Child card
                         const poChild = item;
@@ -1882,7 +1925,7 @@ const ChangeRequestsPage: React.FC = () => {
                     })}
 
                     {/* 🔥 MIXED ORDERING: Render merged pending items (purchases + POChildren mixed by date) */}
-                    {vendorApprovalsSubTab === 'pending' && mergedPendingItems.map((item, index) => {
+                    {vendorApprovalsSubTab === 'pending' && paginatedPendingItems.map((item, index) => {
                       // Check if this item is a POChild or regular purchase
                       if (isPOChild(item)) {
                         // Render POChild card
@@ -2122,7 +2165,7 @@ const ChangeRequestsPage: React.FC = () => {
                     })}
 
                     {/* 🔥 MIXED ORDERING: Render merged rejected items (parents + PO children sorted by date) */}
-                    {vendorApprovalsSubTab === 'rejected' && mergedRejectedItems.map((item, index) => {
+                    {vendorApprovalsSubTab === 'rejected' && paginatedRejectedItems.map((item, index) => {
                       if (isPOChild(item)) {
                         // Render PO Child card
                         const poChild = item;
@@ -2405,46 +2448,96 @@ const ChangeRequestsPage: React.FC = () => {
 
           </Tabs>
 
-          {/* ✅ PERFORMANCE: Pagination Controls */}
-          {pagination && (
-            <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
-              <div className="text-sm text-gray-600 font-medium">
-                Showing {pagination.total_count > 0 ? Math.min((currentPage - 1) * perPage + 1, pagination.total_count) : 0} to {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={!pagination.has_prev}
-                  className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  style={{ color: 'rgb(36, 61, 138)' }}
-                >
-                  Previous
-                </button>
-                {Array.from({ length: pagination.total_pages || 1 }, (_, i) => i + 1).map(page => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                      currentPage === page
-                        ? 'border-[rgb(36,61,138)] bg-blue-50'
-                        : 'border-gray-300 hover:bg-gray-50'
-                    }`}
-                    style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
-                  >
-                    {page}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
-                  disabled={!pagination.has_next}
-                  className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  style={{ color: 'rgb(36, 61, 138)' }}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+          {/* ✅ PERFORMANCE: Pagination Controls - Per Tab */}
+          {(() => {
+            // Determine pagination data based on active tab
+            if (activeTab === 'vendor_approvals') {
+              const vendorPagination = getVendorPaginationInfo();
+              const { totalItems, totalPages, startIndex, hasNext, hasPrev } = vendorPagination;
+
+              return (
+                <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                  <div className="text-sm text-gray-600 font-medium">
+                    Showing {totalItems > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + perPage, totalItems)} of {totalItems} results
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setVendorPage(prev => Math.max(1, prev - 1))}
+                      disabled={!hasPrev}
+                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      style={{ color: 'rgb(36, 61, 138)' }}
+                    >
+                      Previous
+                    </button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                      <button
+                        key={page}
+                        onClick={() => setVendorPage(page)}
+                        className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                          vendorPage === page
+                            ? 'border-[rgb(36,61,138)] bg-blue-50'
+                            : 'border-gray-300 hover:bg-gray-50'
+                        }`}
+                        style={{ color: vendorPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setVendorPage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={!hasNext}
+                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      style={{ color: 'rgb(36, 61, 138)' }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              );
+            } else if (activeTab === 'completed' && pagination) {
+              // Completed tab uses server-side pagination
+              return (
+                <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                  <div className="text-sm text-gray-600 font-medium">
+                    Showing {pagination.total_count > 0 ? Math.min((currentPage - 1) * perPage + 1, pagination.total_count) : 0} to {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={!pagination.has_prev}
+                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      style={{ color: 'rgb(36, 61, 138)' }}
+                    >
+                      Previous
+                    </button>
+                    {Array.from({ length: pagination.total_pages || 1 }, (_, i) => i + 1).map(page => (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                          currentPage === page
+                            ? 'border-[rgb(36,61,138)] bg-blue-50'
+                            : 'border-gray-300 hover:bg-gray-50'
+                        }`}
+                        style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
+                      disabled={!pagination.has_next}
+                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      style={{ color: 'rgb(36, 61, 138)' }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
         </div>
       </div>
 
