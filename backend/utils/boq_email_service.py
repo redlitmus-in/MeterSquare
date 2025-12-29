@@ -2011,27 +2011,6 @@ class BOQEmailService:
 
                                 <div style="height: 2px; background: linear-gradient(90deg, transparent, #3b82f6, transparent); margin: 25px 0;"></div>
 
-                                <!-- Purchase Order Information -->
-                                <h2 style="color: #000000; font-size: 20px; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Purchase Order Details</h2>
-                                <table width="100%" cellpadding="10" cellspacing="0" border="0" style="background: #f0f9ff; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold; width: 30%;">PO Number:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">PO-{cr_id}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Vendor:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{vendor_name}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Total Items:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{len(materials)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Total Amount:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">AED {total_cost:,.2f}</td>
-                                    </tr>
-                                </table>
-
                                 <!-- Buyer Contact Information -->
                                 <h2 style="color: #000000; font-size: 20px; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Contact Person</h2>
                                 <table width="100%" cellpadding="10" cellspacing="0" border="0" style="background: #f0f9ff; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">

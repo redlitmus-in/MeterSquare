@@ -562,31 +562,42 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
 
       // CRITICAL: Save material_vendor_selections to database FIRST
       // This ensures the backend can populate vendor contact details correctly
+      // NOTE: Skip for PO children OR if parent CR has already been split
       const saveLpoDataAsync = async () => {
         try {
-          const materialVendorSelections: Record<string, any> = {};
-          materialVendors.forEach(mv => {
-            if (mv.selected_vendors.length > 0) {
-              const selectedVendor = mv.selected_vendors[0];
-              materialVendorSelections[mv.material_name] = {
-                vendor_id: selectedVendor.vendor_id,
-                vendor_name: selectedVendor.vendor_name,
-                negotiated_price: selectedVendor.negotiated_price,
-                vendor_material_name: selectedVendor.vendor_material_name,
-                save_price_for_future: selectedVendor.save_price_for_future
-              };
-            }
-          });
+          // Skip saving vendor selections if:
+          // 1. This is a PO child (po_child_id exists)
+          // 2. Parent CR has been split into PO children (po_children.length > 0)
+          const isPOChild = !!purchase.po_child_id;
+          const parentHasBeenSplit = purchase.po_children && purchase.po_children.length > 0;
 
-          // Save to database first
-          await buyerService.updatePurchaseOrder({
-            cr_id: purchase.cr_id,
-            material_vendor_selections: materialVendorSelections,
-            materials: null as any,
-            total_cost: 0
-          });
+          if (!isPOChild && !parentHasBeenSplit) {
+            const materialVendorSelections: Record<string, any> = {};
+            materialVendors.forEach(mv => {
+              if (mv.selected_vendors.length > 0) {
+                const selectedVendor = mv.selected_vendors[0];
+                materialVendorSelections[mv.material_name] = {
+                  vendor_id: selectedVendor.vendor_id,
+                  vendor_name: selectedVendor.vendor_name,
+                  negotiated_price: selectedVendor.negotiated_price,
+                  vendor_material_name: selectedVendor.vendor_material_name,
+                  save_price_for_future: selectedVendor.save_price_for_future
+                };
+              }
+            });
 
-          console.log('[Auto-load LPO] Saved vendor selections, now loading LPO data');
+            // Save to database first (only for non-split purchases)
+            await buyerService.updatePurchaseOrder({
+              cr_id: purchase.cr_id,
+              material_vendor_selections: materialVendorSelections,
+              materials: null as any,
+              total_cost: 0
+            });
+
+            console.log('[Auto-load LPO] Saved vendor selections, now loading LPO data');
+          } else {
+            console.log('[Auto-load LPO] Skipping vendor selection save - purchase is PO child or already split:', { isPOChild, parentHasBeenSplit });
+          }
 
           // Clear cache for this vendor to force fresh load with vendor data
           const newMap = new Map(lpoDataByVendor);
@@ -2636,6 +2647,14 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                             console.error('Failed to save material vendor selections:', error);
                                             toast.error('Failed to save vendor selections');
                                             return;
+                                          }
+
+                                          // IMPORTANT: If lpoData exists (edited in main view), cache it for this vendor
+                                          // This preserves user's edits (like VAT %) when showing confirmation dialog
+                                          if (lpoData) {
+                                            const newMap = new Map(lpoDataByVendor);
+                                            newMap.set(vendorGroup.vendor_id, lpoData);
+                                            setLpoDataByVendor(newMap);
                                           }
 
                                           // Show confirmation dialog

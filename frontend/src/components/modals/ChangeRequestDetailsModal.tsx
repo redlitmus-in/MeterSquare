@@ -181,37 +181,26 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     }
   }, [isOpen, latestChangeRequest]);
 
-  // Auto-fetch LPO data to get prices when materials have 0 prices and vendor is selected
+  // Auto-fetch LPO data to get prices and VAT when vendor is selected
   React.useEffect(() => {
-    const fetchLPOForPrices = async () => {
+    const fetchLPOData = async () => {
       if (!isOpen || !latestChangeRequest || lpoData) return;
 
-      // Check if we need prices (materials have 0 prices AND no vendor negotiated price)
-      const materials = latestChangeRequest.sub_items_data || latestChangeRequest.materials_data || [];
-      const materialVendorSelections = (latestChangeRequest as any).material_vendor_selections || {};
-
-      const needsPrices = materials.some((m: any) => {
-        const materialName = m.material_name || m.sub_item_name || '';
-        const hasVendorNegotiatedPrice = materialVendorSelections[materialName]?.negotiated_price > 0;
-        const hasMaterialPrice = m.unit_price && m.unit_price > 0;
-        // Only need to fetch LPO if no vendor negotiated price AND no material price
-        return !hasVendorNegotiatedPrice && !hasMaterialPrice;
-      });
-
-      // Only fetch if vendor is selected and we need prices
-      if (needsPrices && latestChangeRequest.selected_vendor_name) {
+      // Always fetch LPO data when vendor is selected (to get VAT and prices)
+      if (latestChangeRequest.selected_vendor_name) {
         try {
           const poChildId = (latestChangeRequest as any).po_child_id;
           const response = await buyerService.previewLPOPdf(latestChangeRequest.cr_id, poChildId);
           const lpoDataFromResponse = response.lpo_data || response;
           setLpoData(lpoDataFromResponse);
         } catch (error) {
-          // Silently fail - LPO prices are optional fallback
+          // Silently fail - LPO data is optional
+          console.log('LPO data not available:', error);
         }
       }
     };
 
-    fetchLPOForPrices();
+    fetchLPOData();
   }, [isOpen, latestChangeRequest, lpoData]);
 
   // Memoize material data for vendor comparison to avoid recalculation on every render
@@ -462,6 +451,11 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const totalMaterialsCost = materialsData.reduce((sum: number, mat: any) =>
     sum + (mat.total_price || (mat.quantity * mat.unit_price) || 0), 0
   );
+
+  // Calculate grand total including VAT (for summary display consistency)
+  const vatPercent = lpoData?.totals?.vat_percent || 0;
+  const vatAmount = vatPercent > 0 ? (totalMaterialsCost * vatPercent / 100) : 0;
+  const grandTotalWithVat = totalMaterialsCost + vatAmount;
 
   // Use role helper functions with fallback string checks for robustness
   const userRoleLower = user?.role?.toLowerCase() || '';
@@ -1382,9 +1376,22 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                     {/* Total Cost on Mobile */}
                     {shouldShowPricing && (
                       <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
+                        {/* Subtotal */}
                         <div className="flex justify-between items-center">
+                          <span className="text-sm text-gray-600">Subtotal:</span>
+                          <span className="text-sm font-medium text-gray-700">{formatCurrency(totalMaterialsCost)}</span>
+                        </div>
+                        {/* VAT - only show if > 0 */}
+                        {vatPercent > 0 && (
+                          <div className="flex justify-between items-center mt-1">
+                            <span className="text-sm text-gray-600">VAT ({vatPercent}%):</span>
+                            <span className="text-sm font-medium text-gray-700">{formatCurrency(vatAmount)}</span>
+                          </div>
+                        )}
+                        {/* Total Cost */}
+                        <div className="flex justify-between items-center mt-2 pt-2 border-t border-purple-200">
                           <span className="text-sm font-bold text-gray-700">Total Cost:</span>
-                          <span className="text-base font-bold text-purple-700">{formatCurrency(totalMaterialsCost)}</span>
+                          <span className="text-base font-bold text-purple-700">{formatCurrency(grandTotalWithVat)}</span>
                         </div>
                         {/* BOQ Total as secondary - always show */}
                         {(() => {

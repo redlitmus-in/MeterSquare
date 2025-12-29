@@ -422,6 +422,13 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
             negotiated_price = vendor_selection.get('negotiated_price')
             vendor_id = vendor_selection.get('vendor_id')
 
+            # ✅ Get brand and specification from vendor selection (same as other branches)
+            vendor_brand = vendor_selection.get('brand', '') if isinstance(vendor_selection, dict) else ''
+            vendor_specification = vendor_selection.get('specification', '') if isinstance(vendor_selection, dict) else ''
+
+            # ✅ Get supplier notes from vendor selection (same as other branches)
+            supplier_notes = vendor_selection.get('supplier_notes', '') if isinstance(vendor_selection, dict) else ''
+
             # Lookup vendor product price from catalog
             vendor_product_price = 0
             if vendor_id and vendor_id in vendor_product_prices:
@@ -435,22 +442,26 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
             # Use vendor price if EITHER negotiated_price OR vendor_product_price exists
             has_vendor_price = (negotiated_price and negotiated_price > 0) or (vendor_product_price and vendor_product_price > 0)
             vendor_selected = (cr.vendor_selection_status in ['approved', 'pending_td_approval'] and has_vendor_price)
-            
+
             # Use vendor price when vendor selected, otherwise BOQ price
             display_unit_price = effective_price if vendor_selected else original_unit_price
             material_total = float(quantity) * float(display_unit_price)
 
             # FIXED: Use vendor price for cr_total when approved
             cr_total += material_total
-            
+
+            # ✅ Get brand and specification - prefer vendor selection, fallback to material data (same as other branches)
+            final_brand = vendor_brand or material.get('brand', '')
+            final_specification = vendor_specification or material.get('specification', '')
+
             materials_list.append({
                 "material_name": material_name,
                 "master_material_id": master_material_id,
                 "is_new_material": material.get('is_new_material', False),  # From change request
                 "justification": material.get('justification', ''),  # Individual material justification
                 "sub_item_name": material.get('sub_item_name', ''),
-                "brand": material.get('brand', ''),
-                "specification": material.get('specification', ''),
+                "brand": final_brand,  # ✅ Brand from vendor selection (same as other branches)
+                "specification": final_specification,  # ✅ Specification from vendor selection (same as other branches)
                 "size": material.get('size', ''),
                 "quantity": quantity,
                 "unit": material.get('unit', ''),
@@ -459,7 +470,8 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                 "negotiated_price": effective_price if effective_price != original_unit_price else None,
                 "vendor_product_price": vendor_product_price,
                 "original_unit_price": original_unit_price,  # Add original for reference
-                "boq_unit_price": original_unit_price  # For PDF comparison
+                "boq_unit_price": original_unit_price,  # For PDF comparison
+                "supplier_notes": supplier_notes  # ✅ Supplier notes from vendor selection (same as other branches)
             })
 
     return materials_list, cr_total
@@ -1526,8 +1538,22 @@ def get_buyer_pending_purchases():
                 "store_requested_materials": store_requested_material_names,  # List of material names sent to store
                 "all_store_requests_approved": all_store_requests_approved,
                 "any_store_request_rejected": any_store_request_rejected,
-                "store_requests_pending": store_requests_pending
+                "store_requests_pending": store_requests_pending,
+                # VAT data from LPO customization
+                "vat_percent": 5.0,  # Default, will be updated below
+                "vat_amount": cr_total * 0.05  # Default, will be updated below
             })
+
+            # Get VAT data from LPO customization for this purchase
+            try:
+                from models.lpo_customization import LPOCustomization
+                lpo_customization = LPOCustomization.query.filter_by(cr_id=cr.cr_id, po_child_id=None).first()
+                if lpo_customization and lpo_customization.vat_percent is not None:
+                    pending_purchases[-1]["vat_percent"] = float(lpo_customization.vat_percent)
+                    pending_purchases[-1]["vat_amount"] = float(lpo_customization.vat_amount) if lpo_customization.vat_amount else (cr_total * float(lpo_customization.vat_percent) / 100)
+            except Exception:
+                pass  # Keep defaults
+
         # Separate ongoing and pending approval
         ongoing_purchases = []
         pending_approval_purchases = []
@@ -1812,8 +1838,21 @@ def get_buyer_completed_purchases():
                 "vendor_selection_status": cr.vendor_selection_status,
                 "vendor_trn": vendor_trn,
                 "vendor_email": vendor_email,
-                "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
+                "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
+                # VAT data
+                "vat_percent": 5.0,  # Default
+                "vat_amount": cr_total * 0.05  # Default
             })
+
+            # Get VAT data from LPO customization for this purchase
+            try:
+                from models.lpo_customization import LPOCustomization
+                lpo_customization = LPOCustomization.query.filter_by(cr_id=cr.cr_id, po_child_id=None).first()
+                if lpo_customization and lpo_customization.vat_percent is not None:
+                    completed_purchases[-1]["vat_percent"] = float(lpo_customization.vat_percent)
+                    completed_purchases[-1]["vat_amount"] = float(lpo_customization.vat_amount) if lpo_customization.vat_amount else (cr_total * float(lpo_customization.vat_percent) / 100)
+            except Exception:
+                pass  # Keep defaults
 
         # Also get completed POChildren (vendor-split purchases)
         # POChild already imported above
@@ -1858,6 +1897,24 @@ def get_buyer_completed_purchases():
             po_child_total = po_child.materials_total_cost or 0
             total_cost += po_child_total
 
+            # Get VAT data for PO Child
+            vat_percent = 5.0  # Default
+            vat_amount = po_child_total * 0.05  # Default
+            try:
+                from models.lpo_customization import LPOCustomization
+                lpo_customization = LPOCustomization.query.filter_by(
+                    cr_id=parent_cr.cr_id if parent_cr else None,
+                    po_child_id=po_child.id
+                ).first()
+                if not lpo_customization and parent_cr:
+                    # Fall back to CR-level customization
+                    lpo_customization = LPOCustomization.query.filter_by(cr_id=parent_cr.cr_id, po_child_id=None).first()
+                if lpo_customization and lpo_customization.vat_percent is not None:
+                    vat_percent = float(lpo_customization.vat_percent)
+                    vat_amount = float(lpo_customization.vat_amount) if lpo_customization.vat_amount else (po_child_total * vat_percent / 100)
+            except Exception:
+                pass  # Keep defaults
+
             completed_po_children_list.append({
                 **po_child.to_dict(),
                 'project_name': project.project_name if project else 'Unknown',
@@ -1869,7 +1926,9 @@ def get_buyer_completed_purchases():
                 'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None,
                 'vendor_phone': vendor.phone if vendor else None,
                 'vendor_contact_person': vendor.contact_person_name if vendor else None,
-                'is_po_child': True
+                'is_po_child': True,
+                'vat_percent': vat_percent,
+                'vat_amount': vat_amount
             })
 
         return jsonify({
@@ -2608,6 +2667,23 @@ def get_purchase_by_id(cr_id):
             "has_store_requests": len(store_requested_material_names) > 0,
             "store_request_count": len(store_requested_material_names)
         }
+
+        # Get VAT data from LPO customization if available
+        try:
+            from models.lpo_customization import LPOCustomization
+            # Check for PO child specific customization first, then CR-level
+            lpo_customization = LPOCustomization.query.filter_by(cr_id=cr_id, po_child_id=None).first()
+            if lpo_customization and lpo_customization.vat_percent is not None:
+                purchase["vat_percent"] = float(lpo_customization.vat_percent)
+                purchase["vat_amount"] = float(lpo_customization.vat_amount) if lpo_customization.vat_amount else (cr_total * float(lpo_customization.vat_percent) / 100)
+            else:
+                # Default 5% VAT for UAE
+                purchase["vat_percent"] = 5.0
+                purchase["vat_amount"] = cr_total * 0.05
+        except Exception as vat_error:
+            log.warning(f"Could not fetch VAT data: {vat_error}")
+            purchase["vat_percent"] = 5.0
+            purchase["vat_amount"] = cr_total * 0.05
 
         # If vendor is selected, add vendor contact details (with overrides)
         if cr.selected_vendor_id:
@@ -6971,9 +7047,15 @@ def send_vendor_whatsapp(cr_id):
                 # If no lpo_data provided, generate using same logic as preview_lpo_pdf
                 if not lpo_data:
                     # Get saved customizations if any
+                    # Priority: 1) PO child specific, 2) CR-level customization
                     saved_customization = None
                     try:
-                        saved_customization = LPOCustomization.query.filter_by(cr_id=cr_id).first()
+                        if po_child and po_child_id:
+                            # First try to find customization specific to this PO child
+                            saved_customization = LPOCustomization.query.filter_by(cr_id=cr_id, po_child_id=po_child_id).first()
+                        if not saved_customization:
+                            # Fall back to CR-level customization (po_child_id is NULL)
+                            saved_customization = LPOCustomization.query.filter_by(cr_id=cr_id, po_child_id=None).first()
                     except Exception as e:
                         log.warning(f"Error fetching LPOCustomization: {e}")
                         db.session.rollback()  # Rollback to clear any failed transaction
@@ -6989,12 +7071,12 @@ def send_vendor_whatsapp(cr_id):
                         qty = material.get('quantity', 0)
                         amount = float(qty) * float(rate)
                         subtotal += amount
-                        
+
                         # Get separate fields for material name, brand, and specification
                         material_name = material.get('material_name', '') or material.get('sub_item_name', '')
                         brand = material.get('brand', '')
                         specification = material.get('specification', '')
-                        
+
                         items.append({
                             "sl_no": i,
                             "material_name": material_name,
@@ -7007,10 +7089,15 @@ def send_vendor_whatsapp(cr_id):
                             "amount": round(amount, 2)
                         })
 
-                    # VAT removed as per requirement
-                    vat_percent = 0
-                    vat_amount = 0
-                    grand_total = subtotal
+                    # VAT - use saved customization values, otherwise default to 5%
+                    if saved_customization and hasattr(saved_customization, 'vat_percent'):
+                        vat_percent = float(saved_customization.vat_percent) if saved_customization.vat_percent is not None else 5.0
+                        vat_amount = (subtotal * vat_percent) / 100
+                    else:
+                        # Default: 5% VAT
+                        vat_percent = 5.0
+                        vat_amount = (subtotal * 5.0) / 100
+                    grand_total = subtotal + vat_amount
 
                     DEFAULT_COMPANY_TRN = "100223723600003"
                     vendor_phone = vendor.phone or ""
@@ -9064,6 +9151,8 @@ def preview_lpo_pdf(cr_id):
                             material['vendor_material_name'] = vendor_selection.get('vendor_material_name', mat_name)
                             material['brand'] = vendor_selection.get('brand', material.get('brand', ''))
                             material['specification'] = vendor_selection.get('specification', material.get('specification', ''))
+                            # ✅ CRITICAL: Ensure supplier_notes is enriched from vendor selection
+                            material['supplier_notes'] = vendor_selection.get('supplier_notes', material.get('supplier_notes', ''))
 
                             # Recalculate total with vendor rate
                             qty = material.get('quantity', 0)

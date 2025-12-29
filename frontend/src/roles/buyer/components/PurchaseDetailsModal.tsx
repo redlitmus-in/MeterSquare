@@ -27,7 +27,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency } from '@/utils/formatters';
-import { Purchase } from '../services/buyerService';
+import { Purchase, buyerService } from '../services/buyerService';
 
 interface PurchaseDetailsModalProps {
   purchase: Purchase;
@@ -42,6 +42,9 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
 }) => {
   // Local purchase state to hold updated data
   const [localPurchase, setLocalPurchase] = useState<Purchase>(purchase);
+
+  // LPO data for VAT information
+  const [lpoData, setLpoData] = useState<any>(null);
 
   // Update local purchase when purchase changes or modal opens
   useEffect(() => {
@@ -150,8 +153,8 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
       });
     }
 
-    // If vendor is approved, recalculate total_cost from materials (which have vendor prices)
-    if (purchase.vendor_selection_status === 'approved' && purchase.materials && purchase.materials.length > 0) {
+    // Always calculate total_cost from materials (for all statuses, not just approved)
+    if (purchase.materials && purchase.materials.length > 0) {
       const vendorTotalCost = updatedPurchase.materials.reduce((sum, mat) => {
         return sum + (mat.total_price || (mat.unit_price * mat.quantity) || 0);
       }, 0);
@@ -160,6 +163,34 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
 
     setLocalPurchase(updatedPurchase);
   }, [purchase, isOpen]);
+
+  // Fetch LPO data for VAT information when modal opens
+  useEffect(() => {
+    const fetchLPOData = async () => {
+      if (!isOpen || !purchase || lpoData) return;
+
+      // Only fetch if vendor is selected (has LPO customization data)
+      if (purchase.selected_vendor_name || (purchase as any).vendor_name) {
+        try {
+          const poChildId = (purchase as any).po_child_id;
+          const response = await buyerService.previewLPOPdf(purchase.cr_id, poChildId);
+          const lpoDataFromResponse = response.lpo_data || response;
+          setLpoData(lpoDataFromResponse);
+        } catch (error) {
+          console.log('LPO data not available:', error);
+        }
+      }
+    };
+
+    fetchLPOData();
+  }, [isOpen, purchase, lpoData]);
+
+  // Reset lpoData when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setLpoData(null);
+    }
+  }, [isOpen]);
 
   const handleClose = () => {
     onClose();
@@ -282,7 +313,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         <div className="text-2xl font-bold text-green-600">
                           {(() => {
                             const subtotal = localPurchase.total_cost || 0;
-                            const vatPercent = (localPurchase as any).vat_percent || 5;
+                            const vatPercent = lpoData?.totals?.vat_percent ?? (localPurchase as any).vat_percent ?? 0;
                             const grandTotal = subtotal + (subtotal * vatPercent / 100);
                             return formatCurrency(grandTotal);
                           })()}
@@ -653,8 +684,8 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                           }
                           // Calculate VAT and totals
                           const subtotal = localPurchase.total_cost || 0;
-                          // Check if purchase has VAT data, otherwise use 5% default for UAE
-                          const vatPercent = (localPurchase as any).vat_percent || 5;
+                          // Get VAT from LPO data (saved customization), then purchase, then default 0
+                          const vatPercent = lpoData?.totals?.vat_percent ?? (localPurchase as any).vat_percent ?? 0;
                           const vatAmount = (subtotal * vatPercent / 100);
                           const grandTotal = subtotal + vatAmount;
 
@@ -718,7 +749,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         <p className="font-semibold text-gray-900 mt-1">
                           {(() => {
                             const subtotal = localPurchase.total_cost || 0;
-                            const vatPercent = (localPurchase as any).vat_percent || 5;
+                            const vatPercent = lpoData?.totals?.vat_percent ?? (localPurchase as any).vat_percent ?? 0;
                             const grandTotal = subtotal + (subtotal * vatPercent / 100);
                             return formatCurrency(grandTotal);
                           })()}

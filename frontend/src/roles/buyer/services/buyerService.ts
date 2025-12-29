@@ -290,10 +290,15 @@ export interface LPOInfo {
 export interface LPOItem {
   sl_no: number;
   description: string;
+  material_name?: string;
+  brand?: string;
+  specification?: string;
   qty: number;
   unit: string;
   rate: number;
   amount: number;
+  boq_rate?: number;
+  supplier_notes?: string;  // Per-material notes for supplier (shown in LPO PDF)
 }
 
 export interface LPOTotals {
@@ -914,6 +919,7 @@ class BuyerService {
           lpo_info: lpoData.lpo_info,
           terms: lpoData.terms,
           vendor: lpoData.vendor,
+          totals: lpoData.totals, // Include VAT data (vat_percent, vat_amount)
           include_signatures: includeSignatures,
           po_child_id: poChildId || null
         }

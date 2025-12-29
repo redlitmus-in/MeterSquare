@@ -29,6 +29,7 @@ import { FileText, Download } from 'lucide-react';
 interface VendorEmailModalProps {
   purchase: Purchase;
   isOpen: boolean;
+  openWithWhatsAppPreview?: boolean; // When true, start at WhatsApp preview step
   onClose: () => void;
   onEmailSent?: () => void;
 }
@@ -36,10 +37,11 @@ interface VendorEmailModalProps {
 const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   purchase,
   isOpen,
+  openWithWhatsAppPreview,
   onClose,
   onEmailSent
 }) => {
-  const [step, setStep] = useState<'input' | 'preview' | 'success'>('input');
+  const [step, setStep] = useState<'input' | 'preview' | 'whatsapp_preview' | 'success'>('input');
   const [vendorEmail, setVendorEmail] = useState('');
   const [emailPreview, setEmailPreview] = useState('');
   const [editedEmailContent, setEditedEmailContent] = useState('');
@@ -216,6 +218,13 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       loadLpoData();
     }
   }, [isOpen]);
+
+  // Handle openWithWhatsAppPreview prop - skip to WhatsApp preview step immediately
+  useEffect(() => {
+    if (isOpen && openWithWhatsAppPreview) {
+      setStep('whatsapp_preview');
+    }
+  }, [isOpen, openWithWhatsAppPreview]);
 
   // Auto-close LPO editor if vendor becomes approved
   useEffect(() => {
@@ -538,6 +547,52 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     }
   };
 
+  // Generate WhatsApp message preview (matching backend template)
+  const generateWhatsAppMessage = () => {
+    const poId = purchase.formatted_cr_id || `PO-${purchase.cr_id}`;
+    const vendorCompanyName = purchase.vendor_name || 'Vendor';
+    const buyerPhone = editedBuyerPhone || purchase.buyer_phone || '';
+
+    return `Subject: *Purchase Order Confirmation - ${poId}*
+
+Dear *${vendorCompanyName}*,
+
+Attached is our New Local Purchase Order (LPO) document.
+
+*We kindly request you to:*
+• Confirm receipt and acceptance of the order.
+• Provide the expected delivery timeline.
+
+We appreciate your swift response.
+
+Regards,
+MeterSquare Interiors LLC
+${buyerPhone}
+
+_MeterSquare Interiors LLC_`;
+  };
+
+  // Handle WhatsApp Preview
+  const handleWhatsAppPreview = () => {
+    // Check if vendor phone is available
+    const phoneToCheck = editedVendorPhone || purchase.vendor_phone;
+    if (!phoneToCheck) {
+      showWarning('Vendor phone number is required for WhatsApp. Please add the phone number first.');
+      return;
+    }
+    setStep('whatsapp_preview');
+  };
+
+  // Handle back from WhatsApp preview
+  const handleWhatsAppBack = () => {
+    // If user came directly from WhatsApp button (not from email flow), close the modal
+    if (openWithWhatsAppPreview) {
+      handleClose();
+    } else {
+      setStep('input');
+    }
+  };
+
   const handleToggleEdit = () => {
     if (isEditMode) {
       // Save changes - construct HTML from edited fields
@@ -578,48 +633,6 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
         <div style="background-color: #FEF3C7; border-left: 4px solid #F59E0B; padding: 16px; margin-bottom: 20px;">
           <p style="margin: 0; font-size: 14px; color: #1F2937;">Dear ${editedGreeting},</p>
           <p style="margin: 10px 0 0 0; font-size: 14px; color: #1F2937;">${editedMessage}</p>
-        </div>
-
-        <!-- Purchase Order Details -->
-        <div style="margin-bottom: 20px;">
-          <h3 style="font-weight: bold; color: #1F2937; margin-bottom: 12px; font-size: 16px;">Purchase Order Details</h3>
-          <div style="background-color: #EBF5FF; border-left: 4px solid #2563EB; padding: 12px;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-              <span style="color: #4B5563;">PO Number:</span>
-              <span style="font-weight: 600; color: #2563EB;">PO-${purchase.cr_id}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-              <span style="color: #4B5563;">Vendor:</span>
-              <span style="font-weight: 600; color: #2563EB;">${purchase.vendor_name || '-'}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-              <span style="color: #4B5563;">Total Items:</span>
-              <span style="font-weight: 600; color: #2563EB;">${purchase.materials_count}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: #4B5563;">Total Amount:</span>
-              <span style="font-weight: 600; color: #2563EB;">AED ${purchase.total_cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Materials Table -->
-        <div style="margin-bottom: 20px;">
-          <h3 style="font-weight: bold; color: #1F2937; margin-bottom: 12px; font-size: 16px;">Materials Required</h3>
-          <table style="width: 100%; border-collapse: collapse; border: 1px solid #2563EB;">
-            <thead>
-              <tr style="background-color: #2563EB; color: white;">
-                <th style="padding: 8px; text-align: left; border: 1px solid #2563EB;">S.No</th>
-                <th style="padding: 8px; text-align: left; border: 1px solid #2563EB;">Material Name</th>
-                <th style="padding: 8px; text-align: left; border: 1px solid #2563EB;">Brand</th>
-                <th style="padding: 8px; text-align: left; border: 1px solid #2563EB;">Specs</th>
-                <th style="padding: 8px; text-align: left; border: 1px solid #2563EB;">Quantity</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${materialsRows}
-            </tbody>
-          </table>
         </div>
 
         <!-- Vendor Contact -->
@@ -914,9 +927,9 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                           <div className="text-sm text-purple-900">
                             <p className="font-medium mb-2">Purchase Order Details:</p>
                             <ul className="space-y-1 ml-4 list-disc">
-                              <li>Total Items: {purchase.materials_count}</li>
+                              <li>Total Items: {lpoData?.items?.length || purchase.materials_count || 0}</li>
                               <li>Project: {purchase.project_name}</li>
-                              <li>Total Amount: <span className="font-semibold">AED {purchase.total_cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</span></li>
+                              <li>Total Amount: <span className="font-semibold">AED {(lpoData?.totals?.grand_total || purchase.total_cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></li>
                             </ul>
                           </div>
                         </div>
@@ -1517,58 +1530,6 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                               />
                             </div>
 
-                            {/* Purchase Order Details */}
-                            <div className="border-t pt-4">
-                              <h3 className="font-bold text-gray-900 mb-3 text-base">Purchase Order Details</h3>
-                              <div className="bg-blue-50 border-l-4 border-blue-600 p-3 space-y-2">
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">PO Number:</span>
-                                  <span className="font-semibold text-blue-600">PO-{purchase.cr_id}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Vendor:</span>
-                                  <span className="font-semibold text-blue-600">{purchase.vendor_name || '-'}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Total Items:</span>
-                                  <span className="font-semibold text-blue-600">{purchase.materials_count}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Total Amount:</span>
-                                  <span className="font-semibold text-blue-600">AED {purchase.total_cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Materials Table */}
-                            <div className="border-t pt-4">
-                              <h3 className="font-bold text-gray-900 mb-3 text-base">Materials Required</h3>
-                              <div className="overflow-x-auto">
-                                <table className="w-full border-collapse border border-blue-200">
-                                  <thead>
-                                    <tr className="bg-blue-600 text-white">
-                                      <th className="p-2 text-left border">S.No</th>
-                                      <th className="p-2 text-left border">Material Name</th>
-                                      <th className="p-2 text-left border">Brand</th>
-                                      <th className="p-2 text-left border">Specs</th>
-                                      <th className="p-2 text-left border">Quantity</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {purchase.materials?.map((material: any, idx: number) => (
-                                      <tr key={idx} className={idx % 2 === 0 ? 'bg-blue-50' : 'bg-white'}>
-                                        <td className="p-2 border">{idx + 1}</td>
-                                        <td className="p-2 border font-medium">{material.material_name}</td>
-                                        <td className="p-2 border">{material.brand || '-'}</td>
-                                        <td className="p-2 border">{material.specification || '-'}</td>
-                                        <td className="p-2 border">{material.quantity} {material.unit}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-
                             {/* Vendor Contact - Editable */}
                             <div className="border-t pt-4">
                               <h3 className="font-bold text-gray-900 mb-3 text-base">Vendor Contact Information</h3>
@@ -1686,6 +1647,151 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                   </div>
                 )}
 
+                {/* WhatsApp Preview Step */}
+                {step === 'whatsapp_preview' && (
+                  <div className="flex flex-col h-full space-y-4">
+                    {/* Header */}
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <div className="p-2 bg-green-100 rounded-lg">
+                        <Phone className="w-5 h-5 text-green-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900">WhatsApp Preview</h3>
+                        <p className="text-sm text-gray-500">
+                          Preview the message and PDF that will be sent to <span className="font-medium text-green-600">{editedVendorPhone || purchase.vendor_phone}</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Two Column Layout: PDF Preview + Message Preview */}
+                    <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-6 min-h-0 overflow-hidden">
+                      {/* Left Column: LPO PDF Section (same as email) */}
+                      <div className="flex flex-col h-full">
+                        <div className="flex items-center gap-2 mb-3">
+                          <FileText className="w-4 h-4 text-blue-600" />
+                          <span className="text-sm font-medium text-gray-700">LPO PDF Attachment</span>
+                        </div>
+
+                        {/* LPO PDF Card - Same style as email */}
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <FileText className="w-5 h-5 text-blue-600" />
+                              <div>
+                                <span className="text-sm font-medium text-gray-900">LPO PDF (Mandatory)</span>
+                                <p className="text-xs text-gray-500">Local Purchase Order PDF will be sent via WhatsApp</p>
+                                {isVendorApproved && (
+                                  <p className="text-xs text-amber-600 mt-1 font-medium">⚠ Cannot edit - Vendor has been approved</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Edit and Preview buttons */}
+                          {lpoData && (
+                            <div className="flex gap-2 mt-4">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setStep('input');
+                                  setShowLpoEditor(true);
+                                }}
+                                className="text-xs flex-1"
+                                disabled={isVendorApproved}
+                                title={isVendorApproved ? "Cannot edit - Vendor has been approved" : "Edit LPO details"}
+                              >
+                                <Edit3 className="w-3 h-3 mr-1" />
+                                Edit LPO
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleDownloadLpoPdf}
+                                className="text-xs flex-1"
+                              >
+                                <Download className="w-3 h-3 mr-1" />
+                                Preview PDF
+                              </Button>
+                            </div>
+                          )}
+
+                          {isLoadingLpo && (
+                            <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Loading LPO data...
+                            </div>
+                          )}
+                        </div>
+
+                        {/* PDF Info */}
+                        <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                          <p className="text-xs text-gray-600 mb-2 font-medium">PDF Details:</p>
+                          <div className="space-y-1 text-xs text-gray-500">
+                            <div className="flex justify-between">
+                              <span>File Name:</span>
+                              <span className="font-medium text-gray-700">LPO-{purchase.formatted_cr_id || `PO-${purchase.cr_id}`}.pdf</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Items:</span>
+                              <span className="font-medium text-gray-700">{lpoData?.items?.length || 0}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Total Amount:</span>
+                              <span className="font-medium text-green-600">AED {lpoData?.totals?.grand_total?.toLocaleString() || '0'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Column: WhatsApp Message Preview */}
+                      <div className="flex flex-col h-full">
+                        <div className="flex items-center gap-2 mb-3">
+                          <MessageSquare className="w-4 h-4 text-green-600" />
+                          <span className="text-sm font-medium text-gray-700">WhatsApp Message</span>
+                        </div>
+                        <div className="flex-1 bg-[#e5ddd5] border border-gray-200 rounded-lg p-4 overflow-auto">
+                          {/* WhatsApp Chat Bubble */}
+                          <div className="max-w-sm">
+                            <div className="bg-white rounded-lg shadow p-4 relative">
+                              {/* Message Content */}
+                              <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans">
+                                {generateWhatsAppMessage()}
+                              </pre>
+                              {/* Message Time */}
+                              <div className="flex justify-end mt-2">
+                                <span className="text-xs text-gray-400">
+                                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* PDF Document Bubble */}
+                            <div className="bg-white rounded-lg shadow p-3 mt-2 flex items-center gap-3">
+                              <div className="p-2 bg-red-100 rounded">
+                                <FileText className="w-5 h-5 text-red-600" />
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-sm font-medium text-gray-900">
+                                  LPO-{purchase.formatted_cr_id || `PO-${purchase.cr_id}`}.pdf
+                                </p>
+                                <p className="text-xs text-gray-500">PDF Document</p>
+                              </div>
+                              <Download className="w-4 h-4 text-gray-400" />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-2 text-xs text-gray-500 flex items-center gap-1">
+                          <Phone className="w-3 h-3" />
+                          Message will be sent via WhatsApp Business API
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Step 3: Success */}
                 {step === 'success' && (
                   <div className="flex flex-col items-center justify-center py-16">
@@ -1721,7 +1827,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
             <div className="bg-white border-t border-gray-200 px-6 py-4">
               <div className="max-w-7xl mx-auto flex items-center justify-between">
                 <div className="text-sm text-gray-600">
-                  {step === 'input' ? 'Step 1 of 2: Configure Email' : 'Step 2 of 2: Review & Send'}
+                  {step === 'input' ? 'Step 1 of 2: Configure Email' : step === 'whatsapp_preview' ? 'WhatsApp Preview' : 'Step 2 of 2: Review & Send'}
                 </div>
                 <div className="flex items-center gap-3">
                   {step === 'input' && (
@@ -1765,6 +1871,35 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                           <>
                             <Send className="w-4 h-4 mr-2" />
                             Send Email
+                          </>
+                        )}
+                      </Button>
+                    </>
+                  )}
+                  {step === 'whatsapp_preview' && (
+                    <>
+                      <Button
+                        onClick={handleWhatsAppBack}
+                        variant="outline"
+                        disabled={isSendingWhatsApp}
+                      >
+                        <ArrowLeft className="w-4 h-4 mr-2" />
+                        Back
+                      </Button>
+                      <Button
+                        onClick={handleSendWhatsApp}
+                        disabled={isSendingWhatsApp}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {isSendingWhatsApp ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Sending...
+                          </>
+                        ) : (
+                          <>
+                            <Phone className="w-4 h-4 mr-2" />
+                            Send WhatsApp
                           </>
                         )}
                       </Button>

@@ -66,6 +66,7 @@ const PurchaseOrders: React.FC = () => {
   // Track which materials are selected for store request (by material_name)
   const [selectedStoreMaterials, setSelectedStoreMaterials] = useState<Set<string>>(new Set());
   const [sendingWhatsAppId, setSendingWhatsAppId] = useState<number | null>(null);
+  const [openWithWhatsAppPreview, setOpenWithWhatsAppPreview] = useState(false);
   const [isEditPricesModalOpen, setIsEditPricesModalOpen] = useState(false);
   const [selectedPurchaseForPriceEdit, setSelectedPurchaseForPriceEdit] = useState<Purchase | null>(null);
   // Site Engineer Selection for Vendor Delivery
@@ -364,6 +365,38 @@ const PurchaseOrders: React.FC = () => {
     return sorted;
   }, [activeTab, ongoingSubTab, filteredPurchases, approvedPOChildren, searchTerm]);
 
+  // Get current page for the active tab
+  const currentTabPage = useMemo(() => {
+    if (activeTab === 'ongoing' || activeTab === 'pending_approval') {
+      return pendingPage;
+    } else if (activeTab === 'completed') {
+      return completedPage;
+    } else if (activeTab === 'rejected') {
+      return rejectedPage;
+    }
+    return 1;
+  }, [activeTab, pendingPage, completedPage, rejectedPage]);
+
+  // Paginate the items for display (client-side pagination)
+  const paginatedItems = useMemo(() => {
+    const itemsPerPage = 20;
+
+    // Determine which items to use based on active tab and subtab
+    let items: Array<Purchase | POChild>;
+    if (activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved') {
+      items = mergedVendorApprovedItems;
+    } else if (activeTab === 'pending_approval' && pendingApprovalSubTab === 'vendor_approval') {
+      // For pending_approval vendor_approval, combine parent CRs and POChildren
+      items = [...vendorPendingApproval, ...pendingPOChildren];
+    } else {
+      items = filteredPurchases;
+    }
+
+    const startIndex = (currentTabPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return items.slice(startIndex, endIndex);
+  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, mergedVendorApprovedItems, filteredPurchases, vendorPendingApproval, pendingPOChildren, currentTabPage]);
+
   const stats = useMemo(() => {
     return {
       ongoing: pendingPurchaseItems.length + storeApprovedItems.length + vendorApprovedItems.length + approvedPOChildren.length,
@@ -480,6 +513,55 @@ const PurchaseOrders: React.FC = () => {
     } finally {
       setSendingWhatsAppId(null);
     }
+  };
+
+  // Open modal with WhatsApp preview (instead of directly sending)
+  const handleOpenWhatsAppPreview = (purchase: Purchase) => {
+    if (!purchase.vendor_phone) {
+      showError('Vendor phone number not available');
+      return;
+    }
+    setSelectedPurchase(purchase);
+    setOpenWithWhatsAppPreview(true);
+    setIsVendorEmailModalOpen(true);
+  };
+
+  // Open modal with WhatsApp preview for POChild (convert POChild to Purchase-like object)
+  const handleOpenPOChildWhatsAppPreview = (poChild: POChild) => {
+    if (!poChild.vendor_phone) {
+      showError('Vendor phone number not available');
+      return;
+    }
+    // Convert POChild to Purchase-like object (same as email button does)
+    const purchaseLike = {
+      ...poChild,
+      cr_id: poChild.parent_cr_id,
+      vendor_id: poChild.vendor_id || 0,
+      vendor_name: poChild.vendor_name || '',
+      vendor_email: poChild.vendor_email || '',
+      vendor_phone: poChild.vendor_phone || '',
+      materials: poChild.materials || [],
+      project_name: poChild.project_name || '',
+      boq_name: poChild.boq_name || '',
+      client: poChild.client || '',
+      location: poChild.location || '',
+      created_at: poChild.created_at || '',
+      status: 'pending' as const,
+      vendor_email_sent: poChild.vendor_email_sent || false,
+      vendor_whatsapp_sent: poChild.vendor_whatsapp_sent || false,
+      vendor_whatsapp_sent_at: poChild.vendor_whatsapp_sent_at || null,
+      has_store_requests: false,
+      store_requests_pending: false,
+      all_store_requests_approved: false,
+      any_store_request_rejected: false,
+      vendor_selection_pending_td_approval: false,
+      item_name: poChild.item_name || '',
+      po_child_id: poChild.id,
+      child_notes: (poChild as any).child_notes || '',
+    } as any;
+    setSelectedPurchase(purchaseLike);
+    setOpenWithWhatsAppPreview(true);
+    setIsVendorEmailModalOpen(true);
   };
 
   const handleMarkAsComplete = async (crId: number) => {
@@ -875,12 +957,8 @@ const PurchaseOrders: React.FC = () => {
             </div>
           ) : viewMode === 'card' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* Determine which items to show based on active tab */}
-              {(
-                activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved'
-                  ? mergedVendorApprovedItems
-                  : filteredPurchases
-              ).map((item) => {
+              {/* Display paginated items for current tab/subtab */}
+              {paginatedItems.map((item) => {
                 // Check if this is a POChild or Purchase
                 if (isPOChild(item)) {
                   // Render POChild card
@@ -1150,37 +1228,23 @@ const PurchaseOrders: React.FC = () => {
                                   </Button>
                                   {poChild.vendor_phone ? (
                                     poChild.vendor_whatsapp_sent ? (
-                                      <div
-                                        className="flex-1 flex items-center justify-center bg-green-50 border border-green-300 rounded text-green-600 text-xs px-2 py-1.5"
-                                        title={`WhatsApp sent${poChild.vendor_whatsapp_sent_at ? ` on ${new Date(poChild.vendor_whatsapp_sent_at).toLocaleDateString()}` : ''}`}
+                                      <Button
+                                        onClick={() => handleOpenPOChildWhatsAppPreview(poChild)}
+                                        className="flex-1 bg-green-50 hover:bg-green-100 text-green-600 border border-green-300 text-xs"
+                                        size="sm"
+                                        title={`WhatsApp sent${poChild.vendor_whatsapp_sent_at ? ` on ${new Date(poChild.vendor_whatsapp_sent_at).toLocaleDateString()}` : ''} - Click to resend`}
                                       >
                                         <CheckCircle className="w-3.5 h-3.5 mr-1" />
                                         Sent
-                                      </div>
+                                      </Button>
                                     ) : (
                                       <Button
-                                        onClick={async () => {
-                                          try {
-                                            setSendingWhatsAppId(poChild.id);
-                                            await buyerService.sendVendorWhatsApp(poChild.parent_cr_id, poChild.vendor_phone!, true, poChild.id);
-                                            showSuccess('Purchase order sent via WhatsApp!');
-                                            refetchApprovedPOChildren();
-                                          } catch (error: any) {
-                                            showError(error.message || 'Failed to send WhatsApp');
-                                          } finally {
-                                            setSendingWhatsAppId(null);
-                                          }
-                                        }}
-                                        disabled={sendingWhatsAppId === poChild.id}
+                                        onClick={() => handleOpenPOChildWhatsAppPreview(poChild)}
                                         className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs"
                                         size="sm"
                                         title="Send via WhatsApp"
                                       >
-                                        {sendingWhatsAppId === poChild.id ? (
-                                          <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                        ) : (
-                                          <MessageSquare className="w-3.5 h-3.5 mr-1" />
-                                        )}
+                                        <MessageSquare className="w-3.5 h-3.5 mr-1" />
                                         WhatsApp
                                       </Button>
                                     )
@@ -1607,7 +1671,7 @@ const PurchaseOrders: React.FC = () => {
                             </Button>
                             {purchase.vendor_whatsapp_sent ? (
                               <Button
-                                onClick={() => handleSendWhatsApp(purchase)}
+                                onClick={() => handleOpenWhatsAppPreview(purchase)}
                                 disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
                                 size="sm"
                                 className="flex-1 h-7 text-xs bg-green-100 hover:bg-green-200 text-green-700 border border-green-300 px-2 py-1"
@@ -1622,7 +1686,7 @@ const PurchaseOrders: React.FC = () => {
                               </Button>
                             ) : purchase.vendor_phone ? (
                               <Button
-                                onClick={() => handleSendWhatsApp(purchase)}
+                                onClick={() => handleOpenWhatsAppPreview(purchase)}
                                 disabled={sendingWhatsAppId === purchase.cr_id}
                                 size="sm"
                                 className="flex-1 h-7 text-xs bg-green-500 hover:bg-green-600 text-white px-2 py-1"
@@ -1917,37 +1981,23 @@ const PurchaseOrders: React.FC = () => {
                           </Button>
                           {poChild.vendor_phone ? (
                             poChild.vendor_whatsapp_sent ? (
-                              <div
-                                className="flex-1 flex items-center justify-center bg-green-50 border border-green-300 rounded text-green-600 text-xs px-2 py-1.5"
-                                title={`WhatsApp sent${poChild.vendor_whatsapp_sent_at ? ` on ${new Date(poChild.vendor_whatsapp_sent_at).toLocaleDateString()}` : ''}`}
+                              <Button
+                                onClick={() => handleOpenPOChildWhatsAppPreview(poChild)}
+                                className="flex-1 bg-green-50 hover:bg-green-100 text-green-600 border border-green-300 text-xs"
+                                size="sm"
+                                title={`WhatsApp sent${poChild.vendor_whatsapp_sent_at ? ` on ${new Date(poChild.vendor_whatsapp_sent_at).toLocaleDateString()}` : ''} - Click to resend`}
                               >
                                 <CheckCircle className="w-3.5 h-3.5 mr-1" />
                                 Sent
-                              </div>
+                              </Button>
                             ) : (
                               <Button
-                                onClick={async () => {
-                                  try {
-                                    setSendingWhatsAppId(poChild.id);
-                                    await buyerService.sendVendorWhatsApp(poChild.parent_cr_id, poChild.vendor_phone!, true, poChild.id);
-                                    showSuccess('Purchase order sent via WhatsApp!');
-                                    refetchApprovedPOChildren();
-                                  } catch (error: any) {
-                                    showError(error.message || 'Failed to send WhatsApp');
-                                  } finally {
-                                    setSendingWhatsAppId(null);
-                                  }
-                                }}
-                                disabled={sendingWhatsAppId === poChild.id}
+                                onClick={() => handleOpenPOChildWhatsAppPreview(poChild)}
                                 className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs"
                                 size="sm"
                                 title="Send via WhatsApp"
                               >
-                                {sendingWhatsAppId === poChild.id ? (
-                                  <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                ) : (
-                                  <MessageSquare className="w-3.5 h-3.5 mr-1" />
-                                )}
+                                <MessageSquare className="w-3.5 h-3.5 mr-1" />
                                 WhatsApp
                               </Button>
                             )
@@ -2592,14 +2642,8 @@ const PurchaseOrders: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {/* Determine which items to show based on active tab */}
-                    {(
-                      activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved'
-                        ? mergedVendorApprovedItems
-                        : activeTab === 'pending_approval' && pendingApprovalSubTab === 'vendor_approval'
-                          ? pendingPOChildren
-                          : filteredPurchases
-                    ).map((item) => {
+                    {/* Display paginated items for current tab/subtab */}
+                    {paginatedItems.map((item) => {
                       // Skip POChildren in table view for now, or handle them differently
                       if (isPOChild(item)) {
                         // For table view, render POChild rows
@@ -2880,7 +2924,7 @@ const PurchaseOrders: React.FC = () => {
                                   {/* WhatsApp button with Sent status */}
                                   {purchase.vendor_whatsapp_sent ? (
                                     <Button
-                                      onClick={() => handleSendWhatsApp(purchase)}
+                                      onClick={() => handleOpenWhatsAppPreview(purchase)}
                                       disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
                                       size="sm"
                                       className="px-2 py-1 h-auto text-xs bg-green-100 hover:bg-green-200 text-green-700 border border-green-300"
@@ -2895,7 +2939,7 @@ const PurchaseOrders: React.FC = () => {
                                     </Button>
                                   ) : purchase.vendor_phone ? (
                                     <Button
-                                      onClick={() => handleSendWhatsApp(purchase)}
+                                      onClick={() => handleOpenWhatsAppPreview(purchase)}
                                       disabled={sendingWhatsAppId === purchase.cr_id}
                                       size="sm"
                                       className="px-2 py-1 h-auto text-xs bg-green-500 hover:bg-green-600 text-white"
@@ -2951,72 +2995,97 @@ const PurchaseOrders: React.FC = () => {
             </div>
           )}
 
-          {/* ✅ PERFORMANCE: Pagination Controls */}
+          {/* ✅ PERFORMANCE: Pagination Controls - Show filtered count per tab/subtab */}
           {(() => {
-            // Get the current pagination data based on active tab
-            let currentPagination = null;
+            // Calculate total based on active tab/subtab (same logic as paginatedItems)
+            let totalFiltered: number;
+            if (activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved') {
+              totalFiltered = mergedVendorApprovedItems.length;
+            } else if (activeTab === 'pending_approval' && pendingApprovalSubTab === 'vendor_approval') {
+              totalFiltered = vendorPendingApproval.length + pendingPOChildren.length;
+            } else {
+              totalFiltered = filteredPurchases.length;
+            }
+
+            // Client-side pagination for filtered results
+            const clientPerPage = 20;
+            const clientPages = Math.ceil(totalFiltered / clientPerPage);
+
+            // Get page state based on active tab (for consistency)
             let currentPage = 1;
             let setCurrentPage = setPendingPage;
 
             if (activeTab === 'ongoing' || activeTab === 'pending_approval') {
-              currentPagination = pendingData?.pagination;
               currentPage = pendingPage;
               setCurrentPage = setPendingPage;
             } else if (activeTab === 'completed') {
-              currentPagination = completedData?.pagination;
               currentPage = completedPage;
               setCurrentPage = setCompletedPage;
             } else if (activeTab === 'rejected') {
-              currentPagination = rejectedData?.pagination;
               currentPage = rejectedPage;
               setCurrentPage = setRejectedPage;
             }
 
-            // Always show pagination
-            const total = currentPagination?.total || 0;
-            const pages = currentPagination?.pages || 1;
-            const has_next = currentPagination?.has_next || false;
-            const has_prev = currentPagination?.has_prev || false;
-            const start = total > 0 ? (currentPage - 1) * perPage + 1 : 0;
-            const end = Math.min(currentPage * perPage, total);
+            // Reset to page 1 if current page exceeds available pages
+            if (currentPage > clientPages && clientPages > 0) {
+              currentPage = 1;
+            }
+
+            const start = totalFiltered > 0 ? (currentPage - 1) * clientPerPage + 1 : 0;
+            const end = Math.min(currentPage * clientPerPage, totalFiltered);
+            const has_prev = currentPage > 1;
+            const has_next = currentPage < clientPages;
+
+            // Only show pagination if there are items
+            if (totalFiltered === 0) {
+              return (
+                <div className="flex items-center justify-center bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                  <div className="text-sm text-gray-500 font-medium">
+                    No results found
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
                 <div className="text-sm text-gray-600 font-medium">
-                  Showing {start} to {end} of {total} results
+                  Showing {start} to {end} of {totalFiltered} results
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentPage(currentPage - 1)}
-                    disabled={!has_prev}
-                    className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    style={{ color: 'rgb(36, 61, 138)' }}
-                  >
-                    Previous
-                  </button>
-                  {Array.from({ length: pages }, (_, i) => i + 1).map(page => (
+                {clientPages > 1 && (
+                  <div className="flex items-center gap-2">
                     <button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                        currentPage === page
-                          ? 'border-[rgb(36,61,138)] bg-blue-50'
-                          : 'border-gray-300 hover:bg-gray-50'
-                      }`}
-                      style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                      onClick={() => setCurrentPage(currentPage - 1)}
+                      disabled={!has_prev}
+                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      style={{ color: 'rgb(36, 61, 138)' }}
                     >
-                      {page}
+                      Previous
                     </button>
-                  ))}
-                  <button
-                    onClick={() => setCurrentPage(currentPage + 1)}
-                    disabled={!has_next}
-                    className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    style={{ color: 'rgb(36, 61, 138)' }}
-                  >
-                    Next
-                  </button>
-                </div>
+                    {Array.from({ length: Math.min(clientPages, 5) }, (_, i) => i + 1).map(page => (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                          currentPage === page
+                            ? 'border-[rgb(36,61,138)] bg-blue-50'
+                            : 'border-gray-300 hover:bg-gray-50'
+                        }`}
+                        style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setCurrentPage(currentPage + 1)}
+                      disabled={!has_next}
+                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      style={{ color: 'rgb(36, 61, 138)' }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -3136,9 +3205,11 @@ const PurchaseOrders: React.FC = () => {
         <VendorEmailModal
           purchase={selectedPurchase}
           isOpen={isVendorEmailModalOpen}
+          openWithWhatsAppPreview={openWithWhatsAppPreview}
           onClose={() => {
             setIsVendorEmailModalOpen(false);
             setSelectedPurchase(null);
+            setOpenWithWhatsAppPreview(false); // Reset WhatsApp preview state
           }}
           onEmailSent={async () => {
             // Remove cache completely and refetch fresh data
