@@ -1321,6 +1321,39 @@ def get_buyer_pending_purchases():
                 cr.vendor_selection_status == 'pending_td_approval'
             )
 
+            # Validate and refresh material_vendor_selections with current vendor data
+            # This ensures deleted vendors are removed and vendor names are up-to-date
+            validated_material_vendor_selections = {}
+            if cr.material_vendor_selections:
+                from models.vendor import Vendor as VendorModel
+                # Get all unique vendor IDs from selections
+                mvs_vendor_ids = set()
+                for selection in cr.material_vendor_selections.values():
+                    if isinstance(selection, dict) and selection.get('vendor_id'):
+                        mvs_vendor_ids.add(selection.get('vendor_id'))
+
+                # Fetch all referenced vendors in one query
+                active_mvs_vendors = {
+                    v.vendor_id: v for v in VendorModel.query.filter(
+                        VendorModel.vendor_id.in_(mvs_vendor_ids),
+                        VendorModel.is_deleted == False
+                    ).all()
+                } if mvs_vendor_ids else {}
+
+                # Validate each selection
+                for material_name, selection in cr.material_vendor_selections.items():
+                    if isinstance(selection, dict) and selection.get('vendor_id'):
+                        vendor_id = selection.get('vendor_id')
+                        if vendor_id in active_mvs_vendors:
+                            # Vendor exists - refresh vendor_name with current value
+                            validated_selection = dict(selection)
+                            validated_selection['vendor_name'] = active_mvs_vendors[vendor_id].company_name
+                            validated_material_vendor_selections[material_name] = validated_selection
+                        # If vendor doesn't exist (deleted), skip this selection
+                    else:
+                        # Selection without vendor_id (just negotiated price) - keep it
+                        validated_material_vendor_selections[material_name] = selection
+
             # Get full vendor details from Vendor table if vendor is selected
             vendor_details = {
                 'phone': None,
@@ -1487,7 +1520,7 @@ def get_buyer_pending_purchases():
                 "vendor_whatsapp_sent": cr.vendor_whatsapp_sent or False,
                 "vendor_whatsapp_sent_at": cr.vendor_whatsapp_sent_at.isoformat() if cr.vendor_whatsapp_sent_at else None,
                 "use_per_material_vendors": cr.use_per_material_vendors or False,
-                "material_vendor_selections": cr.material_vendor_selections or {},
+                "material_vendor_selections": validated_material_vendor_selections,
                 "has_store_requests": has_store_requests,
                 "store_request_count": len(store_requests),
                 "store_requested_materials": store_requested_material_names,  # List of material names sent to store
@@ -2506,6 +2539,39 @@ def get_purchase_by_id(cr_id):
             if r.material_name and r.status and r.status.lower() not in ['rejected']
         ]
 
+        # Validate and refresh material_vendor_selections with current vendor data
+        # This ensures deleted vendors are removed and vendor names are up-to-date
+        validated_material_vendor_selections = {}
+        if cr.material_vendor_selections:
+            from models.vendor import Vendor
+            # Get all unique vendor IDs from selections
+            vendor_ids = set()
+            for selection in cr.material_vendor_selections.values():
+                if isinstance(selection, dict) and selection.get('vendor_id'):
+                    vendor_ids.add(selection.get('vendor_id'))
+
+            # Fetch all referenced vendors in one query
+            active_vendors = {
+                v.vendor_id: v for v in Vendor.query.filter(
+                    Vendor.vendor_id.in_(vendor_ids),
+                    Vendor.is_deleted == False
+                ).all()
+            } if vendor_ids else {}
+
+            # Validate each selection
+            for material_name, selection in cr.material_vendor_selections.items():
+                if isinstance(selection, dict) and selection.get('vendor_id'):
+                    vendor_id = selection.get('vendor_id')
+                    if vendor_id in active_vendors:
+                        # Vendor exists - refresh vendor_name with current value
+                        validated_selection = dict(selection)
+                        validated_selection['vendor_name'] = active_vendors[vendor_id].company_name
+                        validated_material_vendor_selections[material_name] = validated_selection
+                    # If vendor doesn't exist (deleted), skip this selection
+                else:
+                    # Selection without vendor_id (just negotiated price) - keep it
+                    validated_material_vendor_selections[material_name] = selection
+
         purchase = {
             "cr_id": cr.cr_id,
             "project_id": project.project_id,
@@ -2535,8 +2601,8 @@ def get_purchase_by_id(cr_id):
             "vendor_email_sent": cr.vendor_email_sent or False,
             "vendor_whatsapp_sent": cr.vendor_whatsapp_sent or False,
             "vendor_whatsapp_sent_at": cr.vendor_whatsapp_sent_at.isoformat() if cr.vendor_whatsapp_sent_at else None,
-            # Include material vendor selections for negotiated prices
-            "material_vendor_selections": cr.material_vendor_selections or {},
+            # Include validated material vendor selections (with current vendor names, deleted vendors removed)
+            "material_vendor_selections": validated_material_vendor_selections,
             # Include store requested materials for filtering in vendor selection
             "store_requested_materials": store_requested_material_names,
             "has_store_requests": len(store_requested_material_names) > 0,
@@ -4375,7 +4441,9 @@ def update_purchase_order(cr_id):
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Verify it's in the correct status (can only edit pending purchases)
-        if cr.status != 'assigned_to_buyer':
+        # Allow both 'assigned_to_buyer' and 'send_to_buyer' statuses
+        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer']
+        if cr.status not in allowed_statuses:
             return jsonify({"error": f"Cannot edit purchase. Current status: {cr.status}"}), 400
 
         # Validate and update materials if provided
@@ -8341,6 +8409,39 @@ def get_vendor_selection_data(cr_id):
         # Calculate materials count
         materials_count = len(materials) if materials else 0
 
+        # Validate and refresh material_vendor_selections with current vendor data
+        # This ensures deleted vendors are removed and vendor names are up-to-date
+        validated_material_vendor_selections = {}
+        if cr.material_vendor_selections:
+            from models.vendor import Vendor
+            # Get all unique vendor IDs from selections
+            vendor_ids = set()
+            for selection in cr.material_vendor_selections.values():
+                if isinstance(selection, dict) and selection.get('vendor_id'):
+                    vendor_ids.add(selection.get('vendor_id'))
+
+            # Fetch all referenced vendors in one query
+            active_vendors = {
+                v.vendor_id: v for v in Vendor.query.filter(
+                    Vendor.vendor_id.in_(vendor_ids),
+                    Vendor.is_deleted == False
+                ).all()
+            } if vendor_ids else {}
+
+            # Validate each selection
+            for material_name, selection in cr.material_vendor_selections.items():
+                if isinstance(selection, dict) and selection.get('vendor_id'):
+                    vendor_id = selection.get('vendor_id')
+                    if vendor_id in active_vendors:
+                        # Vendor exists - refresh vendor_name with current value
+                        validated_selection = dict(selection)
+                        validated_selection['vendor_name'] = active_vendors[vendor_id].company_name
+                        validated_material_vendor_selections[material_name] = validated_selection
+                    # If vendor doesn't exist (deleted), skip this selection
+                else:
+                    # Selection without vendor_id (just negotiated price) - keep it
+                    validated_material_vendor_selections[material_name] = selection
+
         # Prepare vendor selection data
         vendor_data = {
             'selected_vendor_id': cr.selected_vendor_id,
@@ -8355,7 +8456,7 @@ def get_vendor_selection_data(cr_id):
             'vendor_rejection_reason': cr.vendor_rejection_reason,
             # Per-material vendor selection support
             'use_per_material_vendors': cr.use_per_material_vendors,
-            'material_vendor_selections': cr.material_vendor_selections if cr.material_vendor_selections else {}
+            'material_vendor_selections': validated_material_vendor_selections
         }
 
         # Overhead warning removed - columns dropped from database
