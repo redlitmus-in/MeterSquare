@@ -24,7 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Purchase, buyerService, LPOData } from '../services/buyerService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
-import { FileText, Download } from 'lucide-react';
+import { FileText, Download, ChevronDown } from 'lucide-react';
 
 interface VendorEmailModalProps {
   purchase: Purchase;
@@ -1725,25 +1725,6 @@ _MeterSquare Interiors LLC_`;
                             </div>
                           )}
                         </div>
-
-                        {/* PDF Info */}
-                        <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                          <p className="text-xs text-gray-600 mb-2 font-medium">PDF Details:</p>
-                          <div className="space-y-1 text-xs text-gray-500">
-                            <div className="flex justify-between">
-                              <span>File Name:</span>
-                              <span className="font-medium text-gray-700">LPO-{purchase.formatted_cr_id || `PO-${purchase.cr_id}`}.pdf</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Items:</span>
-                              <span className="font-medium text-gray-700">{lpoData?.items?.length || 0}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Total Amount:</span>
-                              <span className="font-medium text-green-600">AED {lpoData?.totals?.grand_total?.toLocaleString() || '0'}</span>
-                            </div>
-                          </div>
-                        </div>
                       </div>
 
                       {/* Right Column: WhatsApp Message Preview */}
@@ -1752,34 +1733,68 @@ _MeterSquare Interiors LLC_`;
                           <MessageSquare className="w-4 h-4 text-green-600" />
                           <span className="text-sm font-medium text-gray-700">WhatsApp Message</span>
                         </div>
-                        <div className="flex-1 bg-[#e5ddd5] border border-gray-200 rounded-lg p-4 overflow-auto">
-                          {/* WhatsApp Chat Bubble */}
-                          <div className="max-w-sm">
-                            <div className="bg-white rounded-lg shadow p-4 relative">
-                              {/* Message Content */}
-                              <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans">
-                                {generateWhatsAppMessage()}
-                              </pre>
+                        <div className="flex-1 bg-[#ece5dd] border border-gray-200 rounded-lg p-4 overflow-auto min-h-[400px]">
+                          {/* WhatsApp Chat - Exact Style Match */}
+                          <div className="max-w-md mx-auto space-y-2">
+                            {/* Message Bubble - WhatsApp exact style */}
+                            <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+                              {/* Expandable Header */}
+                              <div className="flex items-center justify-between p-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50">
+                                <span className="text-sm text-gray-900">
+                                  Subject: <span className="font-bold">Purchase Order Confirmation - {purchase.formatted_cr_id || `PO-${purchase.cr_id}`}</span>
+                                </span>
+                                <ChevronDown className="w-5 h-5 text-gray-400" />
+                              </div>
+
+                              {/* Message Content - Exact WhatsApp format */}
+                              <div className="p-3 text-sm text-gray-800 space-y-3">
+                                <p>Dear <span className="font-bold">{purchase.vendor_name || 'Vendor'}</span>,</p>
+
+                                <p>Attached is our New Local Purchase Order (LPO) document.</p>
+
+                                <div>
+                                  <p className="font-bold">We kindly request you to:</p>
+                                  <p className="ml-2">• Confirm receipt and acceptance of the order.</p>
+                                  <p className="ml-2">• Provide the expected delivery timeline.</p>
+                                </div>
+
+                                <p>We appreciate your swift response.</p>
+
+                                <div className="pt-2">
+                                  <p>Regards,</p>
+                                  <p>MeterSquare Interiors LLC</p>
+                                  <p className="text-green-600">{lpoData?.company?.phone || '8978909077'}</p>
+                                </div>
+
+                                <p className="italic">MeterSquare Interiors LLC</p>
+                              </div>
+
                               {/* Message Time */}
-                              <div className="flex justify-end mt-2">
+                              <div className="flex justify-end px-3 pb-2">
                                 <span className="text-xs text-gray-400">
-                                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase()}
                                 </span>
                               </div>
                             </div>
 
-                            {/* PDF Document Bubble */}
-                            <div className="bg-white rounded-lg shadow p-3 mt-2 flex items-center gap-3">
-                              <div className="p-2 bg-red-100 rounded">
-                                <FileText className="w-5 h-5 text-red-600" />
+                            {/* PDF Document Attachment */}
+                            <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+                              <div className="p-3 flex items-center gap-3">
+                                <div className="w-10 h-12 bg-red-50 rounded flex items-center justify-center flex-shrink-0">
+                                  <FileText className="w-6 h-6 text-red-500" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 truncate">
+                                    LPO-{purchase.formatted_cr_id || `PO-${purchase.cr_id}`}.pdf
+                                  </p>
+                                  <p className="text-xs text-gray-500">PDF Document</p>
+                                </div>
                               </div>
-                              <div className="flex-1">
-                                <p className="text-sm font-medium text-gray-900">
-                                  LPO-{purchase.formatted_cr_id || `PO-${purchase.cr_id}`}.pdf
-                                </p>
-                                <p className="text-xs text-gray-500">PDF Document</p>
+                              <div className="flex justify-end px-3 pb-2">
+                                <span className="text-xs text-gray-400">
+                                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase()}
+                                </span>
                               </div>
-                              <Download className="w-4 h-4 text-gray-400" />
                             </div>
                           </div>
                         </div>

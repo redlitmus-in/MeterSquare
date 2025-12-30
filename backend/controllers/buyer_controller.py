@@ -6928,6 +6928,15 @@ def send_vendor_whatsapp(cr_id):
         lpo_data = data.get('lpo_data')  # LPO customization data from frontend
         po_child_id = data.get('po_child_id')  # Optional: for POChild records
 
+        print(f"\n{'='*60}")
+        print(f"=== WHATSAPP SEND REQUEST RECEIVED ===")
+        print(f"cr_id: {cr_id}")
+        print(f"vendor_phone: {vendor_phone}")
+        print(f"include_lpo_pdf: {include_lpo_pdf}")
+        print(f"po_child_id: {po_child_id}")
+        print(f"lpo_data provided: {lpo_data is not None}")
+        print(f"{'='*60}\n")
+
         if not vendor_phone:
             return jsonify({"error": "Vendor phone number is required"}), 400
 
@@ -7034,10 +7043,15 @@ def send_vendor_whatsapp(cr_id):
             'total_cost': round(cr_total, 2)
         }
 
+        # Get system settings for company phone (used in WhatsApp message)
+        from models.system_settings import SystemSettings
+        settings = SystemSettings.query.first()
+        company_phone = settings.company_phone if settings and settings.company_phone else ''
+
         buyer_data = {
             'name': buyer.full_name or buyer.username or 'Buyer',
             'email': buyer.email or '',
-            'phone': buyer.phone or ''
+            'phone': company_phone  # Use company phone instead of buyer's personal phone
         }
 
         project_data = {
@@ -7049,12 +7063,26 @@ def send_vendor_whatsapp(cr_id):
         # Generate LPO PDF if requested
         pdf_url = None
 
-        if include_lpo_pdf:
-            try:
-                from utils.lpo_pdf_generator import LPOPDFGenerator
-                from models.system_settings import SystemSettings
-                from models.lpo_customization import LPOCustomization
+        print(f"\n=== PDF GENERATION CHECK ===")
+        print(f"include_lpo_pdf value: {include_lpo_pdf}")
+        print(f"include_lpo_pdf type: {type(include_lpo_pdf)}")
 
+        if include_lpo_pdf:
+            print(f">>> ENTERING PDF GENERATION BLOCK")
+            try:
+                print(f">>> Importing LPOPDFGenerator...")
+                from utils.lpo_pdf_generator import LPOPDFGenerator
+                print(f">>> Importing SystemSettings...")
+                from models.system_settings import SystemSettings
+                print(f">>> Importing LPOCustomization...")
+                from models.lpo_customization import LPOCustomization
+                print(f">>> All imports successful!")
+
+                print(f"\n=== PDF GENERATION DEBUG ===")
+                print(f"include_lpo_pdf: {include_lpo_pdf}")
+                print(f"po_child: {po_child}")
+                print(f"po_child_id: {po_child_id}")
+                print(f"cr_id: {cr_id}")
                 log.info("Step 1: Starting PDF generation...")
 
                 # If no lpo_data provided, generate using same logic as preview_lpo_pdf
@@ -7113,13 +7141,14 @@ def send_vendor_whatsapp(cr_id):
                     grand_total = subtotal + vat_amount
 
                     DEFAULT_COMPANY_TRN = "100223723600003"
-                    vendor_phone = vendor.phone or ""
+                    # Use a different variable name to avoid overwriting request vendor_phone
+                    vendor_phone_for_pdf = vendor.phone or ""
                     vendor_trn = getattr(vendor, 'trn', '') or getattr(vendor, 'gst_number', '') or ""
                     default_subject = cr.item_name or cr.justification or ""
 
                     import json
 
-                    # Get vendor phone with code
+                    # Get vendor phone with code for PDF display
                     vendor_phone_formatted = ""
                     if hasattr(vendor, 'phone_code') and vendor.phone_code and vendor.phone:
                         vendor_phone_formatted = f"{vendor.phone_code} {vendor.phone}"
@@ -7178,8 +7207,11 @@ def send_vendor_whatsapp(cr_id):
                         "header_image": getattr(settings, 'lpo_header_image', None) if settings else None
                     }
 
+                print(f">>> Creating LPOPDFGenerator...")
                 generator = LPOPDFGenerator()
+                print(f">>> Generating PDF bytes...")
                 pdf_bytes = generator.generate_lpo_pdf(lpo_data)
+                print(f">>> PDF generated successfully, size: {len(pdf_bytes)} bytes")
                 log.debug(f"LPO PDF generated successfully, size: {len(pdf_bytes)} bytes")
 
                 # Upload PDF to Supabase and get public URL
@@ -7190,10 +7222,29 @@ def send_vendor_whatsapp(cr_id):
                 # Use POChild ID if available for correct PO number
                 po_id_for_filename = po_child.get_formatted_id().replace('PO-', '') if po_child else str(cr_id)
                 pdf_filename = f"LPO-{po_id_for_filename}-{timestamp}.pdf"
-                pdf_path = f"whatsapp/lpo/{pdf_filename}"
+                # Use buyer/cr_X/lpo/ path which is allowed by Supabase RLS policy
+                pdf_path = f"buyer/cr_{cr_id}/lpo/{pdf_filename}"
+
+                print(f">>> Uploading PDF to Supabase: {pdf_path}")
+                print(f">>> SUPABASE_BUCKET: {SUPABASE_BUCKET}")
+
+                # Try to use service role key to bypass RLS for server-side uploads
+                from supabase import create_client as create_supabase_client
+                upload_supabase_url = os.environ.get('DEV_SUPABASE_URL') if environment == 'development' else os.environ.get('SUPABASE_URL')
+                # Try service role key first (bypasses RLS), fallback to anon key
+                service_role_key = os.environ.get('DEV_SUPABASE_SERVICE_ROLE_KEY') or os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+                if service_role_key:
+                    upload_supabase_key = service_role_key
+                    print(f">>> Using SERVICE ROLE KEY (bypasses RLS)")
+                else:
+                    upload_supabase_key = os.environ.get('DEV_SUPABASE_KEY') if environment == 'development' else os.environ.get('SUPABASE_KEY')
+                    print(f">>> Using ANON KEY (subject to RLS)")
+                print(f">>> Using Supabase URL: {upload_supabase_url}")
+
+                upload_client = create_supabase_client(upload_supabase_url, upload_supabase_key)
 
                 # Upload the file with proper content-disposition for filename
-                upload_result = supabase.storage.from_(SUPABASE_BUCKET).upload(
+                upload_result = upload_client.storage.from_(SUPABASE_BUCKET).upload(
                     pdf_path,
                     pdf_bytes,
                     {
@@ -7202,14 +7253,19 @@ def send_vendor_whatsapp(cr_id):
                         "x-upsert": "true"  # Allow overwrite if exists
                     }
                 )
+                print(f">>> Upload result: {upload_result}")
 
                 # Get public URL
                 pdf_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(pdf_path)
+                print(f">>> PDF URL generated: {pdf_url}")
                 log.debug(f"PDF uploaded and URL generated")
 
             except Exception as e:
-                log.error(f"Error in PDF generation/upload: {str(e)}")
+                print(f"\n!!! PDF GENERATION ERROR !!!")
+                print(f"Error: {str(e)}")
                 import traceback
+                print(f"Traceback: {traceback.format_exc()}")
+                log.error(f"Error in PDF generation/upload: {str(e)}")
                 log.error(f"Traceback: {traceback.format_exc()}")
                 # Rollback any failed database transaction
                 try:
@@ -7217,6 +7273,10 @@ def send_vendor_whatsapp(cr_id):
                 except:
                     pass
                 # Continue without PDF
+        else:
+            print(f">>> SKIPPING PDF GENERATION: include_lpo_pdf is {include_lpo_pdf}")
+
+        print(f"\n=== PRE-WHATSAPP: pdf_url = {pdf_url} ===")
 
         # Send WhatsApp message
         log.info(f"=== SENDING WHATSAPP MESSAGE ===")

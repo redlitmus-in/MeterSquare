@@ -564,17 +564,49 @@ def td_mail_send():
                 estimator_user_id = estimator.user_id
 
             if estimator_user_id:
-                notification_service.notify_td_boq_decision(
-                    boq_id=boq_id,
-                    project_name=project.project_name,
-                    td_id=td_user_id,
-                    td_name=td_name,
-                    recipient_user_ids=[estimator_user_id],
-                    approved=(technical_director_status.lower() == 'approved'),
-                    rejection_reason=rejection_reason if technical_director_status.lower() == 'rejected' else None
-                )
+                # Check if this BOQ has internal revisions - send specific notification
+                if boq.has_internal_revisions and boq.internal_revision_number and boq.internal_revision_number > 0:
+                    from utils.comprehensive_notification_service import ComprehensiveNotificationService
+                    if technical_director_status.lower() == 'approved':
+                        ComprehensiveNotificationService.notify_internal_revision_approved(
+                            boq_id=boq_id,
+                            project_name=project.project_name,
+                            revision_number=boq.internal_revision_number,
+                            td_id=td_user_id,
+                            td_name=td_name,
+                            actor_user_id=estimator_user_id,
+                            actor_name=estimator_name
+                        )
+                        log.info(f"Sent internal revision approved notification for BOQ {boq_id}")
+                    else:
+                        ComprehensiveNotificationService.notify_internal_revision_rejected(
+                            boq_id=boq_id,
+                            project_name=project.project_name,
+                            revision_number=boq.internal_revision_number,
+                            td_id=td_user_id,
+                            td_name=td_name,
+                            actor_user_id=estimator_user_id,
+                            actor_name=estimator_name,
+                            rejection_reason=rejection_reason or comments or "No reason provided"
+                        )
+                        log.info(f"Sent internal revision rejected notification for BOQ {boq_id}")
+                else:
+                    # Regular BOQ approval/rejection notification
+                    notification_service.notify_td_boq_decision(
+                        boq_id=boq_id,
+                        project_name=project.project_name,
+                        td_id=td_user_id,
+                        td_name=td_name,
+                        recipient_user_ids=[estimator_user_id],
+                        approved=(technical_director_status.lower() == 'approved'),
+                        rejection_reason=rejection_reason if technical_director_status.lower() == 'rejected' else None
+                    )
+            else:
+                log.warning(f"Could not find estimator user_id for BOQ {boq_id} notification")
         except Exception as notif_error:
             log.error(f"Failed to send TD decision notification: {notif_error}")
+            import traceback
+            log.error(traceback.format_exc())
 
         log.info(f"BOQ {boq_id} {new_status.lower()} by TD, email sent to {recipient_email}")
 

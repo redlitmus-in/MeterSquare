@@ -560,6 +560,7 @@ def client_revision_td_mail_send():
                         estimator_name=estimator_name,
                         revision_number=boq.revision_number
                     )
+                    log.info(f"Sent client revision approved notification to estimator {estimator_user_id} for BOQ {boq_id}")
                 else:
                     ComprehensiveNotificationService.notify_client_revision_rejected(
                         boq_id=boq_id,
@@ -571,8 +572,13 @@ def client_revision_td_mail_send():
                         rejection_reason=rejection_reason or comments or "No reason provided",
                         revision_number=boq.revision_number
                     )
+                    log.info(f"Sent client revision rejected notification to estimator {estimator_user_id} for BOQ {boq_id}")
+            else:
+                log.warning(f"Could not find estimator user_id for BOQ {boq_id} client revision notification - estimator lookup failed")
         except Exception as notif_error:
             log.error(f"Failed to send client revision notification: {notif_error}")
+            import traceback
+            log.error(traceback.format_exc())
 
         log.info(f"BOQ {boq_id} {new_status.lower()} by TD, email sent to {recipient_email}")
 
