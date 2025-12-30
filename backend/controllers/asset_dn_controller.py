@@ -1780,3 +1780,142 @@ def se_receive_selected_items():
         db.session.rollback()
         logger.error(f"Error receiving selected items: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================================
+# ASSET REPAIR MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@asset_dn_bp.route('/api/assets/repairs', methods=['GET'])
+@jwt_required
+def get_asset_repair_items():
+    """Get all asset items sent for repair from ARDNs"""
+    try:
+        # Query items with action_taken = 'send_to_repair'
+        items = AssetReturnDeliveryNoteItem.query.filter(
+            AssetReturnDeliveryNoteItem.action_taken == 'send_to_repair'
+        ).all()
+
+        # Batch load related data
+        ardn_ids = list(set(item.ardn_id for item in items))
+        ardns = {ardn.ardn_id: ardn for ardn in AssetReturnDeliveryNote.query.filter(
+            AssetReturnDeliveryNote.ardn_id.in_(ardn_ids)
+        ).all()} if ardn_ids else {}
+
+        project_ids = list(set(ardn.project_id for ardn in ardns.values()))
+        projects = batch_load_projects(project_ids)
+
+        result = []
+        for item in items:
+            ardn = ardns.get(item.ardn_id)
+            project = projects.get(ardn.project_id) if ardn else None
+
+            result.append({
+                'return_item_id': item.return_item_id,
+                'ardn_id': item.ardn_id,
+                'ardn_number': ardn.ardn_number if ardn else None,
+                'category_id': item.category_id,
+                'category_name': item.category.category_name if item.category else None,
+                'category_code': item.category.category_code if item.category else None,
+                'item_code': item.asset_item.item_code if item.asset_item else None,
+                'serial_number': item.asset_item.serial_number if item.asset_item else None,
+                'quantity': item.quantity,
+                'reported_condition': item.reported_condition,
+                'verified_condition': item.verified_condition,
+                'damage_description': item.damage_description,
+                'pm_notes': item.pm_notes,
+                'action_taken': item.action_taken,
+                'project_id': ardn.project_id if ardn else None,
+                'project_name': project.project_name if project else None,
+                'return_date': ardn.return_date.isoformat() if ardn and ardn.return_date else None,
+                'processed_at': ardn.processed_at.isoformat() if ardn and ardn.processed_at else None,
+                'maintenance_id': item.maintenance_id,
+                # Repair status based on maintenance_id
+                'repair_status': 'completed' if item.maintenance_id else 'pending'
+            })
+
+        return jsonify({
+            'success': True,
+            'data': result
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching repair items: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@asset_dn_bp.route('/api/assets/repairs/<int:return_item_id>/complete', methods=['PUT'])
+@jwt_required
+def complete_asset_repair(return_item_id):
+    """Mark asset repair as complete and return to stock"""
+    try:
+        from flask import g
+        data = request.json or {}
+
+        user_name = g.user.get('full_name') or g.user.get('email') or 'Unknown'
+
+        item = AssetReturnDeliveryNoteItem.query.get(return_item_id)
+        if not item:
+            return jsonify({'success': False, 'error': 'Item not found'}), 404
+
+        if item.action_taken != 'send_to_repair':
+            return jsonify({'success': False, 'error': 'Item is not sent for repair'}), 400
+
+        # Update inventory - add back to available stock
+        if item.category:
+            item.category.available_quantity = (item.category.available_quantity or 0) + item.quantity
+
+        # Update item
+        item.action_taken = 'return_to_stock'
+        item.pm_notes = (item.pm_notes or '') + f"\n[Repair completed by {user_name}]"
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Repair completed and item returned to stock'
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error completing repair: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@asset_dn_bp.route('/api/assets/repairs/<int:return_item_id>/dispose', methods=['PUT'])
+@jwt_required
+def dispose_unrepairable_asset(return_item_id):
+    """Mark unrepairable asset for disposal"""
+    try:
+        from flask import g
+        data = request.json or {}
+
+        user_name = g.user.get('full_name') or g.user.get('email') or 'Unknown'
+        reason = data.get('reason', 'Cannot be repaired')
+
+        item = AssetReturnDeliveryNoteItem.query.get(return_item_id)
+        if not item:
+            return jsonify({'success': False, 'error': 'Item not found'}), 404
+
+        if item.action_taken != 'send_to_repair':
+            return jsonify({'success': False, 'error': 'Item is not sent for repair'}), 400
+
+        # Note: For disposal, we don't add back to available_quantity since item is being disposed
+        # The total_quantity should be reduced but that requires TD approval
+        # For now, just mark as disposed - the item is already removed from available when sent to repair
+
+        # Update item
+        item.action_taken = 'dispose'
+        item.pm_notes = (item.pm_notes or '') + f"\n[Marked for disposal by {user_name}: {reason}]"
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Item marked for disposal'
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error disposing item: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500

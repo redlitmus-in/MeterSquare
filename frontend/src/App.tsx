@@ -93,6 +93,7 @@ const AssetDispatch = lazy(() => import('@/roles/production-manager/pages/AssetD
 const AssetReceiveReturns = lazy(() => import('@/roles/production-manager/pages/AssetReceiveReturns'));
 const ReceiveReturns = lazy(() => import('@/roles/production-manager/pages/ReceiveReturns'));
 const RepairManagement = lazy(() => import('@/roles/production-manager/pages/RepairManagement'));
+const AssetRepairManagement = lazy(() => import('@/roles/production-manager/pages/AssetRepairManagement'));
 
 // Admin Pages - Mix of custom admin pages and role pages
 const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
@@ -1112,6 +1113,12 @@ function App() {
             <Route path="m2-store/repair-management" element={
               <ProductionManagerRoute>
                 <RepairManagement />
+              </ProductionManagerRoute>
+            } />
+            {/* Asset Repair Management */}
+            <Route path="returnable-assets/repairs" element={
+              <ProductionManagerRoute>
+                <AssetRepairManagement />
               </ProductionManagerRoute>
             } />
 

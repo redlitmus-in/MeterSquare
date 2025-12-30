@@ -559,6 +559,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             icon: CheckCircleIcon,
             iconSolid: CheckCircleIcon,
             color: 'text-teal-600'
+          },
+          {
+            name: 'Repair Management',
+            href: buildPath('/returnable-assets/repairs'),
+            icon: WrenchScrewdriverIcon,
+            iconSolid: WrenchScrewdriverIcon,
+            color: 'text-amber-600'
           }
         ]
       },

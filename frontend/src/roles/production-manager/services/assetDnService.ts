@@ -460,3 +460,46 @@ export const deleteStockInDocument = async (stockInId: number): Promise<void> =>
   const response = await apiClient.delete(`/assets/stock-in/${stockInId}/document`);
   if (!response.data.success) throw new Error(response.data.error);
 };
+
+// ============================================================================
+// ASSET REPAIR MANAGEMENT
+// ============================================================================
+
+export interface AssetRepairItem {
+  return_item_id: number;
+  ardn_id: number;
+  ardn_number: string;
+  category_id: number;
+  category_name: string;
+  category_code: string;
+  item_code?: string;
+  serial_number?: string;
+  quantity: number;
+  reported_condition: ReportedCondition;
+  verified_condition?: ReportedCondition;
+  damage_description?: string;
+  pm_notes?: string;
+  action_taken: ActionTaken;
+  project_id: number;
+  project_name?: string;
+  return_date?: string;
+  processed_at?: string;
+  maintenance_id?: number;
+  repair_status: 'pending' | 'completed';
+}
+
+export const getAssetRepairItems = async (): Promise<AssetRepairItem[]> => {
+  const response = await apiClient.get('/assets/repairs');
+  if (!response.data.success) throw new Error(response.data.error);
+  return response.data.data;
+};
+
+export const completeAssetRepair = async (returnItemId: number): Promise<void> => {
+  const response = await apiClient.put(`/assets/repairs/${returnItemId}/complete`, {});
+  if (!response.data.success) throw new Error(response.data.error);
+};
+
+export const disposeUnrepairableAsset = async (returnItemId: number, reason: string): Promise<void> => {
+  const response = await apiClient.put(`/assets/repairs/${returnItemId}/dispose`, { reason });
+  if (!response.data.success) throw new Error(response.data.error);
+};

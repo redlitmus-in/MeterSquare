@@ -1427,16 +1427,17 @@ def request_project_completion(project_id):
 
         # Get incomplete change requests
         # Use centralized completion statuses from config
+        # Only check CRs created by THIS SE (not other SEs)
         incomplete_crs = ChangeRequest.query.filter(
             ChangeRequest.project_id == project_id,
+            ChangeRequest.requested_by_user_id == user_id,  # Filter by current SE
             ChangeRequest.is_deleted == False,
             ~ChangeRequest.status.in_(CR_CONFIG.COMPLETION_STATUSES)
         ).all()
 
-        log.info(f"Validation for SE {user_id} on project {project_id}: Found {len(incomplete_crs)} incomplete CRs")
+        log.info(f"Validation for SE {user_id} on project {project_id}: Found {len(incomplete_crs)} incomplete CRs for this SE")
 
-        # BLOCK ALL INCOMPLETE PURCHASES IN THE PROJECT
-        # No filtering - any incomplete CR blocks completion
+        # Block only THIS SE's incomplete purchases
         blocking_purchases = []
         for cr in incomplete_crs:
             blocking_purchases.append({
