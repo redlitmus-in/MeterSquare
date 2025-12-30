@@ -1,30 +1,22 @@
 """
 Comprehensive migration script to sync support_tickets table columns across all databases
 Checks both DEV and PROD databases and adds any missing columns
+
+Usage:
+  # For DEV database:
+  DATABASE_URL='your_dev_url' python migrations/sync_support_ticket_columns.py
+
+  # For PROD database:
+  DATABASE_URL_PROD='your_prod_url' python migrations/sync_support_ticket_columns.py --prod
 """
 
+import os
+import sys
 import psycopg2
-from psycopg2 import sql
+from dotenv import load_dotenv
 
-# Database configurations
-DATABASES = {
-    'DEV': {
-        'url': 'postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres',
-        'host': 'aws-1-ap-south-1.pooler.supabase.com',
-        'port': 6543,
-        'database': 'postgres',
-        'user': 'postgres.cbzdvghmrpsolryzdpxi',
-        'password': 'Meterkol$2025'
-    },
-    'PROD': {
-        'url': 'postgresql://postgres.wgddnoiakkoskbbkbygw:Rameshdev$08@aws-0-ap-south-1.pooler.supabase.com:6543/postgres',
-        'host': 'aws-0-ap-south-1.pooler.supabase.com',
-        'port': 6543,
-        'database': 'postgres',
-        'user': 'postgres.wgddnoiakkoskbbkbygw',
-        'password': 'Rameshdev$08'
-    }
-}
+# Load environment variables
+load_dotenv()
 
 # All columns that should exist in support_tickets table
 REQUIRED_COLUMNS = {
@@ -65,7 +57,7 @@ def add_missing_columns(cursor, existing_columns, db_name):
 
     return columns_added
 
-def check_and_sync_database(db_name, db_config):
+def check_and_sync_database(db_name, database_url):
     """Check and sync a single database"""
     print(f"\n{'='*60}")
     print(f"Checking {db_name} Database")
@@ -73,13 +65,7 @@ def check_and_sync_database(db_name, db_config):
 
     try:
         # Connect to database
-        conn = psycopg2.connect(
-            host=db_config['host'],
-            port=db_config['port'],
-            database=db_config['database'],
-            user=db_config['user'],
-            password=db_config['password']
-        )
+        conn = psycopg2.connect(database_url)
         conn.autocommit = True
         cursor = conn.cursor()
 
@@ -136,23 +122,37 @@ def main():
     print("="*60)
     print("Support Tickets Table Column Sync")
     print("="*60)
-    print("\nThis script will check both DEV and PROD databases")
-    print("and add any missing columns to the support_tickets table.")
 
-    results = {}
+    # Check for --prod flag
+    is_prod = '--prod' in sys.argv
 
-    for db_name, db_config in DATABASES.items():
-        results[db_name] = check_and_sync_database(db_name, db_config)
+    if is_prod:
+        database_url = os.getenv('DATABASE_URL_PROD')
+        db_name = 'PROD'
+    else:
+        database_url = os.getenv('DATABASE_URL')
+        db_name = 'DEV'
+
+    if not database_url:
+        env_var = 'DATABASE_URL_PROD' if is_prod else 'DATABASE_URL'
+        print(f"\nERROR: {env_var} environment variable not set")
+        print(f"\nUsage:")
+        print(f"  {env_var}='postgresql://...' python migrations/sync_support_ticket_columns.py {'--prod' if is_prod else ''}")
+        sys.exit(1)
+
+    print(f"\nRunning migration on {db_name} database")
+
+    success = check_and_sync_database(db_name, database_url)
 
     # Summary
     print("\n" + "="*60)
     print("SUMMARY")
     print("="*60)
-    for db_name, success in results.items():
-        status = "[SUCCESS]" if success else "[FAILED]"
-        print(f"{db_name}: {status}")
+    status = "[SUCCESS]" if success else "[FAILED]"
+    print(f"{db_name}: {status}")
 
     print("\nMigration completed!")
+    sys.exit(0 if success else 1)
 
 if __name__ == '__main__':
     main()

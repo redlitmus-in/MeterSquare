@@ -13,8 +13,8 @@ import {
   Briefcase,
   Phone,
   Mail,
-  Loader2,
 } from 'lucide-react';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { getAvailableSiteEngineers, assignItemsToSE } from '@/services/boqAssignmentService';
 import { apiClient } from '@/api/config';
@@ -678,7 +678,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                       <div className="space-y-3">
                         {loading ? (
                           <div className="flex items-center justify-center py-12">
-                            <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                            <ModernLoadingSpinners size="sm" />
                           </div>
                         ) : filteredEngineers.length === 0 ? (
                           <div className="text-center py-12">
@@ -892,7 +892,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                       >
                         {creating ? (
                           <>
-                            <Loader2 className="w-5 h-5 animate-spin" />
+                            <ModernLoadingSpinners size="xs" />
                             Creating...
                           </>
                         ) : (
@@ -990,7 +990,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                   <div className="space-y-2">
                     {loadingItems ? (
                       <div className="flex items-center justify-center py-12">
-                        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                        <ModernLoadingSpinners size="sm" />
                       </div>
                     ) : boqItems.length === 0 ? (
                       <div className="text-center py-12">
@@ -1155,7 +1155,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                   >
                     {assigning ? (
                       <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <ModernLoadingSpinners size="xs" />
                         Assigning...
                       </>
                     ) : (
@@ -1268,7 +1268,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                   >
                     {updating ? (
                       <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <ModernLoadingSpinners size="xs" />
                         Updating...
                       </>
                     ) : (

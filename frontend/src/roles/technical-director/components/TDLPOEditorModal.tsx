@@ -6,7 +6,6 @@ import {
   Edit3,
   Save,
   Download,
-  Loader2,
   CheckCircle,
   Plus,
   Trash2,
@@ -16,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { buyerService, LPOData, POChild } from '@/roles/buyer/services/buyerService';
 import { showSuccess, showError, showInfo } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface TDLPOEditorModalProps {
   poChild: POChild | null;
@@ -254,7 +254,7 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
                     >
                       {isSaving ? (
                         <>
-                          <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                          <ModernLoadingSpinners size="xs" className="mr-1" />
                           Saving...
                         </>
                       ) : (
@@ -283,7 +283,7 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <div className="flex flex-col items-center gap-3">
-                  <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                  <ModernLoadingSpinners size="sm" />
                   <p className="text-sm text-gray-600">Loading LPO data...</p>
                 </div>
               </div>
@@ -307,7 +307,7 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
                       <div className="text-sm text-gray-600 flex items-center gap-2">
                         {isSaving ? (
                           <>
-                            <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                            <ModernLoadingSpinners size="xs" />
                             <span>Saving...</span>
                           </>
                         ) : lastSaved ? (
@@ -329,7 +329,7 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
                     >
                       {isSavingDefault ? (
                         <>
-                          <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                          <ModernLoadingSpinners size="xs" className="mr-1" />
                           Saving...
                         </>
                       ) : (

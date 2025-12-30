@@ -61,7 +61,7 @@ export const RETURN_ACTION_LABELS = {
   },
   [RETURN_ACTIONS.MARK_FOR_DISPOSAL]: {
     label: 'Mark for Disposal',
-    description: 'Material is beyond repair, dispose',
+    description: 'Material is beyond repair, send to TD for approval',
     color: 'text-red-600'
   }
 } as const;

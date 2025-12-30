@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
 import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
 import { estimatorService } from '../services/estimatorService';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { downloadClientBOQPDF, previewClientBOQPDF } from '@/services/boqPdfService';
 import { downloadClientBOQExcel } from '@/services/boqExcelService';
 
@@ -963,7 +964,7 @@ MeterSquare Interiors LLC`;
                         </p>
                         {loadingBOQ ? (
                           <div className="flex items-center justify-center py-4">
-                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                            <ModernLoadingSpinners size="sm" />
                           </div>
                         ) : (
                           <>
@@ -1061,7 +1062,7 @@ MeterSquare Interiors LLC`;
                       >
                         {isSending ? (
                           <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                            <ModernLoadingSpinners size="xs" />
                             Sending...
                           </>
                         ) : (

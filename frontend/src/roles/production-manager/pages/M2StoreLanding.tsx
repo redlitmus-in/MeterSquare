@@ -4,7 +4,6 @@ import {
   Package,
   Truck,
   Send,
-  ClipboardList,
   BarChart3,
   ArrowRight,
   Box,
@@ -86,17 +85,6 @@ const M2StoreLanding: React.FC = () => {
       lightBg: 'bg-violet-50',
       iconColor: 'text-violet-600',
       stats: `${stats.pendingRequests} Pending`
-    },
-    {
-      id: 'stock-take',
-      title: 'Stock Take',
-      description: 'Conduct physical inventory counts and reconciliation',
-      icon: ClipboardList,
-      href: '/production-manager/m2-store/stock-take',
-      gradient: 'from-amber-500 to-amber-600',
-      lightBg: 'bg-amber-50',
-      iconColor: 'text-amber-600',
-      stats: 'Audit'
     },
     {
       id: 'reports',

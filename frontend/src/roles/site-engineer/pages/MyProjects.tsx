@@ -167,7 +167,7 @@ const RequestCompletionModalContent: React.FC<{
       <div className="px-4 py-4">
         {validating ? (
           <div className="flex items-center justify-center py-8">
-            <div className="w-6 h-6 border-3 border-[#243d8a] border-t-transparent rounded-full animate-spin"></div>
+            <ModernLoadingSpinners size="sm" />
             <span className="ml-3 text-gray-600 text-sm">Checking validation...</span>
           </div>
         ) : (
@@ -265,7 +265,7 @@ const RequestCompletionModalContent: React.FC<{
           >
             {sending ? (
               <>
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <ModernLoadingSpinners size="xxs" />
                 Sending...
               </>
             ) : (

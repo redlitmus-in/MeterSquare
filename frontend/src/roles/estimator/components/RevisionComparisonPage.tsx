@@ -1557,7 +1557,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                       >
                         {isSendingToTD ? (
                           <>
-                            <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-red-900"></div>
+                            <ModernLoadingSpinners size="xxs" />
                             <span>Sending...</span>
                           </>
                         ) : (
@@ -1648,7 +1648,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                       >
                         {isSendingToTD ? (
                           <>
-                            <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-red-900"></div>
+                            <ModernLoadingSpinners size="xxs" />
                             <span className="text-xs">Sending...</span>
                           </>
                         ) : (
@@ -1718,7 +1718,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                       >
                         {isSendingToTD ? (
                           <>
-                            <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-red-900"></div>
+                            <ModernLoadingSpinners size="xxs" />
                             <span className="text-xs">Sending</span>
                           </>
                         ) : (

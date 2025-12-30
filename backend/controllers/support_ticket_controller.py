@@ -23,10 +23,10 @@ log = get_logger()
 environment = os.environ.get('ENVIRONMENT', 'production')
 if environment == 'development':
     supabase_url = os.environ.get('DEV_SUPABASE_URL')
-    supabase_key = os.environ.get('DEV_SUPABASE_KEY')
+    supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
 else:
     supabase_url = os.environ.get('SUPABASE_URL')
-    supabase_key = os.environ.get('SUPABASE_KEY')
+    supabase_key = os.environ.get('SUPABASE_ANON_KEY')
 SUPABASE_BUCKET = "file_upload"
 
 # Upload configuration

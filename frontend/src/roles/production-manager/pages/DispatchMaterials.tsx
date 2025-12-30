@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Send, FileText, Package, CheckCircle, TruckIcon, Calendar, RefreshCw, AlertCircle, X, AlertTriangle, BoxIcon } from 'lucide-react';
 import { inventoryService, InternalMaterialRequest, InventoryMaterial } from '../services/inventoryService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface AvailabilityInfo {
   available: boolean;
@@ -661,7 +662,7 @@ const DispatchMaterials: React.FC = () => {
 
                 {checkingAvailability ? (
                   <div className="flex items-center gap-3">
-                    <RefreshCw className="w-5 h-5 animate-spin text-gray-500" />
+                    <ModernLoadingSpinners size="xs" />
                     <span className="text-gray-600">Checking inventory...</span>
                   </div>
                 ) : availabilityInfo ? (

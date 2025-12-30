@@ -12,10 +12,10 @@ import {
   X,
   CheckCircle,
   AlertCircle,
-  Loader2,
   FileUp,
   Info
 } from 'lucide-react';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface BOQUploadProps {
@@ -169,7 +169,7 @@ const BOQUpload: React.FC<BOQUploadProps> = ({ onUploadSuccess, onCancel }) => {
                 >
                   {uploading ? (
                     <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      <ModernLoadingSpinners size="xs" className="mr-2" />
                       Processing PDF...
                     </>
                   ) : (

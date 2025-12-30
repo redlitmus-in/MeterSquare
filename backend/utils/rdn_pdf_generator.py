@@ -183,9 +183,17 @@ class RDNPDFGenerator:
         # Format values
         project_location = f"{self._escape_html(project_data.get('project_name', 'N/A'))}, {self._escape_html(project_data.get('project_location', ''))}"
         return_date = self._format_date(rdn_data.get('return_date'))
-        returned_by = self._escape_html(rdn_data.get('created_by', '-'))
+        # Use returned_by field (fallback to created_by for backward compatibility)
+        returned_by = self._escape_html(rdn_data.get('returned_by') or rdn_data.get('created_by') or '-')
         return_to = 'Store / Production Manager'
-        vehicle_driver = f"{self._escape_html(rdn_data.get('vehicle_number', '-'))} / {self._escape_html(rdn_data.get('driver_name', '-'))}"
+        # Format: Vehicle No / Driver Name (Contact)
+        vehicle_no = self._escape_html(rdn_data.get('vehicle_number', '-'))
+        driver_name = self._escape_html(rdn_data.get('driver_name', '-'))
+        driver_contact = rdn_data.get('driver_contact')
+        if driver_contact:
+            vehicle_driver = f"{vehicle_no} / {driver_name} ({self._escape_html(driver_contact)})"
+        else:
+            vehicle_driver = f"{vehicle_no} / {driver_name}"
 
         # Create info grid with proper formatting
         info_data = [

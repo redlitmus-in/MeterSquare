@@ -26,6 +26,15 @@ def run_migration():
                 DROP CONSTRAINT IF EXISTS material_returns_disposal_status_check;
             """))
 
+            # Fix any existing invalid status values before adding constraint
+            print("Fixing existing 'backup_added' status to 'sent_for_repair'...")
+            result = db.session.execute(text("""
+                UPDATE material_returns
+                SET disposal_status = 'sent_for_repair'
+                WHERE disposal_status = 'backup_added'
+            """))
+            print(f"Updated {result.rowcount} rows with 'backup_added' status")
+
             # Add the new constraint with all valid statuses
             print("Adding new constraint with updated statuses...")
             db.session.execute(text("""
@@ -37,6 +46,7 @@ def run_migration():
                     'pending_review',
                     'approved_disposal',
                     'disposed',
+                    'sent_for_repair',
                     'repaired',
                     'rejected'
                 ) OR disposal_status IS NULL);
@@ -50,7 +60,8 @@ def run_migration():
             print("  - pending_review (Damaged/Defective awaiting PM review)")
             print("  - approved_disposal (PM approved for disposal)")
             print("  - disposed (Physically disposed)")
-            print("  - repaired (Marked for repair)")
+            print("  - sent_for_repair (In backup stock, awaiting repair)")
+            print("  - repaired (Repair completed, added to main stock)")
             print("  - rejected (PM rejected the return)")
 
         except Exception as e:

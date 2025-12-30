@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import M2AvailabilityCard, { calculateM2Availability } from './M2AvailabilityCard';
-import { Loader, CheckCircle } from 'lucide-react';
+import { CheckCircle } from 'lucide-react';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface Material {
   materialId: number;
@@ -160,7 +161,7 @@ const M2StorePurchaseFlow: React.FC<M2StorePurchaseFlowProps> = ({
     return (
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12">
         <div className="text-center">
-          <Loader className="w-12 h-12 text-blue-600 animate-spin mx-auto mb-4" />
+          <ModernLoadingSpinners size="lg" className="mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">
             Checking M2 Store Availability...
           </h3>

@@ -14,6 +14,7 @@ import {
   ChevronUpIcon
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { API_BASE_URL } from '@/api/config';
 
 interface ExtensionRequest {
@@ -711,7 +712,7 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
             >
               {isSubmitting ? (
                 <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <ModernLoadingSpinners size="xxs" />
                   Submitting...
                 </>
               ) : (

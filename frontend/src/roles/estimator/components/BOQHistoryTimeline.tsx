@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import DayExtensionApprovalModal from '@/roles/technical-director/components/DayExtensionApprovalModal';
 
 interface BOQHistoryTimelineProps {
@@ -418,7 +419,7 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto"></div>
+          <ModernLoadingSpinners size="sm" className="mx-auto" />
           <p className="mt-3 text-gray-600 text-sm">Loading history...</p>
         </div>
       </div>

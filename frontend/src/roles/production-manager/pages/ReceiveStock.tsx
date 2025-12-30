@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Calendar, Package, CheckCircle, X, Save, RefreshCw, FileText, RotateCcw, AlertTriangle, Trash2, Eye, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { inventoryService, InventoryTransaction, InventoryMaterial, MaterialReturn, MaterialCondition, CreateMaterialReturnData } from '../services/inventoryService';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 type TabType = 'grn' | 'returns';
 
@@ -1273,7 +1274,7 @@ const ReceiveStock: React.FC = () => {
                   >
                     {saving ? (
                       <>
-                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        <ModernLoadingSpinners size="xs" />
                         Processing...
                       </>
                     ) : (
@@ -1291,7 +1292,7 @@ const ReceiveStock: React.FC = () => {
                   >
                     {saving ? (
                       <>
-                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        <ModernLoadingSpinners size="xs" />
                         Processing...
                       </>
                     ) : (

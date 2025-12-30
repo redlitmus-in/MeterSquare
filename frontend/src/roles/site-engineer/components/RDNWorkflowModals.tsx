@@ -10,6 +10,7 @@ import {
   TrashIcon,
 } from '@heroicons/react/24/outline';
 import { showError, showSuccess, showInfo } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface Material {
   delivery_note_item_id: number;
@@ -510,7 +511,7 @@ export const RDNCreationModal: React.FC<RDNCreationModalProps> = ({
               >
                 {creating ? (
                   <>
-                    <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                    <ModernLoadingSpinners size="xs" />
                     Creating RDN...
                   </>
                 ) : (

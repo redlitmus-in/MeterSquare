@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Clock, Package, Eye, Send, CheckCircle, XCircle } from 'lucide-react';
 import { ChangeRequestItem, changeRequestService } from '@/services/changeRequestService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
 import { isSiteEngineer, isProjectManager, canSendForReview } from '@/utils/roleHelpers';
@@ -186,7 +187,7 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
                     >
                       {approvingCrId === request.cr_id ? (
                         <>
-                          <div className="w-3 h-3 sm:w-4 sm:h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          <ModernLoadingSpinners size="xxs" />
                           Approving...
                         </>
                       ) : (
@@ -203,7 +204,7 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
                     >
                       {rejectingCrId === request.cr_id ? (
                         <>
-                          <div className="w-3 h-3 sm:w-4 sm:h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          <ModernLoadingSpinners size="xxs" />
                           Rejecting...
                         </>
                       ) : (
@@ -225,7 +226,7 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
                       >
                         {isSending ? (
                           <>
-                            <div className="w-3 h-3 sm:w-4 sm:h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            <ModernLoadingSpinners size="xxs" />
                             Sending...
                           </>
                         ) : (

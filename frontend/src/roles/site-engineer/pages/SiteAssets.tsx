@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CubeIcon,
@@ -14,34 +14,52 @@ import {
   ClockIcon,
   TruckIcon,
   DocumentTextIcon,
+  CheckIcon,
+  PaperAirplaneIcon,
+  ArrowDownTrayIcon,
+  PrinterIcon,
+  PencilIcon,
 } from '@heroicons/react/24/outline';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import { siteEngineerService } from '../services/siteEngineerService';
 import { showError, showSuccess } from '@/utils/toastHelper';
-import { apiClient } from '@/api/config';
+import { apiClient, API_BASE_URL } from '@/api/config';
 
-// Types
-interface DispatchedMovement {
-  movement_id: number;
+// Types - Updated for ADN flow
+interface DispatchedAsset {
+  adn_id: number;
+  adn_number: string;
+  adn_item_id: number;
+  adn_status?: string;  // ADN-level status (IN_TRANSIT, PARTIAL, DELIVERED)
+  receiver_notes?: string;  // Notes from partial receive
   category_id: number;
   category_code: string;
   category_name: string;
-  item_id?: number;
+  asset_item_id?: number;
   item_code?: string;
+  serial_number?: string;
   project_id: number;
   project_name: string;
   quantity: number;
+  condition?: string;
   dispatched_at: string;
   dispatched_by: string;
+  delivery_date?: string;
+  is_received: boolean;
   received_at?: string;
   received_by?: string;
-  is_received: boolean;
-  condition_before?: string;
-  // Pending return request info
-  has_pending_return?: boolean;
-  pending_return_tracking?: string;
-  pending_return_at?: string;
-  pending_return_quantity?: number;
+}
+
+// Grouped ADN type
+interface GroupedADN {
+  adn_id: number;
+  adn_number: string;
+  adn_status?: string;  // ADN-level status
+  receiver_notes?: string;  // Notes from partial receive
+  project_id: number;
+  project_name: string;
+  dispatched_at: string;
+  dispatched_by: string;
+  items: DispatchedAsset[];
 }
 
 interface AssetHistory {
@@ -63,6 +81,30 @@ interface AssetHistory {
   created_at: string;
 }
 
+// Return Note (ARDN) type for SE's return notes list
+interface MyReturnNote {
+  ardn_id: number;
+  ardn_number: string;
+  project_id: number;
+  project_name?: string;
+  status: 'DRAFT' | 'ISSUED' | 'IN_TRANSIT' | 'RECEIVED' | 'PROCESSED' | 'CANCELLED';
+  return_date: string;
+  return_reason?: string;
+  vehicle_number?: string;
+  driver_name?: string;
+  driver_contact?: string;
+  notes?: string;
+  total_items: number;
+  items: Array<{
+    return_item_id: number;
+    category_name: string;
+    item_code?: string;
+    quantity: number;
+    reported_condition: string;
+    damage_description?: string;
+  }>;
+}
+
 // Constants for colors
 const CONDITION_COLORS: Record<string, string> = {
   good: 'bg-green-100 text-green-700 border-green-200',
@@ -72,25 +114,43 @@ const CONDITION_COLORS: Record<string, string> = {
   default: 'bg-gray-100 text-gray-700 border-gray-200'
 };
 
+const ARDN_STATUS_COLORS: Record<string, string> = {
+  DRAFT: 'bg-gray-100 text-gray-700',
+  ISSUED: 'bg-blue-100 text-blue-700',
+  IN_TRANSIT: 'bg-yellow-100 text-yellow-700',
+  RECEIVED: 'bg-green-100 text-green-700',
+  PROCESSED: 'bg-purple-100 text-purple-700',
+  CANCELLED: 'bg-red-100 text-red-700'
+};
+
 const getConditionColor = (condition: string): string => {
   return CONDITION_COLORS[condition?.toLowerCase()] || CONDITION_COLORS.default;
 };
 
 const SiteAssets: React.FC = () => {
-  const [movements, setMovements] = useState<DispatchedMovement[]>([]);
+  const [pendingReceipt, setPendingReceipt] = useState<DispatchedAsset[]>([]);
+  const [received, setReceived] = useState<DispatchedAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [markingReceived, setMarkingReceived] = useState<number | null>(null);
 
-  // Return request modal state
+  // Checkbox state for pending items - track by adn_item_id
+  const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
+
+  // Partial receive modal state
+  const [showPartialReceiveModal, setShowPartialReceiveModal] = useState(false);
+  const [partialReceiveADN, setPartialReceiveADN] = useState<GroupedADN | null>(null);
+  const [partialReceiveNotes, setPartialReceiveNotes] = useState('');
+
+  // Return request modal state - now supports bulk return
   const [showReturnModal, setShowReturnModal] = useState(false);
-  const [returnMovement, setReturnMovement] = useState<DispatchedMovement | null>(null);
-  const [returnForm, setReturnForm] = useState({
-    quantity: 1,
-    condition: 'good',
-    notes: '',
-    damage_description: ''
-  });
+  const [returnADN, setReturnADN] = useState<GroupedADN | null>(null);
+  const [returnItems, setReturnItems] = useState<DispatchedAsset[]>([]);
+  const [returnItemConditions, setReturnItemConditions] = useState<Record<number, { condition: string; damage_description: string }>>({});
+  const [returnNotes, setReturnNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Checkbox state for received items (for return selection)
+  const [checkedReturnItems, setCheckedReturnItems] = useState<Set<number>>(new Set());
 
   // History state
   const [showHistory, setShowHistory] = useState(false);
@@ -98,32 +158,221 @@ const SiteAssets: React.FC = () => {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
 
-  const fetchMovements = useCallback(async () => {
+  // Expanded ADN state
+  const [expandedADNs, setExpandedADNs] = useState<Set<number>>(new Set());
+
+  // My Return Notes state
+  const [myReturnNotes, setMyReturnNotes] = useState<MyReturnNote[]>([]);
+  const [showMyReturns, setShowMyReturns] = useState(true);
+  const [expandedARDNs, setExpandedARDNs] = useState<Set<number>>(new Set());
+  const [processingARDN, setProcessingARDN] = useState<number | null>(null);
+
+  // Dispatch modal state
+  const [showDispatchModal, setShowDispatchModal] = useState(false);
+  const [dispatchARDN, setDispatchARDN] = useState<MyReturnNote | null>(null);
+  const [dispatchDriverName, setDispatchDriverName] = useState('');
+  const [dispatchVehicleNumber, setDispatchVehicleNumber] = useState('');
+  const [dispatchDriverContact, setDispatchDriverContact] = useState('');
+
+  const fetchAssets = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await apiClient.get('/assets/my-dispatched-movements');
-      setMovements(response.data.movements || []);
+      // Use new ADN-based endpoint
+      const response = await apiClient.get('/assets/se/dispatched-assets');
+      const data = response.data.data || {};
+      setPendingReceipt(data.pending_receipt || []);
+      setReceived(data.received || []);
+      // Reset checked items on refresh
+      setCheckedItems(new Set());
+      // Also fetch my return notes
+      fetchMyReturnNotes();
     } catch (err) {
-      console.error('Error fetching dispatched movements:', err);
+      console.error('Error fetching dispatched assets:', err);
       showError('Failed to load dispatched assets');
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Fetch return notes created by this SE
+  const fetchMyReturnNotes = async () => {
+    try {
+      const response = await apiClient.get('/assets/return-notes', {
+        params: { per_page: 50 }
+      });
+      if (response.data.success) {
+        // Filter to show DRAFT, ISSUED, IN_TRANSIT, and RECEIVED (so SE can see when PM receives)
+        const notes = response.data.data.filter((rn: MyReturnNote) =>
+          ['DRAFT', 'ISSUED', 'IN_TRANSIT', 'RECEIVED'].includes(rn.status)
+        );
+        setMyReturnNotes(notes);
+      }
+    } catch (err) {
+      console.error('Error fetching return notes:', err);
+    }
+  };
+
+  // Issue return note
+  const handleIssueARDN = async (ardn: MyReturnNote) => {
+    setProcessingARDN(ardn.ardn_id);
+    try {
+      await apiClient.put(`/assets/return-notes/${ardn.ardn_id}/issue`);
+      showSuccess(`Return note ${ardn.ardn_number} issued`);
+      fetchMyReturnNotes();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      showError(error.response?.data?.error || 'Failed to issue return note');
+    } finally {
+      setProcessingARDN(null);
+    }
+  };
+
+  // Open dispatch modal
+  const openDispatchModal = (ardn: MyReturnNote) => {
+    setDispatchARDN(ardn);
+    setDispatchDriverName(ardn.driver_name || '');
+    setDispatchVehicleNumber(ardn.vehicle_number || '');
+    setDispatchDriverContact(ardn.driver_contact || '');
+    setShowDispatchModal(true);
+  };
+
+  // Dispatch return note with driver details
+  const handleDispatchARDN = async () => {
+    if (!dispatchARDN) return;
+    setProcessingARDN(dispatchARDN.ardn_id);
+    try {
+      await apiClient.put(`/assets/return-notes/${dispatchARDN.ardn_id}/dispatch`, {
+        vehicle_number: dispatchVehicleNumber,
+        driver_name: dispatchDriverName,
+        driver_contact: dispatchDriverContact
+      });
+      showSuccess(`Return note ${dispatchARDN.ardn_number} dispatched`);
+      setShowDispatchModal(false);
+      setDispatchARDN(null);
+      fetchMyReturnNotes();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      showError(error.response?.data?.error || 'Failed to dispatch return note');
+    } finally {
+      setProcessingARDN(null);
+    }
+  };
+
+  // Download ARDN PDF
+  const handleDownloadARDN = async (ardn: MyReturnNote) => {
+    try {
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        showError('Please log in to download');
+        return;
+      }
+      const response = await fetch(`${API_BASE_URL}/assets/return-notes/${ardn.ardn_id}/download`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Failed to download');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${ardn.ardn_number}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch {
+      showError('Failed to download return note PDF');
+    }
+  };
+
+  // Print ARDN PDF
+  const handlePrintARDN = async (ardn: MyReturnNote) => {
+    try {
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        showError('Please log in to print');
+        return;
+      }
+      const response = await fetch(`${API_BASE_URL}/assets/return-notes/${ardn.ardn_id}/download`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Failed to load for print');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const printWindow = window.open(url, '_blank');
+      if (printWindow) {
+        printWindow.onload = () => printWindow.print();
+      }
+    } catch {
+      showError('Failed to print return note');
+    }
+  };
+
+  // Group pending items by ADN
+  const groupedPendingADNs = useMemo((): GroupedADN[] => {
+    const groups: Record<number, GroupedADN> = {};
+
+    pendingReceipt.forEach(item => {
+      if (!groups[item.adn_id]) {
+        groups[item.adn_id] = {
+          adn_id: item.adn_id,
+          adn_number: item.adn_number,
+          adn_status: item.adn_status,
+          receiver_notes: item.receiver_notes,
+          project_id: item.project_id,
+          project_name: item.project_name,
+          dispatched_at: item.dispatched_at,
+          dispatched_by: item.dispatched_by,
+          items: []
+        };
+      }
+      groups[item.adn_id].items.push(item);
+    });
+
+    return Object.values(groups).sort((a, b) =>
+      new Date(b.dispatched_at).getTime() - new Date(a.dispatched_at).getTime()
+    );
+  }, [pendingReceipt]);
+
+  // Group received items by ADN
+  const groupedReceivedADNs = useMemo((): GroupedADN[] => {
+    const groups: Record<number, GroupedADN> = {};
+
+    received.forEach(item => {
+      if (!groups[item.adn_id]) {
+        groups[item.adn_id] = {
+          adn_id: item.adn_id,
+          adn_number: item.adn_number,
+          adn_status: item.adn_status,
+          receiver_notes: item.receiver_notes,
+          project_id: item.project_id,
+          project_name: item.project_name,
+          dispatched_at: item.dispatched_at,
+          dispatched_by: item.dispatched_by,
+          items: []
+        };
+      }
+      groups[item.adn_id].items.push(item);
+    });
+
+    return Object.values(groups).sort((a, b) =>
+      new Date(b.dispatched_at).getTime() - new Date(a.dispatched_at).getTime()
+    );
+  }, [received]);
+
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
-      // Get SE's assigned project IDs from movements or fetch assigned projects
-      const projectIds: number[] = [...new Set(movements.map(m => m.project_id))];
+      // Get SE's assigned project IDs from assets
+      const allAssets = [...pendingReceipt, ...received];
+      const projectIds: number[] = [...new Set(allAssets.map(a => a.project_id))];
       const projectNames: Record<number, string> = {};
 
-      // Build project name map from movements
-      movements.forEach(m => {
-        projectNames[m.project_id] = m.project_name;
+      // Build project name map from assets
+      allAssets.forEach(a => {
+        projectNames[a.project_id] = a.project_name;
       });
 
-      // If no movements, fetch assigned projects
+      // If no assets, fetch assigned projects
       if (projectIds.length === 0) {
         try {
           const projectsResponse = await apiClient.get('/projects/assigned-to-me');
@@ -143,24 +392,31 @@ const SiteAssets: React.FC = () => {
         return;
       }
 
-      // Fetch movements for all SE's projects
+      // Fetch movements for all SE's projects in parallel
       const allHistory: AssetHistory[] = [];
 
-      for (const projectId of projectIds) {
-        try {
-          const response = await apiClient.get(`/assets/movements?project_id=${projectId}&limit=50`);
-          const projectMovements = response.data.movements || [];
+      const historyPromises = projectIds.map(projectId =>
+        apiClient.get(`/assets/movements?project_id=${projectId}&limit=50`)
+          .then(response => ({
+            projectId,
+            movements: response.data.movements || []
+          }))
+          .catch(err => {
+            console.error(`Error fetching history for project ${projectId}:`, err);
+            return { projectId, movements: [] };
+          })
+      );
 
-          projectMovements.forEach((m: AssetHistory) => {
-            allHistory.push({
-              ...m,
-              project_name: projectNames[projectId] || m.project_name || `Project #${projectId}`
-            });
+      const historyResults = await Promise.all(historyPromises);
+
+      historyResults.forEach(({ projectId, movements }) => {
+        movements.forEach((m: AssetHistory) => {
+          allHistory.push({
+            ...m,
+            project_name: projectNames[projectId] || m.project_name || `Project #${projectId}`
           });
-        } catch (err) {
-          console.error(`Error fetching history for project ${projectId}:`, err);
-        }
-      }
+        });
+      });
 
       // Sort by date descending
       allHistory.sort((a, b) => {
@@ -178,15 +434,16 @@ const SiteAssets: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchMovements();
-  }, [fetchMovements]);
+    fetchAssets();
+  }, [fetchAssets]);
 
-  const handleMarkReceived = async (movementId: number) => {
+  // Handle marking entire ADN as received (all items)
+  const handleMarkAllReceived = async (adnId: number) => {
     try {
-      setMarkingReceived(movementId);
-      await apiClient.post('/assets/mark-received', { movement_id: movementId });
-      showSuccess('Asset marked as received! PM has been notified.');
-      fetchMovements();
+      setMarkingReceived(adnId);
+      await apiClient.put(`/assets/se/receive-adn/${adnId}`);
+      showSuccess('All items marked as received!');
+      fetchAssets();
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       showError(error.response?.data?.error || 'Failed to mark as received');
@@ -195,42 +452,287 @@ const SiteAssets: React.FC = () => {
     }
   };
 
-  const openReturnModal = (movement: DispatchedMovement) => {
-    setReturnMovement(movement);
-    setReturnForm({
-      quantity: movement.quantity,
-      condition: 'good',
-      notes: '',
-      damage_description: ''
+  // Handle marking selected items as received (selective receive)
+  // If partial (not all items selected), show modal for mandatory notes
+  const handleMarkSelectedReceived = (adn: GroupedADN) => {
+    const selectedItemIds = adn.items
+      .filter(item => checkedItems.has(item.adn_item_id))
+      .map(item => item.adn_item_id);
+
+    if (selectedItemIds.length === 0) {
+      showError('Please select at least one item to receive');
+      return;
+    }
+
+    // If partial receive (not all items), show modal for mandatory notes
+    const isPartialReceive = selectedItemIds.length < adn.items.length;
+    if (isPartialReceive) {
+      setPartialReceiveADN(adn);
+      setPartialReceiveNotes('');
+      setShowPartialReceiveModal(true);
+      return;
+    }
+
+    // If all items selected, receive directly without notes
+    submitReceiveItems(adn, selectedItemIds, '');
+  };
+
+  // Submit receive items to API
+  const submitReceiveItems = async (adn: GroupedADN, selectedItemIds: number[], notes: string) => {
+    try {
+      setMarkingReceived(adn.adn_id);
+      const response = await apiClient.put('/assets/se/receive-items', {
+        adn_id: adn.adn_id,
+        item_ids: selectedItemIds,
+        notes: notes || undefined
+      });
+
+      const data = response.data.data;
+      if (data.all_received) {
+        showSuccess(`All ${data.received_count} item(s) received! Delivery note complete.`);
+      } else {
+        showSuccess(`${data.received_count} item(s) marked as received`);
+      }
+
+      // Clear checked items for this ADN
+      setCheckedItems(prev => {
+        const newSet = new Set(prev);
+        selectedItemIds.forEach(id => newSet.delete(id));
+        return newSet;
+      });
+
+      // Close modal if open
+      setShowPartialReceiveModal(false);
+      setPartialReceiveADN(null);
+      setPartialReceiveNotes('');
+
+      fetchAssets();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      showError(error.response?.data?.error || 'Failed to mark items as received');
+    } finally {
+      setMarkingReceived(null);
+    }
+  };
+
+  // Handle partial receive confirmation from modal
+  const handleConfirmPartialReceive = () => {
+    if (!partialReceiveADN) return;
+
+    if (!partialReceiveNotes.trim()) {
+      showError('Please provide a reason for partial receive');
+      return;
+    }
+
+    const selectedItemIds = partialReceiveADN.items
+      .filter(item => checkedItems.has(item.adn_item_id))
+      .map(item => item.adn_item_id);
+
+    submitReceiveItems(partialReceiveADN, selectedItemIds, partialReceiveNotes.trim());
+  };
+
+  // Get count of checked items in an ADN
+  const getCheckedCountInADN = (adn: GroupedADN): number => {
+    return adn.items.filter(item => checkedItems.has(item.adn_item_id)).length;
+  };
+
+  // Toggle checkbox for an item
+  const toggleItemCheck = (itemId: number) => {
+    setCheckedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
     });
+  };
+
+  // Toggle all items in an ADN
+  const toggleAllInADN = (adn: GroupedADN) => {
+    const allItemIds = adn.items.map(i => i.adn_item_id);
+    const allChecked = allItemIds.every(id => checkedItems.has(id));
+
+    setCheckedItems(prev => {
+      const newSet = new Set(prev);
+      if (allChecked) {
+        // Uncheck all
+        allItemIds.forEach(id => newSet.delete(id));
+      } else {
+        // Check all
+        allItemIds.forEach(id => newSet.add(id));
+      }
+      return newSet;
+    });
+  };
+
+  // Check if all items in ADN are checked
+  const isAllCheckedInADN = (adn: GroupedADN): boolean => {
+    return adn.items.every(item => checkedItems.has(item.adn_item_id));
+  };
+
+  // Check if some items in ADN are checked
+  const isSomeCheckedInADN = (adn: GroupedADN): boolean => {
+    return adn.items.some(item => checkedItems.has(item.adn_item_id)) &&
+           !adn.items.every(item => checkedItems.has(item.adn_item_id));
+  };
+
+  // Toggle ADN expansion
+  const toggleADNExpansion = (adnId: number) => {
+    setExpandedADNs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(adnId)) {
+        newSet.delete(adnId);
+      } else {
+        newSet.add(adnId);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle return item checkbox
+  const toggleReturnItemCheck = (itemId: number) => {
+    setCheckedReturnItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle all return items in an ADN
+  const toggleAllReturnInADN = (adn: GroupedADN) => {
+    const allItemIds = adn.items.map(i => i.adn_item_id);
+    const allChecked = allItemIds.every(id => checkedReturnItems.has(id));
+
+    setCheckedReturnItems(prev => {
+      const newSet = new Set(prev);
+      if (allChecked) {
+        allItemIds.forEach(id => newSet.delete(id));
+      } else {
+        allItemIds.forEach(id => newSet.add(id));
+      }
+      return newSet;
+    });
+  };
+
+  // Check if all return items in ADN are checked
+  const isAllReturnCheckedInADN = (adn: GroupedADN): boolean => {
+    return adn.items.every(item => checkedReturnItems.has(item.adn_item_id));
+  };
+
+  // Check if some return items in ADN are checked
+  const isSomeReturnCheckedInADN = (adn: GroupedADN): boolean => {
+    return adn.items.some(item => checkedReturnItems.has(item.adn_item_id)) &&
+           !adn.items.every(item => checkedReturnItems.has(item.adn_item_id));
+  };
+
+  // Get count of checked return items in an ADN
+  const getCheckedReturnCountInADN = (adn: GroupedADN): number => {
+    return adn.items.filter(item => checkedReturnItems.has(item.adn_item_id)).length;
+  };
+
+  // Open bulk return modal for selected items in an ADN
+  const openBulkReturnModal = (adn: GroupedADN) => {
+    const selectedItems = adn.items.filter(item => checkedReturnItems.has(item.adn_item_id));
+    if (selectedItems.length === 0) {
+      showError('Please select at least one item to return');
+      return;
+    }
+
+    // Initialize conditions for each item
+    const conditions: Record<number, { condition: string; damage_description: string }> = {};
+    selectedItems.forEach(item => {
+      conditions[item.adn_item_id] = { condition: 'good', damage_description: '' };
+    });
+
+    setReturnADN(adn);
+    setReturnItems(selectedItems);
+    setReturnItemConditions(conditions);
+    setReturnNotes('');
     setShowReturnModal(true);
   };
 
-  const handleReturnRequest = async () => {
-    if (!returnMovement) return;
+  // Open return modal for single item
+  const openSingleReturnModal = (adn: GroupedADN, item: DispatchedAsset) => {
+    const conditions: Record<number, { condition: string; damage_description: string }> = {
+      [item.adn_item_id]: { condition: 'good', damage_description: '' }
+    };
+
+    setReturnADN(adn);
+    setReturnItems([item]);
+    setReturnItemConditions(conditions);
+    setReturnNotes('');
+    setShowReturnModal(true);
+  };
+
+  // Update condition for a specific item
+  const updateItemCondition = (itemId: number, field: 'condition' | 'damage_description', value: string) => {
+    setReturnItemConditions(prev => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        [field]: value
+      }
+    }));
+  };
+
+  const handleBulkReturnRequest = async () => {
+    if (!returnADN || returnItems.length === 0) return;
+
+    // Validate - if any item is not 'good', it needs a damage description
+    const invalidItems = returnItems.filter(item => {
+      const cond = returnItemConditions[item.adn_item_id];
+      return cond.condition !== 'good' && !cond.damage_description.trim();
+    });
+
+    if (invalidItems.length > 0) {
+      showError(`Please provide damage description for items with condition other than "good"`);
+      return;
+    }
 
     try {
       setSubmitting(true);
 
-      const payload: Record<string, unknown> = {
-        category_id: returnMovement.category_id,
-        project_id: returnMovement.project_id,
-        condition: returnForm.condition,
-        quantity: returnForm.quantity,
-        notes: returnForm.notes || undefined,
-        damage_description: returnForm.condition !== 'good' ? returnForm.damage_description : undefined
+      // Create return note via ARDN flow with multiple items
+      const payload = {
+        project_id: returnADN.project_id,
+        original_adn_id: returnADN.adn_id,
+        return_reason: returnNotes || 'Return request',
+        notes: returnNotes,
+        items: returnItems.map(item => {
+          const cond = returnItemConditions[item.adn_item_id];
+          return {
+            category_id: item.category_id,
+            asset_item_id: item.asset_item_id,
+            original_adn_item_id: item.adn_item_id,
+            quantity: item.quantity,
+            reported_condition: cond.condition,
+            damage_description: cond.condition !== 'good' ? cond.damage_description : undefined,
+            notes: returnNotes
+          };
+        })
       };
 
-      if (returnMovement.item_id) {
-        payload.item_ids = [returnMovement.item_id];
-      }
+      const response = await apiClient.post('/assets/return-notes', payload);
 
-      const response = await apiClient.post('/assets/return-requests', payload);
-
-      showSuccess(`Return request created! Tracking: ${response.data.tracking_code}`);
+      showSuccess(`Return note created: ${response.data.data?.ardn_number || 'Success'} with ${returnItems.length} item(s)`);
       setShowReturnModal(false);
-      setReturnMovement(null);
-      fetchMovements();
+      setReturnADN(null);
+      setReturnItems([]);
+      setReturnItemConditions({});
+      setReturnNotes('');
+      // Clear checked items for this ADN
+      setCheckedReturnItems(prev => {
+        const newSet = new Set(prev);
+        returnItems.forEach(item => newSet.delete(item.adn_item_id));
+        return newSet;
+      });
+      fetchAssets();
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       showError(error.response?.data?.error || 'Failed to create return request');
@@ -246,10 +748,6 @@ const SiteAssets: React.FC = () => {
       </div>
     );
   }
-
-  // Group by status
-  const pendingReceipt = movements.filter(m => !m.is_received);
-  const received = movements.filter(m => m.is_received);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
@@ -267,7 +765,7 @@ const SiteAssets: React.FC = () => {
               </div>
             </div>
             <button
-              onClick={fetchMovements}
+              onClick={fetchAssets}
               className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
             >
               <ArrowPathIcon className="w-4 h-4" />
@@ -278,61 +776,8 @@ const SiteAssets: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-xl shadow-sm border border-gray-200 p-4"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-yellow-100 rounded-lg">
-                <TruckIcon className="w-5 h-5 text-yellow-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Pending Receipt</p>
-                <p className="text-2xl font-bold text-yellow-600">{pendingReceipt.length}</p>
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white rounded-xl shadow-sm border border-gray-200 p-4"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-100 rounded-lg">
-                <CheckCircleIcon className="w-5 h-5 text-green-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Received at Site</p>
-                <p className="text-2xl font-bold text-green-600">{received.length}</p>
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white rounded-xl shadow-sm border border-gray-200 p-4"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-100 rounded-lg">
-                <CubeIcon className="w-5 h-5 text-indigo-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Total Dispatched</p>
-                <p className="text-2xl font-bold text-indigo-600">{movements.length}</p>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-
-        {/* Pending Receipt Section - Yellow */}
-        {pendingReceipt.length > 0 && (
+        {/* Pending Receipt Section - Grouped by ADN */}
+        {groupedPendingADNs.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -343,56 +788,191 @@ const SiteAssets: React.FC = () => {
                 <TruckIcon className="w-5 h-5" />
                 Dispatched - Pending Your Receipt
               </h3>
-              <p className="text-sm text-yellow-600 mt-1">These assets have been dispatched to your sites. Mark as received when you get them.</p>
+              <p className="text-sm text-yellow-600 mt-1">
+                Review items and mark delivery notes as received. All items in a delivery note will be marked received together.
+              </p>
             </div>
-            <div className="divide-y divide-gray-100">
-              {pendingReceipt.map((mov) => (
-                <div key={mov.movement_id} className="px-5 py-4 hover:bg-yellow-50/50 transition-colors">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-4">
-                      <div className="p-2 bg-yellow-100 rounded-lg">
-                        <TruckIcon className="w-5 h-5 text-yellow-600" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-900">{mov.category_name}</p>
-                        <p className="text-sm text-gray-500">
-                          {mov.quantity} unit(s) • {mov.item_code || mov.category_code}
-                        </p>
-                        <p className="text-sm text-gray-500 mt-1">
-                          <span className="font-medium">Project:</span> {mov.project_name}
-                        </p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          Dispatched: {new Date(mov.dispatched_at).toLocaleDateString()} at {new Date(mov.dispatched_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                          {mov.dispatched_by && ` by ${mov.dispatched_by}`}
-                        </p>
+
+            <div className="divide-y divide-gray-200">
+              {groupedPendingADNs.map((adn) => {
+                const isExpanded = expandedADNs.has(adn.adn_id);
+                const allChecked = isAllCheckedInADN(adn);
+                const someChecked = isSomeCheckedInADN(adn);
+
+                return (
+                  <div key={adn.adn_id} className="bg-white">
+                    {/* ADN Header */}
+                    <div className="px-5 py-4 bg-yellow-50/50">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {/* Select All Checkbox */}
+                          <button
+                            role="checkbox"
+                            aria-checked={allChecked ? 'true' : someChecked ? 'mixed' : 'false'}
+                            aria-label={`Select all items in ${adn.adn_number}`}
+                            onClick={() => toggleAllInADN(adn)}
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                              allChecked
+                                ? 'bg-green-500 border-green-500'
+                                : someChecked
+                                  ? 'bg-yellow-200 border-yellow-500'
+                                  : 'bg-white border-gray-300 hover:border-yellow-500'
+                            }`}
+                          >
+                            {(allChecked || someChecked) && (
+                              <CheckIcon className={`w-3 h-3 ${allChecked ? 'text-white' : 'text-yellow-700'}`} />
+                            )}
+                          </button>
+
+                          <button
+                            onClick={() => toggleADNExpansion(adn.adn_id)}
+                            className="flex items-center gap-2 hover:bg-yellow-100 rounded-lg px-2 py-1 -ml-2 transition-colors"
+                          >
+                            {isExpanded ? (
+                              <ChevronUpIcon className="w-4 h-4 text-gray-500" />
+                            ) : (
+                              <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+                            )}
+                            <div className="text-left">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-sm font-semibold text-yellow-700">{adn.adn_number}</span>
+                                <span className="px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded-full text-xs font-medium">
+                                  {adn.items.length} item{adn.items.length !== 1 ? 's' : ''}
+                                </span>
+                                {adn.adn_status === 'PARTIAL' && (
+                                  <span className="px-2 py-0.5 bg-orange-200 text-orange-800 rounded-full text-xs font-medium">
+                                    Partial
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-sm text-gray-600">
+                                <span className="font-medium">{adn.project_name}</span>
+                                <span className="text-gray-400 mx-2">•</span>
+                                <span className="text-xs">
+                                  Dispatched: {new Date(adn.dispatched_at).toLocaleDateString()} at {new Date(adn.dispatched_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                </span>
+                              </p>
+                            </div>
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {/* Show "Receive Selected" when some items are checked */}
+                          {getCheckedCountInADN(adn) > 0 && getCheckedCountInADN(adn) < adn.items.length && (
+                            <button
+                              onClick={() => handleMarkSelectedReceived(adn)}
+                              disabled={markingReceived === adn.adn_id}
+                              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium shadow-sm"
+                            >
+                              {markingReceived === adn.adn_id ? (
+                                <>
+                                  <ModernLoadingSpinners size="xs" />
+                                  Marking...
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircleIcon className="w-4 h-4" />
+                                  Receive Selected ({getCheckedCountInADN(adn)})
+                                </>
+                              )}
+                            </button>
+                          )}
+                          {/* Show "Receive All" button */}
+                          <button
+                            onClick={() => getCheckedCountInADN(adn) === adn.items.length
+                              ? handleMarkSelectedReceived(adn)
+                              : handleMarkAllReceived(adn.adn_id)}
+                            disabled={markingReceived === adn.adn_id}
+                            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors font-medium shadow-sm"
+                          >
+                            {markingReceived === adn.adn_id && getCheckedCountInADN(adn) !== adn.items.length ? (
+                              <>
+                                <ModernLoadingSpinners size="xs" />
+                                Marking...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircleIcon className="w-4 h-4" />
+                                Receive All
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleMarkReceived(mov.movement_id)}
-                      disabled={markingReceived === mov.movement_id}
-                      className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors font-medium"
-                    >
-                      {markingReceived === mov.movement_id ? (
-                        <>
-                          <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                          Marking...
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircleIcon className="w-4 h-4" />
-                          Mark as Received
-                        </>
+
+                    {/* Expandable Items List */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-5 py-2 bg-gray-50 border-t border-gray-200">
+                            {/* Show partial receive notes at top of items if ADN is PARTIAL */}
+                            {adn.adn_status === 'PARTIAL' && adn.receiver_notes && (
+                              <div className="mb-3 bg-orange-50 border border-orange-200 rounded-lg p-3">
+                                <p className="text-xs font-medium text-orange-800 uppercase mb-1">
+                                  Why these items are pending
+                                </p>
+                                <p className="text-sm text-orange-700">{adn.receiver_notes}</p>
+                              </div>
+                            )}
+                            <div className="divide-y divide-gray-100">
+                              {adn.items.map((item) => (
+                                <div
+                                  key={item.adn_item_id}
+                                  onClick={() => toggleItemCheck(item.adn_item_id)}
+                                  className={`py-3 px-2 flex items-center gap-3 transition-colors cursor-pointer hover:bg-gray-100 rounded-lg ${
+                                    checkedItems.has(item.adn_item_id) ? 'bg-green-50/50 hover:bg-green-100/50' : ''
+                                  }`}
+                                >
+                                  {/* Item Checkbox */}
+                                  <div
+                                    role="checkbox"
+                                    aria-checked={checkedItems.has(item.adn_item_id)}
+                                    aria-label={`Select ${item.category_name}`}
+                                    className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all flex-shrink-0 ${
+                                      checkedItems.has(item.adn_item_id)
+                                        ? 'bg-green-500 border-green-500'
+                                        : 'bg-white border-gray-300'
+                                    }`}
+                                  >
+                                    {checkedItems.has(item.adn_item_id) && (
+                                      <CheckIcon className="w-3 h-3 text-white" />
+                                    )}
+                                  </div>
+
+                                  <div className="p-2 bg-yellow-100 rounded-lg flex-shrink-0">
+                                    <CubeIcon className="w-4 h-4 text-yellow-600" />
+                                  </div>
+
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-medium text-gray-900 text-sm">{item.category_name}</p>
+                                    <p className="text-xs text-gray-500">
+                                      {item.quantity} unit(s) • {item.item_code || item.serial_number || item.category_code}
+                                      {item.condition && <span className="ml-2">• Condition: {item.condition}</span>}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </motion.div>
                       )}
-                    </button>
+                    </AnimatePresence>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </motion.div>
         )}
 
-        {/* Received Section - Green */}
-        {received.length > 0 && (
+        {/* Received Section - Grouped by ADN */}
+        {groupedReceivedADNs.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -403,70 +983,187 @@ const SiteAssets: React.FC = () => {
                 <CheckCircleIcon className="w-5 h-5" />
                 Received at Your Sites
               </h3>
-              <p className="text-sm text-green-600 mt-1">These assets are at your sites. You can request to return them when done.</p>
+              <p className="text-sm text-green-600 mt-1">Select items to create a Return Delivery Note (RDN). You can return multiple items at once.</p>
             </div>
-            <div className="divide-y divide-gray-100">
-              {received.map((mov) => (
-                <div key={mov.movement_id} className="px-5 py-4 hover:bg-green-50/50 transition-colors">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-4">
-                      <div className="p-2 bg-green-100 rounded-lg">
-                        <CheckCircleIcon className="w-5 h-5 text-green-600" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-900">{mov.category_name}</p>
-                        <p className="text-sm text-gray-500">
-                          {mov.quantity} unit(s) • {mov.item_code || mov.category_code}
-                        </p>
-                        <p className="text-sm text-gray-500 mt-1">
-                          <span className="font-medium">Project:</span> {mov.project_name}
-                        </p>
-                        <div className="text-xs text-gray-400 mt-1 space-y-0.5">
-                          <p>
-                            Dispatched: {new Date(mov.dispatched_at).toLocaleDateString()} {new Date(mov.dispatched_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                          </p>
-                          {mov.received_at && (
-                            <p className="text-green-600">
-                              Received: {new Date(mov.received_at).toLocaleDateString()} {new Date(mov.received_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                              {mov.received_by && ` by ${mov.received_by}`}
-                            </p>
-                          )}
-                          {mov.has_pending_return && mov.pending_return_at && (
-                            <p className="text-orange-600 font-medium">
-                              Return Requested: {new Date(mov.pending_return_at).toLocaleDateString()} {new Date(mov.pending_return_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                            </p>
+
+            <div className="divide-y divide-gray-200">
+              {groupedReceivedADNs.map((adn) => {
+                const isExpanded = expandedADNs.has(adn.adn_id);
+                const allReturnChecked = isAllReturnCheckedInADN(adn);
+                const someReturnChecked = isSomeReturnCheckedInADN(adn);
+                const checkedReturnCount = getCheckedReturnCountInADN(adn);
+
+                return (
+                  <div key={adn.adn_id} className="bg-white">
+                    {/* ADN Header */}
+                    <div className="px-5 py-4 bg-green-50/50">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {/* Select All Checkbox for Return */}
+                          <button
+                            type="button"
+                            role="checkbox"
+                            aria-checked={allReturnChecked ? 'true' : someReturnChecked ? 'mixed' : 'false'}
+                            aria-label={`Select all items in ${adn.adn_number} for return`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              toggleAllReturnInADN(adn);
+                            }}
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                              allReturnChecked
+                                ? 'bg-indigo-500 border-indigo-500'
+                                : someReturnChecked
+                                  ? 'bg-indigo-200 border-indigo-500'
+                                  : 'bg-white border-gray-300 hover:border-indigo-500'
+                            }`}
+                          >
+                            {(allReturnChecked || someReturnChecked) && (
+                              <CheckIcon className={`w-3 h-3 ${allReturnChecked ? 'text-white' : 'text-indigo-700'}`} />
+                            )}
+                          </button>
+
+                          <button
+                            onClick={() => toggleADNExpansion(adn.adn_id)}
+                            className="flex items-center gap-2 hover:bg-green-100 rounded-lg px-2 py-1 -ml-2 transition-colors"
+                          >
+                            {isExpanded ? (
+                              <ChevronUpIcon className="w-4 h-4 text-gray-500" />
+                            ) : (
+                              <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+                            )}
+                            <div className="text-left">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-sm font-semibold text-green-700">{adn.adn_number}</span>
+                                <span className="px-2 py-0.5 bg-green-200 text-green-800 rounded-full text-xs font-medium">
+                                  {adn.items.length} item{adn.items.length !== 1 ? 's' : ''}
+                                </span>
+                                {adn.adn_status === 'PARTIAL' && (
+                                  <span className="px-2 py-0.5 bg-orange-200 text-orange-800 rounded-full text-xs font-medium">
+                                    Partial DN
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-sm text-gray-600">
+                                <span className="font-medium">{adn.project_name}</span>
+                              </p>
+                            </div>
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {/* Show "Return Selected" when items are checked */}
+                          {checkedReturnCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openBulkReturnModal(adn);
+                              }}
+                              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm"
+                            >
+                              <ArrowUturnLeftIcon className="w-4 h-4" />
+                              Return Selected ({checkedReturnCount})
+                            </button>
                           )}
                         </div>
                       </div>
                     </div>
-                    {mov.has_pending_return ? (
-                      <div className="flex flex-col items-end gap-1">
-                        <span className="flex items-center gap-2 px-4 py-2 bg-orange-100 text-orange-700 rounded-lg font-medium text-sm">
-                          <ClockIcon className="w-4 h-4" />
-                          Waiting for PM
-                        </span>
-                        {mov.pending_return_tracking && (
-                          <span className="text-xs text-orange-600 font-mono">{mov.pending_return_tracking}</span>
-                        )}
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => openReturnModal(mov)}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium"
-                      >
-                        <ArrowUturnLeftIcon className="w-4 h-4" />
-                        Return
-                      </button>
-                    )}
+
+                    {/* Expandable Items List */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-5 py-2 bg-gray-50 border-t border-gray-200">
+                            {/* Show partial receive notes if ADN had partial receive */}
+                            {adn.adn_status === 'PARTIAL' && adn.receiver_notes && (
+                              <div className="mb-3 bg-orange-50 border border-orange-200 rounded-lg p-3">
+                                <p className="text-xs font-medium text-orange-800 uppercase mb-1">
+                                  Partial Receive Notes (some items still pending)
+                                </p>
+                                <p className="text-sm text-orange-700">{adn.receiver_notes}</p>
+                              </div>
+                            )}
+                            <div className="divide-y divide-gray-100">
+                              {adn.items.map((item) => (
+                                <div
+                                  key={item.adn_item_id}
+                                  onClick={() => toggleReturnItemCheck(item.adn_item_id)}
+                                  className={`py-3 px-2 flex items-center gap-3 transition-colors cursor-pointer hover:bg-gray-100 rounded-lg ${
+                                    checkedReturnItems.has(item.adn_item_id) ? 'bg-indigo-50/50 hover:bg-indigo-100/50' : ''
+                                  }`}
+                                >
+                                  {/* Item Checkbox */}
+                                  <div
+                                    role="checkbox"
+                                    aria-checked={checkedReturnItems.has(item.adn_item_id)}
+                                    aria-label={`Select ${item.category_name} for return`}
+                                    className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all flex-shrink-0 ${
+                                      checkedReturnItems.has(item.adn_item_id)
+                                        ? 'bg-indigo-500 border-indigo-500'
+                                        : 'bg-white border-gray-300'
+                                    }`}
+                                  >
+                                    {checkedReturnItems.has(item.adn_item_id) && (
+                                      <CheckIcon className="w-3 h-3 text-white" />
+                                    )}
+                                  </div>
+
+                                  <div className="p-2 bg-green-100 rounded-lg flex-shrink-0">
+                                    <CubeIcon className="w-4 h-4 text-green-600" />
+                                  </div>
+
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-medium text-gray-900 text-sm">{item.category_name}</p>
+                                    <p className="text-xs text-gray-500">
+                                      {item.quantity} unit(s) • {item.item_code || item.serial_number || item.category_code}
+                                    </p>
+                                    {item.received_at && (
+                                      <p className="text-xs text-green-600 mt-0.5">
+                                        Received: {new Date(item.received_at).toLocaleDateString()}
+                                        {item.received_by && ` by ${item.received_by}`}
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  {/* Single item return button - only show for unchecked items when not all are selected */}
+                                  {!allReturnChecked && !checkedReturnItems.has(item.adn_item_id) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        openSingleReturnModal(adn, item);
+                                      }}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors text-sm font-medium"
+                                    >
+                                      <ArrowUturnLeftIcon className="w-3.5 h-3.5" />
+                                      Return
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </motion.div>
         )}
 
         {/* Empty State */}
-        {movements.length === 0 && (
+        {pendingReceipt.length === 0 && received.length === 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -495,12 +1192,200 @@ const SiteAssets: React.FC = () => {
               <p className="text-sm text-blue-800 font-medium">Asset Flow</p>
               <p className="text-sm text-blue-600 mt-1">
                 <span className="font-medium">1. Dispatched</span> → PM dispatches asset, you see it in yellow section<br/>
-                <span className="font-medium">2. Received</span> → Mark as received when you get it, moves to green section<br/>
-                <span className="font-medium">3. Return</span> → Request return when done, PM will be notified
+                <span className="font-medium">2. Received</span> → Select items with checkboxes, then click "Receive Selected" or "Receive All"<br/>
+                <span className="font-medium">3. Return</span> → Request return for individual items when done
               </p>
             </div>
           </div>
         </div>
+
+        {/* My Return Notes Section */}
+        {myReturnNotes.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-xl shadow-sm border-2 border-orange-200 overflow-hidden"
+          >
+            <div className="px-5 py-4 bg-orange-50 border-b border-orange-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-orange-100 rounded-lg">
+                    <ArrowUturnLeftIcon className="w-5 h-5 text-orange-600" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-gray-900">My Return Notes</h2>
+                    <p className="text-sm text-gray-500">Track your return requests - Issue → Dispatch → Store Receives</p>
+                  </div>
+                </div>
+                <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-sm font-medium">
+                  {myReturnNotes.length} pending
+                </span>
+              </div>
+            </div>
+
+            <div className="divide-y divide-gray-200">
+              {myReturnNotes.map(ardn => {
+                const isExpanded = expandedARDNs.has(ardn.ardn_id);
+                const isProcessing = processingARDN === ardn.ardn_id;
+
+                return (
+                  <div key={ardn.ardn_id} className="bg-white">
+                    {/* ARDN Header */}
+                    <div className="px-5 py-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => {
+                              const newExpanded = new Set(expandedARDNs);
+                              if (isExpanded) newExpanded.delete(ardn.ardn_id);
+                              else newExpanded.add(ardn.ardn_id);
+                              setExpandedARDNs(newExpanded);
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded"
+                          >
+                            {isExpanded ? <ChevronUpIcon className="w-5 h-5" /> : <ChevronDownIcon className="w-5 h-5" />}
+                          </button>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-orange-600">{ardn.ardn_number}</span>
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${ARDN_STATUS_COLORS[ardn.status]}`}>
+                                {ardn.status}
+                              </span>
+                              <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                                {ardn.total_items} item(s)
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-500">{ardn.project_name || `Project #${ardn.project_id}`}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {/* DRAFT → Issue button */}
+                          {ardn.status === 'DRAFT' && (
+                            <button
+                              onClick={() => handleIssueARDN(ardn)}
+                              disabled={isProcessing}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm font-medium"
+                            >
+                              {isProcessing ? <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" /> : <CheckCircleIcon className="w-3.5 h-3.5" />}
+                              Issue
+                            </button>
+                          )}
+
+                          {/* ISSUED → Dispatch button */}
+                          {ardn.status === 'ISSUED' && (
+                            <button
+                              onClick={() => openDispatchModal(ardn)}
+                              disabled={isProcessing}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 text-sm font-medium"
+                            >
+                              {isProcessing ? <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" /> : <TruckIcon className="w-3.5 h-3.5" />}
+                              Dispatch
+                            </button>
+                          )}
+
+                          {/* IN_TRANSIT → Waiting indicator */}
+                          {ardn.status === 'IN_TRANSIT' && (
+                            <span className="flex items-center gap-1 px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg text-sm font-medium">
+                              <ClockIcon className="w-3.5 h-3.5" />
+                              In Transit to Store
+                            </span>
+                          )}
+
+                          {/* RECEIVED → Success indicator */}
+                          {ardn.status === 'RECEIVED' && (
+                            <span className="flex items-center gap-1 px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-sm font-medium">
+                              <CheckCircleIcon className="w-3.5 h-3.5" />
+                              Received at Store
+                            </span>
+                          )}
+
+                          {/* Download PDF */}
+                          <button
+                            onClick={() => handleDownloadARDN(ardn)}
+                            className="p-1.5 text-green-600 hover:bg-green-100 rounded-lg"
+                            title="Download PDF"
+                          >
+                            <ArrowDownTrayIcon className="w-4 h-4" />
+                          </button>
+
+                          {/* Print PDF */}
+                          <button
+                            onClick={() => handlePrintARDN(ardn)}
+                            className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg"
+                            title="Print"
+                          >
+                            <PrinterIcon className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expanded Items */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="border-t border-gray-100"
+                        >
+                          <div className="px-5 py-3 bg-gray-50">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-3">
+                              <div>
+                                <span className="text-gray-500">Return Date:</span>
+                                <p className="font-medium">{new Date(ardn.return_date).toLocaleDateString()}</p>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Reason:</span>
+                                <p className="font-medium">{ardn.return_reason || '-'}</p>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Driver:</span>
+                                <p className="font-medium">{ardn.driver_name || '-'}</p>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Vehicle:</span>
+                                <p className="font-medium">{ardn.vehicle_number || '-'}</p>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              {ardn.items.map(item => (
+                                <div
+                                  key={item.return_item_id}
+                                  className="flex items-center gap-3 p-2 bg-white rounded-lg border border-gray-200"
+                                >
+                                  <div className="p-1.5 bg-orange-100 rounded">
+                                    <CubeIcon className="w-4 h-4 text-orange-600" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <p className="font-medium text-sm">{item.category_name}</p>
+                                    <p className="text-xs text-gray-500">
+                                      {item.quantity} unit(s) • {item.item_code || '-'}
+                                    </p>
+                                  </div>
+                                  <span className={`px-2 py-0.5 rounded text-xs ${getConditionColor(item.reported_condition)}`}>
+                                    {item.reported_condition}
+                                  </span>
+                                  {item.damage_description && (
+                                    <span className="text-xs text-red-600 max-w-[150px] truncate" title={item.damage_description}>
+                                      {item.damage_description}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
 
         {/* History Section - Collapsible */}
         <motion.div
@@ -541,7 +1426,7 @@ const SiteAssets: React.FC = () => {
               >
                 {loadingHistory ? (
                   <div className="p-8 text-center">
-                    <ArrowPathIcon className="w-6 h-6 animate-spin text-indigo-600 mx-auto" />
+                    <ModernLoadingSpinners size="sm" className="mx-auto" />
                     <p className="text-sm text-gray-500 mt-2">Loading history...</p>
                   </div>
                 ) : history.length === 0 ? (
@@ -560,14 +1445,14 @@ const SiteAssets: React.FC = () => {
                         return acc;
                       }, {} as Record<string, { project_name: string; movements: AssetHistory[] }>)
                     ).map(([key, group]) => {
-                      const isExpanded = expandedProjects.has(key);
+                      const isProjectExpanded = expandedProjects.has(key);
                       return (
                         <div key={key} className="border-b border-gray-200 last:border-b-0">
                           {/* Project Header - Clickable */}
                           <button
                             onClick={() => {
                               const newExpanded = new Set(expandedProjects);
-                              if (isExpanded) {
+                              if (isProjectExpanded) {
                                 newExpanded.delete(key);
                               } else {
                                 newExpanded.add(key);
@@ -583,7 +1468,7 @@ const SiteAssets: React.FC = () => {
                                 {group.movements.length} movement(s)
                               </span>
                             </div>
-                            {isExpanded ? (
+                            {isProjectExpanded ? (
                               <ChevronUpIcon className="w-5 h-5 text-gray-400" />
                             ) : (
                               <ChevronDownIcon className="w-5 h-5 text-gray-400" />
@@ -591,7 +1476,7 @@ const SiteAssets: React.FC = () => {
                           </button>
                           {/* Project Movements - Collapsible */}
                           <AnimatePresence>
-                            {isExpanded && (
+                            {isProjectExpanded && (
                               <motion.div
                                 initial={{ height: 0, opacity: 0 }}
                                 animate={{ height: 'auto', opacity: 1 }}
@@ -665,9 +1550,9 @@ const SiteAssets: React.FC = () => {
         </motion.div>
       </div>
 
-      {/* Return Request Modal */}
+      {/* Bulk Return Request Modal */}
       <AnimatePresence>
-        {showReturnModal && returnMovement && (
+        {showReturnModal && returnADN && returnItems.length > 0 && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -679,19 +1564,21 @@ const SiteAssets: React.FC = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto"
+              className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
               onClick={e => e.stopPropagation()}
             >
               {/* Modal Header */}
-              <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-5 py-4 rounded-t-xl">
+              <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-5 py-4 rounded-t-xl flex-shrink-0">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-white/20 rounded-lg">
                       <ArrowUturnLeftIcon className="w-5 h-5 text-white" />
                     </div>
                     <div className="text-white">
-                      <h3 className="font-semibold">Request Return</h3>
-                      <p className="text-sm text-white/80">{returnMovement.category_name}</p>
+                      <h3 className="font-semibold">Create Return Delivery Note (RDN)</h3>
+                      <p className="text-sm text-white/80">
+                        {returnADN.adn_number} • {returnItems.length} item{returnItems.length !== 1 ? 's' : ''} to return
+                      </p>
                     </div>
                   </div>
                   <button
@@ -703,118 +1590,370 @@ const SiteAssets: React.FC = () => {
                 </div>
               </div>
 
-              {/* Modal Body */}
-              <div className="p-5 space-y-4">
-                {/* Asset Info */}
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-sm text-gray-500">Returning from</p>
-                  <p className="font-medium text-gray-900">{returnMovement.project_name}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {returnMovement.item_code || returnMovement.category_code} - {returnMovement.quantity} units
-                  </p>
+              {/* Modal Body - Scrollable */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                {/* DN Info */}
+                <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-indigo-600 font-medium">Returning from</p>
+                      <p className="font-semibold text-indigo-900">{returnADN.project_name}</p>
+                      <p className="text-xs text-indigo-600 font-mono mt-1">Original DN: {returnADN.adn_number}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold text-indigo-600">{returnItems.length}</p>
+                      <p className="text-xs text-indigo-500">Items</p>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Quantity */}
-                {!returnMovement.item_id && returnMovement.quantity > 1 && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Quantity to Return
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max={returnMovement.quantity}
-                      value={returnForm.quantity}
-                      onChange={(e) => setReturnForm(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Max: {returnMovement.quantity}</p>
-                  </div>
-                )}
-
-                {/* Condition Assessment */}
+                {/* Items with Condition Selection */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Condition Assessment
+                    Select Condition for Each Item
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {['good', 'fair', 'poor', 'damaged'].map((cond) => (
-                      <button
-                        key={cond}
-                        onClick={() => setReturnForm(prev => ({ ...prev, condition: cond }))}
-                        className={`px-3 py-2 rounded-lg text-sm font-medium border-2 transition-all ${
-                          returnForm.condition === cond
-                            ? cond === 'good' ? 'bg-green-100 border-green-500 text-green-700'
-                              : cond === 'fair' ? 'bg-yellow-100 border-yellow-500 text-yellow-700'
-                              : cond === 'poor' ? 'bg-orange-100 border-orange-500 text-orange-700'
-                              : 'bg-red-100 border-red-500 text-red-700'
-                            : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'
-                        }`}
-                      >
-                        {cond.charAt(0).toUpperCase() + cond.slice(1)}
-                      </button>
-                    ))}
+                  <div className="space-y-3 max-h-[300px] overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
+                    {returnItems.map((item) => {
+                      const cond = returnItemConditions[item.adn_item_id] || { condition: 'good', damage_description: '' };
+                      return (
+                        <div key={item.adn_item_id} className="bg-white rounded-lg p-3 border border-gray-200">
+                          <div className="flex items-start gap-3">
+                            <div className="p-2 bg-indigo-100 rounded-lg flex-shrink-0">
+                              <CubeIcon className="w-4 h-4 text-indigo-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-gray-900 text-sm">{item.category_name}</p>
+                              <p className="text-xs text-gray-500">
+                                {item.quantity} unit(s) • {item.item_code || item.serial_number || item.category_code}
+                              </p>
+
+                              {/* Condition Buttons */}
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {['good', 'fair', 'poor', 'damaged'].map((condition) => (
+                                  <button
+                                    key={condition}
+                                    onClick={() => updateItemCondition(item.adn_item_id, 'condition', condition)}
+                                    className={`px-2 py-1 rounded text-xs font-medium border transition-all ${
+                                      cond.condition === condition
+                                        ? condition === 'good' ? 'bg-green-100 border-green-500 text-green-700'
+                                          : condition === 'fair' ? 'bg-yellow-100 border-yellow-500 text-yellow-700'
+                                          : condition === 'poor' ? 'bg-orange-100 border-orange-500 text-orange-700'
+                                          : 'bg-red-100 border-red-500 text-red-700'
+                                        : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'
+                                    }`}
+                                  >
+                                    {condition.charAt(0).toUpperCase() + condition.slice(1)}
+                                  </button>
+                                ))}
+                              </div>
+
+                              {/* Damage Description if not good */}
+                              {cond.condition !== 'good' && (
+                                <div className="mt-2">
+                                  <input
+                                    type="text"
+                                    value={cond.damage_description}
+                                    onChange={(e) => updateItemCondition(item.adn_item_id, 'damage_description', e.target.value)}
+                                    placeholder={cond.condition === 'damaged' ? 'Describe damage...' : 'Describe condition...'}
+                                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                  />
+                                  {!cond.damage_description.trim() && (
+                                    <p className="text-xs text-red-500 mt-1">* Required for non-good condition</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Damage Description (if not good) */}
-                {returnForm.condition !== 'good' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      {returnForm.condition === 'damaged' ? 'Damage Description' : 'Condition Details'}
-                      <span className="text-red-500 ml-1">*</span>
-                    </label>
-                    <textarea
-                      value={returnForm.damage_description}
-                      onChange={(e) => setReturnForm(prev => ({ ...prev, damage_description: e.target.value }))}
-                      rows={3}
-                      placeholder={
-                        returnForm.condition === 'damaged'
-                          ? "Describe the damage in detail..."
-                          : "Describe the current condition..."
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    />
-                  </div>
-                )}
-
-                {/* Notes */}
+                {/* Return Notes */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Additional Notes (Optional)
+                    Return Notes (Optional)
                   </label>
                   <textarea
-                    value={returnForm.notes}
-                    onChange={(e) => setReturnForm(prev => ({ ...prev, notes: e.target.value }))}
+                    value={returnNotes}
+                    onChange={(e) => setReturnNotes(e.target.value)}
                     rows={2}
-                    placeholder="Any additional information..."
+                    placeholder="Reason for return, any additional information..."
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
                 </div>
               </div>
 
               {/* Modal Footer */}
+              <div className="px-5 py-4 border-t border-gray-200 flex justify-between items-center flex-shrink-0 bg-gray-50">
+                <p className="text-sm text-gray-500">
+                  RDN will be created for {returnItems.length} item{returnItems.length !== 1 ? 's' : ''}
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowReturnModal(false)}
+                    className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleBulkReturnRequest}
+                    disabled={submitting}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                  >
+                    {submitting ? (
+                      <>
+                        <ModernLoadingSpinners size="xs" />
+                        Creating RDN...
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUturnLeftIcon className="w-4 h-4" />
+                        Create Return Note
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Partial Receive Modal - Mandatory Notes */}
+        {showPartialReceiveModal && partialReceiveADN && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowPartialReceiveModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-xl max-w-md w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Partial Receive</h3>
+                  <p className="text-sm text-gray-500">
+                    {partialReceiveADN.adn_number} - {getCheckedCountInADN(partialReceiveADN)} of {partialReceiveADN.items.length} items
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowPartialReceiveModal(false)}
+                  className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <XMarkIcon className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+
+              {/* Modal Content */}
+              <div className="px-5 py-4 space-y-4">
+                {/* Items being received */}
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                  <p className="text-sm font-medium text-yellow-800 mb-2">Items to receive:</p>
+                  <ul className="text-sm text-yellow-700 space-y-1">
+                    {partialReceiveADN.items
+                      .filter(item => checkedItems.has(item.adn_item_id))
+                      .map(item => (
+                        <li key={item.adn_item_id} className="flex items-center gap-2">
+                          <CheckCircleIcon className="w-4 h-4 text-green-500" />
+                          {item.category_name} ({item.quantity} unit{item.quantity > 1 ? 's' : ''})
+                        </li>
+                      ))
+                    }
+                  </ul>
+                </div>
+
+                {/* Items NOT being received */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                  <p className="text-sm font-medium text-gray-700 mb-2">Items NOT received (remaining):</p>
+                  <ul className="text-sm text-gray-600 space-y-1">
+                    {partialReceiveADN.items
+                      .filter(item => !checkedItems.has(item.adn_item_id))
+                      .map(item => (
+                        <li key={item.adn_item_id} className="flex items-center gap-2">
+                          <ClockIcon className="w-4 h-4 text-yellow-500" />
+                          {item.category_name} ({item.quantity} unit{item.quantity > 1 ? 's' : ''})
+                        </li>
+                      ))
+                    }
+                  </ul>
+                </div>
+
+                {/* Mandatory Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Reason for Partial Receive <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={partialReceiveNotes}
+                    onChange={(e) => setPartialReceiveNotes(e.target.value)}
+                    rows={3}
+                    placeholder="Why are you not receiving all items? (e.g., items missing, wrong items, damaged items not in delivery...)"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">This is required for partial receives</p>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
               <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-3">
                 <button
-                  onClick={() => setShowReturnModal(false)}
+                  onClick={() => setShowPartialReceiveModal(false)}
                   className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={handleReturnRequest}
-                  disabled={submitting || (returnForm.condition !== 'good' && !returnForm.damage_description)}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                  onClick={handleConfirmPartialReceive}
+                  disabled={markingReceived === partialReceiveADN.adn_id || !partialReceiveNotes.trim()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                 >
-                  {submitting ? (
+                  {markingReceived === partialReceiveADN.adn_id ? (
                     <>
-                      <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                      Submitting...
+                      <ModernLoadingSpinners size="xs" />
+                      Receiving...
                     </>
                   ) : (
                     <>
-                      <ArrowUturnLeftIcon className="w-4 h-4" />
-                      Request Return
+                      <CheckCircleIcon className="w-4 h-4" />
+                      Confirm Partial Receive
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Dispatch ARDN Modal */}
+        {showDispatchModal && dispatchARDN && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowDispatchModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="px-5 py-4 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-amber-50">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
+                      <TruckIcon className="w-5 h-5 text-orange-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">Dispatch Return Note</h3>
+                      <p className="text-sm text-gray-500">{dispatchARDN.ardn_number}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowDispatchModal(false)}
+                    className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                  >
+                    <XMarkIcon className="w-5 h-5 text-gray-500" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Content */}
+              <div className="p-5 space-y-4">
+                <p className="text-sm text-gray-600">
+                  Enter driver and vehicle details to dispatch this return note.
+                </p>
+
+                {/* Driver Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Driver Name
+                  </label>
+                  <input
+                    type="text"
+                    value={dispatchDriverName}
+                    onChange={(e) => setDispatchDriverName(e.target.value)}
+                    placeholder="Enter driver name"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                </div>
+
+                {/* Vehicle Number */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Vehicle Number
+                  </label>
+                  <input
+                    type="text"
+                    value={dispatchVehicleNumber}
+                    onChange={(e) => setDispatchVehicleNumber(e.target.value)}
+                    placeholder="Enter vehicle number (e.g., KA-01-AB-1234)"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                </div>
+
+                {/* Driver Contact */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Driver Contact
+                  </label>
+                  <input
+                    type="tel"
+                    value={dispatchDriverContact}
+                    onChange={(e) => setDispatchDriverContact(e.target.value)}
+                    placeholder="Enter driver phone number"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                </div>
+
+                {/* Items Summary */}
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-sm font-medium text-gray-700 mb-2">Items being returned:</p>
+                  <ul className="text-sm text-gray-600 space-y-1">
+                    {dispatchARDN.items.map((item, idx) => (
+                      <li key={idx} className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />
+                        {item.category_name} ({item.quantity} unit{item.quantity > 1 ? 's' : ''})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-3">
+                <button
+                  onClick={() => setShowDispatchModal(false)}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDispatchARDN}
+                  disabled={processingARDN === dispatchARDN.ardn_id}
+                  className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                >
+                  {processingARDN === dispatchARDN.ardn_id ? (
+                    <>
+                      <ModernLoadingSpinners size="xs" />
+                      Dispatching...
+                    </>
+                  ) : (
+                    <>
+                      <TruckIcon className="w-4 h-4" />
+                      Dispatch
                     </>
                   )}
                 </button>

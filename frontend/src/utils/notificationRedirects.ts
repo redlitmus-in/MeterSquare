@@ -601,15 +601,6 @@ export const getNotificationRedirectPath = (
       };
     }
 
-    // Stock Take Alert
-    if (titleLower.includes('stock take')) {
-      return {
-        path: buildPath('/m2-store/stock-take'),
-        queryParams: {
-          alert_type: 'required'
-        },
-      };
-    }
   }
 
   // Use metadata.link if provided as fallback

@@ -13,8 +13,16 @@ load_dotenv()
 def create_storage_bucket():
     """Create inventory-files storage bucket in Supabase"""
 
-    supabase_url = os.getenv('SUPABASE_URL')
-    supabase_key = os.getenv('SUPABASE_KEY')
+    # Use ENVIRONMENT variable to determine which Supabase to use
+    environment = os.environ.get('ENVIRONMENT', 'production')
+    if environment == 'development':
+        supabase_url = os.getenv('DEV_SUPABASE_URL')
+        supabase_key = os.getenv('DEV_SUPABASE_ANON_KEY')
+        env_label = 'DEVELOPMENT'
+    else:
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        env_label = 'PRODUCTION'
 
     if not supabase_url or not supabase_key:
         print('❌ Missing Supabase environment variables')
@@ -23,7 +31,7 @@ def create_storage_bucket():
     bucket_name = 'inventory-files'
 
     print('=' * 70)
-    print('Creating Supabase Storage Bucket')
+    print(f'Creating Supabase Storage Bucket ({env_label})')
     print('=' * 70)
 
     try:

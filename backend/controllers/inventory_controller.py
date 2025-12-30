@@ -22,6 +22,7 @@ from controllers.inventory_helpers import (
     DISPOSAL_PENDING_REVIEW,
     DISPOSAL_APPROVED_DISPOSAL,
     DISPOSAL_DISPOSED,
+    DISPOSAL_SENT_FOR_REPAIR,
     DISPOSAL_REPAIRED,
     DISPOSAL_REJECTED,
     generate_material_code,
@@ -2221,56 +2222,157 @@ def mark_as_disposed(return_id):
 
 
 def add_repaired_to_stock(return_id):
-    """Add repaired material back to inventory stock"""
+    """
+    Mark material as repaired and move from backup stock to main stock.
+    This is called when PM confirms the repair is complete.
+
+    Flow: sent_for_repair -> repaired (and backup_stock -> current_stock)
+    """
     try:
         material_return = MaterialReturn.query.get(return_id)
 
         if not material_return:
             return jsonify({'error': 'Material return not found'}), 404
 
-        if material_return.disposal_status != DISPOSAL_REPAIRED:
-            return jsonify({'error': f'Material must be marked as repaired first. Current status: {material_return.disposal_status}'}), 400
+        # Must be in sent_for_repair status
+        if material_return.disposal_status != DISPOSAL_SENT_FOR_REPAIR:
+            return jsonify({'error': f'Material must be sent for repair first. Current status: {material_return.disposal_status}'}), 400
 
         if material_return.add_to_stock:
-            return jsonify({'error': 'Material has already been added to stock'}), 400
+            return jsonify({'error': 'Material has already been added to main stock'}), 400
 
         current_user = g.user.get('email', 'system')
+        data = request.get_json() or {}
 
         # Get material
         material = InventoryMaterial.query.get(material_return.inventory_material_id)
         if not material:
             return jsonify({'error': 'Material not found in inventory'}), 404
 
-        # Create RETURN transaction
-        total_amount = material_return.quantity * material.unit_price
+        # Get quantity to move (defaults to full return quantity)
+        quantity_to_move = data.get('quantity', material_return.quantity)
+        if quantity_to_move > (material.backup_stock or 0):
+            return jsonify({'error': f'Insufficient backup stock. Available: {material.backup_stock or 0}, Requested: {quantity_to_move}'}), 400
+
+        # Create RETURN transaction (moving from backup to main)
+        total_amount = quantity_to_move * material.unit_price
         new_transaction = InventoryTransaction(
             inventory_material_id=material_return.inventory_material_id,
             transaction_type='RETURN',
-            quantity=material_return.quantity,
+            quantity=quantity_to_move,
             unit_price=material.unit_price,
             total_amount=total_amount,
             reference_number=material_return.reference_number,
             project_id=material_return.project_id,
-            notes=f'Repaired material return added to stock - {material_return.notes or ""}',
+            notes=f'Repaired material moved from backup to main stock - {data.get("notes", "")}',
             created_by=current_user
         )
         db.session.add(new_transaction)
 
-        # Update material stock
-        material.current_stock += material_return.quantity
+        # Move from backup stock to main stock
+        material.backup_stock = (material.backup_stock or 0) - quantity_to_move
+        material.current_stock = (material.current_stock or 0) + quantity_to_move
         material.last_modified_at = datetime.utcnow()
         material.last_modified_by = current_user
 
-        # Update return record
+        # Update return record - mark as fully repaired
         material_return.add_to_stock = True
+        material_return.disposal_status = DISPOSAL_REPAIRED  # Repair complete
+        material_return.disposal_notes = data.get('notes', f'Repair completed - Moved {quantity_to_move} to main stock')
         material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
 
         db.session.commit()
 
         return jsonify({
-            'message': 'Repaired material added to stock successfully',
+            'message': 'Repaired material added to main stock successfully',
             'return': material_return.to_dict(),
-            'new_stock_level': material.current_stock
+            'new_stock_level': material.current_stock,
+            'new_backup_stock': material.backup_stock
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def request_disposal_from_repair(return_id):
+    """
+    When repair is not possible, request disposal from TD.
+    This moves item from sent_for_repair status to pending_review for TD approval.
+
+    Flow: sent_for_repair -> pending_review (awaiting TD approval for disposal)
+    """
+    try:
+        material_return = MaterialReturn.query.get(return_id)
+
+        if not material_return:
+            return jsonify({'error': 'Material return not found'}), 404
+
+        # Must be in sent_for_repair status
+        if material_return.disposal_status != DISPOSAL_SENT_FOR_REPAIR:
+            return jsonify({'error': f'Material must be sent for repair first. Current status: {material_return.disposal_status}'}), 400
+
+        current_user = g.user.get('email', 'system')
+        data = request.get_json() or {}
+
+        # Get material
+        material = InventoryMaterial.query.get(material_return.inventory_material_id)
+        if not material:
+            return jsonify({'error': 'Material not found in inventory'}), 404
+
+        # Calculate disposal value
+        estimated_value = material_return.quantity * material.unit_price
+
+        # Update return record - send for disposal review
+        material_return.disposal_status = DISPOSAL_PENDING_REVIEW
+        material_return.disposal_value = estimated_value
+        material_return.disposal_notes = data.get('notes', 'Cannot repair - Disposal requested')
+        material_return.disposal_reviewed_by = current_user
+        material_return.disposal_reviewed_at = datetime.utcnow()
+
+        db.session.commit()
+
+        # Notify TD for disposal approval
+        try:
+            tds = User.query.filter_by(user_role='Technical Director').all()
+            project = Project.query.get(material_return.project_id) if material_return.project_id else None
+            project_name = project.project_name if project else 'N/A'
+
+            for td in tds:
+                ComprehensiveNotificationService.send_email_notification(
+                    recipient=td.email,
+                    subject=f'Material Disposal Request - Repair Failed - {material.material_name}',
+                    message=f'''
+                    <p>A material disposal request has been submitted because repair was not possible.</p>
+
+                    <h3>Material Details:</h3>
+                    <ul>
+                        <li>Material: {material.material_name} ({material.material_code})</li>
+                        <li>Brand: {material.brand or 'N/A'}</li>
+                        <li>Quantity: {material_return.quantity} {material.unit}</li>
+                        <li>Condition: {material_return.condition}</li>
+                        <li>Estimated Value: AED {estimated_value:.2f}</li>
+                        <li>Project: {project_name}</li>
+                    </ul>
+
+                    <h3>Reason:</h3>
+                    <p>{data.get('notes', 'Cannot repair - Disposal requested')}</p>
+
+                    <p>Please review and approve/reject this disposal request in the system.</p>
+
+                    <p>Requested by: {current_user}</p>
+                    ''',
+                    notification_type='disposal_request',
+                    action_url=f'/inventory/disposal-requests'
+                )
+
+            print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
+        except Exception as email_error:
+            print(f"Failed to send TD notification: {str(email_error)}")
+
+        return jsonify({
+            'message': 'Disposal request sent to TD for approval',
+            'return': material_return.to_dict()
         }), 200
 
     except Exception as e:
@@ -4090,9 +4192,10 @@ def process_return_delivery_item(return_note_id, item_id):
         item.material_return_id = material_return.return_id
 
         # If PM action specified in request, process immediately
-        pm_action = data.get('action')  # 'approve', 'backup', 'reject'
+        # Supports both old actions (approve, backup, reject) and new actions (add_to_stock, repair, disposal)
+        pm_action = data.get('action')
 
-        if pm_action == 'approve' and item.condition == 'Good':
+        if pm_action in ['approve', 'add_to_stock'] and item.condition == 'Good':
             # Add to stock immediately
             total_amount = material_return.quantity * material.unit_price
 
@@ -4127,8 +4230,8 @@ def process_return_delivery_item(return_note_id, item_id):
             # Update RDN item
             item.inventory_transaction_id = new_transaction.inventory_transaction_id
 
-        elif pm_action == 'backup' and item.condition in ['Damaged', 'Defective']:
-            # Add to backup stock
+        elif pm_action in ['backup', 'repair'] and item.condition in ['Damaged', 'Defective']:
+            # Send for repair - Add to backup stock for repair
             usable_quantity = data.get('usable_quantity', material_return.quantity)
 
             total_amount = usable_quantity * material.unit_price
@@ -4142,7 +4245,7 @@ def process_return_delivery_item(return_note_id, item_id):
                 total_amount=total_amount,
                 reference_number=rdn.return_note_number,
                 project_id=rdn.project_id,
-                notes=f'Return to backup stock from RDN {rdn.return_note_number} - {item.condition} condition',
+                notes=f'Return to backup stock for repair from RDN {rdn.return_note_number} - {item.condition} condition',
                 created_by=current_user
             )
             db.session.add(new_transaction)
@@ -4153,15 +4256,75 @@ def process_return_delivery_item(return_note_id, item_id):
             material.last_modified_at = datetime.utcnow()
             material.last_modified_by = current_user
 
-            # Update return record
-            material_return.add_to_stock = True
-            material_return.disposal_status = 'approved_disposal'
+            # Update return record - mark as sent for repair (NOT add_to_stock yet, waiting for repair)
+            # IMPORTANT: Update quantity to match what was actually sent for repair
+            material_return.quantity = usable_quantity  # Track actual quantity sent for repair
+            material_return.add_to_stock = False  # Will be set to True when repair is complete
+            material_return.disposal_status = DISPOSAL_SENT_FOR_REPAIR  # In backup stock, awaiting repair
             material_return.disposal_reviewed_by = current_user
             material_return.disposal_reviewed_at = datetime.utcnow()
-            material_return.disposal_notes = data.get('notes', f'Added {usable_quantity} to backup stock')
+            material_return.disposal_notes = data.get('notes', f'Sent for repair - Added {usable_quantity} to backup stock')
             material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
 
             item.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+        elif pm_action == 'disposal' and item.condition in ['Damaged', 'Defective']:
+            # Mark for disposal - Send to TD for approval
+            estimated_value = material_return.quantity * material.unit_price
+
+            # Update return record with disposal pending TD review
+            material_return.add_to_stock = False
+            material_return.disposal_status = DISPOSAL_PENDING_REVIEW  # Requires TD approval
+            material_return.disposal_value = estimated_value
+            material_return.disposal_notes = data.get('notes', f'Material beyond repair - Disposal requested from RDN {rdn.return_note_number}')
+
+            # Notify TD for approval
+            try:
+                tds = User.query.filter_by(user_role='Technical Director').all()
+                project = Project.query.get(rdn.project_id)
+                project_name = project.project_name if project else 'Unknown Project'
+
+                for td in tds:
+                    ComprehensiveNotificationService.send_email_notification(
+                        recipient=td.email,
+                        subject=f'Material Disposal Request - {material.material_name}',
+                        message=f'''
+                        <p>A material disposal request has been submitted from a return delivery note and requires your review.</p>
+
+                        <h3>Return Details:</h3>
+                        <ul>
+                            <li>RDN: {rdn.return_note_number}</li>
+                            <li>Project: {project_name}</li>
+                        </ul>
+
+                        <h3>Material Details:</h3>
+                        <ul>
+                            <li>Material: {material.material_name} ({material.material_code})</li>
+                            <li>Brand: {material.brand or 'N/A'}</li>
+                            <li>Quantity: {material_return.quantity} {material.unit}</li>
+                            <li>Condition: {item.condition}</li>
+                            <li>Estimated Value: AED {estimated_value:.2f}</li>
+                        </ul>
+
+                        <h3>Return Reason:</h3>
+                        <p>{item.return_reason or 'Not specified'}</p>
+
+                        <h3>Disposal Notes:</h3>
+                        <p>{data.get('notes', 'Material beyond repair')}</p>
+
+                        <p>Please review and approve/reject this disposal request in the system.</p>
+
+                        <p>Requested by: {current_user}</p>
+                        ''',
+                        notification_type='disposal_request',
+                        action_url=f'/inventory/disposal-requests'
+                    )
+
+                print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
+
+            except Exception as notif_error:
+                print(f"Error sending disposal request notification: {notif_error}")
+                # Don't fail the request if notification fails
 
         elif pm_action == 'reject':
             material_return.disposal_status = 'rejected'
@@ -4255,7 +4418,8 @@ def process_all_return_delivery_items(return_note_id):
 
                 item.material_return_id = material_return.return_id
 
-                if pm_action == 'approve' and item.condition == 'Good':
+                # Support both old actions (approve, backup, reject) and new actions (add_to_stock, repair, disposal)
+                if pm_action in ['approve', 'add_to_stock'] and item.condition == 'Good':
                     total_amount = material_return.quantity * material.unit_price
 
                     new_transaction = InventoryTransaction(
@@ -4284,7 +4448,8 @@ def process_all_return_delivery_items(return_note_id):
                     material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
                     item.inventory_transaction_id = new_transaction.inventory_transaction_id
 
-                elif pm_action == 'backup' and item.condition in ['Damaged', 'Defective']:
+                elif pm_action in ['backup', 'repair'] and item.condition in ['Damaged', 'Defective']:
+                    # Send for repair - Add to backup stock
                     usable_quantity = item_action.get('usable_quantity', material_return.quantity)
                     total_amount = usable_quantity * material.unit_price
 
@@ -4296,7 +4461,7 @@ def process_all_return_delivery_items(return_note_id):
                         total_amount=total_amount,
                         reference_number=rdn.return_note_number,
                         project_id=rdn.project_id,
-                        notes=f'Return to backup stock from RDN {rdn.return_note_number} - {item.condition} condition',
+                        notes=f'Return to backup stock for repair from RDN {rdn.return_note_number} - {item.condition} condition',
                         created_by=current_user
                     )
                     db.session.add(new_transaction)
@@ -4306,13 +4471,69 @@ def process_all_return_delivery_items(return_note_id):
                     material.last_modified_at = datetime.utcnow()
                     material.last_modified_by = current_user
 
-                    material_return.add_to_stock = True
-                    material_return.disposal_status = 'approved_disposal'
+                    # Mark as sent for repair (NOT add_to_stock yet, waiting for repair)
+                    # IMPORTANT: Update quantity to match what was actually sent for repair
+                    material_return.quantity = usable_quantity  # Track actual quantity sent for repair
+                    material_return.add_to_stock = False  # Will be set to True when repair is complete
+                    material_return.disposal_status = DISPOSAL_SENT_FOR_REPAIR  # In backup stock, awaiting repair
                     material_return.disposal_reviewed_by = current_user
                     material_return.disposal_reviewed_at = datetime.utcnow()
-                    material_return.disposal_notes = item_action.get('notes', f'Added {usable_quantity} to backup stock')
+                    material_return.disposal_notes = item_action.get('notes', f'Sent for repair - Added {usable_quantity} to backup stock')
                     material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
                     item.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+                elif pm_action == 'disposal' and item.condition in ['Damaged', 'Defective']:
+                    # Mark for disposal - Send to TD for approval
+                    estimated_value = material_return.quantity * material.unit_price
+
+                    material_return.add_to_stock = False
+                    material_return.disposal_status = DISPOSAL_PENDING_REVIEW
+                    material_return.disposal_value = estimated_value
+                    material_return.disposal_notes = item_action.get('notes', f'Material beyond repair - Disposal requested from RDN {rdn.return_note_number}')
+
+                    # Notify TD for approval (collect for batch notification)
+                    try:
+                        tds = User.query.filter_by(user_role='Technical Director').all()
+                        project = Project.query.get(rdn.project_id)
+                        project_name = project.project_name if project else 'Unknown Project'
+
+                        for td in tds:
+                            ComprehensiveNotificationService.send_email_notification(
+                                recipient=td.email,
+                                subject=f'Material Disposal Request - {material.material_name}',
+                                message=f'''
+                                <p>A material disposal request has been submitted from a return delivery note and requires your review.</p>
+
+                                <h3>Return Details:</h3>
+                                <ul>
+                                    <li>RDN: {rdn.return_note_number}</li>
+                                    <li>Project: {project_name}</li>
+                                </ul>
+
+                                <h3>Material Details:</h3>
+                                <ul>
+                                    <li>Material: {material.material_name} ({material.material_code})</li>
+                                    <li>Brand: {material.brand or 'N/A'}</li>
+                                    <li>Quantity: {material_return.quantity} {material.unit}</li>
+                                    <li>Condition: {item.condition}</li>
+                                    <li>Estimated Value: AED {estimated_value:.2f}</li>
+                                </ul>
+
+                                <h3>Return Reason:</h3>
+                                <p>{item.return_reason or 'Not specified'}</p>
+
+                                <h3>Disposal Notes:</h3>
+                                <p>{item_action.get('notes', 'Material beyond repair')}</p>
+
+                                <p>Please review and approve/reject this disposal request in the system.</p>
+
+                                <p>Requested by: {current_user}</p>
+                                ''',
+                                notification_type='disposal_request',
+                                action_url=f'/inventory/disposal-requests'
+                            )
+                    except Exception as notif_error:
+                        print(f"Error sending disposal notification: {notif_error}")
 
                 elif pm_action == 'reject':
                     material_return.disposal_status = 'rejected'

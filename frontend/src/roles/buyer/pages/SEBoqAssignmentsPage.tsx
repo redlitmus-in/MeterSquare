@@ -147,7 +147,7 @@ const SEBoqAssignmentsPage: React.FC = () => {
         </div>
         {isRefreshing && (
           <div className="flex items-center gap-2 text-blue-600">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+            <ModernLoadingSpinners size="xs" />
             <span className="text-sm font-medium">Updating...</span>
           </div>
         )}

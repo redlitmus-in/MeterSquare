@@ -4,6 +4,10 @@ Check current user_id column type in project table
 
 import sys
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -15,8 +19,14 @@ from flask import Flask
 def check_type():
     """Check current user_id column type"""
 
+    database_url = os.environ.get('DATABASE_URL')
+    if not database_url:
+        print("ERROR: DATABASE_URL environment variable not set")
+        print("Usage: DATABASE_URL='postgresql://...' python migrations/check_user_id_type.py")
+        return
+
     app = Flask(__name__)
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/corporate_interiors')
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     db.init_app(app)

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Package, FileText, Eye, Loader2, MapPin, Ruler, Tag, Hash, DollarSign, Image as ImageIcon, AlertCircle, CheckCircle, ExternalLink } from 'lucide-react';
+import { X, Package, FileText, Eye, MapPin, Ruler, Tag, Hash, DollarSign, Image as ImageIcon, AlertCircle, CheckCircle, ExternalLink } from 'lucide-react';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useNavigate } from 'react-router-dom';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { formatCurrency } from '@/utils/formatters';
@@ -243,7 +244,7 @@ const BOQSubItemDetailModal: React.FC<BOQSubItemDetailModalProps> = ({
           <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
             {isLoading ? (
               <div className="flex flex-col items-center justify-center py-12">
-                <Loader2 className="w-8 h-8 text-slate-600 animate-spin mb-3" />
+                <ModernLoadingSpinners size="sm" className="mb-3" />
                 <p className="text-gray-600">Loading BOQ item details...</p>
               </div>
             ) : error ? (

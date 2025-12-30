@@ -20,7 +20,6 @@ import {
   FileText,
   Download,
   Edit3,
-  Loader2,
   Save,
   Plus,
   Trash2
@@ -31,6 +30,7 @@ import { Badge } from '@/components/ui/badge';
 import { Purchase, buyerService, MaterialVendorSelection, LPOData } from '../services/buyerService';
 import { buyerVendorService, Vendor, VendorProduct } from '../services/buyerVendorService';
 import { toast } from 'sonner';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
 
 interface MaterialVendorSelectionModalProps {
@@ -1682,7 +1682,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                 {/* Materials List with Vendor Selection */}
                 {loadingVendors ? (
                   <div className="flex items-center justify-center py-12">
-                    <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    <ModernLoadingSpinners size="sm" />
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -1914,7 +1914,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                             className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs"
                                           >
                                             {savingMaterialNote === material.material_name ? (
-                                              <><Loader2 className="w-3 h-3 animate-spin mr-1" /> Saving...</>
+                                              <><ModernLoadingSpinners size="xxs" className="mr-1" /> Saving...</>
                                             ) : (
                                               <><Save className="w-3 h-3 mr-1" /> Save</>
                                             )}
@@ -2669,7 +2669,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                       >
                                         {isSubmitting ? (
                                           <>
-                                            <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            <ModernLoadingSpinners size="xs" className="mr-2" />
                                             Sending...
                                           </>
                                         ) : (
@@ -2943,7 +2943,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                               title={hasMultipleVendors ? "Edit LPO separately for each vendor in their confirmation dialog" : "Edit LPO details"}
                             >
                               {isLoadingLpo ? (
-                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                <ModernLoadingSpinners size="xxs" className="mr-1" />
                               ) : (
                                 <Edit3 className="w-3 h-3 mr-1" />
                               )}
@@ -2965,7 +2965,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         </div>
                       {isLoadingLpo && (
                         <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <ModernLoadingSpinners size="xs" />
                           Loading LPO data...
                         </div>
                       )}
@@ -2994,7 +2994,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                               <div className="text-xs text-gray-500 flex items-center gap-1 bg-gray-50 px-2 py-1 rounded">
                                 {isSavingLpo ? (
                                   <>
-                                    <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
+                                    <ModernLoadingSpinners size="xxs" />
                                     <span>Auto-saving...</span>
                                   </>
                                 ) : lpoLastSaved ? (
@@ -3453,7 +3453,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     >
                       {isSubmitting ? (
                         <>
-                          <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <ModernLoadingSpinners size="xs" className="mr-2" />
                           Applying Changes...
                         </>
                       ) : (
@@ -3484,7 +3484,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         >
                           {isSubmitting && !sendSeparately ? (
                             <>
-                              <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <ModernLoadingSpinners size="xs" className="mr-2" />
                               {isTechnicalDirector ? 'Approving...' : 'Submitting...'}
                             </>
                           ) : (
@@ -3710,7 +3710,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         </div>
                         {isLoadingLpo && (
                           <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <ModernLoadingSpinners size="xs" />
                             Loading LPO data...
                           </div>
                         )}
@@ -4258,7 +4258,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       >
                         {isSubmitting ? (
                           <>
-                            <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            <ModernLoadingSpinners size="xs" className="mr-2" />
                             Sending...
                           </>
                         ) : (

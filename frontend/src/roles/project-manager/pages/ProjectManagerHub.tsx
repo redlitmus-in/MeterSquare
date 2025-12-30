@@ -4,6 +4,7 @@ import HighchartsReact from 'highcharts-react-official';
 import { motion } from 'framer-motion';
 import { projectManagerService } from '../services/projectManagerService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
 import { useDashboardMetricsAutoSync } from '@/hooks/useAutoSync';
 
@@ -426,7 +427,7 @@ const ProjectManagerHub: React.FC = () => {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <ModernLoadingSpinners size="md" className="mx-auto mb-4" />
           <p className="text-gray-600">Loading dashboard...</p>
         </div>
       </div>

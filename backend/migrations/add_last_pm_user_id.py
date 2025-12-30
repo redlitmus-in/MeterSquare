@@ -6,6 +6,10 @@ we can send directly to the same PM without asking for selection.
 
 import os
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add the parent directory to the path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,12 +21,15 @@ from sqlalchemy import text
 def run_migration():
     """Add last_pm_user_id column to boq table"""
 
+    database_url = os.environ.get('DATABASE_URL')
+    if not database_url:
+        print("ERROR: DATABASE_URL environment variable not set")
+        print("Usage: DATABASE_URL='postgresql://...' python migrations/add_last_pm_user_id.py")
+        return False
+
     # Create Flask app context
     app = Flask(__name__)
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
-        'DATABASE_URL',
-        'postgresql://postgres:postgres@localhost:5432/metersquare'
-    )
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     db.init_app(app)

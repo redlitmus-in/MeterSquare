@@ -10,7 +10,6 @@ import {
   Minus,
   AlertCircle,
   CheckCircle,
-  Loader2,
   RotateCcw,
   Store,
   Truck,
@@ -29,6 +28,7 @@ import {
 import { formatCurrency } from '@/utils/formatters';
 import { Purchase, buyerService } from '../services/buyerService';
 import { showSuccess, showError } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface EditPricesModalProps {
   purchase: Purchase;
@@ -498,7 +498,7 @@ const EditPricesModal: React.FC<EditPricesModalProps> = ({
                   >
                     {isSaving ? (
                       <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        <ModernLoadingSpinners size="xs" className="mr-2" />
                         Saving...
                       </>
                     ) : (

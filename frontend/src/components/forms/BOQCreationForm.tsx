@@ -15,7 +15,6 @@ import {
   ChevronUp,
   ChevronRight,
   Upload,
-  Loader2,
   Search,
   PlusCircle,
   Info,
@@ -3398,7 +3397,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   </label>
                   {isLoadingProjects ? (
                     <div className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <ModernLoadingSpinners size="xs" />
                       <span className="text-sm text-gray-500">Loading projects...</span>
                     </div>
                   ) : selectedProject ? (
@@ -3861,7 +3860,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 <div className="flex items-center gap-3">
                   {isLoadingMasterData && (
                     <div className="flex items-center gap-2 text-sm text-gray-500">
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <ModernLoadingSpinners size="xs" />
                       <span>Loading master data...</span>
                     </div>
                   )}
@@ -3940,7 +3939,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       }}
                                     />
                                     {loadingItemData[item.id] ? (
-                                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
+                                      <div className="absolute right-3 top-1/2 -translate-y-1/2"><ModernLoadingSpinners size="xs" /></div>
                                     ) : (
                                       <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                     )}
@@ -4023,7 +4022,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   aria-label="Delete item"
                                 >
                                   {deletingItemId === item.id ? (
-                                    <Loader2 className="w-5 h-5 text-red-500 animate-spin" />
+                                    <ModernLoadingSpinners size="xs" />
                                   ) : (
                                     <Trash2 className="w-5 h-5" />
                                   )}
@@ -5989,7 +5988,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 >
                   {isUploadingBulk ? (
                     <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <ModernLoadingSpinners size="xs" />
                       Importing...
                     </>
                   ) : (
@@ -6009,7 +6008,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               >
                 {isSubmitting ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <ModernLoadingSpinners size="xs" />
                     {editMode ? 'Updating BOQ...' : isRevision ? 'Creating Revision...' : isNewPurchase ? 'Adding Items...' : 'Creating BOQ...'}
                   </>
                 ) : (

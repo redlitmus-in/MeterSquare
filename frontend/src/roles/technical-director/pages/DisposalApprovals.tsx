@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { inventoryService } from '@/roles/production-manager/services/inventoryService';
 import { showSuccess, showError } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface MaterialReturn {
   return_id: number;
@@ -51,9 +52,10 @@ const DisposalApprovals: React.FC = () => {
   const [disposalRequests, setDisposalRequests] = useState<MaterialReturn[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [selectedDisposal, setSelectedDisposal] = useState<MaterialReturn | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [reviewNotes, setReviewNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -67,9 +69,16 @@ const DisposalApprovals: React.FC = () => {
       const response = await inventoryService.getAllMaterialReturns();
       const returns = response?.returns || [];
 
-      // Filter only disposal requests (project_id = 0 for catalog disposals)
+      // Filter disposal requests:
+      // 1. Catalog disposals (project_id = 0 or return_reason contains CATALOG_DISPOSAL)
+      // 2. RDN disposals with disposal-related statuses
       const disposals = returns.filter((ret: MaterialReturn) =>
-        ret.return_reason?.includes('CATALOG_DISPOSAL') || ret.project_id === 0
+        ret.return_reason?.includes('CATALOG_DISPOSAL') ||
+        ret.project_id === 0 ||
+        ret.disposal_status === 'pending_review' ||
+        ret.disposal_status === 'approved_disposal' ||
+        ret.disposal_status === 'disposed' ||
+        ret.disposal_status === 'rejected'
       );
 
       setDisposalRequests(disposals);
@@ -118,23 +127,19 @@ const DisposalApprovals: React.FC = () => {
     setShowDetailModal(true);
   };
 
-  const handleApprove = async () => {
+  const handleApproveClick = () => {
+    if (!selectedDisposal) return;
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmApproval = async () => {
     if (!selectedDisposal) return;
 
-    // Add confirmation for destructive action
-    const materialName = selectedDisposal.material_name || selectedDisposal.material_details?.material_name || 'this material';
-    const unit = selectedDisposal.unit || selectedDisposal.material_details?.unit || 'units';
-
-    const confirmed = window.confirm(
-      `Are you sure you want to approve disposal of ${selectedDisposal.quantity} ${unit} of ${materialName}?\n\nThis will permanently reduce inventory stock and cannot be undone.`
-    );
-
-    if (!confirmed) return;
-
+    setShowConfirmModal(false);
     setSaving(true);
     try {
       await inventoryService.reviewDisposal(selectedDisposal.return_id, {
-        action: 'approve_disposal',
+        action: 'approve',
         notes: reviewNotes || undefined
       });
 
@@ -164,7 +169,8 @@ const DisposalApprovals: React.FC = () => {
     setSaving(true);
     try {
       await inventoryService.reviewDisposal(selectedDisposal.return_id, {
-        action: 'add_to_backup',
+        action: 'backup',
+        usable_quantity: selectedDisposal.quantity, // Add full quantity to backup
         notes: reviewNotes
       });
 
@@ -234,7 +240,7 @@ const DisposalApprovals: React.FC = () => {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <RefreshCw className="w-12 h-12 text-blue-600 animate-spin mx-auto mb-4" />
+          <ModernLoadingSpinners size="lg" className="mx-auto mb-4" />
           <p className="text-gray-600">Loading disposal requests...</p>
         </div>
       </div>
@@ -270,62 +276,43 @@ const DisposalApprovals: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Pending Review</p>
-                <p className="mt-2 text-3xl font-bold text-orange-600">{pendingCount}</p>
-              </div>
-              <div className="p-3 bg-orange-100 rounded-full">
-                <Clock className="w-6 h-6 text-orange-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Approved</p>
-                <p className="mt-2 text-3xl font-bold text-green-600">{approvedCount}</p>
-              </div>
-              <div className="p-3 bg-green-100 rounded-full">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Rejected</p>
-                <p className="mt-2 text-3xl font-bold text-yellow-600">{rejectedCount}</p>
-              </div>
-              <div className="p-3 bg-yellow-100 rounded-full">
-                <XCircle className="w-6 h-6 text-yellow-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Pending Value</p>
-                <p className="mt-2 text-2xl font-bold text-gray-900">
-                  AED {totalValue.toLocaleString()}
-                </p>
-              </div>
-              <div className="p-3 bg-blue-100 rounded-full">
-                <Package className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Filters */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-          <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex flex-col md:flex-row gap-4 items-center">
+            {/* Status Tabs */}
+            <div className="flex bg-gray-100 rounded-lg p-1 gap-1">
+              <button
+                onClick={() => setStatusFilter('pending')}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  statusFilter === 'pending'
+                    ? 'bg-white text-orange-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Pending ({pendingCount})
+              </button>
+              <button
+                onClick={() => setStatusFilter('approved')}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  statusFilter === 'approved'
+                    ? 'bg-white text-green-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Approved ({approvedCount})
+              </button>
+              <button
+                onClick={() => setStatusFilter('rejected')}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  statusFilter === 'rejected'
+                    ? 'bg-white text-yellow-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Rejected ({rejectedCount})
+              </button>
+            </div>
+
             {/* Search */}
             <div className="flex-1">
               <div className="relative">
@@ -338,20 +325,6 @@ const DisposalApprovals: React.FC = () => {
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
-            </div>
-
-            {/* Status Filter */}
-            <div className="md:w-64">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="all">All Statuses</option>
-                <option value="pending">Pending Review</option>
-                <option value="approved">Approved</option>
-                <option value="rejected">Rejected</option>
-              </select>
             </div>
           </div>
         </div>
@@ -450,9 +423,9 @@ const DisposalApprovals: React.FC = () => {
                       <AlertTriangle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <h3 className="text-lg font-medium text-gray-900 mb-1">No disposal requests found</h3>
                       <p className="text-sm text-gray-500">
-                        {searchTerm || statusFilter !== 'all'
-                          ? 'Try adjusting your filters'
-                          : 'No disposal requests have been submitted yet'}
+                        {searchTerm
+                          ? 'Try adjusting your search'
+                          : `No ${statusFilter} disposal requests found`}
                       </p>
                     </td>
                   </tr>
@@ -650,7 +623,7 @@ const DisposalApprovals: React.FC = () => {
                         >
                           {saving ? (
                             <>
-                              <RefreshCw className="w-5 h-5 animate-spin" />
+                              <ModernLoadingSpinners size="xs" />
                               Processing...
                             </>
                           ) : (
@@ -662,13 +635,13 @@ const DisposalApprovals: React.FC = () => {
                         </button>
 
                         <button
-                          onClick={handleApprove}
+                          onClick={handleApproveClick}
                           disabled={saving}
                           className="inline-flex items-center gap-2 px-6 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-sm"
                         >
                           {saving ? (
                             <>
-                              <RefreshCw className="w-5 h-5 animate-spin" />
+                              <ModernLoadingSpinners size="xs" />
                               Processing...
                             </>
                           ) : (
@@ -697,6 +670,71 @@ const DisposalApprovals: React.FC = () => {
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {showConfirmModal && selectedDisposal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+            {/* Header */}
+            <div className="bg-red-50 px-6 py-4 border-b border-red-100">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-100 rounded-full">
+                  <AlertTriangle className="w-6 h-6 text-red-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-red-900">Confirm Disposal</h3>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="px-6 py-5">
+              <p className="text-gray-700 mb-4">
+                Are you sure you want to approve disposal of:
+              </p>
+              <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                <p className="text-lg font-bold text-gray-900">
+                  {selectedDisposal.quantity} {selectedDisposal.unit || selectedDisposal.material_details?.unit || 'units'}
+                </p>
+                <p className="text-sm text-gray-600 mt-1">
+                  {selectedDisposal.material_name || selectedDisposal.material_details?.material_name || 'Material'}
+                </p>
+              </div>
+              <div className="flex items-start gap-2 bg-red-50 rounded-lg p-3">
+                <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-700">
+                  This will <strong>permanently reduce</strong> inventory stock and <strong>cannot be undone</strong>.
+                </p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmApproval}
+                disabled={saving}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+              >
+                {saving ? (
+                  <>
+                    <ModernLoadingSpinners size="xs" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Yes, Approve Disposal
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

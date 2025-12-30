@@ -60,10 +60,10 @@ def has_buyer_permissions(user_role: str) -> bool:
 environment = os.environ.get('ENVIRONMENT', 'production')
 if environment == 'development':
     supabase_url = os.environ.get('DEV_SUPABASE_URL')
-    supabase_key = os.environ.get('DEV_SUPABASE_KEY')
+    supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
 else:
     supabase_url = os.environ.get('SUPABASE_URL')
-    supabase_key = os.environ.get('SUPABASE_KEY')
+    supabase_key = os.environ.get('SUPABASE_ANON_KEY')
 SUPABASE_BUCKET = "file_upload"
 # Pre-build base URL for public files
 PUBLIC_URL_BASE = f"{supabase_url}/storage/v1/object/public/{SUPABASE_BUCKET}/"

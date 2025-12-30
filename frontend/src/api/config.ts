@@ -112,6 +112,25 @@ apiClient.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
+    // Add user info headers for backend tracking (who created/modified records)
+    try {
+      const authStorage = localStorage.getItem('auth-storage');
+      if (authStorage) {
+        const authData = JSON.parse(authStorage);
+        const user = authData?.state?.user;
+        if (user) {
+          if (user.full_name) {
+            config.headers['X-User-Name'] = user.full_name;
+          }
+          if (user.user_id) {
+            config.headers['X-User-Id'] = String(user.user_id);
+          }
+        }
+      }
+    } catch {
+      // Ignore parsing errors
+    }
+
     // Add viewing context for admin role
     const adminViewStore = localStorage.getItem('admin-view-storage');
     if (adminViewStore) {

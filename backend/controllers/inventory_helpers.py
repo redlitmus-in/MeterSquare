@@ -29,7 +29,8 @@ DISPOSAL_APPROVED = 'approved'
 DISPOSAL_PENDING_REVIEW = 'pending_review'
 DISPOSAL_APPROVED_DISPOSAL = 'approved_disposal'
 DISPOSAL_DISPOSED = 'disposed'
-DISPOSAL_REPAIRED = 'repaired'
+DISPOSAL_SENT_FOR_REPAIR = 'sent_for_repair'  # In backup stock, awaiting repair
+DISPOSAL_REPAIRED = 'repaired'  # Repair completed, added to main stock
 DISPOSAL_REJECTED = 'rejected'
 
 

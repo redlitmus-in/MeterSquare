@@ -22,7 +22,7 @@ import {
 } from '@/lib/inventoryConstants';
 
 interface RDNItem {
-  item_id: number;
+  return_item_id: number;
   inventory_material_id: number;
   material_name: string;
   material_code: string;
@@ -57,7 +57,7 @@ interface ReturnDeliveryNote {
 }
 
 interface ItemAction {
-  item_id: number;
+  return_item_id: number;
   action: string;
   notes?: string;
   processed?: boolean;
@@ -118,8 +118,8 @@ const ReceiveReturns: React.FC = () => {
         ? RETURN_ACTIONS.ADD_TO_STOCK
         : RETURN_ACTIONS.SEND_FOR_REPAIR;
 
-      initialActions.set(item.item_id, {
-        item_id: item.item_id,
+      initialActions.set(item.return_item_id, {
+        return_item_id: item.return_item_id,
         action: defaultAction,
         notes: '',
         processed: false,
@@ -260,7 +260,7 @@ const ReceiveReturns: React.FC = () => {
       const unprocessedItems = Array.from(itemActions.values())
         .filter(item => !item.processed)
         .map(item => ({
-          item_id: item.item_id,
+          item_id: item.return_item_id,
           action: item.action,
           notes: item.notes || ''
         }));
@@ -516,7 +516,7 @@ const ReceiveReturns: React.FC = () => {
                           </thead>
                           <tbody className="divide-y divide-gray-200">
                             {rdn.items.map((item) => (
-                              <tr key={item.item_id} className="hover:bg-white">
+                              <tr key={item.return_item_id} className="hover:bg-white">
                                 <td className="py-2">
                                   <p className="font-medium text-gray-900">{item.material_name}</p>
                                   <p className="text-xs text-gray-500">{item.material_code}</p>
@@ -597,15 +597,18 @@ const ReceiveReturns: React.FC = () => {
 
                 {/* Items */}
                 <div className="space-y-3">
-                  {selectedRDN.items.map((item) => {
-                    const itemAction = itemActions.get(item.item_id);
-                    const needsNotes = itemAction?.action !== RETURN_ACTIONS.ADD_TO_STOCK;
+                  {selectedRDN.items.map((item, index) => {
+                    const itemAction = itemActions.get(item.return_item_id);
+                    const currentAction = itemAction?.action || '';
+                    const needsNotes = currentAction !== RETURN_ACTIONS.ADD_TO_STOCK;
                     const isProcessed = itemAction?.processed;
                     const isProcessing = itemAction?.processing;
+                    // Use a combination of item_id and index for unique key
+                    const itemKey = `${item.return_item_id}-${index}`;
 
                     return (
                       <div
-                        key={item.item_id}
+                        key={itemKey}
                         className={`border rounded-lg p-4 ${
                           isProcessed
                             ? 'border-green-300 bg-green-50'
@@ -638,13 +641,13 @@ const ReceiveReturns: React.FC = () => {
                           {/* Process button for individual item */}
                           {!isProcessed && (
                             <button
-                              onClick={() => handleProcessSingleItem(item.item_id)}
+                              onClick={() => handleProcessSingleItem(item.return_item_id)}
                               disabled={isProcessing || confirming}
                               className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                             >
                               {isProcessing ? (
                                 <>
-                                  <ClockIcon className="w-3 h-3 animate-spin" />
+                                  <ModernLoadingSpinners size="xxs" />
                                   Processing...
                                 </>
                               ) : (
@@ -669,20 +672,24 @@ const ReceiveReturns: React.FC = () => {
                                   if (!shouldShowAction) return null;
 
                                   const actionLabel = RETURN_ACTION_LABELS[action];
+                                  const inputId = `action-${itemKey}-${action}`;
                                   return (
                                     <label
                                       key={action}
+                                      htmlFor={inputId}
                                       className={`flex items-center p-2 border rounded-lg cursor-pointer transition-colors ${
-                                        itemAction?.action === action
+                                        currentAction === action
                                           ? 'border-blue-500 bg-blue-50'
                                           : 'border-gray-300 hover:bg-gray-100'
                                       }`}
                                     >
                                       <input
                                         type="radio"
+                                        id={inputId}
+                                        name={`action-${itemKey}`}
                                         value={action}
-                                        checked={itemAction?.action === action}
-                                        onChange={(e) => updateItemAction(item.item_id, e.target.value)}
+                                        checked={currentAction === action}
+                                        onChange={() => updateItemAction(item.return_item_id, action)}
                                         className="w-3 h-3"
                                         disabled={isProcessing}
                                       />
@@ -695,9 +702,9 @@ const ReceiveReturns: React.FC = () => {
                                   );
                                 })}
                               </div>
-                              {itemAction && (
+                              {currentAction && RETURN_ACTION_LABELS[currentAction as keyof typeof RETURN_ACTION_LABELS] && (
                                 <p className="text-xs text-gray-500 mt-1">
-                                  {RETURN_ACTION_LABELS[itemAction.action as keyof typeof RETURN_ACTION_LABELS].description}
+                                  {RETURN_ACTION_LABELS[currentAction as keyof typeof RETURN_ACTION_LABELS].description}
                                 </p>
                               )}
                             </div>
@@ -709,7 +716,7 @@ const ReceiveReturns: React.FC = () => {
                                 </label>
                                 <textarea
                                   value={itemAction?.notes || ''}
-                                  onChange={(e) => updateItemNotes(item.item_id, e.target.value)}
+                                  onChange={(e) => updateItemNotes(item.return_item_id, e.target.value)}
                                   rows={2}
                                   disabled={isProcessing}
                                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
@@ -780,7 +787,7 @@ const ReceiveReturns: React.FC = () => {
                           >
                             {confirming ? (
                               <>
-                                <ClockIcon className="w-4 h-4 animate-spin" />
+                                <ModernLoadingSpinners size="xs" />
                                 Processing...
                               </>
                             ) : (

@@ -28,9 +28,9 @@ import {
   Award,
   Clock,
   AlertCircle,
-  Loader2,
   Activity
 } from 'lucide-react';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
@@ -224,7 +224,7 @@ const ProfilePage: React.FC = () => {
                 title="Change profile picture"
               >
                 {uploading ? (
-                  <Loader2 className="w-6 h-6 text-white animate-spin" />
+                  <ModernLoadingSpinners size="sm" />
                 ) : (
                   <CameraIcon className="w-6 h-6 text-white" />
                 )}
@@ -270,7 +270,7 @@ const ProfilePage: React.FC = () => {
                 >
                   {isLoading ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <ModernLoadingSpinners size="xs" />
                       Saving...
                     </>
                   ) : (

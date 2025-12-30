@@ -1930,7 +1930,7 @@ const ChangeRequestsPage: React.FC = () => {
                               >
                                 {approvingVendorId === purchase.cr_id ? (
                                   <>
-                                    <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    <ModernLoadingSpinners size="xxs" />
                                     <span className="text-[8px]">Approving...</span>
                                   </>
                                 ) : (
@@ -2099,7 +2099,7 @@ const ChangeRequestsPage: React.FC = () => {
                               >
                                 {approvingVendorId === poChild.vendor_id ? (
                                   <>
-                                    <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    <ModernLoadingSpinners size="xxs" />
                                     <span className="text-[8px]">Approving...</span>
                                   </>
                                 ) : (
@@ -2193,7 +2193,7 @@ const ChangeRequestsPage: React.FC = () => {
                                 >
                                   {approvingVendorId === purchase.cr_id ? (
                                     <>
-                                      <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      <ModernLoadingSpinners size="xxs" />
                                       <span className="text-[8px]">Approving...</span>
                                     </>
                                   ) : (

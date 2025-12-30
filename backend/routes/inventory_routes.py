@@ -240,8 +240,15 @@ def mark_disposed_route(return_id):
 @inventory_routes.route('/material_return/<int:return_id>/add_to_stock', methods=['POST'])
 @jwt_required
 def add_repaired_to_stock_route(return_id):
-    """Add repaired material back to inventory stock"""
+    """Mark repair as complete and move from backup stock to main stock"""
     return add_repaired_to_stock(return_id)
+
+
+@inventory_routes.route('/material_return/<int:return_id>/request_disposal', methods=['POST'])
+@jwt_required
+def request_disposal_from_repair_route(return_id):
+    """Request disposal when repair is not possible - sends to TD for approval"""
+    return request_disposal_from_repair(return_id)
 
 
 @inventory_routes.route('/material_return/<int:return_id>/approve', methods=['POST'])

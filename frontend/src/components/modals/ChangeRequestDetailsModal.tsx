@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send, FileText, Download, Loader2, ChevronDown, Edit, ExternalLink, GitCompare } from 'lucide-react';
+import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send, FileText, Download, ChevronDown, Edit, ExternalLink, GitCompare } from 'lucide-react';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { ChangeRequestItem } from '@/services/changeRequestService';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
@@ -769,7 +770,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       >
                         {loadingCompetitors ? (
                           <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <ModernLoadingSpinners size="xs" />
                             Loading...
                           </>
                         ) : (
@@ -807,7 +808,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         >
                           {loadingCompetitors ? (
                             <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <ModernLoadingSpinners size="xxs" />
                               Loading...
                             </>
                           ) : (
@@ -1835,7 +1836,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
                         <span>LPO Details</span>
                         {loadingLPO ? (
-                          <Loader2 className="w-4 h-4 animate-spin ml-1" />
+                          <ModernLoadingSpinners size="xs" className="ml-1" />
                         ) : (
                           <ChevronDown className={`w-4 h-4 transition-transform ${isLPOExpanded ? 'rotate-180' : ''}`} />
                         )}
@@ -2022,7 +2023,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           >
                             {downloadingLPO ? (
                               <>
-                                <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
+                                <ModernLoadingSpinners size="xxs" />
                                 Downloading...
                               </>
                             ) : (
@@ -2162,7 +2163,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
                 {loadingCompetitors ? (
                   <div className="flex flex-col items-center justify-center py-16">
-                    <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
+                    <ModernLoadingSpinners size="lg" className="mb-4" />
                     <p className="text-gray-600">Loading competitor vendors...</p>
                   </div>
                 ) : competitorVendors.length === 0 ? (

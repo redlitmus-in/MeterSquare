@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ArrowDownCircle, Package, Plus, Search, FileText, CheckCircle, DollarSign, ChevronDown, X, Download, ExternalLink } from 'lucide-react';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { inventoryService, InventoryMaterial, CustomUnit } from '../services/inventoryService';
 import ConfirmationModal from '../components/ConfirmationModal';
 
@@ -456,10 +457,6 @@ const StockInPage: React.FC = () => {
       alert('Unit price must be a valid positive number');
       return;
     }
-    if (newMaterialData.current_stock < 0 || isNaN(newMaterialData.current_stock)) {
-      alert('Initial stock must be a valid positive number');
-      return;
-    }
     if (newMaterialData.min_stock_level < 0 || isNaN(newMaterialData.min_stock_level)) {
       alert('Min stock level must be a valid positive number');
       return;
@@ -485,7 +482,7 @@ const StockInPage: React.FC = () => {
         }
       }
 
-      // Create the material
+      // Create the material (stock starts at 0, will be added via Stock In)
       const createdMaterial = await inventoryService.createInventoryItem({
         material_name: newMaterialData.material_name,
         brand: newMaterialData.brand || undefined,
@@ -493,7 +490,7 @@ const StockInPage: React.FC = () => {
         category: newMaterialData.category || undefined,
         unit: newMaterialData.unit,
         unit_price: newMaterialData.unit_price,
-        current_stock: newMaterialData.current_stock,
+        current_stock: 0,
         min_stock_level: newMaterialData.min_stock_level || undefined,
         description: newMaterialData.description || undefined
       });
@@ -501,11 +498,25 @@ const StockInPage: React.FC = () => {
       // Add to materials list
       setAllMaterials(prev => [createdMaterial, ...prev]);
 
-      // Auto-select the newly created material
+      // Auto-select the newly created material in the Stock In form
       handleSelectMaterialFromDropdown(createdMaterial);
 
+      // Reset the new material form
+      setNewMaterialData({
+        material_name: '',
+        brand: '',
+        size: '',
+        category: '',
+        unit: 'pcs',
+        unit_price: 0,
+        current_stock: 0,
+        min_stock_level: 0,
+        description: ''
+      });
+      setUnitSearchTerm('Pieces (pcs)');
+
       setShowNewMaterialModal(false);
-      alert('Material created successfully!');
+      alert('Material created successfully! You can now enter the quantity and price.');
     } catch (error: any) {
       console.error('Error creating material:', error);
       // Show specific error message from backend (e.g., duplicate detection)
@@ -547,6 +558,10 @@ const StockInPage: React.FC = () => {
       }
       if (purchaseFormData.unit_price <= 0) {
         alert('Please enter a valid unit price');
+        return;
+      }
+      if (!deliveryNoteFile) {
+        alert('Please upload a delivery note from vendor');
         return;
       }
 
@@ -594,7 +609,7 @@ const StockInPage: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+        <ModernLoadingSpinners size="md" />
       </div>
     );
   }
@@ -878,18 +893,15 @@ const StockInPage: React.FC = () => {
                         </button>
                       ))}
 
-                      {/* Show "Create New Material" if user has typed something and no exact match */}
-                      {materialSearchTerm.trim() !== '' && filteredMaterials.length === 0 && (
+                      {/* Show "Create New Material" option when user types something */}
+                      {materialSearchTerm.trim() !== '' && (
                         <button
                           type="button"
-                          onClick={() => {
-                            setShowMaterialDropdown(false);
-                            setShowNewMaterialModal(true);
-                          }}
+                          onClick={handleOpenNewMaterialModal}
                           className="w-full px-4 py-3 text-left hover:bg-green-50 border-t border-gray-200 flex items-center space-x-2 text-green-600 font-medium"
                         >
                           <Plus className="w-4 h-4" />
-                          <span>Create New Material: "{materialSearchTerm}"</span>
+                          <span>+ Create New Material: "{materialSearchTerm}"</span>
                         </button>
                       )}
                     </>
@@ -1011,7 +1023,7 @@ const StockInPage: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   <FileText className="w-4 h-4 inline mr-1" />
-                  Delivery Note from Vendor
+                  Delivery Note from Vendor <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="file"
@@ -1069,7 +1081,7 @@ const StockInPage: React.FC = () => {
               >
                 {saving ? (
                   <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <ModernLoadingSpinners size="xxs" />
                     <span>Saving...</span>
                   </>
                 ) : (
@@ -1209,36 +1221,20 @@ const StockInPage: React.FC = () => {
                 </p>
               </div>
 
-              {/* Initial Stock and Min Stock Row */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Initial Stock
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={newMaterialData.current_stock || ''}
-                    onChange={(e) => setNewMaterialData({ ...newMaterialData, current_stock: Number(e.target.value) })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    placeholder="0"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Min Stock Level
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={newMaterialData.min_stock_level || ''}
-                    onChange={(e) => setNewMaterialData({ ...newMaterialData, min_stock_level: Number(e.target.value) })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    placeholder="0"
-                  />
-                </div>
+              {/* Min Stock Level */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Min Stock Level
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newMaterialData.min_stock_level || ''}
+                  onChange={(e) => setNewMaterialData({ ...newMaterialData, min_stock_level: Number(e.target.value) })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  placeholder="0"
+                />
               </div>
 
               {/* Description */}
@@ -1272,7 +1268,7 @@ const StockInPage: React.FC = () => {
               >
                 {savingNewMaterial ? (
                   <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <ModernLoadingSpinners size="xxs" />
                     <span>Creating...</span>
                   </>
                 ) : (

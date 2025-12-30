@@ -27,7 +27,8 @@ import {
   UserGroupIcon,
   PencilSquareIcon as PencilIcon,
   BugAntIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  WrenchScrewdriverIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -509,13 +510,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             color: 'text-red-500'
           },
           {
-            name: 'Stock Take',
-            href: buildPath('/m2-store/stock-take'),
-            icon: ClipboardDocumentCheckIcon,
-            iconSolid: ClipboardDocumentCheckSolid,
-            color: 'text-orange-500'
-          },
-          {
             name: 'Receive Returns',
             href: buildPath('/m2-store/receive-returns'),
             icon: ArrowUturnLeftIcon,
@@ -523,11 +517,48 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             color: 'text-orange-600'
           },
           {
-            name: 'Returnable Assets',
-            href: buildPath('/m2-store/returnable-assets'),
+            name: 'Repair Management',
+            href: buildPath('/m2-store/repair-management'),
+            icon: WrenchScrewdriverIcon,
+            iconSolid: WrenchScrewdriverIcon,
+            color: 'text-amber-600'
+          }
+        ]
+      },
+      {
+        name: 'Returnable Assets',
+        href: buildPath('/returnable-assets/catalog'),
+        icon: CubeIcon,
+        iconSolid: CubeSolid,
+        color: 'text-green-600',
+        children: [
+          {
+            name: 'Asset Catalog',
+            href: buildPath('/returnable-assets/catalog'),
             icon: CubeIcon,
             iconSolid: CubeSolid,
             color: 'text-green-600'
+          },
+          {
+            name: 'Stock In',
+            href: buildPath('/returnable-assets/stock-in'),
+            icon: ArrowDownTrayIcon,
+            iconSolid: ArrowDownTrayIcon,
+            color: 'text-blue-600'
+          },
+          {
+            name: 'Dispatch (DN)',
+            href: buildPath('/returnable-assets/dispatch'),
+            icon: ArrowUpTrayIcon,
+            iconSolid: ArrowUpTrayIcon,
+            color: 'text-orange-600'
+          },
+          {
+            name: 'Process Returns',
+            href: buildPath('/returnable-assets/receive-returns'),
+            icon: CheckCircleIcon,
+            iconSolid: CheckCircleIcon,
+            color: 'text-teal-600'
           }
         ]
       },

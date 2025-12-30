@@ -257,3 +257,403 @@ class AssetMaintenance(db.Model):
             'category_name': self.category.category_name if self.category else None,
             'item_code': self.item.item_code if self.item else None
         }
+
+
+# ============================================================================
+# ASSET DELIVERY NOTE (ADN) - Like Material Delivery Note (MDN)
+# ============================================================================
+
+class AssetDeliveryNote(db.Model):
+    """Asset Delivery Notes - Track asset dispatches to project sites (like MDN for materials)"""
+    __tablename__ = "asset_delivery_notes"
+
+    adn_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    adn_number = db.Column(db.String(50), unique=True, nullable=False)  # ADN-2025-0001
+    project_id = db.Column(db.Integer, nullable=False, index=True)
+    site_location = db.Column(db.String(255), nullable=True)  # Specific site within project
+    delivery_date = db.Column(db.DateTime, nullable=False)
+
+    # Personnel
+    attention_to = db.Column(db.String(255), nullable=True)  # Site engineer/supervisor name
+    attention_to_id = db.Column(db.Integer, nullable=True)  # Site engineer user ID
+    delivery_from = db.Column(db.String(255), default='M2 Store')
+    prepared_by = db.Column(db.String(255), nullable=False)
+    prepared_by_id = db.Column(db.Integer, nullable=True)
+    checked_by = db.Column(db.String(255), nullable=True)
+
+    # Transport details
+    vehicle_number = db.Column(db.String(100), nullable=True)
+    driver_name = db.Column(db.String(255), nullable=True)
+    driver_contact = db.Column(db.String(50), nullable=True)
+
+    # Status tracking
+    status = db.Column(db.String(20), default='DRAFT')  # DRAFT, ISSUED, IN_TRANSIT, DELIVERED, PARTIAL, CANCELLED
+    notes = db.Column(db.Text, nullable=True)
+
+    # Delivery confirmation
+    received_by = db.Column(db.String(255), nullable=True)
+    received_by_id = db.Column(db.Integer, nullable=True)
+    received_at = db.Column(db.DateTime, nullable=True)
+    receiver_notes = db.Column(db.Text, nullable=True)
+
+    # Audit fields
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_modified_by = db.Column(db.String(255), nullable=True)
+    issued_at = db.Column(db.DateTime, nullable=True)
+    issued_by = db.Column(db.String(255), nullable=True)
+    dispatched_at = db.Column(db.DateTime, nullable=True)
+    dispatched_by = db.Column(db.String(255), nullable=True)
+
+    # Relationships
+    items = db.relationship('AssetDeliveryNoteItem', backref='delivery_note', lazy=True, cascade='all, delete-orphan')
+
+    def _format_datetime(self, dt):
+        """Helper to format datetime consistently with UTC indicator"""
+        return (dt.isoformat() + 'Z') if dt else None
+
+    def to_dict(self):
+        return {
+            'adn_id': self.adn_id,
+            'adn_number': self.adn_number,
+            'project_id': self.project_id,
+            'site_location': self.site_location,
+            'delivery_date': self._format_datetime(self.delivery_date),
+            'attention_to': self.attention_to,
+            'attention_to_id': self.attention_to_id,
+            'delivery_from': self.delivery_from,
+            'prepared_by': self.prepared_by,
+            'prepared_by_id': self.prepared_by_id,
+            'checked_by': self.checked_by,
+            'vehicle_number': self.vehicle_number,
+            'driver_name': self.driver_name,
+            'driver_contact': self.driver_contact,
+            'status': self.status,
+            'notes': self.notes,
+            'received_by': self.received_by,
+            'received_by_id': self.received_by_id,
+            'received_at': self._format_datetime(self.received_at),
+            'receiver_notes': self.receiver_notes,
+            'created_at': self._format_datetime(self.created_at),
+            'created_by': self.created_by,
+            'last_modified_at': self._format_datetime(self.last_modified_at),
+            'last_modified_by': self.last_modified_by,
+            'issued_at': self._format_datetime(self.issued_at),
+            'issued_by': self.issued_by,
+            'dispatched_at': self._format_datetime(self.dispatched_at),
+            'dispatched_by': self.dispatched_by,
+            'items': [item.to_dict() for item in self.items] if self.items else [],
+            'total_items': len(self.items) if self.items else 0
+        }
+
+
+class AssetDeliveryNoteItem(db.Model):
+    """Asset Delivery Note Items - Individual assets in a delivery note"""
+    __tablename__ = "asset_delivery_note_items"
+
+    item_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    adn_id = db.Column(db.Integer, db.ForeignKey('asset_delivery_notes.adn_id'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_categories.category_id'), nullable=False)
+    asset_item_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_items.item_id'), nullable=True)  # For individual tracking
+    quantity = db.Column(db.Integer, default=1)  # For quantity-based tracking
+    condition_at_dispatch = db.Column(db.String(20), default='good')  # good, fair, poor
+    notes = db.Column(db.Text, nullable=True)
+
+    # Item-level receipt tracking (for selective receive)
+    is_received = db.Column(db.Boolean, default=False)
+    received_at = db.Column(db.DateTime, nullable=True)
+    received_by = db.Column(db.String(255), nullable=True)
+    received_by_id = db.Column(db.Integer, nullable=True)
+
+    # Return tracking
+    quantity_returned = db.Column(db.Integer, default=0)  # How many have been returned
+    status = db.Column(db.String(20), default='dispatched')  # dispatched, partial_return, fully_returned
+
+    # Relationships
+    category = db.relationship('ReturnableAssetCategory', backref='adn_items', lazy=True)
+    asset_item = db.relationship('ReturnableAssetItem', backref='adn_items', lazy=True)
+
+    def _format_datetime(self, dt):
+        """Helper to format datetime consistently with UTC indicator"""
+        return (dt.isoformat() + 'Z') if dt else None
+
+    def to_dict(self):
+        return {
+            'item_id': self.item_id,
+            'adn_id': self.adn_id,
+            'category_id': self.category_id,
+            'asset_item_id': self.asset_item_id,
+            'quantity': self.quantity,
+            'condition_at_dispatch': self.condition_at_dispatch,
+            'notes': self.notes,
+            'is_received': self.is_received,
+            'received_at': self._format_datetime(self.received_at),
+            'received_by': self.received_by,
+            'received_by_id': self.received_by_id,
+            'quantity_returned': self.quantity_returned,
+            'status': self.status,
+            # Include category/item details
+            'category_code': self.category.category_code if self.category else None,
+            'category_name': self.category.category_name if self.category else None,
+            'tracking_mode': self.category.tracking_mode if self.category else None,
+            'item_code': self.asset_item.item_code if self.asset_item else None,
+            'serial_number': self.asset_item.serial_number if self.asset_item else None
+        }
+
+
+# ============================================================================
+# ASSET RETURN DELIVERY NOTE (ARDN) - Like Return Delivery Note (RDN)
+# ============================================================================
+
+class AssetReturnDeliveryNote(db.Model):
+    """Asset Return Delivery Notes - Track asset returns from sites to store (like RDN for materials)"""
+    __tablename__ = "asset_return_delivery_notes"
+
+    ardn_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    ardn_number = db.Column(db.String(50), unique=True, nullable=False)  # ARDN-2025-0001
+    project_id = db.Column(db.Integer, nullable=False, index=True)
+    site_location = db.Column(db.String(255), nullable=True)
+    return_date = db.Column(db.DateTime, nullable=False)
+
+    # Link to original delivery note (optional - for traceability)
+    original_adn_id = db.Column(db.Integer, db.ForeignKey('asset_delivery_notes.adn_id'), nullable=True)
+
+    # Personnel
+    returned_by = db.Column(db.String(255), nullable=False)  # Site engineer name
+    returned_by_id = db.Column(db.Integer, nullable=True)  # Site engineer user ID
+    return_to = db.Column(db.String(255), default='M2 Store')
+    prepared_by = db.Column(db.String(255), nullable=False)
+    prepared_by_id = db.Column(db.Integer, nullable=True)
+    checked_by = db.Column(db.String(255), nullable=True)
+
+    # Transport details
+    vehicle_number = db.Column(db.String(100), nullable=True)
+    driver_name = db.Column(db.String(255), nullable=True)
+    driver_contact = db.Column(db.String(50), nullable=True)
+
+    # Status tracking
+    status = db.Column(db.String(20), default='DRAFT')  # DRAFT, ISSUED, IN_TRANSIT, RECEIVED, PROCESSED, CANCELLED
+    return_reason = db.Column(db.String(100), nullable=True)  # project_complete, not_needed, damaged, etc.
+    notes = db.Column(db.Text, nullable=True)
+
+    # Store acceptance/processing
+    accepted_by = db.Column(db.String(255), nullable=True)
+    accepted_by_id = db.Column(db.Integer, nullable=True)
+    accepted_at = db.Column(db.DateTime, nullable=True)
+    acceptance_notes = db.Column(db.Text, nullable=True)
+
+    # Processing (PM verifies and decides fate of each item)
+    processed_by = db.Column(db.String(255), nullable=True)
+    processed_by_id = db.Column(db.Integer, nullable=True)
+    processed_at = db.Column(db.DateTime, nullable=True)
+
+    # Audit fields
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_modified_by = db.Column(db.String(255), nullable=True)
+    issued_at = db.Column(db.DateTime, nullable=True)
+    issued_by = db.Column(db.String(255), nullable=True)
+    dispatched_at = db.Column(db.DateTime, nullable=True)  # When sent from site
+    dispatched_by = db.Column(db.String(255), nullable=True)
+
+    # Relationships
+    items = db.relationship('AssetReturnDeliveryNoteItem', backref='return_note', lazy=True, cascade='all, delete-orphan')
+    original_adn = db.relationship('AssetDeliveryNote', backref='return_notes', lazy=True)
+
+    def _format_datetime(self, dt):
+        """Helper to format datetime consistently with UTC indicator"""
+        return (dt.isoformat() + 'Z') if dt else None
+
+    def to_dict(self):
+        return {
+            'ardn_id': self.ardn_id,
+            'ardn_number': self.ardn_number,
+            'project_id': self.project_id,
+            'site_location': self.site_location,
+            'return_date': self._format_datetime(self.return_date),
+            'original_adn_id': self.original_adn_id,
+            'returned_by': self.returned_by,
+            'returned_by_id': self.returned_by_id,
+            'return_to': self.return_to,
+            'prepared_by': self.prepared_by,
+            'prepared_by_id': self.prepared_by_id,
+            'checked_by': self.checked_by,
+            'vehicle_number': self.vehicle_number,
+            'driver_name': self.driver_name,
+            'driver_contact': self.driver_contact,
+            'status': self.status,
+            'return_reason': self.return_reason,
+            'notes': self.notes,
+            'accepted_by': self.accepted_by,
+            'accepted_by_id': self.accepted_by_id,
+            'accepted_at': self._format_datetime(self.accepted_at),
+            'acceptance_notes': self.acceptance_notes,
+            'processed_by': self.processed_by,
+            'processed_by_id': self.processed_by_id,
+            'processed_at': self._format_datetime(self.processed_at),
+            'created_at': self._format_datetime(self.created_at),
+            'created_by': self.created_by,
+            'last_modified_at': self._format_datetime(self.last_modified_at),
+            'last_modified_by': self.last_modified_by,
+            'issued_at': self._format_datetime(self.issued_at),
+            'issued_by': self.issued_by,
+            'dispatched_at': self._format_datetime(self.dispatched_at),
+            'dispatched_by': self.dispatched_by,
+            'items': [item.to_dict() for item in self.items] if self.items else [],
+            'total_items': len(self.items) if self.items else 0,
+            # Include original ADN reference
+            'original_adn_number': self.original_adn.adn_number if self.original_adn else None
+        }
+
+
+class AssetReturnDeliveryNoteItem(db.Model):
+    """Asset Return Delivery Note Items - Individual assets being returned"""
+    __tablename__ = "asset_return_delivery_note_items"
+
+    return_item_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    ardn_id = db.Column(db.Integer, db.ForeignKey('asset_return_delivery_notes.ardn_id'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_categories.category_id'), nullable=False)
+    asset_item_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_items.item_id'), nullable=True)  # For individual tracking
+    original_adn_item_id = db.Column(db.Integer, db.ForeignKey('asset_delivery_note_items.item_id'), nullable=True)  # Link to original dispatch
+    quantity = db.Column(db.Integer, default=1)  # For quantity-based tracking
+
+    # SE reports condition at return
+    reported_condition = db.Column(db.String(20), nullable=False)  # ok, damaged, lost, needs_repair
+    damage_description = db.Column(db.Text, nullable=True)
+    photo_url = db.Column(db.Text, nullable=True)  # Photo evidence for damaged items
+    return_notes = db.Column(db.Text, nullable=True)
+
+    # PM verifies and decides action
+    verified_condition = db.Column(db.String(20), nullable=True)  # ok, damaged, lost, needs_repair
+    pm_notes = db.Column(db.Text, nullable=True)
+    action_taken = db.Column(db.String(30), nullable=True)  # return_to_stock, send_to_repair, dispose, write_off
+
+    # Acceptance tracking
+    quantity_accepted = db.Column(db.Integer, nullable=True)
+    acceptance_status = db.Column(db.String(20), nullable=True)  # PENDING, ACCEPTED, REJECTED, PARTIAL
+
+    # Link to maintenance if sent for repair
+    maintenance_id = db.Column(db.Integer, db.ForeignKey('asset_maintenance.maintenance_id'), nullable=True)
+
+    # Relationships
+    category = db.relationship('ReturnableAssetCategory', backref='ardn_items', lazy=True)
+    asset_item = db.relationship('ReturnableAssetItem', backref='ardn_items', lazy=True)
+    original_adn_item = db.relationship('AssetDeliveryNoteItem', backref='return_items', lazy=True)
+    maintenance_record = db.relationship('AssetMaintenance', backref='return_items', lazy=True)
+
+    def to_dict(self):
+        return {
+            'return_item_id': self.return_item_id,
+            'ardn_id': self.ardn_id,
+            'category_id': self.category_id,
+            'asset_item_id': self.asset_item_id,
+            'original_adn_item_id': self.original_adn_item_id,
+            'quantity': self.quantity,
+            'reported_condition': self.reported_condition,
+            'damage_description': self.damage_description,
+            'photo_url': self.photo_url,
+            'return_notes': self.return_notes,
+            'verified_condition': self.verified_condition,
+            'pm_notes': self.pm_notes,
+            'action_taken': self.action_taken,
+            'quantity_accepted': self.quantity_accepted,
+            'acceptance_status': self.acceptance_status,
+            'maintenance_id': self.maintenance_id,
+            # Include category/item details
+            'category_code': self.category.category_code if self.category else None,
+            'category_name': self.category.category_name if self.category else None,
+            'tracking_mode': self.category.tracking_mode if self.category else None,
+            'item_code': self.asset_item.item_code if self.asset_item else None,
+            'serial_number': self.asset_item.serial_number if self.asset_item else None
+        }
+
+
+# ============================================================================
+# ASSET STOCK IN - Track when new assets are added to inventory
+# ============================================================================
+
+class AssetStockIn(db.Model):
+    """Asset Stock In - Track when new assets are added to inventory"""
+    __tablename__ = "asset_stock_in"
+
+    stock_in_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    stock_in_number = db.Column(db.String(50), unique=True, nullable=False)  # ASI-2025-0001
+    category_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_categories.category_id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+
+    # Purchase details
+    purchase_date = db.Column(db.Date, nullable=True)
+    vendor_name = db.Column(db.String(255), nullable=True)
+    vendor_id = db.Column(db.Integer, nullable=True)
+    invoice_number = db.Column(db.String(100), nullable=True)
+    unit_cost = db.Column(db.Float, default=0.0)
+    total_cost = db.Column(db.Float, default=0.0)
+
+    # Condition
+    condition = db.Column(db.String(20), default='new')  # new, good, fair, refurbished
+    notes = db.Column(db.Text, nullable=True)
+
+    # Document attachment (DN/invoice/receipt)
+    document_url = db.Column(db.Text, nullable=True)  # URL to uploaded document
+
+    # Audit
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    created_by_id = db.Column(db.Integer, nullable=True)
+
+    # Relationships
+    category = db.relationship('ReturnableAssetCategory', backref='stock_ins', lazy=True)
+    items = db.relationship('AssetStockInItem', backref='stock_in', lazy=True, cascade='all, delete-orphan')
+
+    def to_dict(self):
+        return {
+            'stock_in_id': self.stock_in_id,
+            'stock_in_number': self.stock_in_number,
+            'category_id': self.category_id,
+            'quantity': self.quantity,
+            'purchase_date': self.purchase_date.isoformat() if self.purchase_date else None,
+            'vendor_name': self.vendor_name,
+            'vendor_id': self.vendor_id,
+            'invoice_number': self.invoice_number,
+            'unit_cost': self.unit_cost,
+            'total_cost': self.total_cost,
+            'condition': self.condition,
+            'notes': self.notes,
+            'document_url': self.document_url,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'created_by': self.created_by,
+            'created_by_id': self.created_by_id,
+            # Category details
+            'category_code': self.category.category_code if self.category else None,
+            'category_name': self.category.category_name if self.category else None,
+            'tracking_mode': self.category.tracking_mode if self.category else None,
+            'items': [item.to_dict() for item in self.items] if self.items else []
+        }
+
+
+class AssetStockInItem(db.Model):
+    """Asset Stock In Items - For individual tracking mode, each serial number"""
+    __tablename__ = "asset_stock_in_items"
+
+    stock_in_item_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    stock_in_id = db.Column(db.Integer, db.ForeignKey('asset_stock_in.stock_in_id'), nullable=False)
+    asset_item_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_items.item_id'), nullable=True)  # Link to created item
+    serial_number = db.Column(db.String(100), nullable=True)
+    condition = db.Column(db.String(20), default='new')
+    notes = db.Column(db.Text, nullable=True)
+
+    # Relationships
+    asset_item = db.relationship('ReturnableAssetItem', backref='stock_in_items', lazy=True)
+
+    def to_dict(self):
+        return {
+            'stock_in_item_id': self.stock_in_item_id,
+            'stock_in_id': self.stock_in_id,
+            'asset_item_id': self.asset_item_id,
+            'serial_number': self.serial_number,
+            'condition': self.condition,
+            'notes': self.notes,
+            'item_code': self.asset_item.item_code if self.asset_item else None
+        }

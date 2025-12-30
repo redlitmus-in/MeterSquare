@@ -232,6 +232,16 @@ export const assetService = {
     }
   },
 
+  // Alias for getCategories - returns just the array
+  async getCategories(): Promise<AssetCategory[]> {
+    try {
+      const response = await apiClient.get('/assets/categories', { params: { active_only: true } });
+      return response.data.categories || [];
+    } catch (error) {
+      throw handleApiError(error);
+    }
+  },
+
   async getCategoryById(categoryId: number): Promise<AssetCategory> {
     try {
       const response = await apiClient.get(`/assets/categories/${categoryId}`);

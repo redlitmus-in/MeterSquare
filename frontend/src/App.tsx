@@ -83,13 +83,16 @@ const M2StoreLanding = lazy(() => import('@/roles/production-manager/pages/M2Sto
 const MaterialsManagement = lazy(() => import('@/roles/production-manager/pages/MaterialsManagement'));
 const ReceiveStock = lazy(() => import('@/roles/production-manager/pages/ReceiveStock'));
 const DispatchMaterials = lazy(() => import('@/roles/production-manager/pages/DispatchMaterials'));
-const StockTake = lazy(() => import('@/roles/production-manager/pages/StockTake'));
 const MaterialsCatalogPage = lazy(() => import('@/roles/production-manager/pages/MaterialsCatalogPage'));
 const StockOutPage = lazy(() => import('@/roles/production-manager/pages/StockOutPage'));
 const StockInPage = lazy(() => import('@/roles/production-manager/pages/StockInPage'));
 const M2StoreReports = lazy(() => import('@/roles/production-manager/pages/M2StoreReports'));
 const ReturnableAssets = lazy(() => import('@/roles/production-manager/pages/ReturnableAssets'));
+const AssetStockIn = lazy(() => import('@/roles/production-manager/pages/AssetStockIn'));
+const AssetDispatch = lazy(() => import('@/roles/production-manager/pages/AssetDispatch'));
+const AssetReceiveReturns = lazy(() => import('@/roles/production-manager/pages/AssetReceiveReturns'));
 const ReceiveReturns = lazy(() => import('@/roles/production-manager/pages/ReceiveReturns'));
+const RepairManagement = lazy(() => import('@/roles/production-manager/pages/RepairManagement'));
 
 // Admin Pages - Mix of custom admin pages and role pages
 const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
@@ -1068,17 +1071,35 @@ function App() {
                 <DispatchMaterials />
               </ProductionManagerRoute>
             } />
-            <Route path="m2-store/stock-take" element={
-              <ProductionManagerRoute>
-                <StockTake />
-              </ProductionManagerRoute>
-            } />
             <Route path="m2-store/reports" element={
               <ProductionManagerRoute>
                 <M2StoreReports />
               </ProductionManagerRoute>
             } />
-            <Route path="m2-store/returnable-assets" element={
+            {/* Returnable Assets - Old page (kept for compatibility) */}
+            <Route path="m2-store/returnable-assets-old" element={
+              <ProductionManagerRoute>
+                <ReturnableAssets />
+              </ProductionManagerRoute>
+            } />
+            {/* Returnable Assets - New DN/RDN Flow */}
+            <Route path="returnable-assets" element={<Navigate to="returnable-assets/stock-in" replace />} />
+            <Route path="returnable-assets/stock-in" element={
+              <ProductionManagerRoute>
+                <AssetStockIn />
+              </ProductionManagerRoute>
+            } />
+            <Route path="returnable-assets/dispatch" element={
+              <ProductionManagerRoute>
+                <AssetDispatch />
+              </ProductionManagerRoute>
+            } />
+            <Route path="returnable-assets/receive-returns" element={
+              <ProductionManagerRoute>
+                <AssetReceiveReturns />
+              </ProductionManagerRoute>
+            } />
+            <Route path="returnable-assets/catalog" element={
               <ProductionManagerRoute>
                 <ReturnableAssets />
               </ProductionManagerRoute>
@@ -1086,6 +1107,11 @@ function App() {
             <Route path="m2-store/receive-returns" element={
               <ProductionManagerRoute>
                 <ReceiveReturns />
+              </ProductionManagerRoute>
+            } />
+            <Route path="m2-store/repair-management" element={
+              <ProductionManagerRoute>
+                <RepairManagement />
               </ProductionManagerRoute>
             } />
 

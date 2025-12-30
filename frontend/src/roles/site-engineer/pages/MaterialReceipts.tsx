@@ -1427,7 +1427,7 @@ const MaterialReceipts: React.FC = () => {
                 >
                   {confirming ? (
                     <>
-                      <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                      <ModernLoadingSpinners size="xs" />
                       Confirming...
                     </>
                   ) : (

@@ -117,7 +117,7 @@ export interface InternalMaterialRequest {
 }
 
 export type MaterialCondition = 'Good' | 'Damaged' | 'Defective';
-export type DisposalStatus = 'in_transit' | 'pending_approval' | 'approved' | 'pending_review' | 'approved_disposal' | 'disposed' | 'repaired' | 'rejected' | 'backup_added' | null;
+export type DisposalStatus = 'in_transit' | 'pending_approval' | 'approved' | 'pending_review' | 'approved_disposal' | 'disposed' | 'sent_for_repair' | 'repaired' | 'rejected' | 'backup_added' | null;
 
 export interface MaterialReturn {
   return_id?: number;
@@ -1156,16 +1156,18 @@ class InventoryService {
   }
 
   /**
-   * Add repaired material back to inventory stock
+   * Mark material as repaired and move from backup stock to main stock
+   * Called when PM confirms the repair is complete
    */
-  async addRepairedToStock(id: number): Promise<{
+  async addRepairedToStock(id: number, notes?: string): Promise<{
     return: MaterialReturn;
     new_stock_level: number;
+    new_backup_stock: number;
   }> {
     try {
       const response = await apiClient.post(
         `/material_return/${id}/add_to_stock`,
-        {},
+        { notes },
         { headers: this.getAuthHeader() }
       );
       return response.data;
@@ -1174,6 +1176,30 @@ class InventoryService {
       console.error('Error adding repaired to stock:', axiosError);
       throw new Error(
         (axiosError.response?.data as any)?.error || 'Failed to add repaired material to stock'
+      );
+    }
+  }
+
+  /**
+   * Request disposal from repair - when material cannot be repaired
+   * Sends to TD for disposal approval
+   */
+  async requestDisposalFromRepair(id: number, notes?: string): Promise<{
+    message: string;
+    return: MaterialReturn;
+  }> {
+    try {
+      const response = await apiClient.post(
+        `/material_return/${id}/request_disposal`,
+        { notes },
+        { headers: this.getAuthHeader() }
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('Error requesting disposal:', axiosError);
+      throw new Error(
+        (axiosError.response?.data as any)?.error || 'Failed to request disposal'
       );
     }
   }

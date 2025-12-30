@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Clock, ChevronDown, ChevronRight } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface BOQRevisionHistoryProps {
   boqId: number;
@@ -230,7 +231,7 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
+          <ModernLoadingSpinners size="md" className="mx-auto" />
           <p className="mt-4 text-gray-600">Loading revision history...</p>
         </div>
       </div>

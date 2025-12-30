@@ -272,7 +272,7 @@ const ProjectCreationForm: React.FC<{
         >
           {isLoading ? (
             <>
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              <ModernLoadingSpinners size="xs" />
               {initialData ? 'Updating...' : 'Creating...'}
             </>
           ) : (
@@ -2116,7 +2116,7 @@ const EstimatorHub: React.FC = () => {
                 disabled={isSendingToTD}
               >
                 {isSendingToTD ? (
-                  <div className="animate-spin rounded-full h-3 w-3 sm:h-3.5 sm:w-3.5 border-b-2 border-red-900"></div>
+                  <ModernLoadingSpinners size="xxs" />
                 ) : (
                   <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 )}
@@ -4164,7 +4164,7 @@ const EstimatorHub: React.FC = () => {
             >
               {deletingProjectLoading ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <ModernLoadingSpinners size="xs" />
                   Deleting...
                 </>
               ) : (
@@ -4354,7 +4354,7 @@ const EstimatorHub: React.FC = () => {
             >
               {isSendingToTD ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-900 mr-2"></div>
+                  <ModernLoadingSpinners size="xs" className="mr-2" />
                   Sending to TD...
                 </>
               ) : (
@@ -4403,7 +4403,7 @@ const EstimatorHub: React.FC = () => {
           <div className="space-y-4 mt-4 flex-1 overflow-y-auto min-h-0">
             {loadingPMs ? (
               <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <ModernLoadingSpinners size="sm" />
                 <span className="ml-3 text-gray-600">Loading Project Managers...</span>
               </div>
             ) : projectManagers.length === 0 ? (
@@ -4451,7 +4451,7 @@ const EstimatorHub: React.FC = () => {
               >
                 {isSendingToPM ? (
                   <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    <ModernLoadingSpinners size="xs" className="mr-2" />
                     Sending...
                   </>
                 ) : (

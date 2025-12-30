@@ -8,7 +8,6 @@ import {
   Send,
   AlertCircle,
   CheckCircle,
-  Loader2,
   Edit3,
   Save,
   Paperclip,
@@ -24,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Purchase, buyerService, LPOData } from '../services/buyerService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { FileText, Download, ChevronDown } from 'lucide-react';
 
 interface VendorEmailModalProps {
@@ -779,7 +779,7 @@ _MeterSquare Interiors LLC_`;
                     {isLoadingPreview ? (
                       <div className="flex items-center justify-center py-12">
                         <div className="flex flex-col items-center gap-3">
-                          <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                          <ModernLoadingSpinners size="sm" />
                           <p className="text-sm text-gray-600">Loading vendor details...</p>
                         </div>
                       </div>
@@ -1048,7 +1048,7 @@ _MeterSquare Interiors LLC_`;
                             </div>
                             {isLoadingLpo && (
                               <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
-                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <ModernLoadingSpinners size="xs" />
                                 Loading LPO data...
                               </div>
                             )}
@@ -1061,7 +1061,7 @@ _MeterSquare Interiors LLC_`;
                                     <div className="text-xs text-gray-500 flex items-center gap-1">
                                       {isSaving ? (
                                         <>
-                                          <Loader2 className="w-3 h-3 animate-spin" />
+                                          <ModernLoadingSpinners size="xxs" />
                                           <span>Saving...</span>
                                         </>
                                       ) : lastSaved ? (
@@ -1082,7 +1082,7 @@ _MeterSquare Interiors LLC_`;
                                     >
                                       {isSavingDefault ? (
                                         <>
-                                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                          <ModernLoadingSpinners size="xxs" className="mr-1" />
                                           Saving...
                                         </>
                                       ) : (
@@ -1720,7 +1720,7 @@ _MeterSquare Interiors LLC_`;
 
                           {isLoadingLpo && (
                             <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
-                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <ModernLoadingSpinners size="xs" />
                               Loading LPO data...
                             </div>
                           )}
@@ -1879,7 +1879,7 @@ _MeterSquare Interiors LLC_`;
                       >
                         {isSendingEmail ? (
                           <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            <ModernLoadingSpinners size="xs" className="mr-2" />
                             Sending...
                           </>
                         ) : (
@@ -1908,7 +1908,7 @@ _MeterSquare Interiors LLC_`;
                       >
                         {isSendingWhatsApp ? (
                           <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            <ModernLoadingSpinners size="xs" className="mr-2" />
                             Sending...
                           </>
                         ) : (

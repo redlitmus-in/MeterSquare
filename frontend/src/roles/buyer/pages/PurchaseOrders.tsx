@@ -26,7 +26,6 @@ import {
   X,
   MessageSquare,
   Pencil,
-  Loader2,
   TrendingDown,
   TrendingUp,
   Send
@@ -1175,7 +1174,7 @@ const PurchaseOrders: React.FC = () => {
                                   >
                                     {completingPurchaseId === poChild.id ? (
                                       <>
-                                        <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        <ModernLoadingSpinners size="xxs" />
                                         Sending to Store...
                                       </>
                                     ) : (
@@ -1640,7 +1639,7 @@ const PurchaseOrders: React.FC = () => {
                         >
                           {completingPurchaseId === purchase.cr_id ? (
                             <>
-                              <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <ModernLoadingSpinners size="xxs" />
                               Completing...
                             </>
                           ) : (
@@ -1678,7 +1677,7 @@ const PurchaseOrders: React.FC = () => {
                                 title={`Sent via WhatsApp${purchase.vendor_whatsapp_sent_at ? ` on ${new Date(purchase.vendor_whatsapp_sent_at).toLocaleDateString()}` : ''}`}
                               >
                                 {sendingWhatsAppId === purchase.cr_id ? (
-                                  <div className="w-3 h-3 mr-1 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                                  <ModernLoadingSpinners size="xxs" />
                                 ) : (
                                   <CheckCircle className="w-3 h-3 mr-1" />
                                 )}
@@ -1693,7 +1692,7 @@ const PurchaseOrders: React.FC = () => {
                                 title="Send via WhatsApp"
                               >
                                 {sendingWhatsAppId === purchase.cr_id ? (
-                                  <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                  <ModernLoadingSpinners size="xxs" />
                                 ) : (
                                   <MessageSquare className="w-3 h-3 mr-1" />
                                 )}
@@ -1758,7 +1757,7 @@ const PurchaseOrders: React.FC = () => {
                         >
                           {completingPurchaseId === purchase.cr_id ? (
                             <>
-                              <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <ModernLoadingSpinners size="xxs" />
                               Sending to Store...
                             </>
                           ) : (
@@ -2062,7 +2061,7 @@ const PurchaseOrders: React.FC = () => {
                           >
                             {completingPurchaseId === poChild.id ? (
                               <>
-                                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                <ModernLoadingSpinners size="xxs" className="mr-1.5" />
                                 Sending to Store...
                               </>
                             ) : (
@@ -2768,7 +2767,7 @@ const PurchaseOrders: React.FC = () => {
                                 >
                                   {completingPurchaseId === poChild.id ? (
                                     <>
-                                      <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      <ModernLoadingSpinners size="xxs" />
                                       Completing...
                                     </>
                                   ) : (
@@ -2894,7 +2893,7 @@ const PurchaseOrders: React.FC = () => {
                                 className="px-2 py-1 h-auto text-xs bg-green-600 hover:bg-green-700 text-white"
                               >
                                 {completingPurchaseId === purchase.cr_id ? (
-                                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                  <ModernLoadingSpinners size="xxs" />
                                 ) : (
                                   <>
                                     <Check className="w-3 h-3 sm:mr-1" />
@@ -2931,7 +2930,7 @@ const PurchaseOrders: React.FC = () => {
                                       title={`Sent via WhatsApp${purchase.vendor_whatsapp_sent_at ? ` on ${new Date(purchase.vendor_whatsapp_sent_at).toLocaleDateString()}` : ''}`}
                                     >
                                       {sendingWhatsAppId === purchase.cr_id ? (
-                                        <div className="w-3 h-3 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                                        <ModernLoadingSpinners size="xxs" />
                                       ) : (
                                         <CheckCircle className="w-3 h-3 sm:mr-1" />
                                       )}
@@ -2946,7 +2945,7 @@ const PurchaseOrders: React.FC = () => {
                                       title="Send via WhatsApp"
                                     >
                                       {sendingWhatsAppId === purchase.cr_id ? (
-                                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        <ModernLoadingSpinners size="xxs" />
                                       ) : (
                                         <MessageSquare className="w-3 h-3 sm:mr-1" />
                                       )}
@@ -2975,7 +2974,7 @@ const PurchaseOrders: React.FC = () => {
                                 title="Materials will go to M2 Store first, then Production Manager will dispatch to site"
                               >
                                 {completingPurchaseId === purchase.cr_id ? (
-                                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                  <ModernLoadingSpinners size="xxs" />
                                 ) : (
                                   <>
                                     <Package className="w-3 h-3 sm:mr-1" />
@@ -3363,7 +3362,7 @@ const PurchaseOrders: React.FC = () => {
                 {/* Loading state */}
                 {loadingSiteEngineers && (
                   <div className="flex items-center justify-center py-8">
-                    <div className="w-8 h-8 border-4 border-cyan-200 border-t-cyan-600 rounded-full animate-spin" />
+                    <ModernLoadingSpinners size="sm" />
                   </div>
                 )}
 
@@ -3471,7 +3470,7 @@ const PurchaseOrders: React.FC = () => {
                 >
                   {completingPurchaseId === selectedPOChildForCompletion.id ? (
                     <>
-                      <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <ModernLoadingSpinners size="xs" className="mr-2" />
                       Completing...
                     </>
                   ) : (
@@ -3699,7 +3698,7 @@ const PurchaseOrders: React.FC = () => {
                       >
                         {completingFromStore ? (
                           <>
-                            <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            <ModernLoadingSpinners size="xs" className="mr-2" />
                             Sending Request...
                           </>
                         ) : (

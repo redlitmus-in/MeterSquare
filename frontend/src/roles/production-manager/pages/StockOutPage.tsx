@@ -14,6 +14,8 @@ import {
   InventoryMaterial
 } from '../services/inventoryService';
 import { showSuccess, showError, showWarning } from '@/utils/toastHelper';
+import { API_BASE_URL } from '@/api/config';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { INVENTORY_DEFAULTS } from '@/lib/inventoryConstants';
 import { normalizeStatus } from '../utils/inventoryHelpers';
 import ConfirmationModal from '../components/ConfirmationModal';
@@ -463,9 +465,7 @@ const StockOutPage: React.FC = () => {
         return;
       }
 
-      // Use correct API base URL from environment (VITE_API_BASE_URL includes /api)
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
-      const response = await fetch(`${baseUrl}/delivery_note/${dn.delivery_note_id}/download`, {
+      const response = await fetch(`${API_BASE_URL}/delivery_note/${dn.delivery_note_id}/download`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -501,9 +501,7 @@ const StockOutPage: React.FC = () => {
         return;
       }
 
-      // Use correct API base URL from environment (VITE_API_BASE_URL includes /api)
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
-      const response = await fetch(`${baseUrl}/delivery_note/${dn.delivery_note_id}/download`, {
+      const response = await fetch(`${API_BASE_URL}/delivery_note/${dn.delivery_note_id}/download`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

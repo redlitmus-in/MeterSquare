@@ -141,6 +141,7 @@ def get_all_projects():
     - search: search term for project name, client, or location
     - status: filter by status
     - work_type: filter by work type
+    - has_se_assigned: if 'true', only return projects with at least one SE assigned
     """
     try:
         current_user = getattr(g, 'user', None)
@@ -157,6 +158,7 @@ def get_all_projects():
         status = request.args.get('status', '')
         work_type = request.args.get('work_type', '')
         project_code = request.args.get('project_code', '')
+        has_se_assigned = request.args.get('has_se_assigned', '').lower() == 'true'
 
         # Build query - Admin sees all projects, Estimators see only their assigned projects
         query = Project.query.filter(Project.is_deleted == False)
@@ -197,6 +199,17 @@ def get_all_projects():
 
         if project_code:
             query = query.filter(Project.project_code.ilike(f"%{project_code}%"))
+
+        # Filter to only projects with Site Engineers assigned (via pm_assign_ss table)
+        # and exclude completed projects (pm_confirmed_completion = False)
+        if has_se_assigned:
+            # Get project IDs that have at least one SE assigned AND not completed
+            projects_with_active_se = db.session.query(PMAssignSS.project_id).filter(
+                PMAssignSS.is_deleted == False,
+                PMAssignSS.assigned_to_se_id != None,
+                PMAssignSS.pm_confirmed_completion == False  # Exclude completed assignments
+            ).distinct().subquery()
+            query = query.filter(Project.project_id.in_(projects_with_active_se))
 
         # Order by most recent first
         query = query.order_by(Project.created_at.desc())
