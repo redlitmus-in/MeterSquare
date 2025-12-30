@@ -97,7 +97,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
       } else {
         // Internal Revisions tab: Show pending approval or with revisions (original logic)
         const hasRevisions = (boq.revision_number || 0) > 0;
-        const isPendingApproval = (status === 'pending_approval' || status === 'pending_revision' || status === 'pending');
+        const isPendingApproval = (status === 'pending_approval' || status === 'pending_revision' || status === 'pending' || status === 'client_pending_revision');
         return hasRevisions || isPendingApproval;
       }
     })
@@ -498,7 +498,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                           {/* Status Badge */}
                           {(() => {
                             const status = boq.status?.toLowerCase() || '';
-                            if (status === 'pending_approval' || status === 'pending_revision' || status === 'pending') {
+                            if (status === 'pending_approval' || status === 'pending_revision' || status === 'pending' || status === 'client_pending_revision') {
                               return (
                                 <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">
                                   ⏳ Pending Review
@@ -564,7 +564,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                         {/* Status Badge */}
                         {(() => {
                           const status = boq.status?.toLowerCase() || '';
-                          if (status === 'pending_approval' || status === 'pending_revision' || status === 'pending') {
+                          if (status === 'pending_approval' || status === 'pending_revision' || status === 'pending' || status === 'client_pending_revision') {
                             return (
                               <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">
                                 ⏳ Pending Review
@@ -1530,7 +1530,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
             <div className="border-t border-gray-200 p-3 bg-gray-50">
               {(() => {
                 const status = selectedBoq.status?.toLowerCase() || '';
-                const isPendingApproval = status === 'pending_approval' || status === 'pending_revision' || status === 'pending';
+                const isPendingApproval = status === 'pending_approval' || status === 'pending_revision' || status === 'pending' || status === 'client_pending_revision';
                 const isRevisionApproved = status === 'revision_approved' || status === 'approved';
                 const isSentToClient = status === 'sent_for_confirmation';
                 const isClientConfirmed = status === 'client_confirmed';

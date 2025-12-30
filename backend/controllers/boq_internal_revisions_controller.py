@@ -33,9 +33,12 @@ def get_all_internal_revision():
         user_id = current_user.get('user_id') if current_user else None
         user_role = current_user.get('role', '').lower() if current_user else ''
 
-        # Get all BOQ IDs that have internal revision records
+        # Get all BOQ IDs that have internal revision records (handle NULL is_deleted as not deleted)
         boq_ids_with_revisions = db.session.query(BOQInternalRevision.boq_id).filter(
-            BOQInternalRevision.is_deleted == False
+            db.or_(
+                BOQInternalRevision.is_deleted == False,
+                BOQInternalRevision.is_deleted.is_(None)
+            )
         ).distinct().all()
 
         boq_ids = [row[0] for row in boq_ids_with_revisions]
@@ -54,38 +57,44 @@ def get_all_internal_revision():
                 db.func.lower(BOQ.status) != 'internal_revision_pending'
             )
             log.info(f"Technical Director {user_id} - showing all internal revision BOQs (excluding Internal_Revision_Pending)")
+        elif user_role == 'estimator' or user_role == 'admin':
+            # For Estimator and Admin: Show ALL BOQs with internal revisions INCLUDING Internal_Revision_Pending
+            # Estimators need to see their pending revisions to continue editing
+            # Admin can view as any role and needs to see all data
+            boqs_query = BOQ.query.filter(
+                BOQ.is_deleted == False,
+                db.or_(
+                    BOQ.has_internal_revisions == True,
+                    BOQ.boq_id.in_(boq_ids)
+                )
+                # NOTE: No status exclusion for estimators/admin - they see all internal revisions
+            )
+            log.info(f"{user_role.capitalize()} {user_id} - showing all internal revision BOQs (including Internal_Revision_Pending)")
         else:
-            # For Estimator and other roles: Show all BOQs with internal revisions
-            # EXCLUDE Internal_Revision_Pending (still editing, not sent to TD yet - stays in Rejected tab only)
+            # For other roles: Show all BOQs with internal revisions
+            # EXCLUDE Internal_Revision_Pending (still editing, not sent to TD yet)
             boqs_query = BOQ.query.filter(
                 BOQ.is_deleted == False,
                 db.or_(
                     BOQ.has_internal_revisions == True,
                     BOQ.boq_id.in_(boq_ids)
                 ),
-                # Exclude Internal_Revision_Pending for ALL users (only show after sent to TD)
+                # Exclude Internal_Revision_Pending for other users
                 db.func.lower(BOQ.status) != 'internal_revision_pending'
             )
 
         # Filter based on user role
+        # NOTE: For internal revisions, estimators see ALL BOQs (same as TD)
+        # This allows collaboration and visibility across all internal revision work
         if user_role == 'estimator':
-            # For estimators, only show BOQs for projects assigned to them
-            # First, get all project IDs assigned to this estimator
-            estimator_project_ids = db.session.query(Project.project_id).filter(
-                Project.estimator_id == user_id,
-                Project.is_deleted == False
-            ).all()
-            estimator_project_ids = [pid[0] for pid in estimator_project_ids]
-
-            log.info(f"Estimator {user_id} assigned to {len(estimator_project_ids)} projects: {estimator_project_ids}")
-
-            # Filter BOQs to only those belonging to the estimator's projects
-            boqs_query = boqs_query.filter(BOQ.project_id.in_(estimator_project_ids))
+            # Estimators see all internal revisions (no additional filter)
+            log.info(f"Estimator {user_id} - showing ALL internal revision BOQs (no project filter)")
         elif user_role != 'technical_director':
             # For other roles (not estimator, not TD), show all
             log.info(f"User role '{user_role}' - showing all internal revision BOQs")
 
         boqs = boqs_query.all()
+        log.info(f"📋 Internal Revisions Query: Found {len(boqs)} BOQs for user {user_id} (role: {user_role})")
 
         result = []
 
@@ -96,10 +105,13 @@ def get_all_internal_revision():
             # Get project details
             project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first() if boq.project_id else None
 
-            # Get all internal revisions for this BOQ
-            internal_revisions = BOQInternalRevision.query.filter_by(
-                boq_id=boq.boq_id,
-                is_deleted=False
+            # Get all internal revisions for this BOQ (handle NULL is_deleted as not deleted)
+            internal_revisions = BOQInternalRevision.query.filter(
+                BOQInternalRevision.boq_id == boq.boq_id,
+                db.or_(
+                    BOQInternalRevision.is_deleted == False,
+                    BOQInternalRevision.is_deleted.is_(None)
+                )
             ).order_by(BOQInternalRevision.internal_revision_number.desc()).all()
 
             # Format internal revisions
@@ -403,10 +415,26 @@ def get_internal_revisions(boq_id):
 
         # ✅ Fix: Fetch all internal revisions linked to this BOQ (not filtered by < current)
         # Because BOQInternalRevision stores history snapshots, not only numeric sequence comparisons
+
+        # Debug: Check total records for this BOQ (including deleted)
+        total_revisions_all = BOQInternalRevision.query.filter(
+            BOQInternalRevision.boq_id == boq_id
+        ).count()
+        log.info(f"📋 BOQ {boq_id}: Total internal revision records (including deleted): {total_revisions_all}")
+
+        # Debug: Check if BOQ has has_internal_revisions flag set
+        log.info(f"📋 BOQ {boq_id}: has_internal_revisions flag = {boq.has_internal_revisions}, internal_revision_number = {boq.internal_revision_number}")
+
+        # Query internal revisions - handle NULL is_deleted as FALSE (not deleted)
         revisions = BOQInternalRevision.query.filter(
             BOQInternalRevision.boq_id == boq_id,
-            BOQInternalRevision.is_deleted == False
+            db.or_(
+                BOQInternalRevision.is_deleted == False,
+                BOQInternalRevision.is_deleted.is_(None)  # Handle NULL as not deleted
+            )
         ).order_by(BOQInternalRevision.internal_revision_number.asc()).all()
+
+        log.info(f"📋 BOQ {boq_id}: Found {len(revisions)} non-deleted internal revision records")
 
         internal_revisions = []
         original_boq = None
@@ -527,6 +555,11 @@ def update_internal_revision_boq(boq_id):
         boq.status = "Internal_Revision_Pending"
         boq.last_modified_by = user_name
         boq.last_modified_at = datetime.utcnow()
+
+        # 🔥 Fix: Explicitly add BOQ to session and flag as modified to ensure status is saved
+        db.session.add(boq)
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(boq, 'status')
 
         # Extract summary values from incoming payload (do NOT recalculate)
         # The frontend has already calculated everything, just use those values

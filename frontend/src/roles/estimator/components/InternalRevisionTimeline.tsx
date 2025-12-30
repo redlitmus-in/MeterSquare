@@ -1815,43 +1815,120 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
                 {/* Action Buttons - Different buttons for different roles */}
                 {(() => {
-                  const status = selectedBoq?.status?.toLowerCase()?.replace(/_/g, '') || '';
+                  // 🔥 Fix: Always use main BOQ status as primary source of truth
+                  const boqStatus = selectedBoq?.status?.toLowerCase()?.replace(/_/g, '') || '';
+                  // Use revision status only if specifically viewing a previous revision with a valid status_after
+                  const revisionStatus = currentRevision?.status_after?.toLowerCase()?.replace(/_/g, '') || '';
+                  const status = boqStatus; // Always use main BOQ status for button display logic
                   const isRejected = status === 'rejected';
                   const isClientRevisionRejected = status === 'clientrevisionrejected';
-                  const isApproved = status === 'approved' || status === 'revisionapproved';
+                  // 🔥 Fix: Include items_assigned, pmapproved as approved states (BOQ already approved and progressed)
+                  const isApproved = status === 'approved' || status === 'revisionapproved' || status === 'itemsassigned' || status === 'pmapproved';
                   const isUnderRevision = status === 'underrevision';
                   const isSentForConfirmation = status === 'sentforconfirmation';
                   const isPendingTDApproval = status === 'pendingtdapproval';
                   const isPendingRevision = status === 'pendingrevision';
                   const isClientConfirmed = status === 'clientconfirmed';
                   const isInternalRevisionPending = status === 'internalrevisionpending';
-                  const lastAction = currentRevision?.action_type;
+                  const isClientPendingRevision = status === 'clientpendingrevision';
+                  // Get the latest revision's action (first in the array since it's sorted by most recent)
+                  const latestRevision = internalRevisions.length > 0 ? internalRevisions[0] : null;
+                  const latestAction = latestRevision?.action_type;
+                  const currentAction = currentRevision?.action_type;
                   const isPendingApproval = status === 'pendingapproval' || status === 'pending';
-                  // 🔥 Fix: Internal_Revision_Pending means it's saved but NOT yet sent to TD
-                  // Only consider it sent to TD if the action was explicitly SENT_TO_TD
-                  const isSentToTD = lastAction === 'SENT_TO_TD';
+                  // 🔥 Fix: Check if the revision was sent to TD or is an internal revision edit
+                  // INTERNAL_REVISION_EDIT means estimator saved/submitted the revision for TD review
+                  const isSentToTD = latestAction === 'SENT_TO_TD' || currentAction === 'SENT_TO_TD';
+                  const isInternalRevisionEdit = latestAction === 'INTERNAL_REVISION_EDIT' || currentAction === 'INTERNAL_REVISION_EDIT';
+                  // TD can approve/reject if it's an internal revision edit (not already approved/rejected)
+                  const tdCanApprove = isSentToTD || isInternalRevisionEdit;
 
                   // Statuses where buttons should be hidden (BOQ is in a final or processing state)
                   // Note: isClientRevisionRejected IS included here to hide buttons in Internal Revisions tab
                   // Note: isPendingRevision is EXCLUDED - TD needs to see Approve/Reject buttons for internal revisions
-                  const isInFinalOrProcessingState = isApproved || isUnderRevision || isSentForConfirmation || isPendingTDApproval || isClientConfirmed || isClientRevisionRejected || isRejected;
+                  // Note: isUnderRevision is EXCLUDED - TD needs to see buttons for internal revisions under review
+                  const isInFinalOrProcessingState = isApproved || isSentForConfirmation || isPendingTDApproval || isClientConfirmed || isClientRevisionRejected || isRejected;
 
-                  // Technical Director: Show Approve/Reject buttons when pending approval
-                  if (userRole === 'technical_director' || userRole === 'technical-director') {
-                    // Hide buttons if BOQ is already in a final/processing state
-                    // Note: isPendingRevision is NOT a final state - TD needs to review!
-                    if (isInFinalOrProcessingState && !isPendingRevision) {
+                  // Technical Director (or Admin viewing as TD): Show Approve/Reject buttons when pending approval
+                  const normalizedUserRole = userRole?.toLowerCase()?.trim() || '';
+                  const isTDOrAdmin = normalizedUserRole === 'technical_director' ||
+                                      normalizedUserRole === 'technical-director' ||
+                                      normalizedUserRole === 'technicaldirector' ||
+                                      normalizedUserRole === 'admin';
+
+                  if (isTDOrAdmin) {
+                    // 🔥 Fix: Under_Revision means estimator is revising - TD should wait
+                    // Show "Under Revision" message, NOT approve/reject buttons
+                    if (isUnderRevision) {
+                      return (
+                        <div className="mt-4 text-center py-3 bg-orange-50 border border-orange-200 rounded-lg">
+                          <p className="text-sm font-medium text-orange-800">🔄 Under Revision - Waiting for Estimator to submit</p>
+                        </div>
+                      );
+                    }
+
+                    // Check if already approved by TD
+                    const alreadyApproved = latestAction === 'TD_APPROVED';
+
+                    // For Pending_Revision - show buttons (estimator submitted, waiting for TD approval)
+                    if (isPendingRevision && !alreadyApproved) {
+                      return (
+                        <div className="mt-4 flex gap-2">
+                          <button
+                            className="flex-1 text-white text-sm h-10 rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-2 px-4 font-semibold shadow-md bg-green-600"
+                            onClick={() => setShowApprovalModal(true)}
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                            <span>Approve</span>
+                          </button>
+                          <button
+                            className="flex-1 text-white text-sm h-10 rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-2 px-4 font-semibold shadow-md bg-red-600"
+                            onClick={() => setShowRejectionModal(true)}
+                          >
+                            <XCircle className="h-4 w-4" />
+                            <span>Reject</span>
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    // For Internal_Revision_Pending - show buttons only if there's a revision edit
+                    if (isInternalRevisionPending && tdCanApprove && !alreadyApproved) {
+                      return (
+                        <div className="mt-4 flex gap-2">
+                          <button
+                            className="flex-1 text-white text-sm h-10 rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-2 px-4 font-semibold shadow-md bg-green-600"
+                            onClick={() => setShowApprovalModal(true)}
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                            <span>Approve</span>
+                          </button>
+                          <button
+                            className="flex-1 text-white text-sm h-10 rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-2 px-4 font-semibold shadow-md bg-red-600"
+                            onClick={() => setShowRejectionModal(true)}
+                          >
+                            <XCircle className="h-4 w-4" />
+                            <span>Reject</span>
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    // If Internal_Revision_Pending but no revision edit yet - waiting for estimator
+                    if (isInternalRevisionPending && !tdCanApprove) {
+                      return (
+                        <div className="mt-4 text-center py-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                          <p className="text-sm font-medium text-yellow-800">📝 Pending Estimator Submission</p>
+                        </div>
+                      );
+                    }
+
+                    // Hide buttons if BOQ is already in a final/processing state (excluding Under_Revision which is handled above)
+                    if (isInFinalOrProcessingState) {
                       if (isApproved) {
                         return (
                           <div className="mt-4 text-center py-3 bg-green-50 border border-green-200 rounded-lg">
                             <p className="text-sm font-medium text-green-800">✅ Already Approved</p>
-                          </div>
-                        );
-                      }
-                      if (isUnderRevision) {
-                        return (
-                          <div className="mt-4 text-center py-3 bg-orange-50 border border-orange-200 rounded-lg">
-                            <p className="text-sm font-medium text-orange-800">🔄 Under Revision</p>
                           </div>
                         );
                       }
@@ -1871,9 +1948,10 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                       }
                     }
 
-                    // Show Approve/Reject buttons for pending approval OR pending revision (internal revision sent to TD)
-                    // isPendingRevision = estimator sent internal revision to TD for approval
-                    if ((isPendingApproval || isPendingRevision) && !isInFinalOrProcessingState) {
+                    // Show Approve/Reject buttons only for pending approval (sent to TD for review)
+                    // Note: isPendingRevision is already handled above - means waiting for client revision
+                    // Note: isInternalRevisionPending is already handled above - means estimator saved but not sent
+                    if (isPendingApproval && !isInFinalOrProcessingState) {
                       return (
                         <div className="mt-4 flex gap-2">
                           <button
@@ -1965,7 +2043,8 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                     // If sent to TD (actually sent, not just saved), hide buttons and show waiting message
                     // isPendingRevision means estimator sent revision to TD and TD hasn't responded yet
                     // Note: Internal_Revision_Pending is NOT included - it means saved but not yet sent
-                    if (isSentToTD || isPendingApproval || isPendingRevision) {
+                    // Note: Client_Pending_Revision means client revision sent to TD - hide buttons
+                    if (isSentToTD || isPendingApproval || isPendingRevision || isClientPendingRevision) {
                       return (
                         <div className="mt-4 text-center py-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                           <p className="text-sm font-medium text-yellow-800">⏳ Sent to TD - Waiting for approval</p>
@@ -1975,8 +2054,8 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
                     // Show buttons for: Rejected, Internal_Revision_Pending, or other editable states
                     // Internal_Revision_Pending means BOQ was edited and saved but NOT yet sent to TD
-                    // Exclude isPendingRevision - already sent to TD, waiting for approval (no buttons)
-                    if (isRejected || isInternalRevisionPending || (!isSentToTD && !isPendingApproval && !isPendingRevision && !isInFinalOrProcessingState)) {
+                    // Exclude isPendingRevision and isClientPendingRevision - already sent to TD, waiting for approval (no buttons)
+                    if (isRejected || isInternalRevisionPending || (!isSentToTD && !isPendingApproval && !isPendingRevision && !isClientPendingRevision && !isInFinalOrProcessingState)) {
                       return (
                         <div className="space-y-2 mt-4">
                           <div className="flex gap-2">

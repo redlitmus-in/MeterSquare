@@ -148,7 +148,8 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
       // Immediately update selectedBoq with expected new status
       // This ensures UI reflects the change immediately without waiting for refresh
-      const expectedStatus = (boq.revision_number || 0) > 0 ? 'pending_revision' : 'pending';
+      // Client Revisions use Client_Pending_Revision status
+      const expectedStatus = (boq.revision_number || 0) > 0 ? 'client_pending_revision' : 'pending';
       setSelectedBoq({
         ...boq,
         status: expectedStatus
@@ -172,6 +173,8 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
   const loadRevisionData = async (boq: BOQ) => {
     setIsLoading(true);
     try {
+      console.log('🔍 Loading revision data for BOQ:', boq.boq_id, 'Revision:', boq.revision_number);
+
       // 🔥 Fetch FULL detailed BOQ from /boq/{boq_id} endpoint (like Internal Revisions does)
       const API_URL = API_BASE_URL;
       const token = localStorage.getItem('access_token');
@@ -205,13 +208,17 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
         };
 
         // Now fetch history for previous revisions
+        console.log('📥 Fetching history from API...');
         const result = await estimatorService.getBOQDetailsHistory(boq.boq_id!);
+        console.log('📥 API Response:', result);
+
         let historyList = result.success && result.data ? (result.data.history || []) : [];
 
         console.log('📊 BOQ History Data:', {
           currentRevision: boq.revision_number,
           historyCount: historyList.length,
-          historyVersions: historyList.map((h: any) => h.version)
+          historyVersions: historyList.map((h: any) => h.version),
+          firstHistoryRecord: historyList[0]
         });
 
         // For Rev 1 with no history, show placeholder message
@@ -1813,8 +1820,24 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                       </div>
 
                       {/* Expandable Details - Full Details with Soft Red Background */}
-                      {isExpanded && revision.boq_details?.items && (
+                      {isExpanded && (
                         <div className="p-4 bg-gradient-to-br from-red-50 to-red-100 space-y-3 max-h-[500px] overflow-y-auto">
+                          {!revision.boq_details?.items ? (
+                            <div className="text-center py-8">
+                              <p className="text-red-700 font-medium">No detailed data available for this revision</p>
+                              <p className="text-sm text-red-600 mt-2">
+                                This revision was created before detailed history tracking was enabled.
+                              </p>
+                              <div className="mt-4 text-xs text-gray-600 bg-white/50 p-3 rounded">
+                                <p className="font-semibold mb-1">Debug Info:</p>
+                                <p>Version: {revision.version}</p>
+                                <p>Has boq_details: {revision.boq_details ? 'Yes' : 'No'}</p>
+                                <p>Has items: {revision.boq_details?.items ? 'Yes' : 'No'}</p>
+                                <p>Items count: {revision.boq_details?.items?.length || 0}</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
                           {/* Preliminaries Section - Shown FIRST (Previous Revision) */}
                           {revision.boq_details?.preliminaries && (
                             <div className="mb-6 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-5 border-2 border-purple-200 shadow-lg">
@@ -2359,6 +2382,8 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
                           {/* Grand Total Section */}
                           {renderGrandTotalSection(revision.boq_details)}
+                            </>
+                          )}
                         </div>
                       )}
 
