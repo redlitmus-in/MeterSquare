@@ -1789,12 +1789,66 @@ def se_receive_selected_items():
 @asset_dn_bp.route('/api/assets/repairs', methods=['GET'])
 @jwt_required
 def get_asset_repair_items():
-    """Get all asset items sent for repair from ARDNs"""
+    """Get all asset items sent for repair from ARDNs
+
+    Query params:
+    - status: 'pending' (default) for items currently in repair,
+              'completed' for repaired items returned to stock,
+              'disposed' for disposed items,
+              'all' for all repair-related items
+    """
     try:
-        # Query items with action_taken = 'send_to_repair'
-        items = AssetReturnDeliveryNoteItem.query.filter(
-            AssetReturnDeliveryNoteItem.action_taken == 'send_to_repair'
-        ).all()
+        status = request.args.get('status', 'pending')
+
+        # Build query based on status
+        if status == 'pending':
+            # Items currently in repair
+            items = AssetReturnDeliveryNoteItem.query.filter(
+                AssetReturnDeliveryNoteItem.action_taken == 'send_to_repair'
+            ).all()
+        elif status == 'completed':
+            # Items that were repaired (pm_notes contains "[Repair completed")
+            items = AssetReturnDeliveryNoteItem.query.filter(
+                AssetReturnDeliveryNoteItem.action_taken == 'return_to_stock',
+                AssetReturnDeliveryNoteItem.pm_notes.like('%[Repair completed%')
+            ).all()
+        elif status == 'disposed':
+            # Items disposed from repair (pm_notes contains "[Marked for disposal")
+            items = AssetReturnDeliveryNoteItem.query.filter(
+                AssetReturnDeliveryNoteItem.action_taken == 'dispose',
+                AssetReturnDeliveryNoteItem.pm_notes.like('%[Marked for disposal%')
+            ).all()
+        elif status == 'history':
+            # All completed repairs and disposals
+            from sqlalchemy import or_
+            items = AssetReturnDeliveryNoteItem.query.filter(
+                or_(
+                    db.and_(
+                        AssetReturnDeliveryNoteItem.action_taken == 'return_to_stock',
+                        AssetReturnDeliveryNoteItem.pm_notes.like('%[Repair completed%')
+                    ),
+                    db.and_(
+                        AssetReturnDeliveryNoteItem.action_taken == 'dispose',
+                        AssetReturnDeliveryNoteItem.pm_notes.like('%[Marked for disposal%')
+                    )
+                )
+            ).all()
+        else:
+            # All items (pending + history)
+            from sqlalchemy import or_
+            items = AssetReturnDeliveryNoteItem.query.filter(
+                or_(
+                    AssetReturnDeliveryNoteItem.action_taken == 'send_to_repair',
+                    db.and_(
+                        AssetReturnDeliveryNoteItem.action_taken == 'return_to_stock',
+                        AssetReturnDeliveryNoteItem.pm_notes.like('%[Repair completed%')
+                    ),
+                    db.and_(
+                        AssetReturnDeliveryNoteItem.action_taken == 'dispose',
+                        AssetReturnDeliveryNoteItem.pm_notes.like('%[Marked for disposal%')
+                    )
+                )
+            ).all()
 
         # Batch load related data
         ardn_ids = list(set(item.ardn_id for item in items))

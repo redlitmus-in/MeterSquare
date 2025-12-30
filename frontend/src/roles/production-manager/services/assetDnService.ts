@@ -488,8 +488,10 @@ export interface AssetRepairItem {
   repair_status: 'pending' | 'completed';
 }
 
-export const getAssetRepairItems = async (): Promise<AssetRepairItem[]> => {
-  const response = await apiClient.get('/assets/repairs');
+export type RepairFilterStatus = 'pending' | 'completed' | 'disposed' | 'history' | 'all';
+
+export const getAssetRepairItems = async (status: RepairFilterStatus = 'pending'): Promise<AssetRepairItem[]> => {
+  const response = await apiClient.get(`/assets/repairs?status=${status}`);
   if (!response.data.success) throw new Error(response.data.error);
   return response.data.data;
 };
@@ -502,4 +504,123 @@ export const completeAssetRepair = async (returnItemId: number): Promise<void> =
 export const disposeUnrepairableAsset = async (returnItemId: number, reason: string): Promise<void> => {
   const response = await apiClient.put(`/assets/repairs/${returnItemId}/dispose`, { reason });
   if (!response.data.success) throw new Error(response.data.error);
+};
+
+// ============================================================================
+// ASSET DISPOSAL (TD APPROVAL WORKFLOW)
+// ============================================================================
+
+export type DisposalReason = 'damaged' | 'unrepairable' | 'obsolete' | 'lost' | 'expired' | 'other';
+export type DisposalStatus = 'pending_review' | 'approved' | 'rejected';
+export type DisposalSourceType = 'repair' | 'catalog' | 'return';
+
+export interface AssetDisposalRequest {
+  disposal_id: number;
+  return_item_id?: number;
+  category_id: number;
+  asset_item_id?: number;
+  quantity: number;
+  disposal_reason: DisposalReason;
+  justification?: string;
+  estimated_value: number;
+  image_url?: string;
+  image_filename?: string;
+  requested_by: string;
+  requested_by_id?: number;
+  requested_at: string;
+  status: DisposalStatus;
+  reviewed_by?: string;
+  reviewed_by_id?: number;
+  reviewed_at?: string;
+  review_notes?: string;
+  source_type: DisposalSourceType;
+  source_ardn_id?: number;
+  project_id?: number;
+  created_at: string;
+  updated_at?: string;
+  // Related data
+  category_code?: string;
+  category_name?: string;
+  item_code?: string;
+  serial_number?: string;
+  ardn_number?: string;
+  project_name?: string;
+  unit_price?: number;
+  // From return item if linked
+  reported_condition?: string;
+  verified_condition?: string;
+  damage_description?: string;
+}
+
+// Get disposal requests
+export const getAssetDisposalRequests = async (status: DisposalStatus | 'all' = 'pending_review'): Promise<AssetDisposalRequest[]> => {
+  const response = await apiClient.get(`/assets/disposal?status=${status}`);
+  if (!response.data.success) throw new Error(response.data.error);
+  return response.data.data;
+};
+
+// Create disposal request (from repair page or catalog)
+export const createAssetDisposalRequest = async (data: {
+  category_id: number;
+  asset_item_id?: number;
+  return_item_id?: number;
+  quantity?: number;
+  disposal_reason: DisposalReason;
+  justification?: string;
+  source_type?: DisposalSourceType;
+  source_ardn_id?: number;
+  project_id?: number;
+}): Promise<AssetDisposalRequest> => {
+  const response = await apiClient.post('/assets/disposal', data);
+  if (!response.data.success) throw new Error(response.data.error);
+  return response.data.data;
+};
+
+// Upload disposal image
+export const uploadDisposalImage = async (disposalId: number, file: File): Promise<{
+  disposal_id: number;
+  image_url: string;
+  filename: string;
+}> => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await apiClient.post(`/assets/disposal/${disposalId}/upload-image`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+
+  if (!response.data.success) throw new Error(response.data.error);
+  return response.data.data;
+};
+
+// TD Approval functions
+export const approveAssetDisposal = async (disposalId: number, notes?: string): Promise<AssetDisposalRequest> => {
+  const response = await apiClient.put(`/assets/disposal/${disposalId}/approve`, { notes });
+  if (!response.data.success) throw new Error(response.data.error);
+  return response.data.data;
+};
+
+export const rejectAssetDisposal = async (disposalId: number, notes: string, action: 'return_to_stock' | 'send_to_repair' = 'return_to_stock'): Promise<AssetDisposalRequest> => {
+  const response = await apiClient.put(`/assets/disposal/${disposalId}/reject`, { notes, action });
+  if (!response.data.success) throw new Error(response.data.error);
+  return response.data.data;
+};
+
+// Get single disposal detail
+export const getAssetDisposalDetail = async (disposalId: number): Promise<AssetDisposalRequest> => {
+  const response = await apiClient.get(`/assets/disposal/${disposalId}`);
+  if (!response.data.success) throw new Error(response.data.error);
+  return response.data.data;
+};
+
+// Catalog disposal (direct from asset catalog)
+export const requestCatalogDisposal = async (categoryId: number, data: {
+  quantity: number;
+  disposal_reason: DisposalReason;
+  justification?: string;
+  asset_item_id?: number;
+}): Promise<AssetDisposalRequest> => {
+  const response = await apiClient.post(`/assets/catalog/${categoryId}/dispose`, data);
+  if (!response.data.success) throw new Error(response.data.error);
+  return response.data.data;
 };

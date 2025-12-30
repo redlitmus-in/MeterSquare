@@ -18,6 +18,7 @@ from routes.upload_image_route import image_routes
 from routes.inventory_routes import inventory_routes
 from routes.asset_routes import asset_routes
 from routes.asset_dn_routes import asset_dn_routes
+from routes.asset_disposal_routes import asset_disposal_routes
 from routes.support_routes import support_routes
 
 # Import and register the routes from the route blueprints
@@ -43,4 +44,5 @@ def initialize_routes(app):
     app.register_blueprint(inventory_routes)
     app.register_blueprint(asset_routes)
     app.register_blueprint(asset_dn_routes)
+    app.register_blueprint(asset_disposal_routes)
     app.register_blueprint(support_routes)

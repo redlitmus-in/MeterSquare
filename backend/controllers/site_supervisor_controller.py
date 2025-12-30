@@ -1353,6 +1353,152 @@ def assign_projects_sitesupervisor():
             "error_type": type(e).__name__
         }), 500
 
+def validate_completion_request(project_id):
+    """
+    Validate if SE can request project completion WITHOUT actually submitting.
+    This is a read-only check for the frontend to show blocking items.
+    """
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+
+        # Get the project - check both traditional and item-level assignments
+        project = Project.query.filter_by(
+            project_id=project_id,
+            site_supervisor_id=user_id,
+            is_deleted=False
+        ).first()
+
+        # If not found via traditional assignment, check for item-level assignment
+        if not project:
+            from models.pm_assign_ss import PMAssignSS
+
+            item_assignment = PMAssignSS.query.filter_by(
+                project_id=project_id,
+                assigned_to_se_id=user_id,
+                is_deleted=False
+            ).first()
+
+            if item_assignment:
+                project = Project.query.filter_by(
+                    project_id=project_id,
+                    is_deleted=False
+                ).first()
+
+        if not project:
+            return jsonify({
+                "success": False,
+                "error": "Project not found or not assigned to you"
+            }), 404
+
+        # Check if already completed
+        if project.status and project.status.lower() == 'completed':
+            return jsonify({
+                "success": False,
+                "error": "Project is already completed"
+            }), 400
+
+        # Get BOQ
+        boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({
+                "success": False,
+                "error": "BOQ not found for this project"
+            }), 404
+
+        # Check for incomplete CRs (only this SE's)
+        from models.change_request import ChangeRequest
+        from models.returnable_assets import AssetReturnRequest
+        from models.pm_assign_ss import PMAssignSS
+        from config.change_request_config import CR_CONFIG
+
+        incomplete_crs = ChangeRequest.query.filter(
+            ChangeRequest.project_id == project_id,
+            ChangeRequest.requested_by_user_id == user_id,
+            ChangeRequest.is_deleted == False,
+            ~ChangeRequest.status.in_(CR_CONFIG.COMPLETION_STATUSES)
+        ).all()
+
+        blocking_purchases = [{
+            "cr_id": cr.cr_id,
+            "item_name": cr.item_name or f"Item {cr.item_id}",
+            "status": cr.status,
+            "requested_by": cr.requested_by_name,
+            "reason": "Purchase not completed"
+        } for cr in incomplete_crs]
+
+        # Check for incomplete asset returns (only this SE's)
+        from sqlalchemy.orm import joinedload
+        incomplete_returns = AssetReturnRequest.query.options(
+            joinedload(AssetReturnRequest.category)
+        ).filter(
+            AssetReturnRequest.project_id == project_id,
+            AssetReturnRequest.requested_by_id == user_id,
+            AssetReturnRequest.status.in_(CR_CONFIG.ASSET_RETURN_INCOMPLETE_STATUSES)
+        ).all()
+
+        blocking_returns = [{
+            "request_id": req.request_id,
+            "category": req.category.category_name if req.category else "Asset",
+            "quantity": req.quantity,
+            "status": req.status
+        } for req in incomplete_returns]
+
+        # Check if SE has any assignments
+        se_assignments = PMAssignSS.query.filter(
+            PMAssignSS.project_id == project_id,
+            PMAssignSS.assigned_to_se_id == user_id,
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.assigned_by_pm_id.isnot(None)
+        ).all()
+
+        is_project_level_se = project.site_supervisor_id == user_id
+
+        if not se_assignments:
+            if is_project_level_se:
+                return jsonify({
+                    "success": False,
+                    "can_proceed": False,
+                    "error": "No items have been assigned to you for this project yet",
+                    "details": "The Project Manager needs to assign specific BOQ items to you before you can request completion."
+                }), 400
+            else:
+                return jsonify({
+                    "success": False,
+                    "can_proceed": False,
+                    "error": "No items have been assigned to you for this project yet"
+                }), 400
+
+        # Return validation result
+        if blocking_purchases or blocking_returns:
+            return jsonify({
+                "success": True,
+                "can_proceed": False,
+                "message": "Please complete all purchases and asset returns before requesting project completion",
+                "incomplete_purchases_count": len(blocking_purchases),
+                "incomplete_returns_count": len(blocking_returns),
+                "blocking_items": {
+                    "purchases": blocking_purchases,
+                    "returns": blocking_returns
+                }
+            }), 200
+
+        # All clear - can proceed
+        return jsonify({
+            "success": True,
+            "can_proceed": True,
+            "message": "Ready to request completion",
+            "project_name": project.project_name
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error validating completion request: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            "success": False,
+            "error": f"Failed to validate: {str(e)}"
+        }), 500
+
+
 def request_project_completion(project_id):
     """Site Engineer requests project completion - sends notification to PM"""
     try:

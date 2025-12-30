@@ -126,7 +126,8 @@
       "Bash(python check_delivery_notes.py:*)",
       "Bash(tail:*)",
       "Bash(pgrep:*)",
-      "Bash(ss -tlnp:*)"
+      "Bash(ss -tlnp:*)",
+      "Bash(python -c:*)"
     ],
     "deny": [],
     "ask": []

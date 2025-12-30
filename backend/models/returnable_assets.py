@@ -657,3 +657,89 @@ class AssetStockInItem(db.Model):
             'notes': self.notes,
             'item_code': self.asset_item.item_code if self.asset_item else None
         }
+
+
+# ============================================================================
+# ASSET DISPOSAL - Track disposal requests requiring TD approval
+# ============================================================================
+
+class AssetDisposal(db.Model):
+    """Asset Disposal Requests - Track disposal requests requiring TD approval"""
+    __tablename__ = "asset_disposal"
+
+    disposal_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+
+    # Source reference
+    return_item_id = db.Column(db.Integer, db.ForeignKey('asset_return_delivery_note_items.return_item_id'), nullable=True)
+    category_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_categories.category_id'), nullable=True)
+    asset_item_id = db.Column(db.Integer, db.ForeignKey('returnable_asset_items.item_id'), nullable=True)
+
+    # Disposal details
+    quantity = db.Column(db.Integer, default=1)
+    disposal_reason = db.Column(db.String(100), nullable=False)  # damaged, unrepairable, obsolete, lost, expired, other
+    justification = db.Column(db.Text, nullable=True)
+    estimated_value = db.Column(db.Float, default=0.0)
+
+    # Image documentation
+    image_url = db.Column(db.Text, nullable=True)
+    image_filename = db.Column(db.String(255), nullable=True)
+
+    # Request info
+    requested_by = db.Column(db.String(255), nullable=False)
+    requested_by_id = db.Column(db.Integer, nullable=True)
+    requested_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Approval workflow
+    status = db.Column(db.String(30), default='pending_review')  # pending_review, approved, rejected
+    reviewed_by = db.Column(db.String(255), nullable=True)
+    reviewed_by_id = db.Column(db.Integer, nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    review_notes = db.Column(db.Text, nullable=True)
+
+    # Source tracking
+    source_type = db.Column(db.String(30), default='repair')  # repair, catalog, return
+    source_ardn_id = db.Column(db.Integer, db.ForeignKey('asset_return_delivery_notes.ardn_id'), nullable=True)
+    project_id = db.Column(db.Integer, nullable=True)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    return_item = db.relationship('AssetReturnDeliveryNoteItem', backref='disposal_requests', lazy=True)
+    category = db.relationship('ReturnableAssetCategory', backref='disposal_requests', lazy=True)
+    asset_item = db.relationship('ReturnableAssetItem', backref='disposal_requests', lazy=True)
+    source_ardn = db.relationship('AssetReturnDeliveryNote', backref='disposal_requests', lazy=True)
+
+    def to_dict(self):
+        return {
+            'disposal_id': self.disposal_id,
+            'return_item_id': self.return_item_id,
+            'category_id': self.category_id,
+            'asset_item_id': self.asset_item_id,
+            'quantity': self.quantity,
+            'disposal_reason': self.disposal_reason,
+            'justification': self.justification,
+            'estimated_value': self.estimated_value,
+            'image_url': self.image_url,
+            'image_filename': self.image_filename,
+            'requested_by': self.requested_by,
+            'requested_by_id': self.requested_by_id,
+            'requested_at': self.requested_at.isoformat() if self.requested_at else None,
+            'status': self.status,
+            'reviewed_by': self.reviewed_by,
+            'reviewed_by_id': self.reviewed_by_id,
+            'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
+            'review_notes': self.review_notes,
+            'source_type': self.source_type,
+            'source_ardn_id': self.source_ardn_id,
+            'project_id': self.project_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            # Include related data
+            'category_code': self.category.category_code if self.category else None,
+            'category_name': self.category.category_name if self.category else None,
+            'item_code': self.asset_item.item_code if self.asset_item else None,
+            'serial_number': self.asset_item.serial_number if self.asset_item else None,
+            'ardn_number': self.source_ardn.ardn_number if self.source_ardn else None
+        }

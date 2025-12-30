@@ -33,6 +33,16 @@ def get_sitesupervisor_dashboard_route():
         return access_check
     return get_sitesupervisor_dashboard()
 
+# Site Engineer validates completion request (read-only check)
+@sitesupervisor_routes.route('/validate_completion/<int:project_id>', methods=['GET'])
+@jwt_required
+def validate_completion_request_route(project_id):
+    """Site Supervisor validates if completion can be requested (no side effects)"""
+    access_check = check_ss_or_admin_access()
+    if access_check:
+        return access_check
+    return validate_completion_request(project_id)
+
 #Site Engineer requests project completion
 @sitesupervisor_routes.route('/request_completion/<int:project_id>', methods=['POST'])
 @jwt_required

@@ -34,7 +34,13 @@ export const siteEngineerService = {
     return response.data;
   },
 
-  // Request project completion
+  // Validate if completion can be requested (read-only check, no side effects)
+  validateCompletionRequest: async (projectId: number) => {
+    const response = await apiClient.get(`/validate_completion/${projectId}`);
+    return response.data;
+  },
+
+  // Request project completion (actually submits the request)
   requestProjectCompletion: async (projectId: number) => {
     const response = await apiClient.post(`/request_completion/${projectId}`, {});
     return response.data;

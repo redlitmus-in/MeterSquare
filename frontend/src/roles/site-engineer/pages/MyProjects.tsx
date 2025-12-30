@@ -116,27 +116,30 @@ const RequestCompletionModalContent: React.FC<{
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    // Check validation when modal opens
+    // Check validation when modal opens (read-only check, no side effects)
     const checkValidation = async () => {
       try {
         setValidating(true);
-        await siteEngineerService.requestProjectCompletion(project.project_id);
-        // If successful, no blocking items
-        setValidationData({ canProceed: true, blocking_items: null });
-      } catch (error: any) {
-        const errorData = error?.response?.data;
-        if (errorData?.blocking_items) {
-          setValidationData({
-            canProceed: false,
-            blocking_items: errorData.blocking_items,
-            message: errorData.message
-          });
+        // Use validation endpoint (GET) - does NOT submit the request
+        const response = await siteEngineerService.validateCompletionRequest(project.project_id);
+
+        if (response.can_proceed) {
+          // All clear - can proceed with submission
+          setValidationData({ canProceed: true, blocking_items: null });
         } else {
+          // Has blocking items
           setValidationData({
             canProceed: false,
-            error: errorData?.error || 'Failed to check completion status'
+            blocking_items: response.blocking_items,
+            message: response.message
           });
         }
+      } catch (error: any) {
+        const errorData = error?.response?.data;
+        setValidationData({
+          canProceed: false,
+          error: errorData?.error || 'Failed to check completion status'
+        });
       } finally {
         setValidating(false);
       }
@@ -699,10 +702,18 @@ const MyProjects: React.FC = () => {
                           </div>
                         )}
                         {project.my_completion_requested && !project.my_work_confirmed && project.status?.toLowerCase() !== 'completed' && (
-                          <div onClick={(e) => e.stopPropagation()} className="px-2 sm:px-3 py-1 sm:py-1.5 bg-yellow-100 border border-yellow-400 rounded-md flex items-center gap-1">
-                            <ClockIcon className="w-3 sm:w-4 h-3 sm:h-4 text-yellow-600 flex-shrink-0" />
-                            <span className="text-[10px] sm:text-xs font-bold text-yellow-900">Pending</span>
-                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setProjectToRequest(project);
+                              setShowRequestModal(true);
+                            }}
+                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-[#243d8a] hover:bg-[#1e3270] text-white rounded-md transition-colors flex items-center gap-1 text-[10px] sm:text-xs font-medium shadow-sm whitespace-nowrap"
+                            title="Re-send completion request"
+                          >
+                            <CheckCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />
+                            <span className="hidden sm:inline">Request</span> Completion
+                          </button>
                         )}
                         {project.my_work_confirmed && project.status?.toLowerCase() !== 'completed' && (
                           <div onClick={(e) => e.stopPropagation()} className="px-2 sm:px-3 py-1 sm:py-1.5 bg-green-100 border border-green-400 rounded-md flex items-center gap-1">
