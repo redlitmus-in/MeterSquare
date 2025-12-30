@@ -960,9 +960,10 @@ class ComprehensiveNotificationService:
                     action_required=True,
                     action_url=get_td_approval_url(td_user.user_id, boq_id, tab='revisions'),
                     action_label='Review Revision',
-                    metadata={'boq_id': boq_id, 'internal_revision_number': revision_number},
+                    metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'target_role': 'technical_director'},
                     sender_id=actor_id,
-                    sender_name=actor_name
+                    sender_name=actor_name,
+                    target_role='technical_director'
                 )
 
                 send_notification_to_user(td_user.user_id, notification.to_dict())
@@ -991,9 +992,10 @@ class ComprehensiveNotificationService:
                 category='boq',
                 action_url=get_boq_view_url(actor_user_id, boq_id, tab='revisions'),
                 action_label='View BOQ',
-                metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'approved'},
+                metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'approved', 'target_role': 'estimator'},
                 sender_id=td_id,
-                sender_name=td_name
+                sender_name=td_name,
+                target_role='estimator'
             )
 
             send_notification_to_user(actor_user_id, notification.to_dict())
@@ -1020,9 +1022,10 @@ class ComprehensiveNotificationService:
                 action_required=True,
                 action_url=get_boq_view_url(actor_user_id, boq_id, tab='revisions'),
                 action_label='View Details',
-                metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'rejected', 'reason': rejection_reason},
+                metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'rejected', 'reason': rejection_reason, 'target_role': 'estimator'},
                 sender_id=td_id,
-                sender_name=td_name
+                sender_name=td_name,
+                target_role='estimator'
             )
 
             send_notification_to_user(actor_user_id, notification.to_dict())
@@ -1054,9 +1057,10 @@ class ComprehensiveNotificationService:
                 category='boq',
                 action_url=get_boq_view_url(estimator_user_id, boq_id, tab='revisions'),
                 action_label='View BOQ',
-                metadata={'boq_id': boq_id, 'client_revision_approved': True, 'revision_number': revision_number},
+                metadata={'boq_id': boq_id, 'client_revision_approved': True, 'revision_number': revision_number, 'target_role': 'estimator'},
                 sender_id=td_id,
-                sender_name=td_name
+                sender_name=td_name,
+                target_role='estimator'
             )
 
             send_notification_to_user(estimator_user_id, notification.to_dict())
@@ -1089,9 +1093,10 @@ class ComprehensiveNotificationService:
                 action_required=True,
                 action_url=get_boq_view_url(estimator_user_id, boq_id, tab='revisions'),
                 action_label='Make Changes',
-                metadata={'boq_id': boq_id, 'client_revision_rejected': True, 'reason': rejection_reason, 'revision_number': revision_number},
+                metadata={'boq_id': boq_id, 'client_revision_rejected': True, 'reason': rejection_reason, 'revision_number': revision_number, 'target_role': 'estimator'},
                 sender_id=td_id,
-                sender_name=td_name
+                sender_name=td_name,
+                target_role='estimator'
             )
 
             send_notification_to_user(estimator_user_id, notification.to_dict())
