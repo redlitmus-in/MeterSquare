@@ -637,13 +637,18 @@ class ModernBOQPDFGenerator:
 
                 prelim_description = ''.join(desc_parts)
 
+                # Get actual qty, unit, and rate from cost_details
+                prelim_qty = cost_details.get('quantity', 1) or 1
+                prelim_unit = cost_details.get('unit', 'lot') or 'lot'
+                prelim_rate = cost_details.get('rate', preliminary_amount) or preliminary_amount
+
                 table_data.append([
                     str(item_index),
                     Paragraph(prelim_description, ParagraphStyle('Prelim', parent=self.styles['Normal'], fontSize=8)),
                     '',  # No image for preliminaries
-                    '1',
-                    'lot',
-                    f'{preliminary_amount:,.2f}',
+                    f'{prelim_qty:.0f}' if isinstance(prelim_qty, (int, float)) else str(prelim_qty),
+                    prelim_unit,
+                    f'{prelim_rate:,.2f}',
                     f'{preliminary_amount:,.2f}'
                 ])
                 item_index += 1
@@ -926,13 +931,18 @@ class ModernBOQPDFGenerator:
 
                 prelim_description = ''.join(desc_parts)
 
+                # Get actual qty, unit, and rate from cost_details
+                prelim_qty = cost_details.get('quantity', 1) or 1
+                prelim_unit = cost_details.get('unit', 'lot') or 'lot'
+                prelim_rate = cost_details.get('rate', preliminary_amount) or preliminary_amount
+
                 table_data.append([
                     str(item_index),
                     Paragraph(prelim_description, ParagraphStyle('Prelim', parent=self.styles['Normal'], fontSize=7)),
                     '',  # No image for preliminaries
-                    '1',
-                    'lot',
-                    f'{preliminary_amount:,.2f}',
+                    f'{prelim_qty:.0f}' if isinstance(prelim_qty, (int, float)) else str(prelim_qty),
+                    prelim_unit,
+                    f'{prelim_rate:,.2f}',
                     f'{preliminary_amount:,.2f}'
                 ])
                 item_index += 1
