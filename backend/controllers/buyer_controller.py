@@ -4029,10 +4029,12 @@ def create_po_children(cr_id):
     - Independent lifecycle (vendor approval, purchase tracking)
     """
     try:
+        print(f"[create_po_children] ENTRY - cr_id={cr_id}")
         current_user = g.user
         user_id = current_user['user_id']
         user_name = current_user.get('full_name', 'Unknown User')
         user_role = current_user.get('role', '').lower()
+        print(f"[create_po_children] user_id={user_id}, user_name={user_name}, user_role={user_role}")
 
         data = request.get_json()
         vendor_groups = data.get('vendor_groups')  # Array of {vendor_id, vendor_name, materials: []}
@@ -4435,35 +4437,69 @@ def create_po_children(cr_id):
 
         db.session.commit()
 
+        # DEBUG: Using print() to ensure output shows in console
+        print(f"[TD Notification DEBUG] cr_id={cr_id}, user_role='{user_role}', is_td={is_td}, created_po_children count={len(created_po_children)}")
+        print(f"[TD Notification DEBUG] created_po_children={created_po_children}")
+
         # Send notifications to TD if buyer created PO children
-        if not is_td:
+        if not is_td and created_po_children:
             try:
                 from models.role import Role
                 from utils.notification_utils import NotificationManager
                 from socketio_server import send_notification_to_user
 
-                td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
-                if td_role:
+                print(f"[TD Notification] Sending notifications for {len(created_po_children)} PO children from CR {cr_id}")
+
+                # Use ilike pattern matching like the working code in comprehensive_notification_service.py
+                td_role = Role.query.filter(Role.role.ilike('%technical%director%'), Role.is_deleted == False).first()
+                print(f"[TD Notification] td_role query result: {td_role}")
+                if not td_role:
+                    print(f"[TD Notification] TD role not found in database!")
+                else:
+                    print(f"[TD Notification] Found TD role: role_id={td_role.role_id}, role={td_role.role}")
                     from models.user import User
                     td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                    print(f"[TD Notification] Found {len(td_users)} active TD users to notify")
+
                     for td_user in td_users:
-                        notification = NotificationManager.create_notification(
-                            user_id=td_user.user_id,
-                            type='action_required',
-                            title=f'{len(created_po_children)} Purchase Orders Need Approval',
-                            message=f'Buyer created {len(created_po_children)} separate purchase orders from PO-{cr_id}. Each needs approval.',
-                            priority='high',
-                            category='purchase',
-                            action_url=f'/technical-director/vendor-approval?cr_id={cr_id}',
-                            action_label='Review Purchase Orders',
-                            metadata={'parent_cr_id': str(cr_id), 'po_children_count': len(created_po_children), 'submission_group_id': submission_group_id, 'target_role': 'technical-director'},
-                            sender_id=user_id,
-                            sender_name=user_name,
-                            target_role='technical-director'
-                        )
-                        send_notification_to_user(td_user.user_id, notification.to_dict())
+                        try:
+                            # Get formatted IDs for each PO child
+                            po_child_ids = [pc.get('formatted_id', f"PO-{pc.get('id')}") for pc in created_po_children]
+
+                            notification = NotificationManager.create_notification(
+                                user_id=td_user.user_id,
+                                type='action_required',
+                                title=f'Purchase Order Needs Approval',
+                                message=f'{user_name} sent {len(created_po_children)} purchase order(s) for vendor approval: {", ".join(po_child_ids)}',
+                                priority='high',
+                                category='purchase',
+                                action_url=f'/technical-director/change-requests?tab=vendor_approvals&subtab=pending',
+                                action_label='Review Purchase Orders',
+                                metadata={
+                                    'parent_cr_id': str(cr_id),
+                                    'po_children_count': len(created_po_children),
+                                    'po_child_ids': [pc.get('id') for pc in created_po_children],
+                                    'submission_group_id': submission_group_id,
+                                    'target_role': 'technical-director'
+                                },
+                                sender_id=user_id,
+                                sender_name=user_name,
+                                target_role='technical-director'
+                            )
+                            send_notification_to_user(td_user.user_id, notification.to_dict())
+                            print(f"[TD Notification] Sent notification to TD user {td_user.user_id} ({td_user.full_name})")
+                        except Exception as inner_error:
+                            print(f"[TD Notification] Failed to send notification to TD user {td_user.user_id}: {inner_error}")
             except Exception as notif_error:
-                log.error(f"Failed to send notification: {notif_error}")
+                print(f"[TD Notification] Failed to send notifications: {notif_error}")
+                import traceback
+                print(f"[TD Notification] Traceback: {traceback.format_exc()}")
+        else:
+            # Log why notifications were NOT sent
+            if is_td:
+                print(f"[TD Notification] SKIPPED - User is TD (is_td={is_td}), no need to notify self")
+            elif not created_po_children:
+                print(f"[TD Notification] SKIPPED - No PO children were created (created_po_children is empty)")
 
         return jsonify({
             "success": True,
