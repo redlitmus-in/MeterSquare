@@ -108,6 +108,22 @@ def create_disposal_request():
         if not category:
             return jsonify({'success': False, 'error': 'Category not found'}), 404
 
+        # Check if there's already a pending disposal request for this return item
+        if data.get('return_item_id'):
+            existing_disposal = AssetDisposal.query.filter_by(
+                return_item_id=data['return_item_id'],
+                status='pending_review'
+            ).first()
+            if existing_disposal:
+                return jsonify({'success': False, 'error': 'A disposal request is already pending for this item'}), 400
+
+            # Verify the return item exists and is in repair status
+            return_item = AssetReturnDeliveryNoteItem.query.get(data['return_item_id'])
+            if not return_item:
+                return jsonify({'success': False, 'error': 'Return item not found'}), 404
+            if return_item.action_taken != 'send_to_repair':
+                return jsonify({'success': False, 'error': f'Item cannot be disposed. Current status: {return_item.action_taken}'}), 400
+
         # Calculate estimated value
         estimated_value = (category.unit_price or 0) * quantity
 

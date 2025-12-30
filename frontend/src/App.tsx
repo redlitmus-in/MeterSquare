@@ -54,6 +54,7 @@ const TechnicalDirectorHub = lazy(() => import('@/roles/technical-director/pages
 // Technical Director Pages
 const ProjectApprovals = lazy(() => import('@/roles/technical-director/pages/ProjectApprovals'));
 const DisposalApprovals = lazy(() => import('@/roles/technical-director/pages/DisposalApprovals'));
+const AssetDisposalApprovals = lazy(() => import('@/roles/technical-director/pages/AssetDisposalApprovals'));
 const ChangeRequestsPage = lazy(() => import('@/roles/technical-director/pages/ChangeRequestsPage'));
 
 // Project Manager Pages
@@ -94,6 +95,8 @@ const AssetReceiveReturns = lazy(() => import('@/roles/production-manager/pages/
 const ReceiveReturns = lazy(() => import('@/roles/production-manager/pages/ReceiveReturns'));
 const RepairManagement = lazy(() => import('@/roles/production-manager/pages/RepairManagement'));
 const AssetRepairManagement = lazy(() => import('@/roles/production-manager/pages/AssetRepairManagement'));
+const MaterialDisposalPage = lazy(() => import('@/roles/production-manager/pages/MaterialDisposalPage'));
+const AssetDisposalPage = lazy(() => import('@/roles/production-manager/pages/AssetDisposalPage'));
 
 // Admin Pages - Mix of custom admin pages and role pages
 const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
@@ -951,6 +954,11 @@ function App() {
                 <DisposalApprovals />
               </TechnicalDirectorRoute>
             } />
+            <Route path="asset-disposal-approvals" element={
+              <TechnicalDirectorRoute>
+                <AssetDisposalApprovals />
+              </TechnicalDirectorRoute>
+            } />
             {/* purchase-orders route moved to general routes (line 916 - RoleSpecificPurchaseOrders) */}
             {/* vendor-approval route REMOVED - old page replaced by ChangeRequestsPage */}
             {/* team-assignment route REMOVED - not needed */}
@@ -1115,10 +1123,20 @@ function App() {
                 <RepairManagement />
               </ProductionManagerRoute>
             } />
+            <Route path="m2-store/disposal" element={
+              <ProductionManagerRoute>
+                <MaterialDisposalPage />
+              </ProductionManagerRoute>
+            } />
             {/* Asset Repair Management */}
             <Route path="returnable-assets/repairs" element={
               <ProductionManagerRoute>
                 <AssetRepairManagement />
+              </ProductionManagerRoute>
+            } />
+            <Route path="returnable-assets/disposal" element={
+              <ProductionManagerRoute>
+                <AssetDisposalPage />
               </ProductionManagerRoute>
             } />
 

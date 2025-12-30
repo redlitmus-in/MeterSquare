@@ -16,7 +16,7 @@ import { inventoryService, MaterialReturn } from '../services/inventoryService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
-type TabType = 'pending' | 'completed' | 'sent_to_td';
+type TabType = 'pending' | 'completed';
 
 const RepairManagement: React.FC = () => {
   const [repairItems, setRepairItems] = useState<MaterialReturn[]>([]);
@@ -43,11 +43,9 @@ const RepairManagement: React.FC = () => {
       // Filter items that are in the repair workflow:
       // - sent_for_repair: In backup stock, waiting for repair
       // - repaired: Repair complete, moved to main stock
-      // - pending_review: Sent to TD for disposal approval (cannot repair)
       const repairs = returns.filter((ret: MaterialReturn) =>
         ret.disposal_status === 'sent_for_repair' ||
-        ret.disposal_status === 'repaired' ||
-        ret.disposal_status === 'pending_review'
+        ret.disposal_status === 'repaired'
       );
 
       setRepairItems(repairs);
@@ -66,13 +64,10 @@ const RepairManagement: React.FC = () => {
     // Tab filter based on disposal_status:
     // - pending: items with sent_for_repair status (in backup stock, awaiting repair)
     // - completed: items with repaired status (repair done, moved to main stock)
-    // - sent_to_td: items with pending_review status (sent to TD for disposal approval)
     if (activeTab === 'pending') {
       filtered = filtered.filter(item => item.disposal_status === 'sent_for_repair');
     } else if (activeTab === 'completed') {
       filtered = filtered.filter(item => item.disposal_status === 'repaired');
-    } else if (activeTab === 'sent_to_td') {
-      filtered = filtered.filter(item => item.disposal_status === 'pending_review');
     }
 
     // Search filter
@@ -96,7 +91,6 @@ const RepairManagement: React.FC = () => {
   // Counts based on disposal_status
   const pendingCount = repairItems.filter(item => item.disposal_status === 'sent_for_repair').length;
   const completedCount = repairItems.filter(item => item.disposal_status === 'repaired').length;
-  const sentToTDCount = repairItems.filter(item => item.disposal_status === 'pending_review').length;
 
   const handleViewDetails = (item: MaterialReturn) => {
     setSelectedItem(item);
@@ -220,16 +214,6 @@ const RepairManagement: React.FC = () => {
               >
                 Completed ({completedCount})
               </button>
-              <button
-                onClick={() => setActiveTab('sent_to_td')}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  activeTab === 'sent_to_td'
-                    ? 'bg-white text-red-600 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Sent to TD ({sentToTDCount})
-              </button>
             </div>
 
             {/* Search */}
@@ -329,11 +313,6 @@ const RepairManagement: React.FC = () => {
                             Repaired
                           </span>
                         )}
-                        {item.disposal_status === 'pending_review' && (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                            Awaiting TD
-                          </span>
-                        )}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <button
@@ -358,9 +337,7 @@ const RepairManagement: React.FC = () => {
                   ? 'Try adjusting your search'
                   : activeTab === 'pending'
                     ? 'No materials pending repair'
-                    : activeTab === 'completed'
-                      ? 'No completed repairs yet'
-                      : 'No items sent to TD for disposal'}
+                    : 'No completed repairs yet'}
               </p>
             </div>
           )}
@@ -511,16 +488,6 @@ const RepairManagement: React.FC = () => {
                 <div className="flex items-center gap-2 text-green-700">
                   <CheckCircle className="w-5 h-5" />
                   <span className="font-medium">This item has been repaired and added to main stock</span>
-                </div>
-              </div>
-            )}
-
-            {/* Sent to TD badge - Show for items awaiting TD approval */}
-            {selectedItem.disposal_status === 'pending_review' && (
-              <div className="px-6 py-4 bg-amber-50 border-t border-amber-200 rounded-b-xl">
-                <div className="flex items-center gap-2 text-amber-700">
-                  <Clock className="w-5 h-5" />
-                  <span className="font-medium">Awaiting Technical Director approval for disposal</span>
                 </div>
               </div>
             )}

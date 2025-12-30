@@ -16,7 +16,6 @@ import {
   createAssetDisposalRequest,
   uploadDisposalImage,
   AssetRepairItem,
-  RepairFilterStatus,
   DisposalReason
 } from '../services/assetDnService';
 import { showSuccess, showError } from '@/utils/toastHelper';
@@ -86,7 +85,7 @@ const AssetRepairManagement: React.FC = () => {
 
   const handleViewDetails = (item: AssetRepairItem) => {
     setSelectedItem(item);
-    setDisposeReason('');
+    setDisposeReason('unrepairable');  // Reset to default valid value
     setShowDetailModal(true);
   };
 
@@ -123,12 +122,15 @@ const AssetRepairManagement: React.FC = () => {
         await completeAssetRepair(selectedItem.return_item_id);
         showSuccess('Asset repaired and returned to stock');
       } else {
+        // Ensure disposal reason has a valid value
+        const reason = disposeReason || 'unrepairable';
+
         // Create disposal request requiring TD approval
         const disposal = await createAssetDisposalRequest({
           category_id: selectedItem.category_id,
           return_item_id: selectedItem.return_item_id,
           quantity: selectedItem.quantity,
-          disposal_reason: disposeReason,
+          disposal_reason: reason,
           justification: disposeJustification || `Cannot be repaired. From ARDN: ${selectedItem.ardn_number}`,
           source_type: 'repair',
           source_ardn_id: selectedItem.ardn_id,

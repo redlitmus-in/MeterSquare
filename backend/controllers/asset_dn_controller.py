@@ -26,7 +26,8 @@ from models.returnable_assets import (
     AssetReturnDeliveryNoteItem,
     AssetStockIn,
     AssetStockInItem,
-    AssetMaintenance
+    AssetMaintenance,
+    AssetDisposal
 )
 from models.project import Project
 from models.user import User
@@ -1813,13 +1814,13 @@ def get_asset_repair_items():
                 AssetReturnDeliveryNoteItem.pm_notes.like('%[Repair completed%')
             ).all()
         elif status == 'disposed':
-            # Items disposed from repair (pm_notes contains "[Marked for disposal")
+            # Items disposed from repair (TD approved disposal)
             items = AssetReturnDeliveryNoteItem.query.filter(
                 AssetReturnDeliveryNoteItem.action_taken == 'dispose',
-                AssetReturnDeliveryNoteItem.pm_notes.like('%[Marked for disposal%')
+                AssetReturnDeliveryNoteItem.pm_notes.like('%[Disposal approved by TD%')
             ).all()
         elif status == 'history':
-            # All completed repairs and disposals
+            # All completed repairs and TD-approved disposals (excludes pending_disposal)
             from sqlalchemy import or_
             items = AssetReturnDeliveryNoteItem.query.filter(
                 or_(
@@ -1829,12 +1830,12 @@ def get_asset_repair_items():
                     ),
                     db.and_(
                         AssetReturnDeliveryNoteItem.action_taken == 'dispose',
-                        AssetReturnDeliveryNoteItem.pm_notes.like('%[Marked for disposal%')
+                        AssetReturnDeliveryNoteItem.pm_notes.like('%[Disposal approved by TD%')
                     )
                 )
             ).all()
         else:
-            # All items (pending + history)
+            # All items (pending repairs + history, excludes pending_disposal)
             from sqlalchemy import or_
             items = AssetReturnDeliveryNoteItem.query.filter(
                 or_(
@@ -1845,7 +1846,7 @@ def get_asset_repair_items():
                     ),
                     db.and_(
                         AssetReturnDeliveryNoteItem.action_taken == 'dispose',
-                        AssetReturnDeliveryNoteItem.pm_notes.like('%[Marked for disposal%')
+                        AssetReturnDeliveryNoteItem.pm_notes.like('%[Disposal approved by TD%')
                     )
                 )
             ).all()
@@ -1939,12 +1940,13 @@ def complete_asset_repair(return_item_id):
 @asset_dn_bp.route('/api/assets/repairs/<int:return_item_id>/dispose', methods=['PUT'])
 @jwt_required
 def dispose_unrepairable_asset(return_item_id):
-    """Mark unrepairable asset for disposal"""
+    """Mark unrepairable asset for disposal - creates disposal request for TD approval"""
     try:
         from flask import g
         data = request.json or {}
 
         user_name = g.user.get('full_name') or g.user.get('email') or 'Unknown'
+        user_id = g.user.get('user_id')
         reason = data.get('reason', 'Cannot be repaired')
 
         item = AssetReturnDeliveryNoteItem.query.get(return_item_id)
@@ -1954,22 +1956,46 @@ def dispose_unrepairable_asset(return_item_id):
         if item.action_taken != 'send_to_repair':
             return jsonify({'success': False, 'error': 'Item is not sent for repair'}), 400
 
-        # Note: For disposal, we don't add back to available_quantity since item is being disposed
-        # The total_quantity should be reduced but that requires TD approval
-        # For now, just mark as disposed - the item is already removed from available when sent to repair
+        # Get category for estimated value calculation
+        category = ReturnableAssetCategory.query.get(item.category_id)
+        estimated_value = (category.unit_price or 0) * (item.quantity or 1) if category else 0
 
-        # Update item
-        item.action_taken = 'dispose'
-        item.pm_notes = (item.pm_notes or '') + f"\n[Marked for disposal by {user_name}: {reason}]"
+        # Get ARDN for project info
+        ardn = AssetReturnDeliveryNote.query.get(item.ardn_id)
+        project_id = ardn.project_id if ardn else None
+
+        # Create disposal request in asset_disposal table for TD approval
+        disposal = AssetDisposal(
+            return_item_id=return_item_id,
+            category_id=item.category_id,
+            asset_item_id=item.asset_item_id,
+            quantity=item.quantity or 1,
+            disposal_reason='unrepairable',
+            justification=reason,
+            estimated_value=estimated_value,
+            image_url=item.photo_url,
+            requested_by=user_name,
+            requested_by_id=user_id,
+            source_type='repair',
+            source_ardn_id=item.ardn_id,
+            project_id=project_id,
+            status='pending_review'
+        )
+        db.session.add(disposal)
+
+        # Update item to pending disposal (awaiting TD approval)
+        item.action_taken = 'pending_disposal'
+        item.pm_notes = (item.pm_notes or '') + f"\n[Disposal requested by {user_name}: {reason}]"
 
         db.session.commit()
 
         return jsonify({
             'success': True,
-            'message': 'Item marked for disposal'
+            'message': 'Disposal request sent to TD for approval',
+            'disposal_id': disposal.disposal_id
         })
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error disposing item: {str(e)}")
+        logger.error(f"Error creating disposal request: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500

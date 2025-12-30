@@ -352,7 +352,23 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         href: buildPath('/disposal-approvals'),
         icon: ExclamationTriangleIcon,
         iconSolid: ExclamationTriangleSolid,
-        color: 'text-red-600'
+        color: 'text-red-600',
+        children: [
+          {
+            name: 'Material Disposal',
+            href: buildPath('/disposal-approvals'),
+            icon: ExclamationTriangleIcon,
+            iconSolid: ExclamationTriangleSolid,
+            color: 'text-red-600'
+          },
+          {
+            name: 'Asset Disposal',
+            href: buildPath('/asset-disposal-approvals'),
+            icon: WrenchScrewdriverIcon,
+            iconSolid: WrenchScrewdriverIcon,
+            color: 'text-orange-600'
+          }
+        ]
       },
       // ========== PROCUREMENT & SUPPLY CHAIN ==========
       {
@@ -517,11 +533,18 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             color: 'text-orange-600'
           },
           {
-            name: 'Repair Management',
+            name: 'Repair',
             href: buildPath('/m2-store/repair-management'),
             icon: WrenchScrewdriverIcon,
             iconSolid: WrenchScrewdriverIcon,
             color: 'text-amber-600'
+          },
+          {
+            name: 'Disposal',
+            href: buildPath('/m2-store/disposal'),
+            icon: ExclamationTriangleIcon,
+            iconSolid: ExclamationTriangleSolid,
+            color: 'text-red-600'
           }
         ]
       },
@@ -561,11 +584,18 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             color: 'text-teal-600'
           },
           {
-            name: 'Repair Management',
+            name: 'Repair',
             href: buildPath('/returnable-assets/repairs'),
             icon: WrenchScrewdriverIcon,
             iconSolid: WrenchScrewdriverIcon,
             color: 'text-amber-600'
+          },
+          {
+            name: 'Disposal',
+            href: buildPath('/returnable-assets/disposal'),
+            icon: ExclamationTriangleIcon,
+            iconSolid: ExclamationTriangleSolid,
+            color: 'text-red-600'
           }
         ]
       },
