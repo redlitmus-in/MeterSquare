@@ -312,7 +312,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   // Load custom units from database
   const loadCustomUnits = async () => {
     try {
-      const response = await apiClient.get('/custom-units');
+      const response = await apiClient.get('/boq/custom-units');
       if (response.data && response.data.custom_units) {
         const customUnitsFromDB = response.data.custom_units.map((unit: any) => ({
           value: unit.value,
@@ -355,7 +355,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       const unitLabel = unitValue.trim().charAt(0).toUpperCase() + unitValue.trim().slice(1);
 
       // Save to database
-      const response = await apiClient.post('/custom-units', {
+      const response = await apiClient.post('/boq/custom-units', {
         unit_value: normalizedValue,
         unit_label: unitLabel
       });

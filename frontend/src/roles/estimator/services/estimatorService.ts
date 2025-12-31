@@ -1907,7 +1907,7 @@ async sendClientRevisionToTD(
   // Custom Units Management
   async getCustomUnits(): Promise<{ success: boolean; data: any[] }> {
     try {
-      const response = await apiClient.get('/custom-units');
+      const response = await apiClient.get('/boq/custom-units');
       return {
         success: true,
         data: response.data.custom_units || []
@@ -1923,7 +1923,7 @@ async sendClientRevisionToTD(
 
   async createCustomUnit(unitValue: string, unitLabel: string): Promise<{ success: boolean; unit?: any; message?: string }> {
     try {
-      const response = await apiClient.post('/custom-units', {
+      const response = await apiClient.post('/boq/custom-units', {
         unit_value: unitValue,
         unit_label: unitLabel
       });
