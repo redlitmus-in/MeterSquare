@@ -303,6 +303,7 @@ async function loadNotificationsFromIndexedDB(db: IDBDatabase) {
 
     request.onsuccess = () => {
       const notifications = request.result || [];
+
       if (notifications.length > 0) {
         const filteredNotifications = filterOldNotifications(notifications);
         const currentNotifications = useNotificationStore.getState().notifications;

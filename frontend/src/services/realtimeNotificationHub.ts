@@ -532,15 +532,20 @@ class RealtimeNotificationHub {
             category: (notification as any).category || notification.metadata?.category || 'system'
           };
 
+          // Check if notification already exists in store (to avoid duplicate desktop notifications)
+          const store = useNotificationStore.getState();
+          const alreadyExists = store.notifications.some(n => String(n.id) === String(notification.id));
+
           // Add to notification store (shows in notification panel + badge count)
-          useNotificationStore.getState().addNotification(notificationData);
+          store.addNotification(notificationData);
 
           // Check if notification is recent (within 5 minutes)
           const notificationTime = new Date(notification.timestamp || Date.now()).getTime();
           const isRecent = (now - notificationTime) < RECENT_THRESHOLD;
 
-          // Show popup and desktop notification for recent missed notifications
-          if (isRecent) {
+          // Show popup and desktop notification ONLY for recent AND truly new notifications
+          // Skip if notification already existed in store (prevents desktop spam on page reload)
+          if (isRecent && !alreadyExists) {
             this.showIncomingNotificationPopup(notification);
             this.showDesktopNotification(notification);
           }

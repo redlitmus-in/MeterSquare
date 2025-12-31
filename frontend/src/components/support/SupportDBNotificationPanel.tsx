@@ -82,20 +82,15 @@ const SupportDBNotificationPanel: React.FC<SupportDBNotificationPanelProps> = ({
 
   // Show desktop notification
   const showDesktopNotification = (notification: DBNotification) => {
-    console.log('[Desktop Notification] Attempting to show:', notification.title);
-
     if (!isNotificationSupported()) {
-      console.log('[Desktop Notification] Not supported');
       return;
     }
 
     if (Notification.permission !== 'granted') {
-      console.log('[Desktop Notification] Permission not granted:', Notification.permission);
       return;
     }
 
     try {
-      console.log('[Desktop Notification] Creating notification...');
       const desktopNotif = new Notification(notification.title, {
         body: notification.message,
         icon: '/assets/structo-logo.png',
@@ -113,9 +108,8 @@ const SupportDBNotificationPanel: React.FC<SupportDBNotificationPanelProps> = ({
 
       // Auto-close after 15 seconds
       setTimeout(() => desktopNotif.close(), 15000);
-      console.log('[Desktop Notification] Notification shown successfully');
-    } catch (e) {
-      console.error('[Desktop Notification] Error:', e);
+    } catch {
+      // Silent fail
     }
   };
 
@@ -130,24 +124,18 @@ const SupportDBNotificationPanel: React.FC<SupportDBNotificationPanelProps> = ({
         const newNotifications = data.notifications as DBNotification[];
         const latestId = newNotifications[0]?.id ?? 0;
 
-        console.log('[Support Notifications] Fetched:', newNotifications.length, 'notifications');
-        console.log('[Support Notifications] Latest ID:', latestId, '| Last known ID:', lastNotificationIdRef.current);
-
         // Check for new notifications and show desktop notification
         // lastNotificationIdRef is initialized to -1, so first fetch sets it to actual value
         if (lastNotificationIdRef.current >= 0 && newNotifications.length > 0) {
           if (latestId > lastNotificationIdRef.current) {
             // New notification arrived
             const newOnes = newNotifications.filter(n => n.id > lastNotificationIdRef.current);
-            console.log('[Support Notifications] NEW notifications detected:', newOnes.length);
             newOnes.forEach(n => {
               if (!n.read) {
                 showDesktopNotification(n);
               }
             });
           }
-        } else if (lastNotificationIdRef.current === -1) {
-          console.log('[Support Notifications] First fetch - initializing lastNotificationIdRef to:', latestId);
         }
 
         // Always update lastNotificationIdRef (even if 0 notifications, set to 0)
@@ -188,11 +176,9 @@ const SupportDBNotificationPanel: React.FC<SupportDBNotificationPanelProps> = ({
     const handleVisibilityChange = () => {
       if (document.hidden) {
         // Slower polling when minimized - still need it for desktop notifications
-        console.log('[Support Notifications] Tab hidden - switching to slow polling (60s)');
         startPolling(POLL_INTERVAL_HIDDEN);
       } else {
         // Fetch immediately when tab becomes visible, then fast polling
-        console.log('[Support Notifications] Tab visible - switching to fast polling (30s)');
         fetchNotifications();
         startPolling(POLL_INTERVAL_VISIBLE);
       }

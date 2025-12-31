@@ -983,6 +983,11 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(actor_user_id, 'Internal Revision Approved', 'boq_id', boq_id, minutes=5):
+                log.info(f"[notify_internal_revision_approved] Skipping duplicate for BOQ {boq_id}, user {actor_user_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=actor_user_id,
                 type='success',
@@ -1012,6 +1017,11 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(actor_user_id, 'Internal Revision Rejected', 'boq_id', boq_id, minutes=5):
+                log.info(f"[notify_internal_revision_rejected] Skipping duplicate for BOQ {boq_id}, user {actor_user_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=actor_user_id,
                 type='rejection',
@@ -1042,6 +1052,11 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(estimator_user_id, 'Client Revision Approved', 'boq_id', boq_id, minutes=5):
+                log.info(f"[notify_client_revision_approved] Skipping duplicate for BOQ {boq_id}, user {estimator_user_id}")
+                return
+
             # Build message with revision number if available
             if revision_number and revision_number > 0:
                 message = f'Client revision R{revision_number} for {project_name} has been approved by {td_name}'
@@ -1077,6 +1092,11 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(estimator_user_id, 'Client Revision Rejected', 'boq_id', boq_id, minutes=5):
+                log.info(f"[notify_client_revision_rejected] Skipping duplicate for BOQ {boq_id}, user {estimator_user_id}")
+                return
+
             # Build message with revision number if available
             if revision_number and revision_number > 0:
                 message = f'Client revision R{revision_number} for {project_name} was rejected by {td_name}. Reason: {rejection_reason}'
