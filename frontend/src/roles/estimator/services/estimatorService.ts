@@ -863,7 +863,27 @@ class EstimatorService {
       };
     }
   }
-
+// Send Client Revision BOQ to Technical Director (status will be Client_Pending_Revision)
+async sendClientRevisionToTD(
+  boqId: number,
+  params?: { td_email?: string; full_name?: string; comments?: string }
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await apiClient.get(`/send_client_revision/${boqId}`, {
+      params: params || {}
+    });
+    return {
+      success: response.data.success !== false,
+      message: response.data.message || 'Client revision sent successfully to Technical Director'
+    };
+  } catch (error: any) {
+    console.error('Client revision sending error:', error.response?.data || error.message);
+    return {
+      success: false,
+      message: error.response?.data?.error || error.response?.data?.message || 'Failed to send client revision'
+    };
+  }
+}
   // Send BOQ to Client (after TD approval)
   async sendBOQToClient(
     boqId: number,

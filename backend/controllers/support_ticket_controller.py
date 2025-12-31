@@ -4,9 +4,10 @@ Handles CRUD operations for support tickets (bugs, issues, implementations)
 No authentication required - fully public API
 """
 
-from flask import request, jsonify
+from flask import request, jsonify, g
 from config.db import db
 from models.support_ticket import SupportTicket
+from models.user import User
 from config.logging import get_logger
 from datetime import datetime
 from sqlalchemy import or_
@@ -137,11 +138,27 @@ def public_create_ticket():
         ticket_number = SupportTicket.generate_ticket_number(ticket_type)
         as_draft = data.get('as_draft', 'false').lower() == 'true'
 
+        # Try to get user_id from logged-in user or by email lookup
+        reporter_user_id = None
+        reporter_email = data['reporter_email']
+
+        # First check if user is logged in (g.user from JWT)
+        current_user = getattr(g, 'user', None)
+        if current_user and current_user.get('user_id'):
+            reporter_user_id = current_user.get('user_id')
+            log.info(f"Ticket created by logged-in user: {reporter_user_id}")
+        else:
+            # Try to find user by email
+            user = User.query.filter_by(email=reporter_email, is_active=True, is_deleted=False).first()
+            if user:
+                reporter_user_id = user.user_id
+                log.info(f"Found user by email {reporter_email}: user_id={reporter_user_id}")
+
         new_ticket = SupportTicket(
             ticket_number=ticket_number,
-            reporter_user_id=None,
+            reporter_user_id=reporter_user_id,
             reporter_name=data['reporter_name'],
-            reporter_email=data['reporter_email'],
+            reporter_email=reporter_email,
             reporter_role=data.get('reporter_role', 'Public User'),
             ticket_type=ticket_type,
             title=data['title'],
@@ -201,6 +218,27 @@ def public_create_ticket():
             db.session.commit()
 
         log.info(f"Ticket created: {new_ticket.ticket_number} by {data['reporter_email']}")
+
+        # Send notification to dev team when ticket is submitted (not draft)
+        if new_ticket.status == 'submitted':
+            try:
+                ComprehensiveNotificationService.notify_ticket_submitted(
+                    ticket_id=new_ticket.ticket_id,
+                    ticket_number=new_ticket.ticket_number,
+                    client_name=new_ticket.reporter_name,
+                    client_email=new_ticket.reporter_email,
+                    subject=new_ticket.title,
+                    priority=new_ticket.priority
+                )
+                log.info(f"Sent ticket submission notification for {new_ticket.ticket_number}")
+            except Exception as notif_error:
+                log.error(f"Failed to send ticket submission notification: {notif_error}")
+
+            # Emit Socket.IO event for real-time updates
+            try:
+                emit_support_ticket_event('ticket_submitted', new_ticket.to_dict())
+            except Exception as socket_error:
+                log.warning(f"Failed to emit socket event: {socket_error}")
 
         return jsonify({
             "success": True,

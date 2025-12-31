@@ -15,7 +15,8 @@ class Notification(db.Model):
 
     # Primary fields
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False, index=True)  # ✅ Index for user queries
+    # user_id is nullable to support broadcast notifications (e.g., support tickets for dev team without login)
+    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=True, index=True)  # ✅ Index for user queries
     target_role = Column(String(50), nullable=True, index=True)  # ✅ Index for role-based queries
 
     # Notification content
@@ -74,9 +75,9 @@ class Notification(db.Model):
             'metadata': self.meta_data,
             'senderId': self.sender_id,
             'senderName': self.sender_name,
-            'timestamp': self.created_at.isoformat() if self.created_at else None,
-            'readAt': self.read_at.isoformat() if self.read_at else None,
-            'deletedAt': self.deleted_at.isoformat() if self.deleted_at else None
+            'timestamp': (self.created_at.isoformat() + 'Z') if self.created_at else None,  # Add Z for UTC
+            'readAt': (self.read_at.isoformat() + 'Z') if self.read_at else None,
+            'deletedAt': (self.deleted_at.isoformat() + 'Z') if self.deleted_at else None
         }
 
     @classmethod

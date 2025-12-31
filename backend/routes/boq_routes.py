@@ -303,3 +303,12 @@ def create_custom_unit_route():
     if access_check:
         return access_check
     return create_custom_unit()
+    
+@boq_routes.route('/send_client_revision/<int:boq_id>', methods=['GET'])
+@jwt_required
+def send_td_client_boq_email_route(boq_id):
+    """Send Client Revision BOQ to Technical Director for approval"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return send_td_client_boq_email(boq_id)

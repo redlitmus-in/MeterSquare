@@ -3489,22 +3489,20 @@ const EstimatorHub: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="revisions" className="mt-0 p-0">
-              <RevisionComparisonPage
+            <RevisionComparisonPage
                 boqList={filteredBOQs}
                 onSendToTD={async (boq) => {
-                  // Send directly to TD without email modal
-                  // Note: revision_boq endpoint is used during BOQ editing (in BOQCreationForm)
-                  // This sendBOQEmail just notifies TD after the revision is saved
-                  const result = await estimatorService.sendBOQEmail(boq.boq_id!, {
+                  // Send Client Revision to TD - uses dedicated API that sets status to Client_Pending_Revision
+                  const result = await estimatorService.sendClientRevisionToTD(boq.boq_id!, {
                     comments: (boq.revision_number || 0) > 0
-                      ? `Sending Revision ${boq.revision_number} for review`
+                      ? `Sending Client Revision ${boq.revision_number} for review`
                       : 'Sending BOQ for review'
                   });
                   if (result.success) {
-                    showSuccess('BOQ sent to Technical Director successfully!');
+                    showSuccess('Client revision sent to Technical Director successfully!');
                     loadBOQs();
                   } else {
-                    showError(result.message || 'Failed to send BOQ to TD');
+                    showError(result.message || 'Failed to send client revision to TD');
                   }
                 }}
                 onSendToClient={(boq) => {

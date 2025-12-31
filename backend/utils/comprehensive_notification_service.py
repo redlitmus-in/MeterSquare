@@ -1617,44 +1617,40 @@ class ComprehensiveNotificationService:
         """
         Notify dev team when a new support ticket is submitted
         Trigger: Client submits new support ticket
-        Recipients: All users with 'admin' or 'developer' roles
+        Recipients: Broadcast notification for support-management page (public, no login required)
         """
         try:
-            # Get admin users (dev team)
-            admin_role = Role.query.filter_by(role='admin').first()
-            dev_users = []
-            if admin_role:
-                dev_users = User.query.filter_by(role_id=admin_role.role_id, is_active=True, is_deleted=False).all()
+            # Create a broadcast notification for support-management page (user_id=None)
+            # This allows the public support-management page to fetch notifications without auth
+            notification = NotificationManager.create_notification(
+                user_id=None,  # Broadcast notification - no specific user
+                type='warning' if priority in ['urgent', 'critical', 'high'] else 'info',
+                title=f'New Support Ticket #{ticket_number}',
+                message=f'{client_name} submitted a {priority} priority ticket: {subject[:80]}...',
+                priority='urgent' if priority in ['urgent', 'critical'] else 'normal',
+                category='support',
+                action_required=True,
+                action_url=f'/support-management?ticket_id={ticket_id}',
+                action_label='View Ticket',
+                metadata={
+                    'ticket_id': ticket_id,
+                    'ticket_number': ticket_number,
+                    'client_email': client_email,
+                    'client_name': client_name,
+                    'priority': priority,
+                    'workflow': 'support_ticket',
+                    'event_type': 'ticket_submitted',
+                    'target_role': 'support-management'
+                },
+                sender_name=client_name,
+                target_role='support-management'
+            )
 
-            for dev_user in dev_users:
-                # Check for duplicate notification
-                if check_duplicate_notification(dev_user.user_id, f'New Support Ticket #{ticket_number}', 'ticket_id', ticket_id):
-                    continue
-
-                notification = NotificationManager.create_notification(
-                    user_id=dev_user.user_id,
-                    type='warning' if priority == 'urgent' else 'info',
-                    title=f'New Support Ticket #{ticket_number}',
-                    message=f'{client_name} submitted a {priority} priority ticket: {subject[:80]}...',
-                    priority='urgent' if priority == 'urgent' else 'normal',
-                    category='support',
-                    action_required=True,
-                    action_url=build_notification_action_url(dev_user.user_id, 'support-management', {'ticket_id': ticket_id}, 'admin'),
-                    action_label='View Ticket',
-                    metadata={
-                        'ticket_id': ticket_id,
-                        'ticket_number': ticket_number,
-                        'client_email': client_email,
-                        'priority': priority,
-                        'workflow': 'support_ticket'
-                    },
-                    sender_name=client_name
-                )
-                send_notification_to_user(dev_user.user_id, notification.to_dict())
-
-            log.info(f"Sent ticket submission notification to {len(dev_users)} dev team members for ticket #{ticket_number}")
+            log.info(f"Created support ticket notification for #{ticket_number}")
         except Exception as e:
             log.error(f"Error sending ticket submission notification: {e}")
+            import traceback
+            log.error(traceback.format_exc())
 
     @staticmethod
     def notify_ticket_approved(ticket_id, ticket_number, client_user_id, client_email, subject, approved_by_name):
@@ -1682,9 +1678,11 @@ class ComprehensiveNotificationService:
                             'ticket_id': ticket_id,
                             'ticket_number': ticket_number,
                             'status': 'approved',
-                            'workflow': 'support_ticket'
+                            'workflow': 'support_ticket',
+                            'target_role': 'client'
                         },
-                        sender_name=approved_by_name
+                        sender_name=approved_by_name,
+                        target_role='client'
                     )
                     send_notification_to_user(client_user_id, notification.to_dict())
 
@@ -1719,9 +1717,11 @@ class ComprehensiveNotificationService:
                             'ticket_number': ticket_number,
                             'status': 'rejected',
                             'rejection_reason': rejection_reason,
-                            'workflow': 'support_ticket'
+                            'workflow': 'support_ticket',
+                            'target_role': 'client'
                         },
-                        sender_name=rejected_by_name
+                        sender_name=rejected_by_name,
+                        target_role='client'
                     )
                     send_notification_to_user(client_user_id, notification.to_dict())
 
@@ -1763,9 +1763,11 @@ class ComprehensiveNotificationService:
                             'ticket_id': ticket_id,
                             'ticket_number': ticket_number,
                             'status': new_status,
-                            'workflow': 'support_ticket'
+                            'workflow': 'support_ticket',
+                            'target_role': 'client'
                         },
-                        sender_name=updated_by_name
+                        sender_name=updated_by_name,
+                        target_role='client'
                     )
                     send_notification_to_user(client_user_id, notification.to_dict())
 
@@ -1800,9 +1802,11 @@ class ComprehensiveNotificationService:
                             'ticket_number': ticket_number,
                             'status': 'resolved',
                             'resolution_notes': resolution_notes,
-                            'workflow': 'support_ticket'
+                            'workflow': 'support_ticket',
+                            'target_role': 'client'
                         },
-                        sender_name=resolved_by_name
+                        sender_name=resolved_by_name,
+                        target_role='client'
                     )
                     send_notification_to_user(client_user_id, notification.to_dict())
 
@@ -1844,9 +1848,11 @@ class ComprehensiveNotificationService:
                         'ticket_number': ticket_number,
                         'status': 'closed',
                         'client_feedback': client_feedback,
-                        'workflow': 'support_ticket'
+                        'workflow': 'support_ticket',
+                        'target_role': 'admin'
                     },
-                    sender_name=client_name
+                    sender_name=client_name,
+                    target_role='admin'
                 )
                 send_notification_to_user(dev_user.user_id, notification.to_dict())
 

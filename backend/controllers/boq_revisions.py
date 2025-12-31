@@ -13,6 +13,7 @@ from utils.boq_email_service import *
 from config.db import db
 from models.boq import *
 from sqlalchemy import func, and_, or_
+from sqlalchemy.orm.attributes import flag_modified
 from config.logging import get_logger
 
 log = get_logger()
@@ -508,7 +509,6 @@ def client_revision_td_mail_send():
             # Update existing history
             existing_history.action = current_actions
             # Mark the JSONB field as modified for SQLAlchemy to detect changes
-            from sqlalchemy.orm.attributes import flag_modified
             flag_modified(existing_history, "action")
 
             existing_history.action_by = td_name

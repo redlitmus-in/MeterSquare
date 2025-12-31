@@ -42,7 +42,7 @@ import {
   Lock,
   Rocket
 } from 'lucide-react';
-import { io, Socket } from 'socket.io-client';
+// Socket.IO removed - using DB API polling for notifications instead
 import { supportApi, SupportTicket } from '@/api/support';
 import { showSuccess, showError, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -57,7 +57,7 @@ import {
   notifyNewComment,
   notifyAdminResponse
 } from '@/utils/supportNotificationHelper';
-import NotificationPanel from '@/components/support/NotificationPanel';
+import SupportDBNotificationPanel from '@/components/support/SupportDBNotificationPanel';
 
 // Ticket type configuration
 const ticketTypes = [
@@ -108,11 +108,8 @@ const SupportManagement: React.FC = () => {
 
   // Notification state
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>('default');
-  // ✅ PERFORMANCE: Disabled polling - using real-time subscriptions instead
-  const [isPolling] = useState(false); // Polling disabled - using real-time updates
-
-  // Socket.IO ref for real-time updates
-  const socketRef = useRef<Socket | null>(null);
+  // Using DB API polling for notifications (every 5 seconds via SupportDBNotificationPanel)
+  const [isPolling] = useState(false);
 
   // Modal state
   const [actionModal, setActionModal] = useState<{
@@ -253,83 +250,7 @@ const SupportManagement: React.FC = () => {
     };
   }, [isPolling]);
 
-  // Set up Socket.IO connection for real-time updates
-  useEffect(() => {
-    // Connect to Socket.IO server
-    const socket = io(API_BASE_URL, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    });
-
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      console.log('Support Management: Connected to Socket.IO');
-      // Join the support room to receive ticket events
-      socket.emit('join:support');
-    });
-
-    socket.on('room_joined', (data) => {
-      console.log('Support Management: Joined room', data);
-    });
-
-    // Listen for support ticket events
-    socket.on('support_ticket', (data) => {
-      console.log('Support Management: Received ticket event', data);
-
-      if (data.type === 'ticket_submitted') {
-        // New ticket submitted - show notification and refresh
-        const ticket = data.ticket;
-        notifyNewTicket(
-          ticket.ticket_number,
-          ticket.title,
-          ticket.reporter_name,
-          ticket.reporter_role || 'client',
-          ticket.reporter_email || '',
-          ticket.ticket_id
-        );
-        showInfo(`New ticket from ${ticket.reporter_name}: "${ticket.title}"`);
-        // Refresh ticket list
-        loadTicketsRef.current(false);
-      }
-
-      if (data.type === 'ticket_comment') {
-        // New comment added
-        const ticket = data.ticket;
-        const comment = data.new_comment;
-        if (comment?.sender_type === 'client') {
-          notifyNewComment(
-            ticket.ticket_number,
-            ticket.title,
-            comment.sender_name || ticket.reporter_name,
-            'client',
-            ticket.reporter_role || 'client',
-            ticket.reporter_email || '',
-            ticket.ticket_id
-          );
-          showInfo(`New comment on ${ticket.ticket_number} from ${comment.sender_name}`);
-        }
-        // Refresh ticket list
-        loadTicketsRef.current(false);
-      }
-    });
-
-    socket.on('disconnect', () => {
-      console.log('Support Management: Disconnected from Socket.IO');
-    });
-
-    socket.on('connect_error', (error) => {
-      console.error('Support Management: Socket.IO connection error', error);
-    });
-
-    // Cleanup on unmount
-    return () => {
-      socket.disconnect();
-      socketRef.current = null;
-    };
-  }, []);
+  // Real-time updates handled by SupportDBNotificationPanel (polling every 5 seconds)
 
   // Handle notification permission request
   const handleRequestNotificationPermission = async () => {
@@ -601,8 +522,8 @@ const SupportManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* Notification Panel - includes desktop notification toggle */}
-          <NotificationPanel currentUserRole="admin" />
+          {/* Notification Panel - fetches from database API for support-management page */}
+          <SupportDBNotificationPanel />
         </div>
       </div>
 
