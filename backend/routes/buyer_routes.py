@@ -633,3 +633,14 @@ def debug_material_selections(cr_id):
         return jsonify({"error": "CR not found"}), 404
 
 
+# Project Site Engineers route
+@buyer_routes.route('/project/<int:project_id>/site-engineers', methods=['GET'])
+@jwt_required
+def get_project_site_engineers_route(project_id):
+    """Get all site engineers assigned to a project for buyer to select recipient (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_project_site_engineers(project_id)
+
+

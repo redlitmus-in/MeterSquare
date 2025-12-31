@@ -86,6 +86,17 @@ const StockOutPage: React.FC = () => {
     reason: ''
   });
 
+  // Materials view modal state (for grouped materials)
+  const [materialsViewModal, setMaterialsViewModal] = useState<{
+    show: boolean;
+    materials: any[];
+    requestNumber: number | null;
+  }>({
+    show: false,
+    materials: [],
+    requestNumber: null
+  });
+
   // Form state for new Delivery Note
   const [dnFormData, setDnFormData] = useState<CreateDeliveryNoteData>({
     project_id: 0,
@@ -290,15 +301,44 @@ const StockOutPage: React.FC = () => {
     });
 
     // For vendor delivery requests, store material info since it's not in inventory
-    setDnItems([{
-      inventory_material_id: request.inventory_material_id || 0,
-      quantity: request.quantity || 0,
-      notes: '',
-      internal_request_id: request.request_id,
-      material_name: isVendorDelivery ? request.material_name : undefined,
-      brand: isVendorDelivery ? request.brand : undefined,
-      is_vendor_delivery: isVendorDelivery
-    }]);
+    // Match inventory by sub-item (brand) name, not item name
+
+    // Handle grouped materials (materials_data) or single material
+    if (request.materials_data && Array.isArray(request.materials_data) && request.materials_data.length > 0) {
+      // Grouped materials - create DN item for each material
+      const dnItemsList = request.materials_data.map(mat => {
+        const subItemName = mat.brand || mat.material_name;
+        const matchedInventory = materials.find(
+          inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
+        );
+        return {
+          inventory_material_id: matchedInventory?.inventory_material_id || 0,
+          quantity: mat.quantity || 0,
+          notes: '',
+          internal_request_id: request.request_id,
+          material_name: isVendorDelivery ? mat.material_name : undefined,
+          brand: isVendorDelivery ? mat.brand : undefined,
+          is_vendor_delivery: isVendorDelivery
+        };
+      });
+      setDnItems(dnItemsList);
+    } else {
+      // Single material
+      const subItemName = request.brand || request.material_name;
+      const matchedInventory = materials.find(
+        inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
+      );
+
+      setDnItems([{
+        inventory_material_id: matchedInventory?.inventory_material_id || request.inventory_material_id || 0,
+        quantity: request.quantity || 0,
+        notes: '',
+        internal_request_id: request.request_id,
+        material_name: isVendorDelivery ? request.material_name : undefined,
+        brand: isVendorDelivery ? request.brand : undefined,
+        is_vendor_delivery: isVendorDelivery
+      }]);
+    }
 
     setShowDeliveryNoteModal(true);
     setActiveSubTab('delivery-notes');
@@ -589,7 +629,7 @@ const StockOutPage: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading...</div>
+        <ModernLoadingSpinners size="lg" />
       </div>
     );
   }
@@ -740,8 +780,82 @@ const StockOutPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-4 text-sm text-gray-900">
                         <div>
-                          <div className="font-medium">{req.material_name}</div>
-                          {req.brand && <div className="text-gray-500 text-xs">{req.brand}</div>}
+                          {/* Show grouped materials - if 1 show directly, if more show View button */}
+                          {req.materials_data && Array.isArray(req.materials_data) && req.materials_data.length > 0 ? (
+                            req.materials_data.length === 1 ? (
+                              // Single material from grouped data - show directly with inventory status
+                              (() => {
+                                const mat = req.materials_data[0];
+                                // Check inventory against sub-item (brand) name, not item name
+                                const subItemName = mat.brand || mat.material_name;
+                                const inventoryMatch = materials.find(
+                                  inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
+                                );
+                                const isInInventory = !!inventoryMatch;
+                                return (
+                                  <div>
+                                    <div className="text-xs text-gray-500">{mat.material_name}</div>
+                                    {mat.brand && (
+                                      <div className="font-semibold text-gray-900">{mat.brand}</div>
+                                    )}
+                                    {/* Inventory status indicator - checks sub-item */}
+                                    {isInInventory ? (
+                                      <div className="flex items-center gap-1 mt-1">
+                                        <CheckCircle className="w-3 h-3 text-green-500" />
+                                        <span className="text-[10px] text-green-600">In Stock: {inventoryMatch.current_stock} {inventoryMatch.unit}</span>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1 mt-1">
+                                        <Package className="w-3 h-3 text-orange-500" />
+                                        <span className="text-[10px] text-orange-600">Awaiting Vendor</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()
+                            ) : (
+                              // Multiple materials - show View button
+                              <button
+                                onClick={() => setMaterialsViewModal({
+                                  show: true,
+                                  materials: req.materials_data || [],
+                                  requestNumber: req.request_number || null
+                                })}
+                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                              >
+                                <Package className="w-3.5 h-3.5 mr-1.5" />
+                                View {req.materials_data.length} Materials
+                              </button>
+                            )
+                          ) : (
+                            // Single material without materials_data
+                            (() => {
+                              // Check inventory against sub-item (brand) name, not item name
+                              const subItemName = req.brand || req.material_name;
+                              const inventoryMatch = materials.find(
+                                inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
+                              );
+                              const isInInventory = !!inventoryMatch;
+                              return (
+                                <div>
+                                  <div className="text-xs text-gray-500">{req.material_name}</div>
+                                  {req.brand && <div className="font-semibold text-gray-900">{req.brand}</div>}
+                                  {/* Inventory status indicator - checks sub-item */}
+                                  {isInInventory ? (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <CheckCircle className="w-3 h-3 text-green-500" />
+                                      <span className="text-[10px] text-green-600">In Stock: {inventoryMatch.current_stock} {inventoryMatch.unit}</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <Package className="w-3 h-3 text-orange-500" />
+                                      <span className="text-[10px] text-orange-600">Awaiting Vendor</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()
+                          )}
                           {/* Show source type badge for vendor deliveries */}
                           {req.source_type === 'from_vendor_delivery' && (
                             <span className="inline-flex items-center mt-1 px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 border border-orange-300">
@@ -752,7 +866,10 @@ const StockOutPage: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-4 py-4 text-sm font-bold text-cyan-600">
-                        {req.quantity} {req.material_details?.unit || ''}
+                        {/* Show materials count for grouped requests */}
+                        {req.materials_count && req.materials_count > 1
+                          ? `${req.materials_count} items`
+                          : `${req.quantity} ${req.material_details?.unit || ''}`}
                       </td>
                       <td className="px-4 py-4 text-sm">
                         {/* For vendor delivery, show destination instead of stock */}
@@ -775,28 +892,47 @@ const StockOutPage: React.FC = () => {
                       <td className="px-4 py-4">
                         <div className="flex gap-2 flex-wrap">
                           {normalizeStatus(req.status) === 'PENDING' && (
-                            <>
-                              <button
-                                onClick={() => handleApproveRequest(req.request_id!)}
-                                className={`px-3 py-1.5 text-xs rounded-lg font-medium ${
-                                  req.source_type === 'from_vendor_delivery'
-                                    ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
-                                    : 'bg-green-100 text-green-700 hover:bg-green-200'
-                                }`}
-                                aria-label={req.source_type === 'from_vendor_delivery'
-                                  ? `Confirm vendor delivery ${req.request_number}`
-                                  : `Approve request ${req.request_number}`}
-                              >
-                                {req.source_type === 'from_vendor_delivery' ? 'Confirm Receipt' : 'Approve'}
-                              </button>
-                              <button
-                                onClick={() => handleRejectRequest(req.request_id!)}
-                                className="px-3 py-1.5 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-medium"
-                                aria-label={`Reject request ${req.request_number}`}
-                              >
-                                Reject
-                              </button>
-                            </>
+                            (() => {
+                              // Check if sub-item is in inventory - use brand (sub-item) for check
+                              const matData = req.materials_data?.[0];
+                              const subItemName = matData?.brand || matData?.material_name || req.brand || req.material_name;
+                              const isInInventory = materials.some(
+                                inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
+                              );
+                              const isAwaitingVendor = !isInInventory;
+
+                              return (
+                                <>
+                                  <button
+                                    onClick={() => handleApproveRequest(req.request_id!)}
+                                    disabled={isAwaitingVendor}
+                                    className={`px-3 py-1.5 text-xs rounded-lg font-medium ${
+                                      isAwaitingVendor
+                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                        : req.source_type === 'from_vendor_delivery'
+                                          ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                                          : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                    }`}
+                                    aria-label={req.source_type === 'from_vendor_delivery'
+                                      ? `Confirm vendor delivery ${req.request_number}`
+                                      : `Approve request ${req.request_number}`}
+                                    title={isAwaitingVendor ? 'Material not yet in inventory - awaiting vendor delivery' : ''}
+                                  >
+                                    {req.source_type === 'from_vendor_delivery' ? 'Confirm Receipt' : 'Approve'}
+                                  </button>
+                                  {/* Hide Reject button for vendor deliveries */}
+                                  {req.source_type !== 'from_vendor_delivery' && (
+                                    <button
+                                      onClick={() => handleRejectRequest(req.request_id!)}
+                                      className="px-3 py-1.5 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-medium"
+                                      aria-label={`Reject request ${req.request_number}`}
+                                    >
+                                      Reject
+                                    </button>
+                                  )}
+                                </>
+                              );
+                            })()
                           )}
                           {(req.status === 'APPROVED' || req.status === 'approved') && (
                             <button
@@ -1342,6 +1478,120 @@ const StockOutPage: React.FC = () => {
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Reject Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Materials View Modal */}
+      {materialsViewModal.show && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-4 border-b border-blue-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <Package className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Materials - Request #{materialsViewModal.requestNumber}
+                    </h3>
+                    <p className="text-sm text-gray-600">
+                      {materialsViewModal.materials.length} materials in this request
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMaterialsViewModal({ show: false, materials: [], requestNumber: null })}
+                  className="p-2 hover:bg-blue-200 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5 text-gray-600" />
+                </button>
+              </div>
+            </div>
+
+            {/* Materials List */}
+            <div className="p-4 max-h-96 overflow-y-auto">
+              <div className="space-y-3">
+                {materialsViewModal.materials.map((mat: any, idx: number) => {
+                  // Check if material exists in inventory - use sub-item (brand) for check
+                  const subItemName = mat.brand || mat.material_name;
+                  const inventoryMatch = materials.find(
+                    inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
+                  );
+                  const isInInventory = !!inventoryMatch;
+                  const currentStock = inventoryMatch?.current_stock || 0;
+                  const hasEnoughStock = isInInventory && currentStock >= (mat.quantity || 0);
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-lg border ${
+                        !isInInventory
+                          ? 'bg-orange-50 border-orange-200'
+                          : hasEnoughStock
+                            ? 'bg-green-50 border-green-200'
+                            : 'bg-yellow-50 border-yellow-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="text-xs text-gray-500">{mat.material_name}</div>
+                          {mat.brand && <div className="font-semibold text-gray-900">{mat.brand}</div>}
+                          {mat.specification && <div className="text-xs text-gray-400">{mat.specification}</div>}
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-bold text-cyan-600">
+                            {mat.quantity} {mat.unit || 'nos'}
+                          </div>
+                          {mat.unit_price > 0 && (
+                            <div className="text-xs text-gray-500">
+                              AED {mat.unit_price?.toLocaleString()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {/* Inventory Status */}
+                      <div className="mt-2 pt-2 border-t border-gray-200">
+                        {!isInInventory ? (
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <Package className="w-3.5 h-3.5 text-orange-500" />
+                            <span className="text-orange-600 font-medium">Awaiting Vendor Delivery</span>
+                          </div>
+                        ) : hasEnoughStock ? (
+                          <div className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                              <span className="text-green-600 font-medium">Available in inventory</span>
+                            </div>
+                            <span className="text-gray-600">Stock: {currentStock} {inventoryMatch?.unit || mat.unit || 'nos'}</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <ArrowUpCircle className="w-3.5 h-3.5 text-yellow-500" />
+                              <span className="text-yellow-600 font-medium">Low stock</span>
+                            </div>
+                            <span className="text-gray-600">Stock: {currentStock} {inventoryMatch?.unit || mat.unit || 'nos'} (need {mat.quantity})</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-end">
+              <button
+                onClick={() => setMaterialsViewModal({ show: false, materials: [], requestNumber: null })}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+              >
+                Close
               </button>
             </div>
           </div>

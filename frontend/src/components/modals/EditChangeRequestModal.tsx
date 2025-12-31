@@ -494,7 +494,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                               <input
                                 type="number"
                                 min="0.01"
-                                step="0.01"
+                                step="any"
                                 value={material.quantity || ''}
                                 onChange={(e) => {
                                   const newQty = parseFloat(e.target.value) || 0;
@@ -505,6 +505,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                                   }
                                   handleMaterialChange(material.id, 'quantity', newQty);
                                 }}
+                                onWheel={(e) => e.currentTarget.blur()}
                                 className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
                                   (!isProjectManagerOrEstimator && material.master_material_id !== null && material.master_material_id !== undefined) ? 'bg-gray-50 cursor-not-allowed' :
                                   (material.master_material_id && material.original_boq_quantity && material.quantity > material.original_boq_quantity) ? 'border-red-500 bg-red-50' : ''

@@ -114,6 +114,16 @@ export interface InternalMaterialRequest {
     unit: string;
     unit_price: number;
   };
+  // Grouped Materials fields (for PO with multiple materials)
+  po_child_id?: number;
+  materials_data?: Array<{
+    material_name: string;
+    quantity: number;
+    brand?: string;
+    size?: string;
+    unit?: string;
+  }>;
+  materials_count?: number;
 }
 
 export type MaterialCondition = 'Good' | 'Damaged' | 'Defective';

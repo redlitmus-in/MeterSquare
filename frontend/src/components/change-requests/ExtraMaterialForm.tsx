@@ -2125,8 +2125,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             }`}
                             min="0.01"
                             max={!material.isNew && material.originalBoqQuantity ? material.originalBoqQuantity : undefined}
-                            step="0.01"
+                            step="any"
                             placeholder="Enter quantity"
+                            onWheel={(e) => e.currentTarget.blur()}
                           />
                           {!material.isNew && material.originalBoqQuantity && material.quantity > material.originalBoqQuantity && (
                             <p className="text-[10px] text-red-600 mt-0.5">

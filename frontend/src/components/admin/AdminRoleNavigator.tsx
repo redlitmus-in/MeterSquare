@@ -12,6 +12,7 @@ import { useAdminViewStore } from '@/store/adminViewStore';
 import { useAuthStore } from '@/store/authStore';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { motion, AnimatePresence } from 'framer-motion';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface RoleGroup {
   roleId: number;
@@ -183,7 +184,9 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
           >
             <div className="space-y-1 px-2">
               {loading ? (
-                <div className="text-xs text-gray-500 py-2 text-center">Loading...</div>
+                <div className="flex items-center justify-center py-3">
+                  <ModernLoadingSpinners size="xs" />
+                </div>
               ) : roleGroups.length === 0 ? (
                 <div className="text-xs text-gray-500 py-2 text-center">No users found</div>
               ) : (

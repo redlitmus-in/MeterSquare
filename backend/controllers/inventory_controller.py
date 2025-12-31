@@ -1352,15 +1352,146 @@ def approve_internal_request(request_id):
 
         current_user = g.user.get('email', 'system')
 
-        # Handle vendor delivery requests differently
-        # These are materials coming from vendor, not from existing inventory
+        # Handle vendor delivery requests - ADD to inventory then DEDUCT (proper audit trail)
         if internal_req.source_type == 'from_vendor_delivery':
             # Validate destination site exists for vendor deliveries
             if not internal_req.final_destination_site or not internal_req.final_destination_site.strip():
                 return jsonify({'error': 'Final destination site is required for vendor deliveries'}), 400
 
-            # Vendor delivery confirmation - no inventory deduction needed
-            # Materials go directly from vendor to site
+            # Check if this is a grouped materials request
+            materials_data = internal_req.materials_data
+            transaction_details = []
+
+            if materials_data and isinstance(materials_data, list) and len(materials_data) > 0:
+                # GROUPED VENDOR DELIVERY - Multiple materials
+                print(f"Processing grouped vendor delivery: {len(materials_data)} materials")
+
+                for mat in materials_data:
+                    mat_name = mat.get('material_name', '')
+                    mat_qty = float(mat.get('quantity', 0))
+                    mat_unit = mat.get('unit', 'nos')
+                    mat_price = float(mat.get('unit_price', 0) or 0)
+
+                    # Find matching inventory material by name (case-insensitive)
+                    inv_material = InventoryMaterial.query.filter(
+                        db.func.lower(InventoryMaterial.material_name) == mat_name.lower()
+                    ).first()
+
+                    if inv_material:
+                        # Step 1: ADD to inventory (received from vendor)
+                        inv_material.current_stock += mat_qty
+                        inv_material.last_modified_at = datetime.utcnow()
+                        inv_material.last_modified_by = current_user
+
+                        # Create RECEIVING transaction
+                        receive_transaction = InventoryTransaction(
+                            inventory_material_id=inv_material.inventory_material_id,
+                            transaction_type='RECEIVING',
+                            quantity=mat_qty,
+                            unit_price=mat_price or inv_material.unit_price,
+                            total_amount=mat_qty * (mat_price or inv_material.unit_price),
+                            reference_number=f'VD-{internal_req.request_number}',
+                            project_id=internal_req.project_id,
+                            notes=f'Received from vendor - Request #{internal_req.request_number}',
+                            created_by=current_user
+                        )
+                        db.session.add(receive_transaction)
+
+                        # Step 2: DEDUCT from inventory (sent to site)
+                        inv_material.current_stock -= mat_qty
+                        inv_material.last_modified_at = datetime.utcnow()
+
+                        # Create WITHDRAWAL transaction
+                        withdraw_transaction = InventoryTransaction(
+                            inventory_material_id=inv_material.inventory_material_id,
+                            transaction_type='WITHDRAWAL',
+                            quantity=mat_qty,
+                            unit_price=mat_price or inv_material.unit_price,
+                            total_amount=mat_qty * (mat_price or inv_material.unit_price),
+                            reference_number=f'VD-{internal_req.request_number}',
+                            project_id=internal_req.project_id,
+                            notes=f'Dispatched to {internal_req.final_destination_site} - Vendor Delivery #{internal_req.request_number}',
+                            created_by=current_user
+                        )
+                        db.session.add(withdraw_transaction)
+
+                        transaction_details.append({
+                            'material_name': mat_name,
+                            'quantity': mat_qty,
+                            'unit': mat_unit,
+                            'action': 'received_and_dispatched'
+                        })
+                        print(f"Vendor delivery: {mat_name} x{mat_qty} {mat_unit} → received and dispatched to {internal_req.final_destination_site}")
+                    else:
+                        # Material not in inventory - just log it
+                        transaction_details.append({
+                            'material_name': mat_name,
+                            'quantity': mat_qty,
+                            'unit': mat_unit,
+                            'action': 'skipped_not_in_inventory'
+                        })
+                        print(f"Material '{mat_name}' not found in inventory - skipping transaction")
+
+            else:
+                # SINGLE MATERIAL VENDOR DELIVERY
+                mat_name = internal_req.material_name
+                mat_qty = internal_req.quantity
+
+                # Find matching inventory material
+                inv_material = InventoryMaterial.query.filter(
+                    db.func.lower(InventoryMaterial.material_name) == mat_name.lower()
+                ).first()
+
+                if inv_material:
+                    # Step 1: ADD to inventory
+                    inv_material.current_stock += mat_qty
+                    inv_material.last_modified_at = datetime.utcnow()
+                    inv_material.last_modified_by = current_user
+
+                    receive_transaction = InventoryTransaction(
+                        inventory_material_id=inv_material.inventory_material_id,
+                        transaction_type='RECEIVING',
+                        quantity=mat_qty,
+                        unit_price=inv_material.unit_price,
+                        total_amount=mat_qty * inv_material.unit_price,
+                        reference_number=f'VD-{internal_req.request_number}',
+                        project_id=internal_req.project_id,
+                        notes=f'Received from vendor - Request #{internal_req.request_number}',
+                        created_by=current_user
+                    )
+                    db.session.add(receive_transaction)
+
+                    # Step 2: DEDUCT from inventory
+                    inv_material.current_stock -= mat_qty
+
+                    withdraw_transaction = InventoryTransaction(
+                        inventory_material_id=inv_material.inventory_material_id,
+                        transaction_type='WITHDRAWAL',
+                        quantity=mat_qty,
+                        unit_price=inv_material.unit_price,
+                        total_amount=mat_qty * inv_material.unit_price,
+                        reference_number=f'VD-{internal_req.request_number}',
+                        project_id=internal_req.project_id,
+                        notes=f'Dispatched to {internal_req.final_destination_site} - Vendor Delivery #{internal_req.request_number}',
+                        created_by=current_user
+                    )
+                    db.session.add(withdraw_transaction)
+
+                    transaction_details.append({
+                        'material_name': mat_name,
+                        'quantity': mat_qty,
+                        'action': 'received_and_dispatched'
+                    })
+                    print(f"Vendor delivery: {mat_name} x{mat_qty} → received and dispatched to {internal_req.final_destination_site}")
+                else:
+                    transaction_details.append({
+                        'material_name': mat_name,
+                        'quantity': mat_qty,
+                        'action': 'skipped_not_in_inventory'
+                    })
+                    print(f"Material '{mat_name}' not found in inventory - skipping transaction")
+
+            # Approve the request
             internal_req.status = 'APPROVED'
             internal_req.approved_by = current_user
             internal_req.approved_at = datetime.utcnow()
@@ -1369,24 +1500,128 @@ def approve_internal_request(request_id):
 
             db.session.commit()
 
-            print(f"Vendor delivery confirmed: request_id={request_id}, material={internal_req.material_name}, "
-                  f"quantity={internal_req.quantity}, destination={internal_req.final_destination_site}, "
-                  f"approved_by={current_user}")
+            processed_count = len([t for t in transaction_details if t.get('action') == 'received_and_dispatched'])
+            skipped_count = len([t for t in transaction_details if t.get('action') == 'skipped_not_in_inventory'])
 
             return jsonify({
                 'success': True,
-                'message': 'Vendor delivery confirmed! Materials routed to site.',
+                'message': f'Vendor delivery confirmed! {processed_count} materials tracked in inventory, {skipped_count} skipped (not in inventory).',
                 'request': internal_req.to_dict(),
                 'source_type': 'from_vendor_delivery',
-                'material_details': {
-                    'material_name': internal_req.material_name,
-                    'quantity': internal_req.quantity,
-                    'destination': internal_req.final_destination_site,
-                    'routed_from': 'Vendor Delivery'
-                }
+                'transaction_details': transaction_details,
+                'destination': internal_req.final_destination_site
             }), 200
 
         # Regular store request - validate and deduct from inventory
+        # Check if this is a grouped materials request
+        materials_data = internal_req.materials_data
+
+        if materials_data and isinstance(materials_data, list) and len(materials_data) > 0:
+            # GROUPED MATERIALS REQUEST - Handle multiple materials
+            print(f"Processing grouped materials request: {len(materials_data)} materials")
+
+            # Step 1: Find inventory items for all materials and check stock
+            materials_to_deduct = []
+            insufficient_stock = []
+
+            for mat in materials_data:
+                mat_name = mat.get('material_name', '')
+                mat_qty = float(mat.get('quantity', 0))
+                mat_unit = mat.get('unit', 'nos')
+
+                # Find matching inventory material by name (case-insensitive)
+                inv_material = InventoryMaterial.query.filter(
+                    db.func.lower(InventoryMaterial.material_name) == mat_name.lower()
+                ).first()
+
+                if inv_material:
+                    # Check if sufficient stock available
+                    if inv_material.current_stock < mat_qty:
+                        insufficient_stock.append({
+                            'material_name': mat_name,
+                            'requested': mat_qty,
+                            'available': inv_material.current_stock,
+                            'unit': mat_unit
+                        })
+                    else:
+                        materials_to_deduct.append({
+                            'inventory_material': inv_material,
+                            'quantity': mat_qty,
+                            'material_name': mat_name,
+                            'unit': mat_unit
+                        })
+                else:
+                    # Material not found in inventory - skip deduction but log
+                    print(f"Material '{mat_name}' not found in inventory - skipping deduction")
+
+            # If any material has insufficient stock, return error
+            if insufficient_stock:
+                error_details = ', '.join([
+                    f"{item['material_name']}: need {item['requested']} {item['unit']}, have {item['available']}"
+                    for item in insufficient_stock
+                ])
+                return jsonify({
+                    'error': f'Insufficient stock for some materials: {error_details}',
+                    'insufficient_materials': insufficient_stock
+                }), 400
+
+            # Step 2: Deduct all materials from inventory
+            transactions = []
+            deduction_details = []
+
+            for item in materials_to_deduct:
+                inv_mat = item['inventory_material']
+                qty = item['quantity']
+
+                previous_stock = inv_mat.current_stock
+                inv_mat.current_stock -= qty
+                inv_mat.last_modified_at = datetime.utcnow()
+                inv_mat.last_modified_by = current_user
+
+                # Create withdrawal transaction
+                total_amount = qty * inv_mat.unit_price
+                new_transaction = InventoryTransaction(
+                    inventory_material_id=inv_mat.inventory_material_id,
+                    transaction_type='WITHDRAWAL',
+                    quantity=qty,
+                    unit_price=inv_mat.unit_price,
+                    total_amount=total_amount,
+                    reference_number=f'REQ-{internal_req.request_number}',
+                    project_id=internal_req.project_id,
+                    notes=f'Approved grouped request #{internal_req.request_number} - {item["material_name"]}',
+                    created_by=current_user
+                )
+                db.session.add(new_transaction)
+                transactions.append(new_transaction)
+
+                deduction_details.append({
+                    'material_name': item['material_name'],
+                    'previous_stock': previous_stock,
+                    'deducted': qty,
+                    'new_stock': inv_mat.current_stock,
+                    'unit': item['unit']
+                })
+
+                print(f"Deducted {qty} {item['unit']} of '{item['material_name']}' from inventory (was {previous_stock}, now {inv_mat.current_stock})")
+
+            # Step 3: Approve the request
+            internal_req.status = 'APPROVED'
+            internal_req.approved_by = current_user
+            internal_req.approved_at = datetime.utcnow()
+            internal_req.last_modified_by = current_user
+
+            db.session.commit()
+
+            return jsonify({
+                'success': True,
+                'message': f'Grouped request approved! {len(materials_to_deduct)} materials deducted from inventory.',
+                'request': internal_req.to_dict(),
+                'deduction_details': deduction_details,
+                'materials_processed': len(materials_to_deduct),
+                'materials_skipped': len(materials_data) - len(materials_to_deduct)
+            }), 200
+
+        # SINGLE MATERIAL REQUEST - Original logic
         if not internal_req.inventory_material_id:
             return jsonify({'error': 'inventory_material_id is required for approval'}), 400
 

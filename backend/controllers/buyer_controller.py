@@ -2428,47 +2428,55 @@ def complete_purchase():
         # NEW FEATURE: Auto-create Internal Material Requests
         # These requests go to Production Manager so they know
         # which materials to dispatch to which site
+        # IMPORTANT: Skip if this CR has POChildren - they handle their own requests
         # ========================================
         created_imr_count = 0
-        try:
-            # Get project details for final destination
-            project = Project.query.get(cr.project_id)
-            final_destination = project.project_name if project else f"Project {cr.project_id}"
 
-            # Create Internal Material Request for each material in the CR
-            for sub_item in sub_items_data:
-                if isinstance(sub_item, dict):
-                    imr = InternalMaterialRequest(
-                        cr_id=cr.cr_id,
-                        project_id=cr.project_id,
-                        request_buyer_id=buyer_id,
-                        material_name=sub_item.get('sub_item_name') or sub_item.get('material_name', 'Unknown'),
-                        quantity=sub_item.get('quantity', 0),
-                        brand=sub_item.get('brand', ''),
-                        size=sub_item.get('size', ''),
-                        unit=sub_item.get('unit', 'pcs'),
-                        unit_price=sub_item.get('unit_price', 0),
-                        total_cost=sub_item.get('total_price', 0),
+        # Check if this CR has POChildren - if so, skip individual request creation
+        # POChildren have their own completion flow via complete_po_child_purchase() which creates GROUPED requests
+        po_children_exist = POChild.query.filter_by(parent_cr_id=cr.cr_id, is_deleted=False).first() is not None
+        if po_children_exist:
+            log.info(f"CR-{cr_id} has POChildren - skipping individual request creation (handled by POChild completion)")
+        else:
+            try:
+                # Get project details for final destination
+                project = Project.query.get(cr.project_id)
+                final_destination = project.project_name if project else f"Project {cr.project_id}"
 
-                        # NEW FIELDS for vendor delivery tracking
-                        source_type='from_vendor_delivery',
-                        status='awaiting_vendor_delivery',
-                        vendor_delivery_confirmed=False,
-                        final_destination_site=final_destination,
-                        routed_by_buyer_id=buyer_id,
-                        routed_to_store_at=datetime.utcnow(),
-                        request_send=True,  # Mark as sent to PM
+                # Create Internal Material Request for each material in the CR
+                for sub_item in sub_items_data:
+                    if isinstance(sub_item, dict):
+                        imr = InternalMaterialRequest(
+                            cr_id=cr.cr_id,
+                            project_id=cr.project_id,
+                            request_buyer_id=buyer_id,
+                            material_name=sub_item.get('sub_item_name') or sub_item.get('material_name', 'Unknown'),
+                            quantity=sub_item.get('quantity', 0),
+                            brand=sub_item.get('brand', ''),
+                            size=sub_item.get('size', ''),
+                            unit=sub_item.get('unit', 'pcs'),
+                            unit_price=sub_item.get('unit_price', 0),
+                            total_cost=sub_item.get('total_price', 0),
 
-                        created_at=datetime.utcnow()
-                    )
-                    db.session.add(imr)
-                    created_imr_count += 1
+                            # NEW FIELDS for vendor delivery tracking
+                            source_type='from_vendor_delivery',
+                            status='awaiting_vendor_delivery',
+                            vendor_delivery_confirmed=False,
+                            final_destination_site=final_destination,
+                            routed_by_buyer_id=buyer_id,
+                            routed_to_store_at=datetime.utcnow(),
+                            request_send=True,  # Mark as sent to PM
 
-            log.info(f"✅ Created {created_imr_count} Internal Material Requests for CR-{cr_id}")
+                            created_at=datetime.utcnow()
+                        )
+                        db.session.add(imr)
+                        created_imr_count += 1
 
-        except Exception as imr_error:
-            log.error(f"❌ Error creating Internal Material Requests: {imr_error}")
-            # Don't fail the whole request, but log the error
+                log.info(f"✅ Created {created_imr_count} Internal Material Requests for CR-{cr_id}")
+
+            except Exception as imr_error:
+                log.error(f"❌ Error creating Internal Material Requests: {imr_error}")
+                # Don't fail the whole request, but log the error
 
         db.session.commit()
 
@@ -5240,50 +5248,76 @@ def get_project_site_engineers(project_id):
             is_deleted=False
         ).all()
 
-        log.info(f"   Found {len(assignments)} PMAssignSS records for project {project_id}")
-
-        for idx, assignment in enumerate(assignments):
-            log.info(f"   Assignment {idx+1}: ss_ids = {assignment.ss_ids}, assigned_to_se_id = {assignment.assigned_to_se_id}")
-
-            # Check ss_ids array
+        # Collect all SE IDs from project assignments (batch fetch to avoid N+1)
+        se_ids_to_fetch = set()
+        for assignment in assignments:
             if assignment.ss_ids and isinstance(assignment.ss_ids, list):
-                for ss_id in assignment.ss_ids:
-                    if ss_id not in seen_ids:
-                        ss_user = User.query.filter_by(
-                            user_id=ss_id,
-                            is_deleted=False
-                        ).first()
-                        if ss_user:
-                            log.info(f"      ✅ Found SE from ss_ids: {ss_user.full_name} (ID: {ss_user.user_id})")
-                            site_engineers.append({
-                                'user_id': ss_user.user_id,
-                                'full_name': ss_user.full_name,
-                                'email': ss_user.email
-                            })
-                            seen_ids.add(ss_user.user_id)
-                        else:
-                            log.warning(f"      ⚠️ User ID {ss_id} from ss_ids not found or deleted")
+                se_ids_to_fetch.update(assignment.ss_ids)
+            if assignment.assigned_to_se_id:
+                se_ids_to_fetch.add(assignment.assigned_to_se_id)
 
-            # Also check assigned_to_se_id (single SE assignment)
-            if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in seen_ids:
-                se_user = User.query.filter_by(
-                    user_id=assignment.assigned_to_se_id,
-                    is_deleted=False
-                ).first()
-                if se_user:
-                    log.info(f"      ✅ Found SE from assigned_to_se_id: {se_user.full_name} (ID: {se_user.user_id})")
-                    site_engineers.append({
-                        'user_id': se_user.user_id,
-                        'full_name': se_user.full_name,
-                        'email': se_user.email
-                    })
-                    seen_ids.add(se_user.user_id)
-                else:
-                    log.warning(f"      ⚠️ User ID {assignment.assigned_to_se_id} from assigned_to_se_id not found or deleted")
+        # Remove already seen IDs and fetch in single query
+        se_ids_to_fetch -= seen_ids
+        if se_ids_to_fetch:
+            se_users = User.query.filter(
+                User.user_id.in_(se_ids_to_fetch),
+                User.is_deleted.is_(False)
+            ).all()
+            for se_user in se_users:
+                site_engineers.append({
+                    'user_id': se_user.user_id,
+                    'full_name': se_user.full_name,
+                    'email': se_user.email
+                })
+                seen_ids.add(se_user.user_id)
 
-        log.info(f"📊 Total site engineers found: {len(site_engineers)}")
-        for se in site_engineers:
-            log.info(f"   - {se['full_name']} ({se['email']})")
+        log.debug(f"Site engineers from project assignments: {len(site_engineers)}")
+
+        # FALLBACK: If no SEs found, get SEs associated with project's PMs
+        if not site_engineers:
+            log.debug("No direct SEs found, checking PMs' associated SEs")
+
+            # Get PM IDs from project (user_id is a JSONB array)
+            pm_ids = []
+            if project.user_id:
+                if isinstance(project.user_id, list):
+                    pm_ids = [int(pid) for pid in project.user_id if pid]
+                elif isinstance(project.user_id, (int, str)):
+                    pm_ids = [int(project.user_id)]
+
+            if pm_ids:
+                # Find all SEs that have been assigned by these PMs (across any project)
+                pm_assignments = PMAssignSS.query.filter(
+                    PMAssignSS.assigned_by_pm_id.in_(pm_ids),
+                    PMAssignSS.is_deleted.is_(False)
+                ).all()
+
+                # Collect SE IDs from PM assignments (batch fetch)
+                pm_se_ids = set()
+                for assignment in pm_assignments:
+                    if assignment.ss_ids and isinstance(assignment.ss_ids, list):
+                        pm_se_ids.update(assignment.ss_ids)
+                    if assignment.assigned_to_se_id:
+                        pm_se_ids.add(assignment.assigned_to_se_id)
+
+                # Remove already seen IDs and fetch in single query
+                pm_se_ids -= seen_ids
+                if pm_se_ids:
+                    pm_se_users = User.query.filter(
+                        User.user_id.in_(pm_se_ids),
+                        User.is_deleted.is_(False)
+                    ).all()
+                    for se_user in pm_se_users:
+                        site_engineers.append({
+                            'user_id': se_user.user_id,
+                            'full_name': se_user.full_name,
+                            'email': se_user.email
+                        })
+                        seen_ids.add(se_user.user_id)
+
+                log.debug(f"After PM fallback: {len(site_engineers)} SEs found")
+
+        log.info(f"Site engineers for project {project_id}: {len(site_engineers)} found")
 
         return jsonify({
             "success": True,
@@ -5294,10 +5328,13 @@ def get_project_site_engineers(project_id):
         }), 200
 
     except Exception as e:
-        log.error(f"❌ Error fetching site engineers for project {project_id}: {str(e)}")
+        log.error(f"Error fetching site engineers for project {project_id}: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"error": f"Failed to fetch site engineers: {str(e)}"}), 500
+        return jsonify({
+            "success": False,
+            "error": f"Failed to fetch site engineers: {str(e)}"
+        }), 500
 
 
 def complete_po_child_purchase(po_child_id):
@@ -5350,12 +5387,31 @@ def complete_po_child_purchase(po_child_id):
         po_child.delivery_routing = 'via_production_manager'
         po_child.store_request_status = 'pending_vendor_delivery'
 
-        db.session.commit()
+        # NOTE: Don't commit yet - wait until IMR is also created so they're atomic
+        # db.session.commit() - REMOVED to fix bug where POChild status was committed but IMR wasn't created
 
         # Create Internal Material Requests for Production Manager
         created_imr_count = 0
         materials_to_route = po_child.materials_data
+
+        # CRITICAL FIX: Handle case where materials_data might be a JSON string
         if materials_to_route:
+            if isinstance(materials_to_route, str):
+                import json
+                try:
+                    materials_to_route = json.loads(materials_to_route)
+                    log.warning(f"POChild {po_child_id} materials_data was string, parsed to list with {len(materials_to_route)} items")
+                except json.JSONDecodeError:
+                    log.error(f"Failed to parse materials_data string for POChild {po_child_id}")
+                    materials_to_route = []
+
+            # Ensure it's a list
+            if not isinstance(materials_to_route, list):
+                log.error(f"POChild {po_child_id} materials_data is not a list: {type(materials_to_route)}")
+                materials_to_route = [materials_to_route] if materials_to_route else []
+
+            log.info(f"POChild {po_child_id}: Processing {len(materials_to_route)} materials for routing to store")
+
             from models.inventory import InternalMaterialRequest
             # notification_service is already imported at top of file
 
@@ -5366,34 +5422,66 @@ def complete_po_child_purchase(po_child_id):
             project_name = project.project_name if project else "Unknown Project"
             final_destination = project.location if project else "Unknown Site"
 
-            for material in materials_to_route:
+            # Prepare grouped materials list for single request
+            grouped_materials = []
+            primary_material_name = None
+
+            for idx, material in enumerate(materials_to_route):
                 if isinstance(material, dict):
-                    imr = InternalMaterialRequest(
-                        cr_id=po_child.parent_cr_id,
-                        project_id=project_id,
-                        request_buyer_id=buyer_id,
-                        material_name=material.get('sub_item_name') or material.get('material_name', 'Unknown'),
-                        quantity=material.get('quantity', 0),
-                        brand=material.get('brand'),
-                        size=material.get('size'),
-                        notes=f"From PO Child #{po_child.id} - Vendor delivery expected",
-                        source_type='from_vendor_delivery',
-                        status='awaiting_vendor_delivery',
-                        final_destination_site=final_destination,
-                        intended_recipient_name=intended_recipient,  # Site engineer selected by buyer
-                        routed_by_buyer_id=buyer_id,
-                        routed_to_store_at=datetime.utcnow(),
-                        request_send=True,
-                        created_at=datetime.utcnow(),
-                        created_by=buyer_name,
-                        last_modified_by=buyer_name
-                    )
-                    db.session.add(imr)
-                    created_imr_count += 1
+                    material_name = material.get('sub_item_name') or material.get('material_name', 'Unknown')
+                    quantity = material.get('quantity', 0)
+                    log.info(f"  Material {idx+1}/{len(materials_to_route)}: {material_name} x {quantity}")
+
+                    grouped_materials.append({
+                        'material_name': material_name,
+                        'quantity': quantity,
+                        'brand': material.get('brand'),
+                        'size': material.get('size'),
+                        'unit': material.get('unit', '')
+                    })
+                    if not primary_material_name:
+                        primary_material_name = material_name
+                else:
+                    log.warning(f"  Skipping material {idx+1}: not a dict, type={type(material)}")
+
+            # Create ONE grouped Internal Material Request (not multiple)
+            if grouped_materials:
+                # Display name shows item category + count
+                display_name = po_child.item_name or primary_material_name
+                if len(grouped_materials) > 1:
+                    display_name = f"{display_name} (+{len(grouped_materials)-1} more)"
+
+                imr = InternalMaterialRequest(
+                    cr_id=po_child.parent_cr_id,
+                    project_id=project_id,
+                    request_buyer_id=buyer_id,
+                    material_name=display_name,
+                    quantity=len(grouped_materials),  # Number of materials
+                    brand=None,
+                    size=None,
+                    notes=f"From {po_child.get_formatted_id()} - {len(grouped_materials)} material(s) - Vendor delivery expected",
+                    source_type='from_vendor_delivery',
+                    status='awaiting_vendor_delivery',
+                    final_destination_site=final_destination,
+                    intended_recipient_name=intended_recipient,
+                    routed_by_buyer_id=buyer_id,
+                    routed_to_store_at=datetime.utcnow(),
+                    po_child_id=po_child.id,  # Link to source POChild
+                    materials_data=grouped_materials,  # All materials in JSONB
+                    materials_count=len(grouped_materials),
+                    request_send=True,
+                    created_at=datetime.utcnow(),
+                    created_by=buyer_name,
+                    last_modified_by=buyer_name
+                )
+                db.session.add(imr)
+                created_imr_count = 1
 
             db.session.commit()
+            log.info(f"POChild {po_child_id}: Created 1 grouped request with {len(grouped_materials)} materials")
 
             # Notify Production Manager about incoming vendor delivery
+            materials_count = len(grouped_materials) if grouped_materials else 0
             if created_imr_count > 0:
                 from models.user import User
                 from models.role import Role
@@ -5405,10 +5493,12 @@ def complete_po_child_purchase(po_child_id):
                     notification_service.create_notification(
                         user_id=pm.user_id,
                         title=f"📦 Incoming Vendor Delivery - {project_name}",
-                        message=f"{buyer_name} has routed {created_imr_count} material(s) from PO Child #{po_child.id} to M2 Store. Expected destination: {final_destination}",
+                        message=f"{buyer_name} has routed {po_child.get_formatted_id()} with {materials_count} material(s) to M2 Store. Expected destination: {final_destination}",
                         type='vendor_delivery_incoming',
                         link=f'/production-manager/stock-out'
                     )
+        else:
+            materials_count = 0
 
         # Check if all PO children for parent CR are completed with eager loading
         all_po_children = POChild.query.options(
@@ -5433,10 +5523,11 @@ def complete_po_child_purchase(po_child_id):
 
         return jsonify({
             "success": True,
-            "message": f"Purchase routed to M2 Store successfully! {created_imr_count} material request(s) created for Production Manager.",
+            "message": f"Purchase routed to M2 Store successfully! 1 request with {materials_count} material(s) created for Production Manager.",
             "po_child": po_child.to_dict(),
             "all_po_children_completed": all_routed,
-            "material_requests_created": created_imr_count,
+            "material_requests_created": 1,
+            "materials_count": materials_count,
             "status": "routed_to_store"
         }), 200
 

@@ -18,6 +18,7 @@ import {
   MessageCircle,
   ExternalLink
 } from 'lucide-react';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { API_BASE_URL } from '@/api/config';
 
 interface DBNotification {
@@ -392,9 +393,8 @@ const SupportDBNotificationPanel: React.FC<SupportDBNotificationPanelProps> = ({
             {/* Notifications List */}
             <div className="max-h-80 overflow-y-auto">
               {isLoading && notifications.length === 0 ? (
-                <div className="py-8 text-center text-gray-500">
-                  <div className="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-2" />
-                  <p className="text-sm">Loading...</p>
+                <div className="py-8 flex justify-center">
+                  <ModernLoadingSpinners size="sm" />
                 </div>
               ) : notifications.length === 0 ? (
                 <div className="py-8 text-center text-gray-500">

@@ -121,6 +121,11 @@ class InternalMaterialRequest(db.Model):
     routed_by_buyer_id = db.Column(db.Integer, nullable=True)  # Buyer who routed this
     routed_to_store_at = db.Column(db.DateTime, nullable=True)  # When buyer completed routing
 
+    # Grouped Materials (for vendor delivery with multiple materials - Added 2025-12-31)
+    po_child_id = db.Column(db.Integer, nullable=True)  # Link to POChild for grouped requests
+    materials_data = db.Column(JSONB, nullable=True)  # All materials in one request: [{name, qty, brand, size}, ...]
+    materials_count = db.Column(db.Integer, default=1)  # Number of materials in this request
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -160,6 +165,10 @@ class InternalMaterialRequest(db.Model):
             'intended_recipient_name': self.intended_recipient_name,
             'routed_by_buyer_id': self.routed_by_buyer_id,
             'routed_to_store_at': self.routed_to_store_at.isoformat() if self.routed_to_store_at else None,
+            # Grouped Materials fields
+            'po_child_id': self.po_child_id,
+            'materials_data': self.materials_data,
+            'materials_count': self.materials_count or 1,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by,
             'last_modified_at': self.last_modified_at.isoformat() if self.last_modified_at else None,

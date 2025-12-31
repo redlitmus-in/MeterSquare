@@ -110,6 +110,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Default template state
   const [isSavingDefault, setIsSavingDefault] = useState(false);
@@ -164,6 +165,9 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
+      }
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
       }
     };
   }, [lpoData, autoSaveLpoCustomization]);
@@ -505,10 +509,17 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
           : 'Purchase order email sent to vendor successfully!';
       showSuccess(message);
 
-      setTimeout(() => {
-        onEmailSent?.();
-        handleClose();
-      }, 2000);
+      // Close modal first, then trigger refresh in background
+      handleClose();
+
+      // Small delay then trigger cache refresh (async, doesn't block)
+      refreshTimeoutRef.current = setTimeout(async () => {
+        try {
+          await onEmailSent?.();
+        } catch (error) {
+          console.error('Failed to refresh data after email send:', error);
+        }
+      }, 500);
     } catch (error: any) {
       console.error('Error sending email:', error);
       showError(error.message || 'Failed to send email to vendor');
@@ -534,11 +545,17 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
       showSuccess('Purchase order sent via WhatsApp successfully!');
 
-      // Close modal and refresh
-      setTimeout(() => {
-        onEmailSent?.();
-        handleClose();
-      }, 1500);
+      // Close modal first, then trigger refresh in background
+      handleClose();
+
+      // Small delay then trigger cache refresh (async, doesn't block)
+      refreshTimeoutRef.current = setTimeout(async () => {
+        try {
+          await onEmailSent?.();
+        } catch (error) {
+          console.error('Failed to refresh data after WhatsApp send:', error);
+        }
+      }, 500);
     } catch (error: any) {
       console.error('Error sending WhatsApp:', error);
       showError(error.message || 'Failed to send WhatsApp message');

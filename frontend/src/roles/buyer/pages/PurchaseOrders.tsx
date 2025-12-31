@@ -592,6 +592,43 @@ const PurchaseOrders: React.FC = () => {
     }
   };
 
+  // Helper function for POChild completion with proper cache invalidation
+  const handlePOChildComplete = async (poChildId: number, notes: string = '', recipient: string = '') => {
+    try {
+      setCompletingPurchaseId(poChildId);
+      await buyerService.completePOChildPurchase(poChildId, notes, recipient);
+
+      showSuccess('Purchase marked as complete and sent to Production Manager!');
+
+      // Remove cache completely and refetch fresh data (same as handleMarkAsComplete)
+      removeQueries(['purchases']);
+      removeQueries(['pending-purchases']);
+      removeQueries(['buyer-pending-purchases']);
+      removeQueries(['buyer-completed-purchases']);
+      removeQueries(['buyer-approved-po-children']);
+      removeQueries(['buyer-pending-po-children']);
+      removeQueries(['change-requests']);
+      removeQueries(['dashboard']);
+
+      // Small delay to ensure backend has processed the change
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      await refetchPending();
+      await refetchCompleted();
+      await refetchApprovedPOChildren();
+
+      // Switch to vendor_approved subtab to show the change
+      setOngoingSubTab('vendor_approved');
+
+      return true;
+    } catch (error: any) {
+      showError(error.message || 'Failed to complete purchase');
+      return false;
+    } finally {
+      setCompletingPurchaseId(null);
+    }
+  };
+
   const handleGetFromStore = async (purchase: Purchase) => {
     try {
       setSelectedPurchase(purchase);
@@ -1153,17 +1190,8 @@ const PurchaseOrders: React.FC = () => {
                                           setLoadingSiteEngineers(false);
                                         }
                                       } else {
-                                        // No project_id, complete directly
-                                        try {
-                                          setCompletingPurchaseId(poChild.id);
-                                          await buyerService.completePOChildPurchase(poChild.id);
-                                          showSuccess('Purchase marked as complete!');
-                                          refetchApprovedPOChildren();
-                                        } catch (error: any) {
-                                          showError(error.message || 'Failed to complete purchase');
-                                        } finally {
-                                          setCompletingPurchaseId(null);
-                                        }
+                                        // No project_id, complete directly with proper cache invalidation
+                                        await handlePOChildComplete(poChild.id);
                                       }
                                     }}
                                     disabled={completingPurchaseId === poChild.id}
@@ -2041,17 +2069,8 @@ const PurchaseOrders: React.FC = () => {
                                   setLoadingSiteEngineers(false);
                                 }
                               } else {
-                                // No project_id, complete directly
-                                try {
-                                  setCompletingPurchaseId(poChild.id);
-                                  await buyerService.completePOChildPurchase(poChild.id);
-                                  showSuccess('Purchase marked as complete!');
-                                  refetchApprovedPOChildren();
-                                } catch (error: any) {
-                                  showError(error.message || 'Failed to complete purchase');
-                                } finally {
-                                  setCompletingPurchaseId(null);
-                                }
+                                // No project_id, complete directly with proper cache invalidation
+                                await handlePOChildComplete(poChild.id);
                               }
                             }}
                             disabled={completingPurchaseId === poChild.id}
@@ -2747,17 +2766,8 @@ const PurchaseOrders: React.FC = () => {
                                         setLoadingSiteEngineers(false);
                                       }
                                     } else {
-                                      // No project_id, complete directly
-                                      try {
-                                        setCompletingPurchaseId(poChild.id);
-                                        await buyerService.completePOChildPurchase(poChild.id);
-                                        showSuccess('Purchase marked as complete!');
-                                        refetchApprovedPOChildren();
-                                      } catch (error: any) {
-                                        showError(error.message || 'Failed to complete purchase');
-                                      } finally {
-                                        setCompletingPurchaseId(null);
-                                      }
+                                      // No project_id, complete directly with proper cache invalidation
+                                      await handlePOChildComplete(poChild.id);
                                     }
                                   }}
                                   disabled={completingPurchaseId === poChild.id}
@@ -3215,10 +3225,14 @@ const PurchaseOrders: React.FC = () => {
             removeQueries(['purchases']);
             removeQueries(['pending-purchases']);
             removeQueries(['buyer-pending-purchases']);
+            removeQueries(['buyer-approved-po-children']);
+            removeQueries(['buyer-pending-po-children']);
+            removeQueries(['dashboard']);
             // Small delay to ensure backend has processed the change
             await new Promise(resolve => setTimeout(resolve, 500));
             await refetchPending();
             await refetchCompleted();
+            await refetchApprovedPOChildren();
           }}
         />
       )}
@@ -3446,23 +3460,19 @@ const PurchaseOrders: React.FC = () => {
                       return;
                     }
 
-                    try {
-                      setCompletingPurchaseId(selectedPOChildForCompletion.id);
-                      await buyerService.completePOChildPurchase(
-                        selectedPOChildForCompletion.id,
-                        '',
-                        selectedSiteEngineer
-                      );
-                      showSuccess('Purchase marked as complete and routed to Production Manager!');
+                    // Use the helper function with proper cache invalidation
+                    const success = await handlePOChildComplete(
+                      selectedPOChildForCompletion.id,
+                      '',
+                      selectedSiteEngineer
+                    );
+
+                    if (success) {
+                      // Close modal and reset state
                       setIsSiteEngineerModalOpen(false);
                       setSelectedPOChildForCompletion(null);
                       setSiteEngineersForProject([]);
                       setSelectedSiteEngineer('');
-                      refetchApprovedPOChildren();
-                    } catch (error: any) {
-                      showError(error.message || 'Failed to complete purchase');
-                    } finally {
-                      setCompletingPurchaseId(null);
                     }
                   }}
                   disabled={completingPurchaseId !== null || !selectedSiteEngineer}

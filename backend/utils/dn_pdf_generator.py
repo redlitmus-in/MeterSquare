@@ -302,14 +302,17 @@ class DNPDFGenerator:
         # ==================== SIGNATURE SECTION ====================
         story.append(Spacer(1, 15*mm))
 
+        # Get prepared_by from delivery note data
+        prepared_by = self._escape_html(dn_data.get('prepared_by', '')) or '________________'
+
         sig_data = [
             [
                 Paragraph('<b>Prepared By:</b>', self.styles['DNLabel']),
                 Paragraph('<b>Checked By:</b>', self.styles['DNLabel']),
             ],
             [
-                Paragraph('Production manager', self.styles['DNNormal']),
-                Paragraph('________________', self.styles['DNNormal']),
+                Paragraph(prepared_by, self.styles['DNNormal']),
+                Paragraph(attention_to if attention_to and attention_to != '-' else '________________', self.styles['DNNormal']),
             ],
             [
                 Paragraph('Signature: ________________', self.styles['DNNormal']),
