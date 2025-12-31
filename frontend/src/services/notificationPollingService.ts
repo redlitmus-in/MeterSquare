@@ -127,6 +127,18 @@ class NotificationPollingService {
       const data = await response.json();
 
       if (data.success && data.notifications && Array.isArray(data.notifications)) {
+        // SYNC: Remove local notifications that no longer exist in DB
+        const store = useNotificationStore.getState();
+        const serverIds = new Set(data.notifications.map((n: any) => String(n.id)));
+        const localNotifications = store.notifications;
+        const orphanedNotifications = localNotifications.filter(n => !serverIds.has(String(n.id)));
+
+        if (orphanedNotifications.length > 0) {
+          orphanedNotifications.forEach(n => {
+            store.deleteNotification(String(n.id));
+          });
+        }
+
         const newNotifications = data.notifications.filter((notif: any) => {
           // Skip if already processed
           if (this.processedNotificationIds.has(notif.id)) {
@@ -134,13 +146,11 @@ class NotificationPollingService {
           }
 
           const createdAt = new Date(notif.timestamp || notif.createdAt).getTime();
-          return createdAt > this.lastFetchTime;
+          const isNew = createdAt > this.lastFetchTime;
+          return isNew;
         });
 
         if (newNotifications.length > 0) {
-          if (import.meta.env.DEV) {
-            console.log(`[Polling] Found ${newNotifications.length} new notification(s)`);
-          }
 
           // Add each new notification to the store
           const store = useNotificationStore.getState();
