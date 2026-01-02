@@ -395,13 +395,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-indigo-600',
         children: [
           {
-            name: 'BOQ Comparison',
-            href: buildPath('/record-material'),
-            icon: ShoppingCartIcon,
-            iconSolid: ShoppingSolid,
-            color: 'text-indigo-600'
-          },
-          {
             name: 'Purchase Comparison',
             href: buildPath('/purchase-comparison'),
             icon: DocumentChartBarIcon,
