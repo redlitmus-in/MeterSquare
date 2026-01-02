@@ -57,6 +57,7 @@ const ProjectApprovals = lazy(() => import('@/roles/technical-director/pages/Pro
 const DisposalApprovals = lazy(() => import('@/roles/technical-director/pages/DisposalApprovals'));
 const AssetDisposalApprovals = lazy(() => import('@/roles/technical-director/pages/AssetDisposalApprovals'));
 const ChangeRequestsPage = lazy(() => import('@/roles/technical-director/pages/ChangeRequestsPage'));
+const PurchaseComparison = lazy(() => import('@/roles/technical-director/pages/PurchaseComparison'));
 
 // Project Manager Pages
 const MyProjects = lazy(() => import('@/roles/project-manager/pages/MyProjects'));
@@ -960,6 +961,11 @@ function App() {
             <Route path="asset-disposal-approvals" element={
               <TechnicalDirectorRoute>
                 <AssetDisposalApprovals />
+              </TechnicalDirectorRoute>
+            } />
+            <Route path="purchase-comparison" element={
+              <TechnicalDirectorRoute>
+                <PurchaseComparison />
               </TechnicalDirectorRoute>
             } />
             {/* purchase-orders route moved to general routes (line 916 - RoleSpecificPurchaseOrders) */}

@@ -28,7 +28,8 @@ import {
   PencilSquareIcon as PencilIcon,
   BugAntIcon,
   ExclamationTriangleIcon,
-  WrenchScrewdriverIcon
+  WrenchScrewdriverIcon,
+  DocumentChartBarIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -387,11 +388,27 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       },
       // ========== OPERATIONS & PRODUCTION ==========
       {
-        name: 'Material Procurement',
+        name: 'Profit Comparison',
         href: buildPath('/record-material'),
         icon: ShoppingCartIcon,
         iconSolid: ShoppingSolid,
-        color: 'text-indigo-600'
+        color: 'text-indigo-600',
+        children: [
+          {
+            name: 'BOQ Comparison',
+            href: buildPath('/record-material'),
+            icon: ShoppingCartIcon,
+            iconSolid: ShoppingSolid,
+            color: 'text-indigo-600'
+          },
+          {
+            name: 'Purchase Comparison',
+            href: buildPath('/purchase-comparison'),
+            icon: DocumentChartBarIcon,
+            iconSolid: DocumentChartBarIcon,
+            color: 'text-green-600'
+          }
+        ]
       }
     ];
 
