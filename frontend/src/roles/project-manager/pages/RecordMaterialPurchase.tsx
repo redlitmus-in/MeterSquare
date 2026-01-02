@@ -53,17 +53,16 @@ export default function RecordMaterialPurchase() {
   // Filter BOQs based on active tab
   const filteredBOQList = useMemo(() => {
     if (activeTab === 'live') {
-      // Live projects: Not completed (pm_assigned !== true OR status not indicating completion)
+      // Live projects: All projects except those with project_status 'completed' or 'closed'
       return boqList.filter((boq: any) => {
-        const status = (boq.status || boq.boq_status || '').toLowerCase();
-        const isCompleted = boq.pm_assigned === true || status === 'completed' || status === 'closed';
-        return !isCompleted;
+        const projectStatus = (boq.project_status || '').toLowerCase();
+        return projectStatus !== 'completed' && projectStatus !== 'closed';
       });
     } else {
-      // Completed projects: pm_assigned = true OR status = completed
+      // Completed projects: ONLY projects with project_status 'completed' or 'closed'
       return boqList.filter((boq: any) => {
-        const status = (boq.status || boq.boq_status || '').toLowerCase();
-        return boq.pm_assigned === true || status === 'completed' || status === 'closed';
+        const projectStatus = (boq.project_status || '').toLowerCase();
+        return projectStatus === 'completed' || projectStatus === 'closed';
       });
     }
   }, [boqList, activeTab]);
@@ -196,7 +195,7 @@ export default function RecordMaterialPurchase() {
           <div className="flex items-center gap-3">
             <ShoppingCartIcon className="w-8 h-8 text-blue-600" />
             <div>
-              <h1 className="text-2xl font-bold text-gray-800">Production Management</h1>
+              <h1 className="text-2xl font-bold text-gray-800">Profit Comparison</h1>
               <p className="text-gray-600">Compare original BOQ with actual purchases</p>
             </div>
           </div>
@@ -226,9 +225,8 @@ export default function RecordMaterialPurchase() {
                     <span className="font-semibold">Live Projects</span>
                     <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
                       {boqList.filter((boq: any) => {
-                        const status = (boq.status || boq.boq_status || '').toLowerCase();
-                        const isCompleted = boq.pm_assigned === true || status === 'completed' || status === 'closed';
-                        return !isCompleted;
+                        const projectStatus = (boq.project_status || '').toLowerCase();
+                        return projectStatus !== 'completed' && projectStatus !== 'closed';
                       }).length}
                     </span>
                   </TabsTrigger>
@@ -239,8 +237,8 @@ export default function RecordMaterialPurchase() {
                     <span className="font-semibold">Completed</span>
                     <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">
                       {boqList.filter((boq: any) => {
-                        const status = (boq.status || boq.boq_status || '').toLowerCase();
-                        return boq.pm_assigned === true || status === 'completed' || status === 'closed';
+                        const projectStatus = (boq.project_status || '').toLowerCase();
+                        return projectStatus === 'completed' || projectStatus === 'closed';
                       }).length}
                     </span>
                   </TabsTrigger>
