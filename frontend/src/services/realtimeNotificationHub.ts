@@ -8,6 +8,7 @@ import { supabase } from '@/api/config';
 import { getSecureUserData } from '@/utils/notificationSecurity';
 import { useNotificationStore } from '@/store/notificationStore';
 import { toast } from 'sonner';
+import { navigateTo } from '@/utils/navigationService';
 
 // NOTE: We use toast for INCOMING notifications but with DIFFERENT styling
 // - YOUR actions: toast.success/error (green/red) - shown by component
@@ -39,6 +40,7 @@ class RealtimeNotificationHub {
   private userRole: string | null = null;
   private authToken: string | null = null;
   private processedNotificationIds: Set<string> = new Set();
+  private shownToastIds: Set<string> = new Set(); // Track shown toasts to prevent duplicates
 
   private constructor() {
     this.initialize();
@@ -169,11 +171,12 @@ class RealtimeNotificationHub {
    * Handle incoming notification from Socket.IO
    */
   private async handleIncomingNotification(notification: RealtimeNotification) {
-    // Deduplicate: Skip if already processed
-    if (this.processedNotificationIds.has(notification.id)) {
+    // Deduplicate: Skip if already processed (normalize ID to string for consistent comparison)
+    const notificationIdStr = String(notification.id);
+    if (this.processedNotificationIds.has(notificationIdStr)) {
       return;
     }
-    this.processedNotificationIds.add(notification.id);
+    this.processedNotificationIds.add(notificationIdStr);
 
     // Clean up old IDs (keep last 100)
     if (this.processedNotificationIds.size > 100) {
@@ -203,7 +206,8 @@ class RealtimeNotificationHub {
         (targetRole === 'siteengineer' && (currentRole === 'siteengineer' || currentRole === 'se')) ||
         (targetRole === 'buyer' && (currentRole === 'buyer' || currentRole === 'procurement')) ||
         (targetRole === 'procurement' && (currentRole === 'buyer' || currentRole === 'procurement')) ||
-        (targetRole === 'estimator' && (currentRole === 'estimator' || currentRole === 'estimation'));
+        (targetRole === 'estimator' && (currentRole === 'estimator' || currentRole === 'estimation')) ||
+        targetRole === 'client' || targetRole === 'all';  // Allow client and all roles
 
       if (!roleMatches) {
         return;
@@ -232,8 +236,64 @@ class RealtimeNotificationHub {
     // This is styled differently to distinguish from your own action feedback
     this.showIncomingNotificationPopup(notification);
 
-    // Also show desktop notification (browser notification)
+    // Show desktop notification (browser notification for when minimized/background)
     this.showDesktopNotification(notification);
+  }
+
+  /**
+   * Show desktop (browser) notification
+   * Only shows when browser tab is in background or minimized
+   * When tab is active/focused, user already sees in-app toast
+   */
+  private async showDesktopNotification(notification: RealtimeNotification) {
+    // Prevent duplicate desktop notifications
+    const notifId = `desktop_${notification.id}`;
+    if (this.shownToastIds.has(notifId)) {
+      return;
+    }
+    this.shownToastIds.add(notifId);
+
+    // Check if browser supports notifications
+    if (!('Notification' in window)) {
+      return;
+    }
+
+    // Check permission
+    if (Notification.permission !== 'granted') {
+      return;
+    }
+
+    // Only show desktop notification when tab is NOT active/visible
+    // If user is looking at the app, they'll see the in-app toast
+    const isTabVisible = document.visibilityState === 'visible' && document.hasFocus();
+    if (isTabVisible) {
+      return;
+    }
+
+    try {
+      const actionUrl = (notification as any).actionUrl || notification.metadata?.actionUrl;
+
+      const desktopNotif = new Notification(notification.title, {
+        body: notification.message,
+        icon: '/assets/logo.png',
+        tag: String(notification.id),
+        requireInteraction: notification.priority === 'urgent' || notification.priority === 'high'
+      });
+
+      desktopNotif.onclick = () => {
+        window.focus();
+        desktopNotif.close();
+        if (actionUrl) {
+          // Use SPA navigation to avoid full page reload
+          navigateTo(actionUrl);
+        }
+      };
+
+      // Auto close after 8 seconds
+      setTimeout(() => desktopNotif.close(), 8000);
+    } catch {
+      // Silent fail
+    }
   }
 
   /**
@@ -242,6 +302,19 @@ class RealtimeNotificationHub {
    * Uses info/message style to distinguish from your own actions
    */
   private showIncomingNotificationPopup(notification: RealtimeNotification) {
+    // Prevent duplicate toasts for the same notification
+    const toastId = String(notification.id);
+    if (this.shownToastIds.has(toastId)) {
+      return;
+    }
+    this.shownToastIds.add(toastId);
+
+    // Clean up old toast IDs (keep last 50)
+    if (this.shownToastIds.size > 50) {
+      const ids = Array.from(this.shownToastIds);
+      this.shownToastIds = new Set(ids.slice(-25));
+    }
+
     // Determine icon based on notification type
     const getIcon = () => {
       switch (notification.type) {
@@ -274,69 +347,11 @@ class RealtimeNotificationHub {
       action: (notification as any).actionUrl ? {
         label: 'View',
         onClick: () => {
-          window.location.href = (notification as any).actionUrl;
+          // Use SPA navigation to avoid full page reload
+          navigateTo((notification as any).actionUrl);
         }
       } : undefined,
     });
-  }
-
-  /**
-   * Show desktop (browser) notification
-   * Firefox has stricter requirements - check permissions in Firefox settings
-   */
-  private async showDesktopNotification(notification: RealtimeNotification) {
-    // Check if browser supports notifications
-    if (!('Notification' in window)) {
-      return;
-    }
-
-    // Check permission - Firefox may block if not from user gesture
-    let permission = Notification.permission;
-
-    if (permission === 'default') {
-      try {
-        permission = await Notification.requestPermission();
-      } catch {
-        return;
-      }
-    }
-
-    if (permission !== 'granted') {
-      return;
-    }
-
-    // Create desktop notification with Firefox-compatible options
-    try {
-      const actionUrl = (notification as any).actionUrl || notification.metadata?.actionUrl || notification.metadata?.action_url;
-
-      // Base options that work in all browsers
-      const notifOptions: NotificationOptions = {
-        body: notification.message,
-        icon: window.location.origin + '/assets/logo.png',
-        tag: notification.id
-      };
-
-      // requireInteraction may cause issues in Firefox - only use for urgent
-      if (notification.priority === 'urgent') {
-        notifOptions.requireInteraction = true;
-      }
-
-      const desktopNotif = new Notification(notification.title, notifOptions);
-
-      // Handle click
-      desktopNotif.onclick = () => {
-        window.focus();
-        desktopNotif.close();
-        if (actionUrl) {
-          window.location.href = actionUrl;
-        }
-      };
-
-      // Auto close after 8 seconds
-      setTimeout(() => desktopNotif.close(), 8000);
-    } catch {
-      // Silent fail
-    }
   }
 
   /**
@@ -511,11 +526,12 @@ class RealtimeNotificationHub {
             }
           };
 
-          // Skip if already processed
-          if (this.processedNotificationIds.has(notification.id)) {
+          // Skip if already processed (normalize ID to string)
+          const notifIdStr = String(notification.id);
+          if (this.processedNotificationIds.has(notifIdStr)) {
             continue;
           }
-          this.processedNotificationIds.add(notification.id);
+          this.processedNotificationIds.add(notifIdStr);
 
           const notificationData = {
             id: notification.id,
@@ -544,17 +560,15 @@ class RealtimeNotificationHub {
           const isRecent = (now - notificationTime) < RECENT_THRESHOLD;
 
           // Show popup and desktop notification ONLY for recent AND truly new notifications
-          // Skip if notification already existed in store (prevents desktop spam on page reload)
+          // Skip if notification already existed in store (prevents spam on page reload)
           if (isRecent && !alreadyExists) {
             this.showIncomingNotificationPopup(notification);
             this.showDesktopNotification(notification);
           }
         }
       }
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.error('[NotificationHub] Failed to fetch missed notifications:', error);
-      }
+    } catch {
+      // Silent fail
     }
   }
 

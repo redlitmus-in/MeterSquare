@@ -335,6 +335,9 @@ const ProjectApprovals: React.FC = () => {
     // Note: 'assigned' tab data (pendingDayExtensions) will auto-reload via useEffect when boqs updates
   }, [boqUpdateTimestamp, filterStatus]); // Reload whenever timestamp OR active tab changes
 
+  // State for revision sub-tab (internal/client) from URL
+  const [urlSubTab, setUrlSubTab] = useState<'client' | 'internal'>('client');
+
   // Sync filterStatus with URL when URL changes (e.g., from notification click)
   useEffect(() => {
     const urlTab = searchParams.get('tab');
@@ -350,6 +353,12 @@ const ProjectApprovals: React.FC = () => {
       if (newFilterStatus !== filterStatus) {
         setFilterStatus(newFilterStatus);
       }
+    }
+
+    // Check for subtab parameter (internal/client for revision sub-tabs)
+    const subtab = searchParams.get('subtab');
+    if (subtab === 'internal' || subtab === 'client') {
+      setUrlSubTab(subtab);
     }
 
     // Check if boq_id param is present - could be used to highlight specific BOQ
@@ -1802,6 +1811,7 @@ const ProjectApprovals: React.FC = () => {
               await loadRevisionTabs();
             }}
             refreshTrigger={boqDetailsRefreshTrigger}
+            defaultSubTab={urlSubTab}
           />
         ) : (
           /* Estimations List - Show for all other tabs */

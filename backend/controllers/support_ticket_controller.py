@@ -972,6 +972,20 @@ def admin_close_ticket(ticket_id):
         db.session.commit()
         log.info(f"Ticket closed by admin: {ticket.ticket_number}")
 
+        # Notify client that their ticket was closed
+        try:
+            ComprehensiveNotificationService.notify_ticket_closed_by_admin(
+                ticket_id=ticket.ticket_id,
+                ticket_number=ticket.ticket_number,
+                client_user_id=ticket.reporter_user_id,
+                client_email=ticket.reporter_email,
+                subject=ticket.title,
+                closed_by_name=data.get('admin_name', 'Dev Team'),
+                closing_notes=data.get('notes')
+            )
+        except Exception as e:
+            log.error(f"Failed to send ticket closed notification: {e}")
+
         return jsonify({
             "success": True,
             "message": "Ticket closed successfully",
@@ -1026,15 +1040,37 @@ def add_comment(ticket_id):
         db.session.commit()
         log.info(f"Comment added to ticket {ticket.ticket_number} by {sender_name} ({sender_type})")
 
-        # Only emit real-time event when CLIENT adds comment (not dev team's own actions)
+        # Send notifications based on who added the comment
         if sender_type == 'client':
+            # Client added comment - notify dev team via real-time event + database notification
             try:
                 emit_support_ticket_event('ticket_comment', {
                     **ticket.to_dict(),
                     'new_comment': comment
                 })
+                # Also create database notification for support-management page
+                ComprehensiveNotificationService.notify_ticket_comment_from_client(
+                    ticket_id=ticket.ticket_id,
+                    ticket_number=ticket.ticket_number,
+                    client_name=sender_name,
+                    client_email=sender_email or ticket.reporter_email,
+                    subject=ticket.title
+                )
             except Exception as e:
                 log.error(f"Failed to emit ticket comment event: {e}")
+        else:
+            # Dev team added comment - notify client
+            try:
+                ComprehensiveNotificationService.notify_ticket_comment(
+                    ticket_id=ticket.ticket_id,
+                    ticket_number=ticket.ticket_number,
+                    client_user_id=ticket.reporter_user_id,
+                    client_email=ticket.reporter_email,
+                    subject=ticket.title,
+                    comment_by=sender_name
+                )
+            except Exception as e:
+                log.error(f"Failed to send comment notification to client: {e}")
 
         return jsonify({
             "success": True,

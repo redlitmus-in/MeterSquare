@@ -201,11 +201,20 @@ def get_boq_view_url(user_id: int, boq_id: int, tab: Optional[str] = None) -> st
     )
 
 
-def get_td_approval_url(user_id: int, boq_id: int, tab: Optional[str] = 'pending') -> str:
-    """Get TD approval URL for a specific user"""
+def get_td_approval_url(user_id: int, boq_id: int, tab: Optional[str] = 'pending', subtab: Optional[str] = None) -> str:
+    """Get TD approval URL for a specific user
+
+    Args:
+        user_id: Target user ID
+        boq_id: BOQ ID to navigate to
+        tab: Main tab (pending, revisions, approved, etc.)
+        subtab: Sub-tab within revisions (internal, client)
+    """
     params = {'boq_id': boq_id}
     if tab:
         params['tab'] = tab
+    if subtab:
+        params['subtab'] = subtab
 
     return build_notification_action_url(
         user_id=user_id,

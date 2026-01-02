@@ -53,9 +53,7 @@ import {
   isNotificationSupported,
   notifyNewTicket,
   initializeKnownTickets,
-  isNewTicketForAdmin,
-  notifyNewComment,
-  notifyAdminResponse
+  isNewTicketForAdmin
 } from '@/utils/supportNotificationHelper';
 import SupportDBNotificationPanel from '@/components/support/SupportDBNotificationPanel';
 
@@ -418,20 +416,7 @@ const SupportManagement: React.FC = () => {
       if (response.success) {
         showSuccess('Comment sent successfully');
         setCommentText(prev => ({ ...prev, [ticketId]: '' }));
-
-        // Send notification to the ticket reporter (dev team sent comment)
-        if (ticket) {
-          notifyNewComment(
-            ticket.ticket_number,
-            ticket.title,
-            'Dev Team',
-            'dev_team',
-            ticket.reporter_role || 'estimator',
-            ticket.reporter_email || '',
-            ticketId
-          );
-        }
-
+        // Backend handles notification to client via Socket.IO
         loadTickets(false); // Reload to get updated comments
       }
     } catch (error: any) {

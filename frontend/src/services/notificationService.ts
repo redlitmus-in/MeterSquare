@@ -10,6 +10,7 @@ import {
   createSecureNotificationId
 } from '@/utils/notificationSecurity';
 import { NotificationConfig, getToastDuration, getAutoCloseDuration } from '@/config/notificationConfig';
+import { navigateTo } from '@/utils/navigationService';
 
 export interface NotificationData {
   id: string;
@@ -209,78 +210,9 @@ class NotificationService {
       return;
     }
 
-    // Always add to in-app notifications first
+    // Add to in-app notifications only (browser notifications disabled)
     this.notifyCallbacks(sanitizedNotification);
-
-    // Check permission for browser notifications
-    if (this.permission !== 'granted') {
-      debug.info('Browser notifications not permitted, showing in-app only');
-      return;
-    }
-
-    try {
-      const options: NotificationOptions = {
-        body: sanitizedNotification.message, // Already sanitized
-        icon: '/assets/logo.png', // MeterSquare ERP logo
-        badge: '/assets/logofavi.png',
-        tag: sanitizedNotification.id,
-        data: sanitizedNotification, // Use sanitized data
-        requireInteraction: sanitizedNotification.priority === 'urgent' || sanitizedNotification.priority === 'high',
-        silent: sanitizedNotification.priority === 'low',
-        timestamp: sanitizedNotification.timestamp instanceof Date
-          ? sanitizedNotification.timestamp.getTime()
-          : new Date(sanitizedNotification.timestamp).getTime(),
-        dir: 'ltr',
-        lang: 'en'
-      };
-
-      // Add custom notification sound for high priority
-      if (sanitizedNotification.priority === 'urgent' || sanitizedNotification.priority === 'high') {
-        options.silent = false;
-      }
-
-      // Add action buttons based on notification type (only if URL is valid)
-      if (sanitizedNotification.actionRequired && sanitizedNotification.actionUrl && isValidInternalUrl(sanitizedNotification.actionUrl)) {
-        options.actions = [
-          {
-            action: 'view',
-            title: sanitizedNotification.actionLabel || 'View',
-            icon: '/assets/logo.png'
-          },
-          {
-            action: 'dismiss',
-            title: 'Dismiss',
-            icon: '/assets/logo.png'
-          }
-        ];
-      }
-
-      debug.info('Sending browser notification');
-
-      // Try to use service worker for better handling (works even when tab is closed)
-      if (this.serviceWorkerRegistration && this.serviceWorkerRegistration.active) {
-        debug.info('Using service worker for notification');
-        try {
-          await this.serviceWorkerRegistration.showNotification(sanitizedNotification.title, options);
-        } catch (error) {
-          debug.warn('Service worker notification failed, falling back to direct API:', error);
-          // Fallback to direct notification if service worker fails
-          const browserNotification = new Notification(sanitizedNotification.title, options);
-          this.setupDirectNotificationHandlers(browserNotification, sanitizedNotification);
-        }
-      } else {
-        debug.info('Using direct notification API');
-        // Fallback to regular notification
-        const browserNotification = new Notification(sanitizedNotification.title, options);
-        this.setupDirectNotificationHandlers(browserNotification, sanitizedNotification);
-      }
-
-      // Update browser tab title with notification badge
-      this.updateTabTitle(1);
-
-    } catch (error) {
-      debug.error('Failed to send browser notification:', error);
-    }
+    debug.info('Notification added to in-app store');
   }
 
   // Send email notification (triggers when email is sent)
@@ -505,23 +437,23 @@ class NotificationService {
             const finalUrl = `${fullPath}?boq_id=${boqId}&tab=pending`;
 
             debug.info('Redirecting BOQ notification to:', finalUrl);
-            window.location.href = finalUrl;
+            navigateTo(finalUrl);
           } else if (notification.actionUrl && isValidInternalUrl(notification.actionUrl)) {
             debug.info('Navigating to notification action URL');
-            window.location.href = notification.actionUrl;
+            navigateTo(notification.actionUrl);
           } else if (notification.metadata.link && isValidInternalUrl(notification.metadata.link)) {
             debug.info('Navigating to notification metadata link');
-            window.location.href = notification.metadata.link;
+            navigateTo(notification.metadata.link);
           }
         } else if (notification.actionUrl && isValidInternalUrl(notification.actionUrl)) {
           debug.info('Navigating to notification action URL');
-          window.location.href = notification.actionUrl;
+          navigateTo(notification.actionUrl);
         }
       }).catch(error => {
         debug.error('Failed to load redirect utilities:', error);
-        // Final fallback
+        // Final fallback - use SPA navigation
         if (notification.actionUrl && isValidInternalUrl(notification.actionUrl)) {
-          window.location.href = notification.actionUrl;
+          navigateTo(notification.actionUrl);
         }
       });
     }

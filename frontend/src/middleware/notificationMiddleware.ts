@@ -16,6 +16,7 @@ import {
 } from '@/config/notificationConfig';
 import { useNotificationStore } from '@/store/notificationStore';
 import { getSecureUserData } from '@/utils/notificationSecurity';
+import { navigateTo } from '@/utils/navigationService';
 
 // Notification data interface
 export interface NotificationData {
@@ -368,14 +369,8 @@ class NotificationMiddleware {
       const store = useNotificationStore.getState();
       store.addNotification(notification);
 
-      // Show in-app notification popup (DIFFERENT from action toast)
-      this.showIncomingNotificationPopup(notification);
-
-      // Show browser/desktop notification
-      const hasPermission = await this.hasNotificationPermission();
-      if (hasPermission) {
-        await this.showBrowserNotification(notification);
-      }
+      // NOTE: Toast popup is handled by realtimeNotificationHub, not here
+      // This prevents duplicate toasts
 
       // Send to background service for persistence
       await this.sendToBackgroundService(notification);
@@ -444,7 +439,7 @@ class NotificationMiddleware {
       duration: notification.priority === 'urgent' || notification.priority === 'high' ? 8000 : 5000,
       action: notification.metadata?.actionUrl ? {
         label: 'View',
-        onClick: () => window.location.href = notification.metadata!.actionUrl!
+        onClick: () => navigateTo(notification.metadata!.actionUrl!)
       } : undefined
     });
   }
@@ -468,7 +463,7 @@ class NotificationMiddleware {
       duration,
       action: notification.metadata?.actionUrl ? {
         label: 'View',
-        onClick: () => window.location.href = notification.metadata!.actionUrl!
+        onClick: () => navigateTo(notification.metadata!.actionUrl!)
       } : undefined
     });
   }
@@ -479,6 +474,14 @@ class NotificationMiddleware {
   }
 
   private async showBrowserNotification(notification: NotificationData): Promise<void> {
+    // Only show desktop notification when tab is NOT active/visible
+    // If user is looking at the app, they'll see the in-app toast
+    const isTabVisible = document.visibilityState === 'visible' && document.hasFocus();
+    if (isTabVisible) {
+      console.log('🔔 Skipping browser notification - tab is visible/focused');
+      return;
+    }
+
     console.log('🔔 Attempting to show browser notification:', {
       title: notification.title,
       permission: Notification.permission,
@@ -516,10 +519,11 @@ class NotificationMiddleware {
           silent: false
         });
 
-        // Add click handler
+        // Add click handler - use SPA navigation to avoid page reload
         browserNotif.onclick = () => {
+          window.focus();
           if (notification.metadata?.actionUrl) {
-            window.location.href = notification.metadata.actionUrl;
+            navigateTo(notification.metadata.actionUrl);
           }
           browserNotif.close();
         };

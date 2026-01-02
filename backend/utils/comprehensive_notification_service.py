@@ -958,7 +958,7 @@ class ComprehensiveNotificationService:
                     priority='high',
                     category='boq',
                     action_required=True,
-                    action_url=get_td_approval_url(td_user.user_id, boq_id, tab='revisions'),
+                    action_url=get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='internal'),
                     action_label='Review Revision',
                     metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'target_role': 'technical_director'},
                     sender_id=actor_id,
@@ -1680,19 +1680,26 @@ class ComprehensiveNotificationService:
         Recipients: Client (if has user account) + email log
         """
         try:
-            # Notify client if they have a user account
-            if client_user_id:
+            # Try to find user_id by email if not provided
+            actual_user_id = client_user_id
+            if not actual_user_id and client_email:
+                user = User.query.filter_by(email=client_email, is_active=True, is_deleted=False).first()
+                if user:
+                    actual_user_id = user.user_id
+                    log.info(f"Found user_id {actual_user_id} from email {client_email} for approval notification")
+
+            if actual_user_id:
                 # Check for duplicate
-                if not check_duplicate_notification(client_user_id, f'Ticket #{ticket_number} Approved', 'ticket_id', ticket_id):
+                if not check_duplicate_notification(actual_user_id, f'Ticket #{ticket_number} Approved', 'ticket_id', ticket_id):
                     notification = NotificationManager.create_notification(
-                        user_id=client_user_id,
+                        user_id=actual_user_id,
                         type='success',
                         title=f'Your Ticket #{ticket_number} is Approved',
                         message=f'Your support ticket "{subject[:60]}..." has been approved and our team is working on it.',
                         priority='normal',
                         category='support',
                         action_required=False,
-                        action_url=build_notification_action_url(client_user_id, 'support', {'ticket_id': ticket_id}, 'dashboard'),
+                        action_url=build_notification_action_url(actual_user_id, 'support', {'ticket_id': ticket_id}, 'dashboard'),
                         action_label='View Ticket',
                         metadata={
                             'ticket_id': ticket_id,
@@ -1704,9 +1711,10 @@ class ComprehensiveNotificationService:
                         sender_name=approved_by_name,
                         target_role='client'
                     )
-                    send_notification_to_user(client_user_id, notification.to_dict())
-
-            log.info(f"Sent ticket approval notification for ticket #{ticket_number} to client")
+                    send_notification_to_user(actual_user_id, notification.to_dict())
+                    log.info(f"Sent ticket approval notification for ticket #{ticket_number} to user {actual_user_id}")
+            else:
+                log.warning(f"Cannot send approval notification for ticket #{ticket_number}: No user_id found (email: {client_email})")
         except Exception as e:
             log.error(f"Error sending ticket approval notification: {e}")
 
@@ -1839,46 +1847,175 @@ class ComprehensiveNotificationService:
         """
         Notify dev team when client confirms resolution and closes ticket
         Trigger: Client confirms resolution
-        Recipients: All admin/dev team users
+        Recipients: Broadcast for support-management page
         """
         try:
-            # Get admin users (dev team)
-            admin_role = Role.query.filter_by(role='admin').first()
-            dev_users = []
-            if admin_role:
-                dev_users = User.query.filter_by(role_id=admin_role.role_id, is_active=True, is_deleted=False).all()
+            # Create a broadcast notification for support-management page
+            notification = NotificationManager.create_notification(
+                user_id=None,  # Broadcast notification
+                type='success',
+                title=f'Ticket #{ticket_number} Closed by Client',
+                message=f'{client_name} confirmed resolution. Feedback: {client_feedback[:80] if client_feedback else "None"}',
+                priority='normal',
+                category='support',
+                action_required=False,
+                action_url=f'/support-management?ticket_id={ticket_id}',
+                action_label='View Ticket',
+                metadata={
+                    'ticket_id': ticket_id,
+                    'ticket_number': ticket_number,
+                    'status': 'closed',
+                    'client_name': client_name,
+                    'client_feedback': client_feedback,
+                    'event_type': 'client_closed',
+                    'workflow': 'support_ticket',
+                    'target_role': 'support-management'
+                },
+                sender_name=client_name,
+                target_role='support-management'
+            )
 
-            for dev_user in dev_users:
-                # Check for duplicate
-                if check_duplicate_notification(dev_user.user_id, f'Ticket #{ticket_number} Closed', 'ticket_id', ticket_id):
-                    continue
-
-                notification = NotificationManager.create_notification(
-                    user_id=dev_user.user_id,
-                    type='success',
-                    title=f'Ticket #{ticket_number} Closed by Client',
-                    message=f'{client_name} confirmed resolution and closed ticket "{subject[:60]}...". Feedback: {client_feedback[:50] if client_feedback else "None"}...',
-                    priority='normal',
-                    category='support',
-                    action_required=False,
-                    action_url=build_notification_action_url(dev_user.user_id, 'support-management', {'ticket_id': ticket_id}, 'admin'),
-                    action_label='View Ticket',
-                    metadata={
-                        'ticket_id': ticket_id,
-                        'ticket_number': ticket_number,
-                        'status': 'closed',
-                        'client_feedback': client_feedback,
-                        'workflow': 'support_ticket',
-                        'target_role': 'admin'
-                    },
-                    sender_name=client_name,
-                    target_role='admin'
-                )
-                send_notification_to_user(dev_user.user_id, notification.to_dict())
-
-            log.info(f"Sent ticket closure notification to {len(dev_users)} dev team members for ticket #{ticket_number}")
+            log.info(f"Created ticket closure notification for ticket #{ticket_number}")
         except Exception as e:
             log.error(f"Error sending ticket closure notification: {e}")
+
+    @staticmethod
+    def notify_ticket_closed_by_admin(ticket_id, ticket_number, client_user_id, client_email, subject, closed_by_name, closing_notes=None):
+        """
+        Notify client when admin/dev team closes their ticket
+        Trigger: Admin closes ticket
+        Recipients: Client (ticket reporter)
+        """
+        try:
+            # Try to find user_id by email if not provided
+            actual_user_id = client_user_id
+            if not actual_user_id and client_email:
+                user = User.query.filter_by(email=client_email, is_active=True, is_deleted=False).first()
+                if user:
+                    actual_user_id = user.user_id
+
+            if not actual_user_id:
+                log.warning(f"Cannot send ticket closed notification - no user found for ticket #{ticket_number}")
+                return
+
+            # Check for duplicate
+            if check_duplicate_notification(actual_user_id, f'Ticket #{ticket_number} Closed', 'ticket_id', ticket_id):
+                return
+
+            message = f'Your ticket "{subject[:60]}..." has been closed by the development team.'
+            if closing_notes:
+                message += f' Notes: {closing_notes[:50]}...'
+
+            notification = NotificationManager.create_notification(
+                user_id=actual_user_id,
+                type='success',
+                title=f'Your Ticket #{ticket_number} is Closed',
+                message=message,
+                priority='normal',
+                category='support',
+                action_required=False,
+                action_url=f'/support?ticket_id={ticket_id}',
+                action_label='View Ticket',
+                metadata={
+                    'ticket_id': ticket_id,
+                    'ticket_number': ticket_number,
+                    'status': 'closed',
+                    'closing_notes': closing_notes,
+                    'workflow': 'support_ticket',
+                    'target_role': 'client'
+                },
+                sender_name=closed_by_name,
+                target_role='client'
+            )
+            send_notification_to_user(actual_user_id, notification.to_dict())
+
+            log.info(f"Sent ticket closed notification for ticket #{ticket_number} to client")
+        except Exception as e:
+            log.error(f"Error sending ticket closed notification: {e}")
+
+    @staticmethod
+    def notify_ticket_comment(ticket_id, ticket_number, client_user_id, client_email, subject, comment_by):
+        """
+        Notify client when dev team adds a comment to their ticket
+        Trigger: Dev team adds comment
+        Recipients: Client (ticket reporter)
+        """
+        try:
+            # Try to find user_id by email if not provided
+            actual_user_id = client_user_id
+            if not actual_user_id and client_email:
+                user = User.query.filter_by(email=client_email, is_active=True, is_deleted=False).first()
+                if user:
+                    actual_user_id = user.user_id
+                    log.info(f"Found user_id {actual_user_id} from email {client_email} for comment notification")
+
+            if actual_user_id:
+                # Check for duplicate (within 2 minutes for comments)
+                if not check_duplicate_notification(actual_user_id, f'New Comment on Ticket #{ticket_number}', 'ticket_id', ticket_id, minutes=2):
+                    notification = NotificationManager.create_notification(
+                        user_id=actual_user_id,
+                        type='info',
+                        title=f'New Comment on Ticket #{ticket_number}',
+                        message=f'{comment_by} added a comment to your support ticket "{subject[:60]}..."',
+                        priority='normal',
+                        category='support',
+                        action_required=False,
+                        action_url=build_notification_action_url(actual_user_id, 'support', {'ticket_id': ticket_id}, 'dashboard'),
+                        action_label='View Comment',
+                        metadata={
+                            'ticket_id': ticket_id,
+                            'ticket_number': ticket_number,
+                            'event_type': 'new_comment',
+                            'workflow': 'support_ticket',
+                            'target_role': 'client'
+                        },
+                        sender_name=comment_by,
+                        target_role='client'
+                    )
+                    send_notification_to_user(actual_user_id, notification.to_dict())
+                    log.info(f"Sent comment notification for ticket #{ticket_number} to user {actual_user_id}")
+                else:
+                    log.info(f"Skipped duplicate comment notification for ticket #{ticket_number}")
+            else:
+                log.warning(f"Cannot send comment notification for ticket #{ticket_number}: No user_id found (email: {client_email})")
+        except Exception as e:
+            log.error(f"Error sending comment notification: {e}")
+
+    @staticmethod
+    def notify_ticket_comment_from_client(ticket_id, ticket_number, client_name, client_email, subject):
+        """
+        Notify dev team when client adds a comment to their ticket
+        Trigger: Client adds comment
+        Recipients: Broadcast for support-management page
+        """
+        try:
+            # Create a broadcast notification for support-management page
+            notification = NotificationManager.create_notification(
+                user_id=None,  # Broadcast notification
+                type='info',
+                title=f'New Comment on Ticket #{ticket_number}',
+                message=f'{client_name} commented on their ticket "{subject[:60]}..."',
+                priority='normal',
+                category='support',
+                action_required=False,
+                action_url=f'/support-management?ticket_id={ticket_id}',
+                action_label='View Comment',
+                metadata={
+                    'ticket_id': ticket_id,
+                    'ticket_number': ticket_number,
+                    'client_email': client_email,
+                    'client_name': client_name,
+                    'event_type': 'client_comment',
+                    'workflow': 'support_ticket',
+                    'target_role': 'support-management'
+                },
+                sender_name=client_name,
+                target_role='support-management'
+            )
+
+            log.info(f"Created client comment notification for ticket #{ticket_number}")
+        except Exception as e:
+            log.error(f"Error sending client comment notification: {e}")
 
 
 # Create singleton instance

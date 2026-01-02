@@ -11,6 +11,7 @@
  */
 
 import { toast, ExternalToast } from 'sonner';
+import { navigateTo } from '@/utils/navigationService';
 
 // Toast options type
 type ToastOptions = string | ExternalToast;
@@ -162,7 +163,8 @@ export const _showIncomingNotification = (
     action: options?.actionUrl ? {
       label: 'View',
       onClick: () => {
-        window.location.href = options.actionUrl!;
+        // Use SPA navigation to avoid page reload
+        navigateTo(options.actionUrl!);
       }
     } : undefined
   });

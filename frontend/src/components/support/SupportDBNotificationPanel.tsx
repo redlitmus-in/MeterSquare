@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { API_BASE_URL } from '@/api/config';
+import { navigateTo } from '@/utils/navigationService';
 
 interface DBNotification {
   id: number;
@@ -81,13 +82,19 @@ const SupportDBNotificationPanel: React.FC<SupportDBNotificationPanelProps> = ({
     }
   };
 
-  // Show desktop notification
+  // Show desktop notification (only when tab is in background)
   const showDesktopNotification = (notification: DBNotification) => {
     if (!isNotificationSupported()) {
       return;
     }
 
     if (Notification.permission !== 'granted') {
+      return;
+    }
+
+    // Only show desktop notification when tab is NOT active/visible
+    const isTabVisible = document.visibilityState === 'visible' && document.hasFocus();
+    if (isTabVisible) {
       return;
     }
 
@@ -102,7 +109,8 @@ const SupportDBNotificationPanel: React.FC<SupportDBNotificationPanelProps> = ({
       desktopNotif.onclick = () => {
         window.focus();
         if (notification.actionUrl) {
-          window.location.href = notification.actionUrl;
+          // Use SPA navigation to avoid page reload
+          navigateTo(notification.actionUrl);
         }
         desktopNotif.close();
       };

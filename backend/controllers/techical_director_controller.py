@@ -279,7 +279,7 @@ def td_mail_send():
         td_name = current_user['full_name']
         td_email = current_user['email']
         td_user_id = current_user['user_id']
-
+ 
         # Get request data
         data = request.get_json(silent=True)
         if not data:
@@ -287,37 +287,37 @@ def td_mail_send():
                 "error": "Invalid request",
                 "message": "Request body must be valid JSON"
             }), 400
-
+ 
         boq_id = data.get("boq_id")
         comments = data.get("comments", "")
         rejection_reason = data.get("rejection_reason", "")
         technical_director_status = data.get("technical_director_status")
-
+ 
         # Validate required fields
         if not boq_id:
             return jsonify({"error": "boq_id is required"}), 400
-
+ 
         if not technical_director_status:
             return jsonify({"error": "technical_director_status is required (approved/rejected)"}), 400
-
+ 
         if technical_director_status.lower() not in ['approved', 'rejected']:
             return jsonify({"error": "technical_director_status must be 'approved' or 'rejected'"}), 400
-
+ 
         # Get BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
-
+ 
         # Get BOQ details
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq_details:
             return jsonify({"error": "BOQ details not found"}), 404
-
+ 
         # Get project
         project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
         if not project:
             return jsonify({"error": "Project not found"}), 404
-
+ 
         # Prepare BOQ data for email
         boq_data = {
             'boq_id': boq.boq_id,
@@ -326,60 +326,69 @@ def td_mail_send():
             'created_by': boq.created_by,
             'created_at': boq.created_at.strftime('%d-%b-%Y %I:%M %p') if boq.created_at else 'N/A'
         }
-
+ 
         project_data = {
             'project_name': project.project_name,
             'client': project.client or 'N/A',
             'location': project.location or 'N/A'
         }
-
+ 
         # Handle both old and new data structures
         boq_json = boq_details.boq_details if boq_details.boq_details else {}
-
+ 
         if 'existing_purchase' in boq_json and 'items' in boq_json['existing_purchase']:
             items = boq_json['existing_purchase']['items']
             items_summary = boq_json.get('combined_summary', {})
         else:
             items = boq_json.get('items', [])
             items_summary = boq_json.get('summary', {})
-
+ 
         items_summary['items'] = items
-
+ 
         # Initialize email service
         # boq_email_service = BOQEmailService()
-
-        # Find Estimator (sender of original BOQ)
-        estimator_role = Role.query.filter(
-            Role.role.in_(['estimator', 'Estimator']),
-            Role.is_deleted == False
-        ).first()
-
+ 
+        # Find Estimator from project.estimator_id (most reliable and simple)
+        # The project table has estimator_id which directly links to the estimator user
         estimator = None
-        if estimator_role:
+ 
+        if project.estimator_id:
             estimator = User.query.filter_by(
-                role_id=estimator_role.role_id,
+                user_id=project.estimator_id,
                 is_active=True,
                 is_deleted=False
-            ).filter(
-                db.or_(
-                    User.full_name == boq.created_by,
-                    User.email == boq.created_by
-                )
             ).first()
-
-            if not estimator:
+            if estimator:
+                log.info(f"Found estimator from project.estimator_id: {estimator.full_name} (ID: {estimator.user_id})")
+ 
+        # Fallback: Try to find by boq.created_by name if project.estimator_id not set
+        if not estimator:
+            estimator_role = Role.query.filter(
+                Role.role.in_(['estimator', 'Estimator']),
+                Role.is_deleted == False
+            ).first()
+ 
+            if estimator_role:
+                # Try exact match on full_name (case-insensitive)
                 estimator = User.query.filter_by(
                     role_id=estimator_role.role_id,
                     is_active=True,
                     is_deleted=False
+                ).filter(
+                    db.func.lower(User.full_name) == db.func.lower(boq.created_by)
                 ).first()
-
+ 
+                if estimator:
+                    log.info(f"Found estimator by name match: {estimator.full_name} (ID: {estimator.user_id})")
+                else:
+                    log.warning(f"Could not find estimator for BOQ {boq_id}, project.estimator_id: {project.estimator_id}, created_by: {boq.created_by}")
+ 
         estimator_email = estimator.email if estimator and estimator.email else boq.created_by
         estimator_name = estimator.full_name if estimator else boq.created_by
-
+ 
         # Get existing BOQ history
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
-
+ 
         # Handle existing actions - ensure it's always a list
         if existing_history:
             if existing_history.action is None:
@@ -392,44 +401,44 @@ def td_mail_send():
                 current_actions = []
         else:
             current_actions = []
-
+ 
         log.info(f"BOQ {boq_id} - Existing history found: {existing_history is not None}")
         log.info(f"BOQ {boq_id} - Current actions before append: {current_actions}")
-
+ 
         new_status = None
         email_sent = False
         recipient_email = None
         recipient_name = None
         recipient_role = None
-
+ 
         # ==================== APPROVED STATUS ====================
         if technical_director_status.lower() == 'approved':
             log.info(f"BOQ {boq_id} approved by TD, sending to Estimator")
-
+ 
             # Check if this is a revision approval (status was Pending_Revision)
             # or a regular approval from Pending_TD_Approval
             is_revision_approval = boq.status.lower() == 'pending_revision'
             new_status = "Revision_Approved" if is_revision_approval else "Approved"
-
+ 
             # DO NOT increment revision_number here!
             # Revision number is already incremented when estimator clicks "Make Revision" and saves
             # (see boq_controller.py revision_boq function line 1436-1438)
             # TD approval should only change status, not increment revision number
-
+ 
             if not estimator or not estimator_email:
                 return jsonify({
                     "success": False,
                     "message": "Cannot send approval email - Estimator email not found"
                 }), 400
-
+ 
             recipient_email = estimator_email
             recipient_name = estimator_name
             recipient_role = "estimator"
-
+ 
             # Email sending disabled - approval proceeds without emails
             email_sent = True
             log.info(f"TD approved BOQ {boq_id} for Estimator {recipient_name} - Email disabled")
-
+ 
             # Prepare new action for APPROVED
             new_action = {
                 "role": "technicalDirector",
@@ -448,26 +457,26 @@ def td_mail_send():
                 "recipient_name": recipient_name,
                 "is_revision": is_revision_approval
             }
-
+ 
         # ==================== REJECTED STATUS ====================
         else:  # rejected
             log.info(f"BOQ {boq_id} rejected by TD, sending back to Estimator")
             new_status = "Rejected"
-
+ 
             if not estimator or not estimator_email:
                 return jsonify({
                     "success": False,
                     "message": "Cannot send rejection email - Estimator email not found"
                 }), 400
-
+ 
             recipient_email = estimator_email
             recipient_name = estimator_name
             recipient_role = "estimator"
-
+ 
             # Email sending disabled - rejection proceeds without emails
             email_sent = True
             log.info(f"TD rejected BOQ {boq_id} for Estimator {recipient_name} - Email disabled")
-
+ 
             # Prepare new action for REJECTED
             new_action = {
                 "role": "technicalDirector",
@@ -486,33 +495,33 @@ def td_mail_send():
                 "recipient_email": recipient_email,
                 "recipient_name": recipient_name
             }
-
+ 
             # ==================== TD REJECTION - DO NOT CREATE INTERNAL REVISION ====================
             # TD rejection should ONLY show in Rejected tab, NOT in Internal Revisions tab
             # Internal revisions are for tracking estimator edits during internal approval cycle
             # TD rejection is a final decision that sends BOQ back to estimator for complete rework
             log.info(f"✅ TD rejection - BOQ {boq_id} will show only in Rejected tab")
-
+ 
         # ==================== UPDATE BOQ & HISTORY ====================
         # Update BOQ status
         boq.status = new_status
         boq.email_sent = True
         boq.last_modified_by = td_name
         boq.last_modified_at = datetime.utcnow()
-
+ 
         # Append new action to existing actions array
         current_actions.append(new_action)
-
+ 
         log.info(f"BOQ {boq_id} - New action created: {new_action}")
         log.info(f"BOQ {boq_id} - Current actions after append: {current_actions}")
-
+ 
         if existing_history:
             # Update existing history
             existing_history.action = current_actions
             # Mark the JSONB field as modified for SQLAlchemy to detect changes
             from sqlalchemy.orm.attributes import flag_modified
             flag_modified(existing_history, "action")
-
+ 
             existing_history.action_by = td_name
             existing_history.boq_status = new_status
             existing_history.sender = td_name
@@ -523,7 +532,7 @@ def td_mail_send():
             existing_history.action_date = datetime.utcnow()
             existing_history.last_modified_by = td_name
             existing_history.last_modified_at = datetime.utcnow()
-
+ 
             log.info(f"BOQ {boq_id} - Updated existing history with {len(current_actions)} actions")
         else:
             # Create new history entry
@@ -542,28 +551,18 @@ def td_mail_send():
             )
             db.session.add(boq_history)
             log.info(f"BOQ {boq_id} - Created new history with {len(current_actions)} actions")
-
+ 
         db.session.commit()
         log.info(f"BOQ {boq_id} - Database committed successfully")
-
+ 
         # Send notification about TD's decision
         try:
-            # Get estimator user_id for notification from BOQHistory actions
-            # This ensures we notify the CORRECT estimator who sent the BOQ to TD
-            estimator_user_id = None
-
-            # Find the latest "sent_to_td" action to get the estimator's user_id
-            if current_actions:
-                for action in reversed(current_actions):  # Check from most recent
-                    if action.get('type') == 'sent_to_td' and action.get('decided_by_user_id'):
-                        estimator_user_id = action.get('decided_by_user_id')
-                        break
-
-            # Fallback: Try to get from estimator object (old logic for backwards compatibility)
-            if not estimator_user_id and estimator and hasattr(estimator, 'user_id'):
-                estimator_user_id = estimator.user_id
-
+            # Get estimator user_id from the estimator object we found earlier
+            # (already retrieved from project.estimator_id - most reliable)
+            estimator_user_id = estimator.user_id if estimator else None
+ 
             if estimator_user_id:
+                log.info(f"Sending notification to estimator user_id {estimator_user_id} ({estimator_name})")
                 # Check if this BOQ has internal revisions - send specific notification
                 if boq.has_internal_revisions and boq.internal_revision_number and boq.internal_revision_number > 0:
                     from utils.comprehensive_notification_service import ComprehensiveNotificationService
@@ -607,9 +606,9 @@ def td_mail_send():
             log.error(f"Failed to send TD decision notification: {notif_error}")
             import traceback
             log.error(traceback.format_exc())
-
+ 
         log.info(f"BOQ {boq_id} {new_status.lower()} by TD, email sent to {recipient_email}")
-
+ 
         return jsonify({
             "success": True,
             "message": f"BOQ {new_status.lower()} successfully and email sent to {recipient_role}",
@@ -619,7 +618,7 @@ def td_mail_send():
             "recipient_role": recipient_role,
             "recipient_name": recipient_name
         }), 200
-
+ 
     except Exception as e:
         db.session.rollback()
         import traceback

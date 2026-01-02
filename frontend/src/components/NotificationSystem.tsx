@@ -132,7 +132,11 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     };
   }, []);
 
-  // Update toast notifications when new notifications arrive
+  // NOTE: Toast notifications are now handled by realtimeNotificationHub.showIncomingNotificationPopup()
+  // This custom toast display has been disabled to prevent duplicate toasts.
+  // The realtimeNotificationHub uses Sonner toast with emojis, while this used custom components with Clock icons.
+  // Keeping the effect commented for reference in case we need to restore custom toast styling later.
+  /*
   useEffect(() => {
     if (notifications.length === 0) return;
 
@@ -170,6 +174,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
       });
     }
   }, [notifications, maxNotifications]);
+  */
 
   const getNotificationIcon = useCallback((type: NotificationData['type']) => {
     switch (type) {

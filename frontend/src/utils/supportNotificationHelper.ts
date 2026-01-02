@@ -326,6 +326,11 @@ export const notifyNewTicket = (
 };
 
 // Notify when admin responds to a ticket (for the ticket reporter only)
+// NOTE: This function only stores the notification for the client's notification panel.
+// Desktop notifications are NOT shown here because:
+// 1. This function is called from SupportManagement (dev team page)
+// 2. Showing desktop notification here would show it to the dev team, not the client
+// 3. The backend sends real-time notifications to clients via Socket.IO
 export const notifyAdminResponse = (
   ticketNumber: string,
   ticketTitle: string,
@@ -333,7 +338,7 @@ export const notifyAdminResponse = (
   reporterRole: string,
   reporterEmail: string,
   ticketId?: number
-): Notification | null => {
+): void => {
   const messages: Record<string, string> = {
     approved: 'Your ticket has been approved',
     rejected: 'Your ticket has been rejected',
@@ -347,6 +352,7 @@ export const notifyAdminResponse = (
   const url = buildSupportPageUrl(reporterRole);
 
   // Store notification - targeted to the reporter only
+  // Desktop notification is handled by the backend via Socket.IO to the client
   addStoredNotification({
     title: `Ticket ${ticketNumber} Update`,
     body: messages[responseType] || `Update on "${ticketTitle}"`,
@@ -359,20 +365,13 @@ export const notifyAdminResponse = (
     reporterRole,
     reporterEmail,
   });
-
-  return showDesktopNotification({
-    title: `Ticket ${ticketNumber} Update`,
-    body: messages[responseType] || `Update on "${ticketTitle}"`,
-    tag: `ticket-update-${ticketNumber}`,
-    requireInteraction: responseType === 'resolved',
-    data: {
-      url,
-      ticketNumber,
-    },
-  });
 };
 
 // Notify when a new comment is added
+// Desktop notification logic:
+// - If client sends comment: Show desktop notification (client is on their page, admin gets notified)
+// - If dev_team sends comment: Do NOT show desktop notification (would show to dev team, not client)
+//   The backend handles notifying the client via Socket.IO
 export const notifyNewComment = (
   ticketNumber: string,
   ticketTitle: string,
@@ -390,33 +389,15 @@ export const notifyNewComment = (
   const body = `${senderName} commented on "${ticketTitle}"`;
 
   if (isFromClient) {
-    // Client sent comment - notify admin/support-management
-    const url = '/support-management';
-
-    addStoredNotification({
-      title,
-      body,
-      type: 'new_comment',
-      ticketNumber,
-      ticketId,
-      url,
-      targetRole: 'admin', // Only for admin page
-      reporterRole,
-      reporterEmail,
-    });
-
-    return showDesktopNotification({
-      title,
-      body,
-      tag: `comment-${ticketNumber}-${Date.now()}`,
-      requireInteraction: false,
-      data: {
-        url,
-        ticketNumber,
-      },
-    });
+    // Client sent comment - backend handles notification to dev team via database
+    // Don't store in localStorage (would show to client themselves)
+    // Don't show desktop notification (client knows they commented)
+    // The SupportDBNotificationPanel on support-management page will show DB notifications
+    return null;
   } else {
-    // Dev team sent comment - notify the ticket reporter only
+    // Dev team sent comment - store notification for the ticket reporter
+    // Do NOT show desktop notification here - it would show to dev team member
+    // The backend sends real-time notification to client via Socket.IO
     const url = buildSupportPageUrl(reporterRole);
 
     addStoredNotification({
@@ -432,16 +413,7 @@ export const notifyNewComment = (
       reporterEmail,
     });
 
-    return showDesktopNotification({
-      title,
-      body,
-      tag: `comment-${ticketNumber}-${Date.now()}`,
-      requireInteraction: false,
-      data: {
-        url,
-        ticketNumber,
-      },
-    });
+    return null; // No desktop notification for dev team actions
   }
 };
 

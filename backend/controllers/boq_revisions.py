@@ -292,35 +292,37 @@ def client_revision_td_mail_send():
         items_summary = boq_details.boq_details.get('summary', {}) if boq_details.boq_details else {}
         items_summary['items'] = boq_details.boq_details.get('items', []) if boq_details.boq_details else []
 
-        # Initialize email service
+       # Initialize email service
         boq_email_service = BOQEmailService()
-
-        # Find Estimator (sender of original BOQ)
-        estimator_role = Role.query.filter(
-            Role.role.in_(['estimator', 'Estimator']),
-            Role.is_deleted == False
-        ).first()
-
+ 
+        # Find Estimator from project.estimator_id
         estimator = None
-        if estimator_role:
+        if project.estimator_id:
             estimator = User.query.filter_by(
-                role_id=estimator_role.role_id,
+                user_id=project.estimator_id,
                 is_active=True,
                 is_deleted=False
-            ).filter(
-                db.or_(
-                    User.full_name == boq.created_by,
-                    User.email == boq.created_by
-                )
             ).first()
-
-            if not estimator:
+ 
+        # Fallback: try to find by created_by if estimator_id not set
+        if not estimator:
+            estimator_role = Role.query.filter(
+                Role.role.in_(['estimator', 'Estimator']),
+                Role.is_deleted == False
+            ).first()
+ 
+            if estimator_role:
                 estimator = User.query.filter_by(
                     role_id=estimator_role.role_id,
                     is_active=True,
                     is_deleted=False
+                ).filter(
+                    db.or_(
+                        User.full_name == boq.created_by,
+                        User.email == boq.created_by
+                    )
                 ).first()
-
+ 
         estimator_email = estimator.email if estimator and estimator.email else boq.created_by
         estimator_name = estimator.full_name if estimator else boq.created_by
 

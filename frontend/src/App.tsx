@@ -27,6 +27,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import RoleBasedRedirect from '@/components/routing/RoleBasedRedirect';
 import NotificationSystem from '@/components/NotificationSystem';
+import NavigationListener from '@/components/NavigationListener';
 
 // Lazy load all non-critical pages
 const TasksPage = lazy(() => import('@/pages/common/TasksPage'));
@@ -857,6 +858,8 @@ function App() {
             }
           }}
         />
+        {/* NavigationListener enables SPA navigation from non-React services */}
+        <NavigationListener />
         {/* NotificationSystem is rendered in DashboardLayout with proper positioning */}
         <Suspense fallback={<PageLoader />}>
           <Routes>

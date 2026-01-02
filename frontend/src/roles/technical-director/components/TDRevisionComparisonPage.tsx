@@ -36,6 +36,7 @@ interface TDRevisionComparisonPageProps {
   onViewDetails: (boq: BOQ) => void;
   onRefresh?: () => Promise<void>;
   refreshTrigger?: number; // Trigger for InternalRevisionTimeline refresh
+  defaultSubTab?: 'client' | 'internal'; // Default sub-tab from URL parameter
 }
 
 const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
@@ -44,7 +45,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
   onReject,
   onViewDetails,
   onRefresh,
-  refreshTrigger
+  refreshTrigger,
+  defaultSubTab = 'client'
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBoq, setSelectedBoq] = useState<BOQ | null>(null);
@@ -83,8 +85,15 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     return revNum === 0 ? 'Original' : `R${revNum}`;
   };
 
-  // State for active tab
-  const [activeTab, setActiveTab] = useState<'client' | 'internal'>('client');
+  // State for active tab - use defaultSubTab from URL parameter
+  const [activeTab, setActiveTab] = useState<'client' | 'internal'>(defaultSubTab);
+
+  // Update activeTab when defaultSubTab prop changes (e.g., from notification link)
+  useEffect(() => {
+    if (defaultSubTab) {
+      setActiveTab(defaultSubTab);
+    }
+  }, [defaultSubTab]);
 
   // Filter BOQs for TD based on active tab and sort by recent first
   const boqsWithRevisions = boqList
