@@ -1,13 +1,14 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
-import { DocumentChartBarIcon, ArrowLeftIcon } from '@heroicons/react/24/outline';
-import { showError, showInfo } from '@/utils/toastHelper';
+import { DocumentChartBarIcon, ArrowLeftIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import { showError, showInfo, showSuccess } from '@/utils/toastHelper';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { apiClient } from '@/api/config';
+import { saveAs } from 'file-saver';
 
 // Interface matching backend response structure
 interface ComparisonMaterial {
@@ -110,6 +111,7 @@ export default function PurchaseComparison() {
   const [activeTab, setActiveTab] = useState('live');
   const [comparisonData, setComparisonData] = useState<PurchaseComparisonData | null>(null);
   const [loadingComparison, setLoadingComparison] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Real-time auto-sync for BOQ list - use dedicated purchase comparison projects endpoint
   const { data: boqData, isLoading: loading, refetch } = useProjectsAutoSync(
@@ -213,6 +215,415 @@ export default function PurchaseComparison() {
   const handleBack = () => {
     setSelectedProject(null);
     setComparisonData(null);
+  };
+
+  // Export to Excel function
+  const handleExportToExcel = async () => {
+    if (!comparisonData || !selectedProject) {
+      showError('No data to export');
+      return;
+    }
+
+    setExporting(true);
+    try {
+      // Dynamically import XLSX to reduce initial bundle size
+      const XLSX = await import('xlsx');
+
+      const projectName = selectedProject.project_name || selectedProject.project?.name || 'N/A';
+      const totalPlanned = groupedByItem.reduce((sum, group) => sum + group.totals.planned_amount, 0);
+      const totalActual = groupedByItem.reduce((sum, group) => sum + group.totals.actual_amount, 0);
+
+      // Prepare Planned Budget sheet
+      const plannedBudgetData: any[] = [];
+      groupedByItem.forEach((group) => {
+        // Add item header
+        plannedBudgetData.push({
+          'Item': group.item_name,
+          'Material Name': '--- ITEM TOTAL ---',
+          'Sub Item': '',
+          'Unit': '',
+          'Planned Amount (AED)': group.totals.planned_amount
+        });
+
+        // Add materials
+        group.plannedMaterials.forEach((material: any) => {
+          plannedBudgetData.push({
+            'Item': '',
+            'Material Name': material.material_name,
+            'Sub Item': material.sub_item_name || '',
+            'Unit': material.unit || '',
+            'Planned Amount (AED)': material.planned_amount || 0
+          });
+        });
+
+        plannedBudgetData.push({}); // Empty row
+      });
+
+      // Add total row
+      plannedBudgetData.push({
+        'Item': 'GRAND TOTAL',
+        'Material Name': '',
+        'Sub Item': '',
+        'Unit': '',
+        'Planned Amount (AED)': totalPlanned
+      });
+
+      // Prepare Actual Spending sheet
+      const actualSpendingData: any[] = [];
+      groupedByItem.forEach((group) => {
+        let groupHasData = false;
+
+        group.actualMaterials
+          .filter((material: any) => {
+            const purchases = material.purchases || [];
+            const hasActivePurchase = purchases.some((p: any) =>
+              ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+            );
+            return (material.actual_amount || 0) > 0 || hasActivePurchase || material.is_new_material === true;
+          })
+          .forEach((material: any) => {
+            const purchases = material.purchases || [];
+            purchases.forEach((p: any) => {
+              if (['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)) {
+                if (!groupHasData) {
+                  // Add item header
+                  actualSpendingData.push({
+                    'Item': group.item_name,
+                    'Material Name': '--- ITEM TOTAL ---',
+                    'Sub Item': '',
+                    'CR ID': '',
+                    'Amount (AED)': '',
+                    'VAT (AED)': '',
+                    'Total (incl. VAT)': group.totals.actual_amount,
+                    'Type': ''
+                  });
+                  groupHasData = true;
+                }
+
+                actualSpendingData.push({
+                  'Item': '',
+                  'Material Name': material.material_name,
+                  'Sub Item': material.sub_item_name || '',
+                  'CR ID': p.cr_id || '-',
+                  'Amount (AED)': p.amount || 0,
+                  'VAT (AED)': p.vat_amount || 0,
+                  'Total (incl. VAT)': (p.amount || 0) + (p.vat_amount || 0),
+                  'Type': p.is_new_material ? 'NEW' : 'Existing'
+                });
+              }
+            });
+          });
+
+        if (groupHasData) {
+          actualSpendingData.push({}); // Empty row
+        }
+      });
+
+      // Add total row
+      actualSpendingData.push({
+        'Item': 'GRAND TOTAL',
+        'Material Name': '',
+        'Sub Item': '',
+        'CR ID': '',
+        'Amount (AED)': '',
+        'VAT (AED)': '',
+        'Total (incl. VAT)': totalActual,
+        'Type': ''
+      });
+
+      // Prepare Comparison sheet (side by side)
+      const comparisonData: any[] = [];
+      groupedByItem.forEach((group) => {
+        const balance = group.totals.planned_amount - group.totals.actual_amount;
+        comparisonData.push({
+          'Item': group.item_name,
+          'Planned Amount (AED)': group.totals.planned_amount,
+          'Actual Amount (incl. VAT)': group.totals.actual_amount,
+          'Balance (AED)': balance,
+          'Status': balance >= 0 ? 'Under Budget' : 'Over Budget'
+        });
+      });
+
+      // Add total row
+      const totalBalance = totalPlanned - totalActual;
+      comparisonData.push({});
+      comparisonData.push({
+        'Item': 'GRAND TOTAL',
+        'Planned Amount (AED)': totalPlanned,
+        'Actual Amount (incl. VAT)': totalActual,
+        'Balance (AED)': totalBalance,
+        'Status': totalBalance >= 0 ? 'Under Budget' : 'Over Budget'
+      });
+
+      // Prepare Summary sheet
+      const summaryData = [
+        { 'Metric': 'Project Name', 'Value': projectName },
+        { 'Metric': 'BOQ ID', 'Value': comparisonData.boq_id || 'N/A' },
+        { 'Metric': '', 'Value': '' },
+        { 'Metric': 'Total Planned Amount (AED)', 'Value': totalPlanned.toFixed(2) },
+        { 'Metric': 'Total Actual Amount (incl. VAT) (AED)', 'Value': totalActual.toFixed(2) },
+        { 'Metric': 'Balance (AED)', 'Value': totalBalance.toFixed(2) },
+        { 'Metric': 'Variance %', 'Value': totalPlanned > 0 ? `${(((totalActual - totalPlanned) / totalPlanned) * 100).toFixed(2)}%` : '0%' },
+        { 'Metric': 'Budget Status', 'Value': totalBalance >= 0 ? 'Under Budget' : 'Over Budget' },
+        { 'Metric': '', 'Value': '' },
+        { 'Metric': 'Report Generated', 'Value': new Date().toLocaleString('en-GB') }
+      ];
+
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+
+      // Add Summary sheet
+      const ws1 = XLSX.utils.json_to_sheet(summaryData);
+      ws1['!cols'] = [{ wch: 35 }, { wch: 25 }];
+      XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
+
+      // Add Comparison sheet
+      const ws2 = XLSX.utils.json_to_sheet(comparisonData);
+      ws2['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 25 }, { wch: 18 }, { wch: 15 }];
+      XLSX.utils.book_append_sheet(wb, ws2, 'Comparison');
+
+      // Add Planned Budget sheet
+      const ws3 = XLSX.utils.json_to_sheet(plannedBudgetData);
+      ws3['!cols'] = [{ wch: 25 }, { wch: 45 }, { wch: 30 }, { wch: 12 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(wb, ws3, 'Planned Budget');
+
+      // Add Actual Spending sheet
+      const ws4 = XLSX.utils.json_to_sheet(actualSpendingData);
+      ws4['!cols'] = [{ wch: 25 }, { wch: 45 }, { wch: 30 }, { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 18 }, { wch: 12 }];
+      XLSX.utils.book_append_sheet(wb, ws4, 'Actual Spending');
+
+      // Generate Excel file
+      const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const data = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+      const safeProjectName = (selectedProject.project_name || selectedProject.project?.name || 'Project').replace(/[^a-zA-Z0-9]/g, '_');
+      saveAs(data, `Purchase_Comparison_${safeProjectName}_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+      showSuccess('Excel file downloaded successfully');
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      showError('Failed to export Excel file');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Export to PDF function
+  const handleExportToPDF = async () => {
+    if (!comparisonData || !selectedProject) {
+      showError('No data to export');
+      return;
+    }
+
+    setExporting(true);
+    try {
+      // Dynamically import jsPDF
+      const { jsPDF } = await import('jspdf');
+      const autoTable = (await import('jspdf-autotable')).default;
+
+      const doc = new jsPDF('landscape', 'mm', 'a4');
+      const projectName = selectedProject.project_name || selectedProject.project?.name || 'N/A';
+      const totalPlanned = groupedByItem.reduce((sum, group) => sum + group.totals.planned_amount, 0);
+      const totalActual = groupedByItem.reduce((sum, group) => sum + group.totals.actual_amount, 0);
+      const totalBalance = totalPlanned - totalActual;
+
+      // Header
+      doc.setFontSize(18);
+      doc.setTextColor(34, 139, 34); // Green
+      doc.text('Purchase Comparison Report', 14, 15);
+
+      doc.setFontSize(12);
+      doc.setTextColor(60);
+      doc.text(`Project: ${projectName}`, 14, 23);
+      doc.text(`Generated: ${new Date().toLocaleString('en-GB')}`, 14, 30);
+
+      // Summary Box
+      doc.setFillColor(240, 253, 244); // Light green
+      doc.rect(200, 10, 85, 28, 'F');
+      doc.setFontSize(10);
+      doc.setTextColor(0);
+      doc.text('Summary', 205, 17);
+      doc.setFontSize(9);
+      doc.text(`Planned: AED ${totalPlanned.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 205, 24);
+      doc.text(`Actual: AED ${totalActual.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 205, 30);
+      doc.setTextColor(totalBalance >= 0 ? 34 : 220, totalBalance >= 0 ? 139 : 53, totalBalance >= 0 ? 34 : 69);
+      doc.text(`Balance: AED ${totalBalance.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 205, 36);
+
+      // Comparison Table
+      doc.setTextColor(0);
+      let yPos = 45;
+
+      const comparisonTableData = groupedByItem.map((group) => {
+        const balance = group.totals.planned_amount - group.totals.actual_amount;
+        return [
+          group.item_name,
+          group.totals.planned_amount.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+          group.totals.actual_amount.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+          balance.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+          balance >= 0 ? 'Under Budget' : 'Over Budget'
+        ];
+      });
+
+      // Add total row
+      comparisonTableData.push([
+        'GRAND TOTAL',
+        totalPlanned.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+        totalActual.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+        totalBalance.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+        totalBalance >= 0 ? 'Under Budget' : 'Over Budget'
+      ]);
+
+      autoTable(doc, {
+        startY: yPos,
+        head: [['Item', 'Planned (AED)', 'Actual (incl. VAT)', 'Balance (AED)', 'Status']],
+        body: comparisonTableData,
+        theme: 'grid',
+        headStyles: {
+          fillColor: [34, 139, 34],
+          textColor: 255,
+          fontSize: 10,
+          fontStyle: 'bold',
+          halign: 'center'
+        },
+        bodyStyles: {
+          fontSize: 9,
+          valign: 'middle'
+        },
+        columnStyles: {
+          0: { cellWidth: 70, halign: 'left' },
+          1: { cellWidth: 40, halign: 'right' },
+          2: { cellWidth: 45, halign: 'right' },
+          3: { cellWidth: 40, halign: 'right' },
+          4: { cellWidth: 30, halign: 'center' }
+        },
+        alternateRowStyles: { fillColor: [245, 245, 245] },
+        didParseCell: (data: any) => {
+          // Color the last row (total)
+          if (data.row.index === comparisonTableData.length - 1) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [220, 252, 231];
+          }
+          // Color status column
+          if (data.column.index === 4 && data.row.index < comparisonTableData.length) {
+            if (data.cell.raw === 'Over Budget') {
+              data.cell.styles.textColor = [220, 53, 69];
+            } else {
+              data.cell.styles.textColor = [34, 139, 34];
+            }
+          }
+        }
+      });
+
+      // New page for detailed breakdown
+      doc.addPage();
+      doc.setFontSize(14);
+      doc.setTextColor(34, 139, 34);
+      doc.text('Detailed Actual Spending by Item', 14, 15);
+
+      yPos = 25;
+
+      groupedByItem.forEach((group) => {
+        const actualMaterials = group.actualMaterials.filter((material: any) => {
+          const purchases = material.purchases || [];
+          const hasActivePurchase = purchases.some((p: any) =>
+            ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+          );
+          return (material.actual_amount || 0) > 0 || hasActivePurchase || material.is_new_material === true;
+        });
+
+        if (actualMaterials.length === 0) return;
+
+        // Check if we need a new page
+        if (yPos > 180) {
+          doc.addPage();
+          yPos = 15;
+        }
+
+        // Item header
+        doc.setFontSize(11);
+        doc.setTextColor(0);
+        doc.setFont(undefined, 'bold');
+        doc.text(`${group.item_name}`, 14, yPos);
+        doc.setFont(undefined, 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(100);
+        doc.text(`Total: AED ${group.totals.actual_amount.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 200, yPos);
+        yPos += 5;
+
+        const materialRows: any[] = [];
+        actualMaterials.forEach((material: any) => {
+          const purchases = material.purchases || [];
+          purchases.forEach((p: any) => {
+            if (['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)) {
+              const total = (p.amount || 0) + (p.vat_amount || 0);
+              materialRows.push([
+                material.material_name,
+                material.sub_item_name || '-',
+                p.cr_id ? `PO #${p.cr_id}` : '-',
+                (p.amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+                (p.vat_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+                total.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+                p.is_new_material ? 'NEW' : '-'
+              ]);
+            }
+          });
+        });
+
+        if (materialRows.length > 0) {
+          autoTable(doc, {
+            startY: yPos,
+            head: [['Material', 'Sub Item', 'PO ID', 'Amount', 'VAT', 'Total', 'Type']],
+            body: materialRows,
+            theme: 'striped',
+            headStyles: {
+              fillColor: [100, 100, 100],
+              textColor: 255,
+              fontSize: 8,
+              fontStyle: 'bold',
+              halign: 'center'
+            },
+            bodyStyles: { fontSize: 8 },
+            columnStyles: {
+              0: { cellWidth: 60, halign: 'left' },
+              1: { cellWidth: 45, halign: 'left' },
+              2: { cellWidth: 20, halign: 'center' },
+              3: { cellWidth: 25, halign: 'right' },
+              4: { cellWidth: 20, halign: 'right' },
+              5: { cellWidth: 25, halign: 'right' },
+              6: { cellWidth: 15, halign: 'center' }
+            },
+            margin: { left: 14, right: 14 }
+          });
+
+          yPos = (doc as any).lastAutoTable.finalY + 10;
+        }
+      });
+
+      // Footer on all pages
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(
+          `Page ${i} of ${pageCount} | MeterSquare - Purchase Comparison Report`,
+          doc.internal.pageSize.getWidth() / 2,
+          doc.internal.pageSize.getHeight() - 8,
+          { align: 'center' }
+        );
+      }
+
+      // Save
+      const safeProjectName = (selectedProject.project_name || selectedProject.project?.name || 'Project').replace(/[^a-zA-Z0-9]/g, '_');
+      doc.save(`Purchase_Comparison_${safeProjectName}_${new Date().toISOString().split('T')[0]}.pdf`);
+
+      showSuccess('PDF file downloaded successfully');
+    } catch (error) {
+      console.error('Error exporting to PDF:', error);
+      showError('Failed to export PDF file');
+    } finally {
+      setExporting(false);
+    }
   };
 
   // Get status badge styling
@@ -444,25 +855,62 @@ export default function PurchaseComparison() {
       >
         {/* Header */}
         <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6 shadow-md mb-6">
-          <div className="flex items-center gap-3">
-            {selectedProject && (
-              <button
-                onClick={handleBack}
-                className="p-2 hover:bg-green-200 rounded-lg transition-colors mr-2"
-              >
-                <ArrowLeftIcon className="w-6 h-6 text-green-700" />
-              </button>
-            )}
-            <DocumentChartBarIcon className="w-8 h-8 text-green-600" />
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800">Purchase Comparison</h1>
-              <p className="text-gray-600">
-                {selectedProject
-                  ? `Comparing estimated vs actual purchases for ${selectedProject.project_name || selectedProject.project?.name || 'Project'}`
-                  : 'Compare planned BOQ materials with actual purchases'
-                }
-              </p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {selectedProject && (
+                <button
+                  onClick={handleBack}
+                  className="p-2 hover:bg-green-200 rounded-lg transition-colors mr-2"
+                >
+                  <ArrowLeftIcon className="w-6 h-6 text-green-700" />
+                </button>
+              )}
+              <DocumentChartBarIcon className="w-8 h-8 text-green-600" />
+              <div>
+                <h1 className="text-2xl font-bold text-gray-800">Purchase Comparison</h1>
+                <p className="text-gray-600">
+                  {selectedProject
+                    ? `Comparing estimated vs actual purchases for ${selectedProject.project_name || selectedProject.project?.name || 'Project'}`
+                    : 'Compare planned BOQ materials with actual purchases'
+                  }
+                </p>
+              </div>
             </div>
+
+            {/* Download Buttons - Show only when project is selected and data is loaded */}
+            {selectedProject && comparisonData && !loadingComparison && (
+              <div className="flex items-center gap-2">
+                {exporting ? (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-gray-400 text-white rounded-lg">
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Exporting...</span>
+                  </div>
+                ) : (
+                  <>
+                    {/* Excel button - commented out for now
+                    <button
+                      onClick={handleExportToExcel}
+                      disabled={exporting}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                      title="Download as Excel"
+                    >
+                      <ArrowDownTrayIcon className="w-5 h-5" />
+                      <span>Excel</span>
+                    </button>
+                    */}
+                    <button
+                      onClick={handleExportToPDF}
+                      disabled={exporting}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                      title="Download as PDF"
+                    >
+                      <ArrowDownTrayIcon className="w-5 h-5" />
+                      <span>PDF</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -754,11 +1202,11 @@ export default function PurchaseComparison() {
                                                   <p className="text-sm font-medium text-gray-900">{item.material_name}</p>
                                                   {item.purchase.is_new_material === true ? (
                                                     <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
-                                                      NEW - CR #{crId}
+                                                      NEW - PO #{crId}
                                                     </Badge>
                                                   ) : crId !== 'unknown' && (
                                                     <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-xs">
-                                                      CR #{crId}
+                                                      PO #{crId}
                                                     </Badge>
                                                   )}
                                                 </div>
@@ -776,12 +1224,12 @@ export default function PurchaseComparison() {
                                           );
                                         });
 
-                                        // Add CR summary row with total (including VAT) only for multi-material CRs
+                                        // Add PO summary row with total (including VAT) only for multi-material POs
                                         if (numMaterials > 1) {
                                           elements.push(
                                             <div key={`cr-${crId}-summary`} className="px-4 py-2 bg-gray-50 border-t border-gray-200">
                                               <div className="flex justify-between items-center text-sm font-semibold text-gray-700">
-                                                <span>CR #{crId} Total {crData.totalVat > 0 ? '(incl. VAT)' : ''}</span>
+                                                <span>PO #{crId} Total {crData.totalVat > 0 ? '(incl. VAT)' : ''}</span>
                                                 <span>{crTotal.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                               </div>
                                             </div>
@@ -814,7 +1262,7 @@ export default function PurchaseComparison() {
                                 </p>
                               </div>
                               <div className={`p-3 rounded-lg ${(group.totals.planned_amount - group.totals.actual_amount) >= 0 ? 'bg-gray-50' : 'bg-red-50'}`}>
-                                <p className="text-xs text-gray-500 mb-1">Balance</p>
+                                <p className="text-xs text-gray-500 mb-1">Balance (remaining purchase)</p>
                                 <p className={`text-base font-bold ${(group.totals.planned_amount - group.totals.actual_amount) >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
                                   {(group.totals.planned_amount - group.totals.actual_amount).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
@@ -854,7 +1302,7 @@ export default function PurchaseComparison() {
                             </p>
                           </div>
                           <div className={`p-3 rounded-lg ${balance >= 0 ? 'bg-gray-50' : 'bg-red-50'}`}>
-                            <p className="text-xs text-gray-500 mb-1">Balance</p>
+                            <p className="text-xs text-gray-500 mb-1">Balance (remaining purchase)</p>
                             <p className={`text-lg font-bold ${balance >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
                               {balance.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
