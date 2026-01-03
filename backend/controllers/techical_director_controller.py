@@ -6,6 +6,7 @@ from models.preliminary_master import BOQInternalRevision
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload  # ✅ PERFORMANCE: Eager loading for N+1 fix
+from sqlalchemy import func, and_  # For aggregations and conditions
 from datetime import datetime  # For datetime.min in sorting
 from utils.boq_email_service import BOQEmailService
 from models.user import User
@@ -13,6 +14,65 @@ from models.role import Role
 from utils.comprehensive_notification_service import notification_service
 
 log = get_logger()
+
+
+def calculate_boq_financial_data(boq, boq_details):
+    """
+    Calculate financial data from BOQ and BOQDetails
+    Returns dict with total_cost, material_cost, labour_cost, etc.
+    """
+    if not boq_details or not boq_details.boq_details:
+        return {
+            'total_cost': 0,
+            'total_material_cost': 0,
+            'total_labour_cost': 0,
+            'items_count': 0
+        }
+
+    total_material_cost = 0
+    total_labour_cost = 0
+    total_selling_price = 0
+    items_count = 0
+
+    boq_json = boq_details.boq_details
+    items = boq_json.get('items', [])
+    items_count = len(items)
+
+    for item in items:
+        # Check for sub_items (new format)
+        if 'sub_items' in item and item.get('sub_items'):
+            for sub_item in item.get('sub_items', []):
+                # Materials
+                for mat in sub_item.get('materials', []):
+                    total_material_cost += mat.get('total_price', 0) or 0
+                # Labour
+                for lab in sub_item.get('labour', []):
+                    lab_cost = lab.get('total_cost') or (lab.get('hours', 0) * lab.get('rate_per_hour', 0))
+                    total_labour_cost += lab_cost
+                # Selling price from quantity * rate
+                sub_quantity = sub_item.get('quantity', 0) or 0
+                sub_rate = sub_item.get('rate', 0) or 0
+                total_selling_price += sub_quantity * sub_rate
+        else:
+            # Old format
+            for mat in item.get('materials', []):
+                total_material_cost += mat.get('total_price', 0) or 0
+            for lab in item.get('labour', []):
+                lab_cost = lab.get('total_cost') or (lab.get('hours', 0) * lab.get('rate_per_hour', 0))
+                total_labour_cost += lab_cost
+
+    # Use database total_cost if no selling price calculated
+    final_total = total_selling_price if total_selling_price > 0 else (float(boq_details.total_cost) if boq_details.total_cost else 0)
+
+    return {
+        'total_cost': final_total,
+        'selling_price': final_total,
+        'total_material_cost': total_material_cost,
+        'total_labour_cost': total_labour_cost,
+        'items_count': items_count,
+        'material_count': boq_details.total_materials if boq_details.total_materials else 0,
+        'labour_count': boq_details.total_labour if boq_details.total_labour else 0
+    }
 
 def get_all_td_boqs():
     try:
@@ -1328,3 +1388,143 @@ def get_td_purchase_order_by_id(cr_id):
             "error": f"Failed to fetch purchase order details: {str(e)}",
             "error_type": type(e).__name__
         }), 500
+
+def get_td_production_management_boqs():
+    """
+    Get ALL BOQs for TD Production Management view (including completed)
+    Returns all project BOQs regardless of assignment or completion status
+    Frontend handles filtering between live and completed projects
+    This is different from td_approved_boq which only shows unassigned projects
+    """
+    try:
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)
+ 
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+ 
+        # OPTIMIZED: Join BOQDetails and User to eliminate N+1 queries
+        query = (
+            db.session.query(
+                BOQ,
+                Project.project_name,
+                Project.project_code,
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.start_date,
+                Project.end_date,
+                Project.status.label('project_status'),
+                Project.user_id,
+                User.full_name.label('last_pm_name'),
+                BOQDetails
+            )
+            .join(Project, BOQ.project_id == Project.project_id)
+            .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
+            .outerjoin(BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False))
+            .filter(
+                BOQ.is_deleted == False,
+                Project.is_deleted == False,
+                BOQ.status != 'Rejected'  # Exclude rejected BOQs
+                # NOTE: Removed completed project filter - frontend handles live/completed tab filtering
+            )
+            .order_by(BOQ.created_at.desc())
+        )
+ 
+        # OPTIMIZED: Use func.count() for better performance
+        if page is not None:
+            total_count = query.with_entities(func.count()).scalar()
+            if total_count == 0:
+                return jsonify({
+                    "message": "No BOQs found for production management",
+                    "count": 0,
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_count": 0,
+                        "total_pages": 0,
+                        "has_next": False,
+                        "has_prev": False
+                    }
+                }), 200
+            offset = (page - 1) * page_size
+            rows = query.offset(offset).limit(page_size).all()
+        else:
+            rows = query.all()
+            if not rows:
+                return jsonify({"message": "No BOQs found for production management", "count": 0, "data": []}), 200
+            total_count = len(rows)
+ 
+        # Build response with financial data
+        production_boqs = []
+        for row in rows:
+            # Use already-loaded BOQ and BOQDetails from JOIN (no additional queries)
+            boq_obj = row.BOQ
+            boq_details = row.BOQDetails
+ 
+            # Calculate financial data
+            financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
+ 
+            boq_entry = {
+                "boq_id": boq_obj.boq_id,
+                "boq_name": boq_obj.boq_name,
+                "project_id": boq_obj.project_id,
+                "project_name": row.project_name,
+                "project_code": row.project_code,
+                "client": row.client,
+                "location": row.location,
+                "floor": row.floor_name,
+                "hours": row.working_hours,
+                "start_date": row.start_date.isoformat() if row.start_date else None,
+                "end_date": row.end_date.isoformat() if row.end_date else None,
+                "status": boq_obj.status,
+                "boq_status": boq_obj.status,
+                "project_status": row.project_status,
+                "client_status": boq_obj.client_status,
+                "revision_number": boq_obj.revision_number or 0,
+                "email_sent": boq_obj.email_sent,
+                "user_id": row.user_id,
+                "created_at": boq_obj.created_at.isoformat() if boq_obj.created_at else None,
+                "created_by": boq_obj.created_by,
+                "client_rejection_reason": boq_obj.client_rejection_reason,
+                "last_pm_user_id": boq_obj.last_pm_user_id,
+                "last_pm_name": row.last_pm_name,
+                # Flag to indicate if PM is assigned
+                "pm_assigned": bool(row.user_id and row.user_id not in [None, '[]', 'null', '']),
+                # Add financial data
+                **financial_data
+            }
+            production_boqs.append(boq_entry)
+ 
+        response = {
+            "message": "TD Production Management BOQs retrieved successfully",
+            "count": len(production_boqs),
+            "data": production_boqs
+        }
+ 
+        if page is not None:
+            total_pages = (total_count + page_size - 1) // page_size
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+ 
+        return jsonify(response), 200
+ 
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error retrieving TD production management BOQs: {str(e)}")
+        return jsonify({
+            'error': 'Failed to retrieve TD production management BOQs',
+            'details': str(e)
+        }), 500
+ 
+ 

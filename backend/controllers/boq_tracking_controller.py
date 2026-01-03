@@ -608,7 +608,8 @@ def get_boq_planned_vs_actual(boq_id):
                     # IMPORTANT: source should be "original_boq" if material was in original BOQ
                     # Only NEW materials from CRs should have source="change_request"
                     # cr_update_data means: material exists in original BOQ but was updated by CR
-                    "source": "change_request" if is_from_change_request else "original_boq"
+                    "source": "change_request" if is_from_change_request else "original_boq",
+                    "balance": float(planned_total - actual_total)  # Planned - Actual balance
                 })
 
                 # Check for unplanned materials (purchased but not in BOQ)
@@ -719,7 +720,8 @@ def get_boq_planned_vs_actual(boq_id):
                                             "note": "This material was purchased but was not in the original BOQ plan",
                                             "is_from_change_request": is_from_cr,
                                             "change_request_id": cr_id,
-                                            "source": "change_request" if is_from_cr else "unplanned"
+                                            "source": "change_request" if is_from_cr else "unplanned",
+                                            "balance": float(-purchase_total)  # Unplanned = 0 planned - actual
                                         })
 
             # Add NEW CR materials (that don't update existing materials)
@@ -794,7 +796,8 @@ def get_boq_planned_vs_actual(boq_id):
                     "justification": justification_text,
                     "is_from_change_request": True,
                     "change_request_id": cr_id,
-                    "source": "change_request"
+                    "source": "change_request",
+                    "balance": float(-actual_total)  # CR materials: 0 planned - actual
                 })
 
             # Labour comparison
@@ -1423,7 +1426,10 @@ def get_boq_planned_vs_actual(boq_id):
                     "profit_percentage": float(profit_pct),
                     "transport_amount": float(planned_transport),
                     "total": float(planned_total),
-                    "selling_price": float(selling_price)
+                    "selling_price": float(selling_price),
+                    "balance": float(planned_total - actual_total),  # Item-level balance
+                    "materials_balance": float(planned_materials_total - actual_materials_total),
+                    "labour_balance": float(planned_labour_total - actual_labour_total)
                 },
                 "actual": {
                     "materials_total": float(actual_materials_total),
@@ -1611,6 +1617,11 @@ def get_boq_planned_vs_actual(boq_id):
             "actual_materials_total": float(total_actual_materials),
             "planned_labour_total": float(total_planned_labour),
             "actual_labour_total": float(total_actual_labour),
+
+            # Balance calculations (Planned - Actual)
+            "balance": float(total_planned - total_actual),
+            "materials_balance": float(total_planned_materials - total_actual_materials),
+            "labour_balance": float(total_planned_labour - total_actual_labour),
 
             "total_planned_miscellaneous": float(total_planned_miscellaneous),
             "total_actual_miscellaneous": float(total_actual_miscellaneous),

@@ -607,15 +607,6 @@ export default function PurchaseComparison() {
                                 </div>
                               </div>
 
-                              {/* Planned Total */}
-                              <div className="mt-4 p-3 rounded-lg bg-blue-50">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm font-medium text-gray-600">Total Planned</span>
-                                  <span className="text-sm font-bold text-blue-600">
-                                    {group.totals.planned_amount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </span>
-                                </div>
-                              </div>
                             </div>
 
                             {/* Right Side - Actual Spending */}
@@ -692,14 +683,29 @@ export default function PurchaseComparison() {
                                 </div>
                               </div>
 
-                              {/* Actual Total */}
-                              <div className="mt-4 p-3 rounded-lg bg-green-50">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm font-medium text-gray-600">Total Actual</span>
-                                  <span className="text-sm font-bold text-green-600">
-                                    {group.totals.actual_amount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </span>
-                                </div>
+                            </div>
+                          </div>
+
+                          {/* Item Summary - Three columns */}
+                          <div className="p-4 bg-gray-100 border-t border-gray-200">
+                            <div className="grid grid-cols-3 gap-4">
+                              <div className="p-3 rounded-lg bg-blue-50">
+                                <p className="text-xs text-gray-500 mb-1">Total Planned</p>
+                                <p className="text-base font-bold text-blue-600">
+                                  {group.totals.planned_amount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                              </div>
+                              <div className="p-3 rounded-lg bg-green-50">
+                                <p className="text-xs text-gray-500 mb-1">Total Actual</p>
+                                <p className="text-base font-bold text-green-600">
+                                  {group.totals.actual_amount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                              </div>
+                              <div className={`p-3 rounded-lg ${(group.totals.planned_amount - group.totals.actual_amount) >= 0 ? 'bg-gray-50' : 'bg-red-50'}`}>
+                                <p className="text-xs text-gray-500 mb-1">Balance</p>
+                                <p className={`text-base font-bold ${(group.totals.planned_amount - group.totals.actual_amount) >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
+                                  {(group.totals.planned_amount - group.totals.actual_amount).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
                               </div>
                             </div>
                           </div>
@@ -708,6 +714,35 @@ export default function PurchaseComparison() {
                     )}
                   </div>
                 )}
+
+                {/* Overall Summary - At Bottom */}
+                <div className="bg-white rounded-xl shadow-md overflow-hidden mt-6">
+                  <div className="p-4 bg-gray-50 border-b border-gray-200">
+                    <h3 className="font-bold text-gray-800">Overall Summary</h3>
+                  </div>
+                  <div className="p-4">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="p-3 rounded-lg bg-blue-50">
+                        <p className="text-xs text-gray-500 mb-1">Total Planned</p>
+                        <p className="text-lg font-bold text-blue-600">
+                          {(comparisonData.overall_summary.planned_total_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                      <div className="p-3 rounded-lg bg-green-50">
+                        <p className="text-xs text-gray-500 mb-1">Total Actual</p>
+                        <p className="text-lg font-bold text-green-600">
+                          {(comparisonData.overall_summary.actual_total_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                      <div className={`p-3 rounded-lg ${((comparisonData.overall_summary.planned_total_amount || 0) - (comparisonData.overall_summary.actual_total_amount || 0)) >= 0 ? 'bg-gray-50' : 'bg-red-50'}`}>
+                        <p className="text-xs text-gray-500 mb-1">Balance</p>
+                        <p className={`text-lg font-bold ${((comparisonData.overall_summary.planned_total_amount || 0) - (comparisonData.overall_summary.actual_total_amount || 0)) >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
+                          {((comparisonData.overall_summary.planned_total_amount || 0) - (comparisonData.overall_summary.actual_total_amount || 0)).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
               </>
             ) : (

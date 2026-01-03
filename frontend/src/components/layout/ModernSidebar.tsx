@@ -29,6 +29,11 @@ import {
   BugAntIcon,
   ExclamationTriangleIcon,
   WrenchScrewdriverIcon,
+  ClockIcon,
+  UserPlusIcon,
+  CalendarDaysIcon,
+  ClipboardDocumentListIcon,
+  BanknotesIcon,
   DocumentChartBarIcon
 } from '@heroicons/react/24/outline';
 import {
@@ -43,7 +48,12 @@ import {
   ClipboardDocumentCheckIcon as ClipboardDocumentCheckSolid,
   CubeIcon as CubeSolid,
   PencilSquareIcon as PencilSolid,
-  ExclamationTriangleIcon as ExclamationTriangleSolid
+  ExclamationTriangleIcon as ExclamationTriangleSolid,
+  ClockIcon as ClockSolid,
+  UserPlusIcon as UserPlusSolid,
+  CalendarDaysIcon as CalendarDaysSolid,
+  ClipboardDocumentListIcon as ClipboardDocumentListSolid,
+  BanknotesIcon as BanknotesSolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
@@ -388,20 +398,18 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       },
       // ========== OPERATIONS & PRODUCTION ==========
       {
+        name: 'Purchase Comparison',
+        href: buildPath('/purchase-comparison'),
+        icon: DocumentChartBarIcon,
+        iconSolid: DocumentChartBarIcon,
+        color: 'text-green-600'
+      },
+      {
         name: 'Profit Comparison',
         href: buildPath('/record-material'),
         icon: ShoppingCartIcon,
         iconSolid: ShoppingSolid,
-        color: 'text-indigo-600',
-        children: [
-          {
-            name: 'Purchase Comparison',
-            href: buildPath('/purchase-comparison'),
-            icon: DocumentChartBarIcon,
-            iconSolid: DocumentChartBarIcon,
-            color: 'text-green-600'
-          }
-        ]
+        color: 'text-indigo-600'
       }
     ];
 
@@ -414,19 +422,43 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         iconSolid: BuildingOfficeSolid,
         color: 'text-blue-600'
       },
-      {
-        name: 'Production Management',
-        href: buildPath('/record-material'),
-        icon: ShoppingCartIcon,
-        iconSolid: ShoppingCartIcon,
-        color: 'text-indigo-600'
-      },
+      // Production Management commented out - PM doesn't need to view this
+      // {
+      //   name: 'Production Management',
+      //   href: buildPath('/record-material'),
+      //   icon: ShoppingCartIcon,
+      //   iconSolid: ShoppingCartIcon,
+      //   color: 'text-indigo-600'
+      // },
       {
         name: 'Material Purchase',
         href: buildPath('/extra-material'),
         icon: CubeIcon,
         iconSolid: CubeSolid,
         color: 'text-purple-600'
+      },
+      {
+        name: 'Labour Management',
+        href: buildPath('/labour/approvals'),
+        icon: ClipboardDocumentListIcon,
+        iconSolid: ClipboardDocumentListSolid,
+        color: 'text-teal-600',
+        children: [
+          {
+            name: 'Requisition Approvals',
+            href: buildPath('/labour/approvals'),
+            icon: DocumentCheckIcon,
+            iconSolid: DocumentCheckSolid,
+            color: 'text-green-500'
+          },
+          {
+            name: 'Attendance Lock',
+            href: buildPath('/labour/attendance-lock'),
+            icon: ClockIcon,
+            iconSolid: ClockSolid,
+            color: 'text-blue-500'
+          }
+        ]
       }
     ];
 
@@ -477,6 +509,36 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: ShoppingCartIcon,
         iconSolid: ShoppingSolid,
         color: 'text-orange-600'
+      },
+      {
+        name: 'Labour Management',
+        href: buildPath('/labour/requisitions'),
+        icon: ClipboardDocumentListIcon,
+        iconSolid: ClipboardDocumentListSolid,
+        color: 'text-purple-600',
+        children: [
+          {
+            name: 'Labour Requisition',
+            href: buildPath('/labour/requisitions'),
+            icon: DocumentPlusIcon,
+            iconSolid: DocumentPlusSolid,
+            color: 'text-purple-500'
+          },
+          {
+            name: 'Arrival Confirmation',
+            href: buildPath('/labour/arrivals'),
+            icon: CheckCircleIcon,
+            iconSolid: CheckCircleIcon,
+            color: 'text-green-500'
+          },
+          {
+            name: 'Attendance Logs',
+            href: buildPath('/labour/attendance'),
+            icon: ClockIcon,
+            iconSolid: ClockSolid,
+            color: 'text-blue-500'
+          }
+        ]
       }
     ];
 
@@ -615,6 +677,29 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: DocumentTextIcon,
         iconSolid: DocumentTextSolid,
         color: 'text-indigo-600'
+      },
+      {
+        name: 'Labour Management',
+        href: buildPath('/labour/registry'),
+        icon: UserPlusIcon,
+        iconSolid: UserPlusSolid,
+        color: 'text-purple-600',
+        children: [
+          {
+            name: 'Labour Registry',
+            href: buildPath('/labour/registry'),
+            icon: UserPlusIcon,
+            iconSolid: UserPlusSolid,
+            color: 'text-purple-500'
+          },
+          {
+            name: 'Assign Workers',
+            href: buildPath('/labour/assignments'),
+            icon: CalendarDaysIcon,
+            iconSolid: CalendarDaysSolid,
+            color: 'text-blue-500'
+          }
+        ]
       }
     ];
 
@@ -634,6 +719,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: PencilIcon,
         iconSolid: PencilSolid,
         color: 'text-indigo-600'
+      },
+      {
+        name: 'Payroll Processing',
+        href: buildPath('/labour/payroll'),
+        icon: BanknotesIcon,
+        iconSolid: BanknotesSolid,
+        color: 'text-green-600'
       }
     ];
 
@@ -931,19 +1023,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             </div>
           </div>
           
-          {/* Toggle Button - Hidden on mobile - Now resets to default width */}
-          <button
-            onClick={resetWidth}
-            className="hidden md:block p-1.5 hover:bg-gray-100 rounded-lg transition-colors duration-200"
-            title="Reset sidebar width"
-            aria-label="Reset sidebar width"
-          >
-            {isIconOnlyMode ? (
-              <ChevronRightIcon className="w-4 h-4 text-gray-600" />
-            ) : (
-              <ChevronLeftIcon className="w-4 h-4 text-gray-600" />
-            )}
-          </button>
         </div>
         {/* Decorative element */}
         <div className={clsx(

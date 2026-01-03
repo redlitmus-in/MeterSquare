@@ -14,7 +14,8 @@ from controllers.techical_director_controller import (
     get_td_se_boq_vendor_requests,
     get_td_dashboard_stats,
     get_td_purchase_orders,
-    get_td_purchase_order_by_id
+    get_td_purchase_order_by_id,
+    get_td_production_management_boqs
 )
 from utils.response_cache import cached_response, cache_dashboard_data
 
@@ -239,3 +240,11 @@ def get_td_purchase_order_by_id_route(cr_id):
         return access_check
     return get_td_purchase_order_by_id(cr_id) 
 
+@technical_routes.route('/td_production_management', methods=['GET'])
+@jwt_required
+def get_td_production_management_boqs_route():
+    """Get ALL BOQs for TD Production Management view (shows all project BOQs)"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_production_management_boqs()
