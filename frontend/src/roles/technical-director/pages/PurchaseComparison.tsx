@@ -312,10 +312,10 @@ export default function PurchaseComparison() {
             crTotalsMap[pCrId] = { amount: 0, vat: 0 };
           }
           crTotalsMap[pCrId].amount += (p.amount || 0);
-          // Use cr_total_vat if available (only set on last material), otherwise use vat_amount
-          if (p.cr_total_vat && crTotalsMap[pCrId].vat === 0) {
+          // Use cr_total_vat if available (same value for all materials in CR), take the max
+          if (p.cr_total_vat && p.cr_total_vat > crTotalsMap[pCrId].vat) {
             crTotalsMap[pCrId].vat = p.cr_total_vat;
-          } else if (p.vat_amount > 0 && crTotalsMap[pCrId].vat === 0) {
+          } else if (p.vat_amount > 0 && p.vat_amount > crTotalsMap[pCrId].vat) {
             crTotalsMap[pCrId].vat = p.vat_amount;
           }
         });
@@ -372,11 +372,10 @@ export default function PurchaseComparison() {
           crDataMap[crId] = { totalAmount: 0, totalVat: 0 };
         }
         crDataMap[crId].totalAmount += materialAmount;
-        // Use cr_total_vat if available, otherwise accumulate vat_amount (only set on last material)
-        if (material.cr_total_vat && crDataMap[crId].totalVat === 0) {
+        // Use cr_total_vat if available (same value for all materials in CR), take the max
+        if (material.cr_total_vat && material.cr_total_vat > crDataMap[crId].totalVat) {
           crDataMap[crId].totalVat = material.cr_total_vat;
-        } else if (materialVat > 0) {
-          // vat_amount is only set on last material of CR, so this will only add once per CR
+        } else if (materialVat > 0 && materialVat > crDataMap[crId].totalVat) {
           crDataMap[crId].totalVat = materialVat;
         }
 
