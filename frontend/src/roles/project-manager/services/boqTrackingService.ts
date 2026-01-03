@@ -20,15 +20,26 @@ class BOQTrackingService {
   }
 
   /**
-   * Get all BOQs
-   * Uses existing API: /api/pm_boq for Project Manager
-   * Uses existing API: /api/td_boqs for Technical Director
-   * Uses existing API: /api/all_boq for Admin
+   * Get all BOQs - Role-based Production Management
+   *
+   * PM: /api/pm_production_management
+   *   - Regular PM: Shows only BOQs assigned to that PM
+   *   - Admin: Shows ALL BOQs
+   *
+   * MEP: /api/mep_approve_boq
+   *   - Shows only BOQs for projects assigned to that MEP
+   *
+   * TD: /api/td_production_management
+   *   - Shows ALL project BOQs (regardless of TD user)
+   *
+   * Admin viewing as another role will use that role's endpoint
    */
   async getAllBOQs() {
     // Get user role from localStorage to determine which endpoint to use
     const userStr = localStorage.getItem('auth-storage');
+    const adminViewStr = localStorage.getItem('admin-view-storage');
     let userRole = '';
+    let viewingAsRole = '';
 
     if (userStr) {
       try {
@@ -39,21 +50,49 @@ class BOQTrackingService {
       }
     }
 
-    // Determine endpoint based on role
-    let endpoint = `/pm_boq`; // Default to PM endpoint
-
-    // Admin uses all_boq endpoint
-    if (userRole === 'admin') {
-      endpoint = `/all_boq`;
-    }
-    // Technical Director uses td_boqs endpoint
-    else if (userRole === 'technical director' ||
-             userRole === 'technical_director' ||
-             userRole === 'technicaldirector') {
-      endpoint = `/td_boqs?page=1&per_page=100`;
+    // Check if admin is viewing as another role
+    if (adminViewStr) {
+      try {
+        const adminViewData = JSON.parse(adminViewStr);
+        viewingAsRole = (adminViewData?.state?.viewingAsRole || '').toLowerCase();
+      } catch (e) {
+        console.error('Error parsing admin view data:', e);
+      }
     }
 
-    console.log('Fetching BOQs from:', endpoint, 'for role:', userRole);
+    // Use viewingAsRole if admin is impersonating, otherwise use actual role
+    const effectiveRole = viewingAsRole || userRole;
+
+    // Determine endpoint based on effective role
+    let endpoint = `/pm_production_management`; // Default to PM production endpoint
+
+    // Technical Director uses NEW td_production_management endpoint (shows ALL BOQs)
+    if (effectiveRole === 'technical director' ||
+        effectiveRole === 'technical_director' ||
+        effectiveRole === 'technicaldirector' ||
+        effectiveRole === 'td') {
+      endpoint = `/td_production_management`;
+    }
+    // MEP uses mep_approve_boq endpoint (shows only MEP's assigned BOQs)
+    else if (effectiveRole === 'mep' ||
+             effectiveRole === 'mep manager' ||
+             effectiveRole === 'mep_manager' ||
+             effectiveRole === 'mepmanager') {
+      endpoint = `/mep_approve_boq`;
+    }
+    // Project Manager uses NEW pm_production_management endpoint (shows ALL BOQs)
+    else if (effectiveRole === 'projectmanager' ||
+             effectiveRole === 'project_manager' ||
+             effectiveRole === 'project manager' ||
+             effectiveRole === 'pm') {
+      endpoint = `/pm_production_management`;
+    }
+    // Admin (without viewing as) uses pm_production_management by default
+    else if (effectiveRole === 'admin') {
+      endpoint = `/pm_production_management`;
+    }
+
+    console.log('Fetching BOQs from:', endpoint, 'for effective role:', effectiveRole, '(actual role:', userRole, ')');
 
     const response = await apiClient.get(
       endpoint,

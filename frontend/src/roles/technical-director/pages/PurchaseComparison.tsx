@@ -2,53 +2,106 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
 import { DocumentChartBarIcon, ArrowLeftIcon } from '@heroicons/react/24/outline';
-import { showSuccess, showError, showInfo } from '@/utils/toastHelper';
-import { boqTrackingService } from '@/roles/project-manager/services/boqTrackingService';
+import { showError, showInfo } from '@/utils/toastHelper';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { apiClient } from '@/api/config';
 
-interface MaterialComparison {
-  item_name: string;
-  sub_item_name: string;
+// Interface matching backend response structure
+interface ComparisonMaterial {
   material_name: string;
   master_material_id: number | null;
+  item_name: string;
+  sub_item_name: string;
   unit: string;
-  planned_quantity: number;
-  planned_rate: number;
-  planned_amount: number;
-  actual_quantity_purchased: number;
-  actual_quantity_used: number;
-  remaining_quantity: number;
-  actual_spent: number;
-  quantity_variance: number;
-  amount_variance: number;
-  quantity_variance_percentage: number;
-  amount_variance_percentage: number;
-  status: 'over_budget' | 'under_budget' | 'on_budget' | 'unplanned';
-  is_from_change_request: boolean;
+  planned: {
+    quantity: number;
+    rate: number;
+    amount: number;
+  };
+  actual: {
+    quantity_purchased: number;
+    quantity_used: number;
+    remaining_quantity: number;
+    unit_price: number;
+    amount: number;
+  };
+  variance: {
+    quantity: number;
+    rate: number;
+    amount: number;
+    quantity_percentage: number;
+    rate_percentage: number;
+    amount_percentage: number;
+  };
+  status: 'over_budget' | 'under_budget' | 'on_budget' | 'not_purchased';
+  // New material from change request
+  is_new_material?: boolean;
+  change_request_id?: number;
+  justification?: string;
 }
 
-interface ComparisonSummary {
-  total_materials: number;
-  total_planned_amount: number;
-  total_actual_spent: number;
-  total_variance: number;
-  variance_percentage: number;
-  over_budget_count: number;
-  under_budget_count: number;
-  on_budget_count: number;
-  unplanned_count: number;
+interface UnplannedMaterial {
+  material_name: string;
+  master_material_id: number | null;
+  item_name: string;
+  unit: string;
+  quantity_purchased: number;
+  quantity_used: number;
+  remaining_quantity: number;
+  unit_price: number;
+  total_amount: number;
+  is_from_change_request: boolean;
+  status: 'unplanned';
 }
 
 interface PurchaseComparisonData {
   project_id: number;
   project_name: string;
   boq_id: number;
-  materials: MaterialComparison[];
-  summary: ComparisonSummary;
+  planned_materials: {
+    materials: any[];
+    summary: {
+      total_count: number;
+      total_quantity: number;
+      total_amount: number;
+    };
+  };
+  actual_materials: {
+    materials: any[];
+    summary: {
+      total_count: number;
+      total_quantity_purchased: number;
+      total_amount: number;
+    };
+  };
+  comparison: {
+    materials: ComparisonMaterial[];
+    summary: {
+      total_compared: number;
+      over_budget_count: number;
+      under_budget_count: number;
+      on_budget_count: number;
+      not_purchased_count: number;
+    };
+  };
+  unplanned_materials: {
+    materials: UnplannedMaterial[];
+    summary: {
+      total_count: number;
+      total_amount: number;
+    };
+  };
+  overall_summary: {
+    planned_total_amount: number;
+    actual_total_amount: number;
+    unplanned_total_amount: number;
+    total_variance: number;
+    variance_percentage: number;
+    budget_status: string;
+  };
 }
 
 export default function PurchaseComparison() {
@@ -57,36 +110,36 @@ export default function PurchaseComparison() {
   const [activeTab, setActiveTab] = useState('live');
   const [comparisonData, setComparisonData] = useState<PurchaseComparisonData | null>(null);
   const [loadingComparison, setLoadingComparison] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  // Real-time auto-sync for BOQ list
+  // Real-time auto-sync for BOQ list - use dedicated purchase comparison projects endpoint
   const { data: boqData, isLoading: loading, refetch } = useProjectsAutoSync(
     async () => {
-      const response = await boqTrackingService.getAllBOQs();
+      const token = localStorage.getItem('access_token');
+      const response = await apiClient.get('/purchase_comparison_projects', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
       let allBOQs: any[] = [];
 
-      if (Array.isArray(response)) {
-        allBOQs = response;
-      } else if (response.boqs && Array.isArray(response.boqs)) {
-        allBOQs = response.boqs;
-      } else if (response.data && Array.isArray(response.data)) {
-        allBOQs = response.data;
-      } else if (response.items && Array.isArray(response.items)) {
-        allBOQs = response.items;
+      if (response.data.success) {
+        const data = response.data.data;
+        if (Array.isArray(data)) {
+          allBOQs = data;
+        } else if (data.projects && Array.isArray(data.projects)) {
+          allBOQs = data.projects;
+        } else if (data.boqs && Array.isArray(data.boqs)) {
+          allBOQs = data.boqs;
+        }
       }
 
-      // Filter for all BOQs except rejected ones
-      const filteredBOQs = allBOQs.filter((boq: any) => {
-        const status = (boq.status || boq.boq_status || boq.completion_status || '').toLowerCase();
-        return status !== 'rejected';
-      });
-
-      if (filteredBOQs.length === 0) {
-        showInfo('No BOQs found');
+      if (allBOQs.length === 0) {
+        showInfo('No projects with purchase data found');
       }
 
-      return filteredBOQs;
+      return allBOQs;
     }
   );
 
@@ -96,13 +149,20 @@ export default function PurchaseComparison() {
   const filteredBOQList = useMemo(() => {
     if (activeTab === 'live') {
       return boqList.filter((boq: any) => {
+        // Check multiple status fields for completed/closed status
         const projectStatus = (boq.project_status || '').toLowerCase();
-        return projectStatus !== 'completed' && projectStatus !== 'closed';
+        const boqStatus = (boq.status || boq.boq_status || '').toLowerCase();
+        const isCompleted = projectStatus === 'completed' || projectStatus === 'closed' ||
+                          boqStatus === 'completed' || boqStatus === 'closed';
+        return !isCompleted;
       });
     } else {
       return boqList.filter((boq: any) => {
+        // Check multiple status fields for completed/closed status
         const projectStatus = (boq.project_status || '').toLowerCase();
-        return projectStatus === 'completed' || projectStatus === 'closed';
+        const boqStatus = (boq.status || boq.boq_status || '').toLowerCase();
+        return projectStatus === 'completed' || projectStatus === 'closed' ||
+               boqStatus === 'completed' || boqStatus === 'closed';
       });
     }
   }, [boqList, activeTab]);
@@ -112,7 +172,7 @@ export default function PurchaseComparison() {
     setLoadingComparison(true);
     try {
       const token = localStorage.getItem('access_token');
-      const response = await apiClient.get(`/purchase-comparison/${projectId}`, {
+      const response = await apiClient.get(`/purchase_comparison/${projectId}`, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -153,7 +213,6 @@ export default function PurchaseComparison() {
   const handleBack = () => {
     setSelectedProject(null);
     setComparisonData(null);
-    setFilterStatus('all');
   };
 
   // Get status badge styling
@@ -165,6 +224,8 @@ export default function PurchaseComparison() {
         return <Badge className="bg-green-100 text-green-700 border-green-200">Under Budget</Badge>;
       case 'on_budget':
         return <Badge className="bg-blue-100 text-blue-700 border-blue-200">On Budget</Badge>;
+      case 'not_purchased':
+        return <Badge className="bg-gray-100 text-gray-700 border-gray-200">Not Purchased</Badge>;
       case 'unplanned':
         return <Badge className="bg-purple-100 text-purple-700 border-purple-200">Unplanned</Badge>;
       default:
@@ -187,12 +248,116 @@ export default function PurchaseComparison() {
     return `${sign}${value.toFixed(2)}%`;
   };
 
-  // Filter materials based on status filter
-  const filteredMaterials = useMemo(() => {
-    if (!comparisonData) return [];
-    if (filterStatus === 'all') return comparisonData.materials;
-    return comparisonData.materials.filter(m => m.status === filterStatus);
-  }, [comparisonData, filterStatus]);
+  // Group materials by item_name for item-based view
+  // Uses the new API structure: comparison.items[].materials with actual.purchases[]
+  const groupedByItem = useMemo(() => {
+    // New API structure: comparison.items[] contains item_name and materials[]
+    const comparisonItems = comparisonData?.comparison?.items || [];
+    // Also get unplanned materials (new materials from change requests)
+    // Structure: unplanned_materials.items[].materials[]
+    const unplannedItems = comparisonData?.unplanned_materials?.items || [];
+
+    const grouped: { [key: string]: {
+      item_name: string;
+      plannedMaterials: any[];
+      actualMaterials: any[];
+      totals: {
+        planned_amount: number;
+        actual_amount: number;
+        variance: number;
+      };
+    }} = {};
+
+    // Process each item from comparison
+    comparisonItems.forEach((item: any) => {
+      const itemName = item.item_name || 'Uncategorized';
+
+      if (!grouped[itemName]) {
+        grouped[itemName] = {
+          item_name: itemName,
+          plannedMaterials: [],
+          actualMaterials: [],
+          totals: {
+            planned_amount: item.summary?.planned_amount || 0,
+            actual_amount: item.summary?.actual_amount || 0,
+            variance: item.summary?.variance || 0
+          }
+        };
+      }
+
+      // Process materials within each item
+      (item.materials || []).forEach((material: any) => {
+        // Add to planned materials
+        grouped[itemName].plannedMaterials.push(material);
+
+        // Get CR info from purchases if available
+        // New API structure: purchases is directly on material, not under material.actual
+        const purchases = material.purchases || [];
+        const firstPurchase = purchases[0];
+        const crId = firstPurchase?.cr_id || null;
+        // Check if ANY purchase has is_new_material: true
+        const isNewMaterial = purchases.some((p: any) => p.is_new_material === true);
+
+        // Add to actual materials with CR info (preserve purchases array for filtering)
+        // New API structure: actual_amount is directly on material, not under material.actual.amount
+        grouped[itemName].actualMaterials.push({
+          ...material,
+          actual_amount: material.actual_amount || 0,
+          is_new_material: isNewMaterial,
+          is_from_change_request: purchases.length > 0,
+          change_request_id: crId,
+          justification: null, // Justification not in this API response
+          purchases: purchases // Keep purchases array for status filtering
+        });
+      });
+    });
+
+    // Process unplanned materials (new materials from change requests)
+    // Structure: unplanned_materials.items[].materials[]
+    unplannedItems.forEach((item: any) => {
+      const itemName = item.item_name || 'Uncategorized';
+
+      if (!grouped[itemName]) {
+        grouped[itemName] = {
+          item_name: itemName,
+          plannedMaterials: [],
+          actualMaterials: [],
+          totals: {
+            planned_amount: 0,
+            actual_amount: 0,
+            variance: 0
+          }
+        };
+      }
+
+      // Process each material in this unplanned item
+      (item.materials || []).forEach((material: any) => {
+        // Add unplanned material to actual materials only (not planned)
+        // All unplanned materials are considered NEW materials
+        const materialAmount = material.actual_amount || material.amount || material.total_amount || 0;
+        grouped[itemName].actualMaterials.push({
+          material_name: material.material_name,
+          sub_item_name: material.sub_item_name || material.item_name || itemName,
+          item_name: material.item_name || itemName,
+          actual_amount: materialAmount,
+          is_new_material: true, // All unplanned materials are NEW
+          is_from_change_request: true, // All unplanned materials are from change requests
+          change_request_id: material.change_request_id || null,
+          justification: null,
+          purchases: [{
+            cr_status: material.cr_status || 'purchase_completed',
+            is_new_material: true
+          }]
+        });
+
+        // Update totals for the group
+        grouped[itemName].totals.actual_amount += materialAmount;
+      });
+    });
+
+    return Object.values(grouped);
+  }, [comparisonData]);
+
 
   // Get clean status label
   const getStatusLabel = (boq: any) => {
@@ -274,7 +439,10 @@ export default function PurchaseComparison() {
                     <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">
                       {boqList.filter((boq: any) => {
                         const projectStatus = (boq.project_status || '').toLowerCase();
-                        return projectStatus !== 'completed' && projectStatus !== 'closed';
+                        const boqStatus = (boq.status || boq.boq_status || '').toLowerCase();
+                        const isCompleted = projectStatus === 'completed' || projectStatus === 'closed' ||
+                                          boqStatus === 'completed' || boqStatus === 'closed';
+                        return !isCompleted;
                       }).length}
                     </span>
                   </TabsTrigger>
@@ -286,7 +454,9 @@ export default function PurchaseComparison() {
                     <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
                       {boqList.filter((boq: any) => {
                         const projectStatus = (boq.project_status || '').toLowerCase();
-                        return projectStatus === 'completed' || projectStatus === 'closed';
+                        const boqStatus = (boq.status || boq.boq_status || '').toLowerCase();
+                        return projectStatus === 'completed' || projectStatus === 'closed' ||
+                               boqStatus === 'completed' || boqStatus === 'closed';
                       }).length}
                     </span>
                   </TabsTrigger>
@@ -385,147 +555,160 @@ export default function PurchaseComparison() {
                   <p className="mt-4 text-gray-600 font-medium">Loading comparison data...</p>
                 </div>
               </div>
-            ) : comparisonData ? (
+            ) : comparisonData && comparisonData.overall_summary ? (
               <>
-                {/* Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                  <div className="bg-white rounded-xl shadow-md p-5 border-l-4 border-blue-500">
-                    <p className="text-sm text-gray-500">Total Planned</p>
-                    <p className="text-2xl font-bold text-gray-800">{formatCurrency(comparisonData.summary.total_planned_amount)}</p>
-                  </div>
-                  <div className="bg-white rounded-xl shadow-md p-5 border-l-4 border-green-500">
-                    <p className="text-sm text-gray-500">Total Actual Spent</p>
-                    <p className="text-2xl font-bold text-gray-800">{formatCurrency(comparisonData.summary.total_actual_spent)}</p>
-                  </div>
-                  <div className={`bg-white rounded-xl shadow-md p-5 border-l-4 ${comparisonData.summary.total_variance > 0 ? 'border-red-500' : 'border-green-500'}`}>
-                    <p className="text-sm text-gray-500">Variance</p>
-                    <p className={`text-2xl font-bold ${comparisonData.summary.total_variance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {formatCurrency(comparisonData.summary.total_variance)}
-                    </p>
-                    <p className={`text-sm ${comparisonData.summary.total_variance > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                      {formatPercentage(comparisonData.summary.variance_percentage)}
-                    </p>
-                  </div>
-                  <div className="bg-white rounded-xl shadow-md p-5 border-l-4 border-purple-500">
-                    <p className="text-sm text-gray-500">Total Materials</p>
-                    <p className="text-2xl font-bold text-gray-800">{comparisonData.summary.total_materials}</p>
-                  </div>
-                  <div className="bg-white rounded-xl shadow-md p-5 border-l-4 border-orange-500">
-                    <p className="text-sm text-gray-500">Status Breakdown</p>
-                    <div className="flex gap-2 mt-1 flex-wrap">
-                      <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">Over: {comparisonData.summary.over_budget_count}</span>
-                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Under: {comparisonData.summary.under_budget_count}</span>
-                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">New: {comparisonData.summary.unplanned_count}</span>
-                    </div>
-                  </div>
-                </div>
+                {/* Comparison - Item Based Side-by-Side View */}
+                {(
+                  <div className="space-y-6">
+                    {groupedByItem.length === 0 ? (
+                      <div className="bg-white rounded-xl shadow-md p-12 text-center">
+                        <DocumentChartBarIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                        <p className="text-gray-500">No materials found</p>
+                      </div>
+                    ) : (
+                      groupedByItem.map((group) => (
+                        <div key={group.item_name} className="bg-white rounded-xl shadow-md overflow-hidden border-l-4 border-indigo-500">
+                          {/* Item Header */}
+                          <div className="flex items-center justify-between p-4 bg-gray-50 border-b border-gray-200">
+                            <h3 className="font-bold text-gray-800 uppercase tracking-wide">{group.item_name}</h3>
+                          </div>
 
-                {/* Filter Buttons */}
-                <div className="bg-white rounded-xl shadow-md p-4 flex gap-2 flex-wrap">
-                  <button
-                    onClick={() => setFilterStatus('all')}
-                    className={`px-4 py-2 rounded-lg transition-colors ${filterStatus === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                  >
-                    All ({comparisonData.materials.length})
-                  </button>
-                  <button
-                    onClick={() => setFilterStatus('over_budget')}
-                    className={`px-4 py-2 rounded-lg transition-colors ${filterStatus === 'over_budget' ? 'bg-red-600 text-white' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
-                  >
-                    Over Budget ({comparisonData.summary.over_budget_count})
-                  </button>
-                  <button
-                    onClick={() => setFilterStatus('under_budget')}
-                    className={`px-4 py-2 rounded-lg transition-colors ${filterStatus === 'under_budget' ? 'bg-green-600 text-white' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}
-                  >
-                    Under Budget ({comparisonData.summary.under_budget_count})
-                  </button>
-                  <button
-                    onClick={() => setFilterStatus('on_budget')}
-                    className={`px-4 py-2 rounded-lg transition-colors ${filterStatus === 'on_budget' ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'}`}
-                  >
-                    On Budget ({comparisonData.summary.on_budget_count})
-                  </button>
-                  <button
-                    onClick={() => setFilterStatus('unplanned')}
-                    className={`px-4 py-2 rounded-lg transition-colors ${filterStatus === 'unplanned' ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'}`}
-                  >
-                    Unplanned ({comparisonData.summary.unplanned_count})
-                  </button>
-                </div>
+                          {/* Side-by-Side Comparison */}
+                          <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-200">
+                            {/* Left Side - Planned Budget */}
+                            <div className="p-5">
+                              <div className="mb-4">
+                                <h4 className="text-lg font-semibold text-gray-800">Planned Budget</h4>
+                                <p className="text-sm text-gray-500">Original estimate</p>
+                              </div>
 
-                {/* Materials Table */}
-                <div className="bg-white rounded-xl shadow-md overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Material</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item / Sub-Item</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Planned Qty</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actual Qty</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Planned Amount</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actual Spent</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Variance</th>
-                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {filteredMaterials.length === 0 ? (
-                          <tr>
-                            <td colSpan={8} className="px-4 py-12 text-center text-gray-500">
-                              No materials found for the selected filter
-                            </td>
-                          </tr>
-                        ) : (
-                          filteredMaterials.map((material, index) => (
-                            <tr key={`${material.master_material_id}-${index}`} className="hover:bg-gray-50">
-                              <td className="px-4 py-4">
-                                <div className="flex items-center">
-                                  <div>
-                                    <p className="font-medium text-gray-900">{material.material_name}</p>
-                                    <p className="text-xs text-gray-500">{material.unit}</p>
-                                  </div>
-                                  {material.is_from_change_request && (
-                                    <Badge className="ml-2 bg-purple-100 text-purple-700 text-xs">CR</Badge>
+                              <div className="mb-3">
+                                <p className="text-sm font-medium text-gray-600 mb-2">Sub Items</p>
+                              </div>
+
+                              {/* Planned Materials List */}
+                              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                                <div className="bg-gray-50 px-4 py-2 flex justify-between text-xs font-medium text-gray-500 uppercase">
+                                  <span>Material</span>
+                                  <span>Amount</span>
+                                </div>
+                                <div className="divide-y divide-gray-100">
+                                  {group.plannedMaterials.map((material, index) => (
+                                    <div key={`planned-${material.master_material_id}-${index}`} className="px-4 py-3 flex justify-between items-start">
+                                      <div>
+                                        <p className="text-sm font-medium text-gray-900">{material.material_name}</p>
+                                        <p className="text-xs text-gray-500">[{material.sub_item_name || material.item_name}]</p>
+                                      </div>
+                                      <p className="text-sm font-medium text-gray-900">
+                                        {(material.planned_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Planned Total */}
+                              <div className="mt-4 p-3 rounded-lg bg-blue-50">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm font-medium text-gray-600">Total Planned</span>
+                                  <span className="text-sm font-bold text-blue-600">
+                                    {group.totals.planned_amount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Right Side - Actual Spending */}
+                            <div className="p-5">
+                              <div className="mb-4">
+                                <h4 className="text-lg font-semibold text-gray-800">Actual Spending</h4>
+                                <p className="text-sm text-gray-500">Real costs incurred</p>
+                              </div>
+
+                              <div className="mb-3">
+                                <p className="text-sm font-medium text-gray-600 mb-2">Sub Items</p>
+                              </div>
+
+                              {/* Actual Materials List */}
+                              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                                <div className="bg-gray-50 px-4 py-2 grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase">
+                                  <span className="col-span-5">Material</span>
+                                  <span className="col-span-2 text-right">Amount</span>
+                                  <span className="col-span-5">Reason</span>
+                                </div>
+                                <div className="divide-y divide-gray-100">
+                                  {group.actualMaterials.filter((m: any) => {
+                                    const amount = m.actual_amount || 0;
+                                    const purchases = m.purchases || [];
+                                    const hasActivePurchase = purchases.some((p: any) =>
+                                      ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+                                    );
+                                    return amount > 0 || hasActivePurchase || m.is_new_material === true;
+                                  }).length === 0 ? (
+                                    <div className="px-4 py-6 text-center text-gray-400 text-sm">
+                                      No purchases yet
+                                    </div>
+                                  ) : (
+                                    group.actualMaterials
+                                      .filter((material: any) => {
+                                        const amount = material.actual_amount || 0;
+                                        const purchases = material.purchases || [];
+                                        const hasActivePurchase = purchases.some((p: any) =>
+                                          ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+                                        );
+                                        return amount > 0 || hasActivePurchase || material.is_new_material === true;
+                                      })
+                                      .map((material: any, index: number) => (
+                                        <div key={`actual-${material.master_material_id}-${index}`} className="px-4 py-3 grid grid-cols-12 gap-2 items-start">
+                                          <div className="col-span-5">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              <p className="text-sm font-medium text-gray-900">{material.material_name}</p>
+                                              {material.is_new_material === true && (
+                                                <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
+                                                  NEW{material.change_request_id ? ` - CR #${material.change_request_id}` : ''}
+                                                </Badge>
+                                              )}
+                                              {material.is_from_change_request === true && material.is_new_material !== true && material.change_request_id && (
+                                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-xs">
+                                                  CR #{material.change_request_id}
+                                                </Badge>
+                                              )}
+                                            </div>
+                                            <p className="text-xs text-gray-500">[{material.sub_item_name || material.item_name}]</p>
+                                          </div>
+                                          <div className="col-span-2 text-right">
+                                            <p className="text-sm font-medium text-gray-900">
+                                              {(material.actual_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                          </div>
+                                          <div className="col-span-5">
+                                            <p className="text-sm text-blue-600 italic">
+                                              {material.justification || '-'}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      ))
                                   )}
                                 </div>
-                              </td>
-                              <td className="px-4 py-4">
-                                <p className="text-sm text-gray-900">{material.item_name || '-'}</p>
-                                <p className="text-xs text-gray-500">{material.sub_item_name || '-'}</p>
-                              </td>
-                              <td className="px-4 py-4 text-right">
-                                <p className="text-sm text-gray-900">{material.planned_quantity.toLocaleString()}</p>
-                              </td>
-                              <td className="px-4 py-4 text-right">
-                                <p className="text-sm text-gray-900">{material.actual_quantity_purchased.toLocaleString()}</p>
-                                <p className="text-xs text-gray-500">Used: {material.actual_quantity_used.toLocaleString()}</p>
-                              </td>
-                              <td className="px-4 py-4 text-right">
-                                <p className="text-sm text-gray-900">{formatCurrency(material.planned_amount)}</p>
-                              </td>
-                              <td className="px-4 py-4 text-right">
-                                <p className="text-sm text-gray-900">{formatCurrency(material.actual_spent)}</p>
-                              </td>
-                              <td className="px-4 py-4 text-right">
-                                <p className={`text-sm font-medium ${material.amount_variance > 0 ? 'text-red-600' : material.amount_variance < 0 ? 'text-green-600' : 'text-gray-600'}`}>
-                                  {formatCurrency(material.amount_variance)}
-                                </p>
-                                <p className={`text-xs ${material.amount_variance > 0 ? 'text-red-500' : material.amount_variance < 0 ? 'text-green-500' : 'text-gray-500'}`}>
-                                  {formatPercentage(material.amount_variance_percentage)}
-                                </p>
-                              </td>
-                              <td className="px-4 py-4 text-center">
-                                {getStatusBadge(material.status)}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                              </div>
+
+                              {/* Actual Total */}
+                              <div className="mt-4 p-3 rounded-lg bg-green-50">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm font-medium text-gray-600">Total Actual</span>
+                                  <span className="text-sm font-bold text-green-600">
+                                    {group.totals.actual_amount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
-                </div>
+                )}
+
               </>
             ) : (
               <div className="bg-white rounded-xl shadow-md p-12 text-center">
