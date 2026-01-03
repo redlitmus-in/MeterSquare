@@ -279,11 +279,19 @@ export default function PurchaseComparison() {
           actualMaterials: [],
           totals: {
             planned_amount: item.summary?.planned_amount || 0,
-            actual_amount: item.summary?.actual_amount || 0,
+            // We'll calculate actual_amount from CR totals below (not from API summary)
+            actual_amount: 0,
             variance: item.summary?.variance || 0
           }
         };
+      } else {
+        // Add to existing planned totals if same item_name appears multiple times
+        grouped[itemName].totals.planned_amount += item.summary?.planned_amount || 0;
+        grouped[itemName].totals.variance += item.summary?.variance || 0;
       }
+
+      // Group purchases by CR ID to calculate correct totals (VAT is per CR, not per material)
+      const crTotalsMap: { [crId: string]: { amount: number, vat: number } } = {};
 
       // Process materials within each item
       (item.materials || []).forEach((material: any) => {
@@ -291,29 +299,49 @@ export default function PurchaseComparison() {
         grouped[itemName].plannedMaterials.push(material);
 
         // Get CR info from purchases if available
-        // New API structure: purchases is directly on material, not under material.actual
         const purchases = material.purchases || [];
         const firstPurchase = purchases[0];
         const crId = firstPurchase?.cr_id || null;
-        // Check if ANY purchase has is_new_material: true
         const isNewMaterial = purchases.some((p: any) => p.is_new_material === true);
+        const totalVat = purchases.reduce((sum: number, p: any) => sum + (p.vat_amount || 0), 0);
 
-        // Add to actual materials with CR info (preserve purchases array for filtering)
-        // New API structure: actual_amount is directly on material, not under material.actual.amount
+        // Track CR totals for correct actual amount calculation
+        purchases.forEach((p: any) => {
+          const pCrId = p.cr_id || 'unknown';
+          if (!crTotalsMap[pCrId]) {
+            crTotalsMap[pCrId] = { amount: 0, vat: 0 };
+          }
+          crTotalsMap[pCrId].amount += (p.amount || 0);
+          // Use cr_total_vat if available (only set on last material), otherwise use vat_amount
+          if (p.cr_total_vat && crTotalsMap[pCrId].vat === 0) {
+            crTotalsMap[pCrId].vat = p.cr_total_vat;
+          } else if (p.vat_amount > 0 && crTotalsMap[pCrId].vat === 0) {
+            crTotalsMap[pCrId].vat = p.vat_amount;
+          }
+        });
+
         grouped[itemName].actualMaterials.push({
           ...material,
           actual_amount: material.actual_amount || 0,
+          vat_amount: totalVat,
           is_new_material: isNewMaterial,
           is_from_change_request: purchases.length > 0,
           change_request_id: crId,
-          justification: null, // Justification not in this API response
-          purchases: purchases // Keep purchases array for status filtering
+          justification: null,
+          purchases: purchases
         });
+      });
+
+      // Calculate actual_amount from CR totals (amount + VAT per CR)
+      Object.values(crTotalsMap).forEach((crData) => {
+        grouped[itemName].totals.actual_amount += (crData.amount + crData.vat);
       });
     });
 
     // Process unplanned materials (new materials from change requests)
     // Structure: unplanned_materials.items[].materials[]
+    // Note: Unlike comparison materials, unplanned materials have actual_amount WITHOUT VAT
+    // So we need to add vat_amount for unplanned materials
     unplannedItems.forEach((item: any) => {
       const itemName = item.item_name || 'Uncategorized';
 
@@ -330,28 +358,53 @@ export default function PurchaseComparison() {
         };
       }
 
+      // Group unplanned materials by CR ID to calculate VAT correctly (VAT is per CR)
+      const crDataMap: { [crId: string]: { totalAmount: number, totalVat: number } } = {};
+
       // Process each material in this unplanned item
       (item.materials || []).forEach((material: any) => {
-        // Add unplanned material to actual materials only (not planned)
-        // All unplanned materials are considered NEW materials
         const materialAmount = material.actual_amount || material.amount || material.total_amount || 0;
+        const materialVat = material.vat_amount || 0;
+        const crId = material.change_request_id || 'unknown';
+
+        // Track CR totals for correct VAT calculation
+        if (!crDataMap[crId]) {
+          crDataMap[crId] = { totalAmount: 0, totalVat: 0 };
+        }
+        crDataMap[crId].totalAmount += materialAmount;
+        // Use cr_total_vat if available, otherwise accumulate vat_amount (only set on last material)
+        if (material.cr_total_vat && crDataMap[crId].totalVat === 0) {
+          crDataMap[crId].totalVat = material.cr_total_vat;
+        } else if (materialVat > 0) {
+          // vat_amount is only set on last material of CR, so this will only add once per CR
+          crDataMap[crId].totalVat = materialVat;
+        }
+
         grouped[itemName].actualMaterials.push({
           material_name: material.material_name,
           sub_item_name: material.sub_item_name || material.item_name || itemName,
           item_name: material.item_name || itemName,
           actual_amount: materialAmount,
+          vat_amount: materialVat,
           is_new_material: true, // All unplanned materials are NEW
           is_from_change_request: true, // All unplanned materials are from change requests
           change_request_id: material.change_request_id || null,
           justification: null,
           purchases: [{
+            cr_id: material.change_request_id || null,
             cr_status: material.cr_status || 'purchase_completed',
-            is_new_material: true
+            is_new_material: true,
+            amount: materialAmount,
+            vat_amount: materialVat,
+            cr_total_vat: material.cr_total_vat || materialVat
           }]
         });
+      });
 
-        // Update totals for the group
-        grouped[itemName].totals.actual_amount += materialAmount;
+      // Update totals for the group - sum CR totals (amount + VAT per CR)
+      // For unplanned materials, we need to add VAT since actual_amount doesn't include it
+      Object.values(crDataMap).forEach((crData) => {
+        grouped[itemName].totals.actual_amount += (crData.totalAmount + crData.totalVat);
       });
     });
 
@@ -622,10 +675,9 @@ export default function PurchaseComparison() {
 
                               {/* Actual Materials List */}
                               <div className="border border-gray-200 rounded-lg overflow-hidden">
-                                <div className="bg-gray-50 px-4 py-2 grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase">
-                                  <span className="col-span-5">Material</span>
-                                  <span className="col-span-2 text-right">Amount</span>
-                                  <span className="col-span-5">Reason</span>
+                                <div className="bg-gray-50 px-4 py-2 flex justify-between text-xs font-medium text-gray-500 uppercase">
+                                  <span>Material</span>
+                                  <span>Amount</span>
                                 </div>
                                 <div className="divide-y divide-gray-100">
                                   {group.actualMaterials.filter((m: any) => {
@@ -640,45 +692,106 @@ export default function PurchaseComparison() {
                                       No purchases yet
                                     </div>
                                   ) : (
-                                    group.actualMaterials
-                                      .filter((material: any) => {
-                                        const amount = material.actual_amount || 0;
-                                        const purchases = material.purchases || [];
-                                        const hasActivePurchase = purchases.some((p: any) =>
-                                          ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
-                                        );
-                                        return amount > 0 || hasActivePurchase || material.is_new_material === true;
-                                      })
-                                      .map((material: any, index: number) => (
-                                        <div key={`actual-${material.master_material_id}-${index}`} className="px-4 py-3 grid grid-cols-12 gap-2 items-start">
-                                          <div className="col-span-5">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                              <p className="text-sm font-medium text-gray-900">{material.material_name}</p>
-                                              {material.is_new_material === true && (
-                                                <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
-                                                  NEW{material.change_request_id ? ` - CR #${material.change_request_id}` : ''}
-                                                </Badge>
-                                              )}
-                                              {material.is_from_change_request === true && material.is_new_material !== true && material.change_request_id && (
-                                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-xs">
-                                                  CR #{material.change_request_id}
-                                                </Badge>
-                                              )}
+                                    (() => {
+                                      // Group all purchases by CR ID to show CR summary with VAT
+                                      const purchasesByCR: { [crId: string]: { materials: any[], totalAmount: number, totalVat: number, hasNewMaterial: boolean } } = {};
+
+                                      group.actualMaterials
+                                        .filter((material: any) => {
+                                          const amount = material.actual_amount || 0;
+                                          const purchases = material.purchases || [];
+                                          const hasActivePurchase = purchases.some((p: any) =>
+                                            ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+                                          );
+                                          return amount > 0 || hasActivePurchase || material.is_new_material === true;
+                                        })
+                                        .forEach((material: any) => {
+                                          const purchases = material.purchases || [];
+                                          const activePurchases = purchases.filter((p: any) =>
+                                            ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+                                          );
+
+                                          activePurchases.forEach((purchase: any) => {
+                                            const crId = purchase.cr_id || 'unknown';
+                                            if (!purchasesByCR[crId]) {
+                                              purchasesByCR[crId] = { materials: [], totalAmount: 0, totalVat: 0, hasNewMaterial: false };
+                                            }
+                                            purchasesByCR[crId].materials.push({
+                                              ...material,
+                                              purchase
+                                            });
+                                            purchasesByCR[crId].totalAmount += (purchase.amount || 0);
+                                            // Use cr_total_vat if available (set on last material of CR), otherwise use vat_amount once
+                                            if (purchase.cr_total_vat && purchase.cr_total_vat > purchasesByCR[crId].totalVat) {
+                                              purchasesByCR[crId].totalVat = purchase.cr_total_vat;
+                                            } else if (purchase.vat_amount > 0 && purchasesByCR[crId].totalVat === 0) {
+                                              // Only set vat once per CR (vat_amount is only on last material)
+                                              purchasesByCR[crId].totalVat = purchase.vat_amount;
+                                            }
+                                            if (purchase.is_new_material) {
+                                              purchasesByCR[crId].hasNewMaterial = true;
+                                            }
+                                          });
+                                        });
+
+                                      // Render grouped by CR
+                                      return Object.entries(purchasesByCR).flatMap(([crId, crData]) => {
+                                        const elements: React.ReactNode[] = [];
+                                        const crTotal = crData.totalAmount + crData.totalVat;
+                                        const numMaterials = crData.materials.length;
+
+                                        // Render each material in this CR
+                                        crData.materials.forEach((item: any, idx: number) => {
+                                          const isLastMaterial = idx === numMaterials - 1;
+                                          // For the last material in CR, show total with VAT; otherwise show material amount
+                                          const displayAmount = isLastMaterial && numMaterials === 1
+                                            ? crTotal  // Single material CR: show total with VAT
+                                            : (item.purchase.amount || 0);  // Multi-material CR: show individual amount
+
+                                          elements.push(
+                                            <div key={`cr-${crId}-mat-${idx}`} className="px-4 py-3 flex justify-between items-start">
+                                              <div>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                  <p className="text-sm font-medium text-gray-900">{item.material_name}</p>
+                                                  {item.purchase.is_new_material === true ? (
+                                                    <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
+                                                      NEW - CR #{crId}
+                                                    </Badge>
+                                                  ) : crId !== 'unknown' && (
+                                                    <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-xs">
+                                                      CR #{crId}
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                                <p className="text-xs text-gray-500">[{item.sub_item_name || item.item_name}]</p>
+                                              </div>
+                                              <div className="text-right">
+                                                <p className="text-sm font-medium text-gray-900">
+                                                  {displayAmount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </p>
+                                                {isLastMaterial && numMaterials === 1 && crData.totalVat > 0 && (
+                                                  <p className="text-xs text-gray-400">(incl. VAT)</p>
+                                                )}
+                                              </div>
                                             </div>
-                                            <p className="text-xs text-gray-500">[{material.sub_item_name || material.item_name}]</p>
-                                          </div>
-                                          <div className="col-span-2 text-right">
-                                            <p className="text-sm font-medium text-gray-900">
-                                              {(material.actual_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </p>
-                                          </div>
-                                          <div className="col-span-5">
-                                            <p className="text-sm text-blue-600 italic">
-                                              {material.justification || '-'}
-                                            </p>
-                                          </div>
-                                        </div>
-                                      ))
+                                          );
+                                        });
+
+                                        // Add CR summary row with total (including VAT) only for multi-material CRs
+                                        if (numMaterials > 1) {
+                                          elements.push(
+                                            <div key={`cr-${crId}-summary`} className="px-4 py-2 bg-gray-50 border-t border-gray-200">
+                                              <div className="flex justify-between items-center text-sm font-semibold text-gray-700">
+                                                <span>CR #{crId} Total {crData.totalVat > 0 ? '(incl. VAT)' : ''}</span>
+                                                <span>{crTotal.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                              </div>
+                                            </div>
+                                          );
+                                        }
+
+                                        return elements;
+                                      });
+                                    })()
                                   )}
                                 </div>
                               </div>
@@ -696,7 +809,7 @@ export default function PurchaseComparison() {
                                 </p>
                               </div>
                               <div className="p-3 rounded-lg bg-green-50">
-                                <p className="text-xs text-gray-500 mb-1">Total Actual</p>
+                                <p className="text-xs text-gray-500 mb-1">Total Actual (incl. VAT)</p>
                                 <p className="text-base font-bold text-green-600">
                                   {group.totals.actual_amount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
@@ -716,33 +829,42 @@ export default function PurchaseComparison() {
                 )}
 
                 {/* Overall Summary - At Bottom */}
-                <div className="bg-white rounded-xl shadow-md overflow-hidden mt-6">
-                  <div className="p-4 bg-gray-50 border-b border-gray-200">
-                    <h3 className="font-bold text-gray-800">Overall Summary</h3>
-                  </div>
-                  <div className="p-4">
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="p-3 rounded-lg bg-blue-50">
-                        <p className="text-xs text-gray-500 mb-1">Total Planned</p>
-                        <p className="text-lg font-bold text-blue-600">
-                          {(comparisonData.overall_summary.planned_total_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
+                {(() => {
+                  // Calculate totals from grouped items (which include VAT)
+                  const totalPlanned = groupedByItem.reduce((sum, group) => sum + group.totals.planned_amount, 0);
+                  const totalActualWithVat = groupedByItem.reduce((sum, group) => sum + group.totals.actual_amount, 0);
+                  const balance = totalPlanned - totalActualWithVat;
+
+                  return (
+                    <div className="bg-white rounded-xl shadow-md overflow-hidden mt-6">
+                      <div className="p-4 bg-gray-50 border-b border-gray-200">
+                        <h3 className="font-bold text-gray-800">Overall Summary</h3>
                       </div>
-                      <div className="p-3 rounded-lg bg-green-50">
-                        <p className="text-xs text-gray-500 mb-1">Total Actual</p>
-                        <p className="text-lg font-bold text-green-600">
-                          {(comparisonData.overall_summary.actual_total_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
-                      </div>
-                      <div className={`p-3 rounded-lg ${((comparisonData.overall_summary.planned_total_amount || 0) - (comparisonData.overall_summary.actual_total_amount || 0)) >= 0 ? 'bg-gray-50' : 'bg-red-50'}`}>
-                        <p className="text-xs text-gray-500 mb-1">Balance</p>
-                        <p className={`text-lg font-bold ${((comparisonData.overall_summary.planned_total_amount || 0) - (comparisonData.overall_summary.actual_total_amount || 0)) >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
-                          {((comparisonData.overall_summary.planned_total_amount || 0) - (comparisonData.overall_summary.actual_total_amount || 0)).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
+                      <div className="p-4">
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="p-3 rounded-lg bg-blue-50">
+                            <p className="text-xs text-gray-500 mb-1">Total Planned</p>
+                            <p className="text-lg font-bold text-blue-600">
+                              {totalPlanned.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                          <div className="p-3 rounded-lg bg-green-50">
+                            <p className="text-xs text-gray-500 mb-1">Total Actual (incl. VAT)</p>
+                            <p className="text-lg font-bold text-green-600">
+                              {totalActualWithVat.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                          <div className={`p-3 rounded-lg ${balance >= 0 ? 'bg-gray-50' : 'bg-red-50'}`}>
+                            <p className="text-xs text-gray-500 mb-1">Balance</p>
+                            <p className={`text-lg font-bold ${balance >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
+                              {balance.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
               </>
             ) : (

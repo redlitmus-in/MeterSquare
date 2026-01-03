@@ -1838,6 +1838,16 @@ def get_purchase_comparision(project_id):
                 # Get item_name from ChangeRequest record (not from sub_items_data)
                 cr_item_name = cr.item_name or ''
 
+                # Parse material_vendor_selections for negotiated prices
+                # Format: {"material_name": {"negotiated_price": 44.0, ...}, ...}
+                vendor_selections = {}
+                if cr.material_vendor_selections:
+                    mvs = cr.material_vendor_selections
+                    if isinstance(mvs, str):
+                        mvs = json.loads(mvs)
+                    if isinstance(mvs, dict):
+                        vendor_selections = mvs
+
                 # Parse sub_items_data (PRIMARY source with unit_price, total_price)
                 if cr.sub_items_data:
                     sub_items_data = cr.sub_items_data
@@ -1846,13 +1856,25 @@ def get_purchase_comparision(project_id):
 
                     if isinstance(sub_items_data, list):
                         for mat in sub_items_data:
-                            # Use exact values from sub_items_data - NO FALLBACK
+                            material_name = mat.get('material_name', '') or mat.get('sub_item_name', '')
+                            quantity = float(mat.get('quantity') if mat.get('quantity') is not None else 0)
+                            boq_unit_price = float(mat.get('unit_price') if mat.get('unit_price') is not None else 0)
+
+                            # Check for negotiated (vendor) price in material_vendor_selections
+                            # This is the actual price paid to vendor, which may differ from BOQ price
+                            negotiated_price = None
+                            if material_name and material_name in vendor_selections:
+                                negotiated_price = vendor_selections[material_name].get('negotiated_price')
+
+                            # Use negotiated price if available, otherwise fall back to BOQ price
+                            actual_unit_price = float(negotiated_price) if negotiated_price else boq_unit_price
+
                             mat_info = {
                                 'master_material_id': mat.get('master_material_id'),
-                                'material_name': mat.get('material_name', '') or mat.get('sub_item_name', ''),
-                                'amount': float(mat.get('total_price') if mat.get('total_price') is not None else 0),
-                                'quantity': float(mat.get('quantity') if mat.get('quantity') is not None else 0),
-                                'unit_price': float(mat.get('unit_price') if mat.get('unit_price') is not None else 0),
+                                'material_name': material_name,
+                                'amount': quantity * actual_unit_price,  # Calculate from qty * actual price
+                                'quantity': quantity,
+                                'unit_price': actual_unit_price,  # Use vendor price if available
                                 'is_new_material': mat.get('is_new', False),
                                 'item_name': cr_item_name,  # Use item_name from CR record
                                 'sub_item_name': mat.get('sub_item_name', ''),
@@ -1864,19 +1886,40 @@ def get_purchase_comparision(project_id):
                 change_requests_lookup[cr.cr_id] = {
                     'materials_total_cost': float(cr.materials_total_cost or 0),
                     'materials_list': materials_list,  # List of all materials
-                    'status': cr.status
+                    'status': cr.status,
+                    'material_vendor_selections': vendor_selections  # Include for PO children lookup
                 }
 
-        # Fetch VAT amounts from LPOCustomization table for all cr_ids
-        lpo_vat_lookup = {}  # {cr_id: vat_amount}
+        # Fetch VAT percent from LPOCustomization table for all cr_ids
+        # We use vat_percent to calculate VAT per material (not stored vat_amount which is total)
+        lpo_vat_percent_lookup = {}  # {cr_id: vat_percent}
+        lpo_vat_percent_by_po_child = {}  # {po_child_id: vat_percent} for split CRs
         if cr_ids:
             lpo_customizations = LPOCustomization.query.filter(
                 LPOCustomization.cr_id.in_(list(cr_ids))
             ).all()
             for lpo_custom in lpo_customizations:
-                # Store VAT amount by cr_id (if po_child_id is null, it applies to the whole CR)
                 if lpo_custom.po_child_id is None:
-                    lpo_vat_lookup[lpo_custom.cr_id] = float(lpo_custom.vat_amount or 0)
+                    # VAT for parent CR (applies when not split)
+                    lpo_vat_percent_lookup[lpo_custom.cr_id] = float(lpo_custom.vat_percent or 5.0)
+                else:
+                    # VAT for specific PO child (applies when CR is split)
+                    lpo_vat_percent_by_po_child[lpo_custom.po_child_id] = float(lpo_custom.vat_percent or 5.0)
+
+        # Fetch PO children for CRs with split_to_sub_crs status
+        from models.po_child import POChild
+        po_children_by_cr = {}  # {cr_id: [po_child, ...]}
+        split_cr_ids = [cr_id for cr_id, cr_data in change_requests_lookup.items() if cr_data.get('status') == 'split_to_sub_crs']
+        if split_cr_ids:
+            po_children = POChild.query.filter(
+                POChild.parent_cr_id.in_(split_cr_ids),
+                POChild.is_deleted == False,
+                POChild.status.in_(['vendor_approved', 'purchase_completed', 'pending_td_approval'])
+            ).all()
+            for po_child in po_children:
+                if po_child.parent_cr_id not in po_children_by_cr:
+                    po_children_by_cr[po_child.parent_cr_id] = []
+                po_children_by_cr[po_child.parent_cr_id].append(po_child)
 
         # Build actual materials list from ChangeRequest.materials_data directly
         # This ensures ALL materials from CRs are included (not just those in MaterialPurchaseTracking)
@@ -1886,15 +1929,95 @@ def get_purchase_comparision(project_id):
 
         # Add all materials directly from ChangeRequest.materials_data (keep original data)
         for cr_id, cr_data in change_requests_lookup.items():
-            materials_list = cr_data.get('materials_list', [])
             cr_status = cr_data.get('status', '')
-            # Get VAT amount for this CR from LPOCustomization
-            cr_vat_amount = lpo_vat_lookup.get(cr_id, 0)
 
-            for mat_info in materials_list:
+            # For split CRs, get materials from PO children instead of parent CR
+            if cr_status == 'split_to_sub_crs' and cr_id in po_children_by_cr:
+                # Process PO children materials
+                for po_child in po_children_by_cr[cr_id]:
+                    po_child_id = po_child.id
+                    # Get VAT percent for this PO child (or fall back to parent CR's VAT)
+                    po_child_vat_percent = lpo_vat_percent_by_po_child.get(po_child_id, lpo_vat_percent_lookup.get(cr_id, 5.0))
+
+                    # Parse PO child materials_data
+                    materials_data = po_child.materials_data
+                    if isinstance(materials_data, str):
+                        materials_data = json.loads(materials_data)
+
+                    if isinstance(materials_data, list):
+                        # Get vendor selections from parent CR for negotiated prices
+                        parent_vendor_selections = cr_data.get('material_vendor_selections', {})
+
+                        # Calculate PO child total subtotal first (sum of all materials)
+                        po_child_subtotal = 0
+                        materials_with_prices = []
+                        for mat in materials_data:
+                            mat_qty = float(mat.get('quantity', 0))
+                            mat_name = mat.get('material_name', '') or mat.get('sub_item_name', '')
+                            neg_price = mat.get('negotiated_price')
+                            if not neg_price and mat_name in parent_vendor_selections:
+                                neg_price = parent_vendor_selections[mat_name].get('negotiated_price')
+                            mat_unit_price = float(neg_price) if neg_price else float(mat.get('unit_price', 0))
+                            mat_amount = mat_qty * mat_unit_price
+                            po_child_subtotal += mat_amount
+                            materials_with_prices.append((mat, mat_qty, mat_unit_price, mat_amount, mat_name))
+
+                        # Calculate total VAT for entire PO child (not per material)
+                        po_child_total_vat = round((po_child_subtotal * po_child_vat_percent) / 100, 2)
+                        num_po_child_materials = len(materials_with_prices)
+
+                        for idx, (mat, material_quantity, material_unit_price, material_amount, material_name) in enumerate(materials_with_prices):
+                            is_new_material = mat.get('is_new', False) or mat.get('is_new_material', False)
+
+                            # VAT: Show full PO child VAT only on LAST material (avoid splitting)
+                            is_last_material = (idx == num_po_child_materials - 1)
+                            material_vat_amount = po_child_total_vat if is_last_material else 0
+
+                            total_actual_quantity += material_quantity
+                            total_actual_amount += Decimal(str(material_amount))
+
+                            actual_materials_list.append({
+                                'material_name': material_name,
+                                'master_material_id': mat.get('master_material_id'),
+                                'item_name': po_child.item_name or cr_data.get('item_name', ''),
+                                'master_item_id': mat.get('master_item_id'),
+                                'sub_item_name': mat.get('sub_item_name', ''),
+                                'unit': mat.get('unit', ''),
+                                'quantity': material_quantity,
+                                'quantity_used': 0,
+                                'remaining_quantity': 0,
+                                'rate': material_unit_price,
+                                'amount': material_amount,
+                                'is_from_change_request': True,
+                                'is_new_material': is_new_material,
+                                'change_request_id': cr_id,
+                                'po_child_id': po_child_id,
+                                'cr_status': po_child.status,
+                                'vat_amount': material_vat_amount,  # VAT shown only on last material
+                                'cr_total_vat': po_child_total_vat,  # Total PO child VAT for reference
+                                'cr_subtotal': po_child_subtotal  # PO child subtotal for reference
+                            })
+                continue  # Skip parent CR materials for split CRs
+
+            # For non-split CRs, use parent CR materials
+            materials_list = cr_data.get('materials_list', [])
+            # Get VAT percent for this CR from LPOCustomization (default 5%)
+            cr_vat_percent = lpo_vat_percent_lookup.get(cr_id, 5.0)
+
+            # Calculate CR total subtotal first (sum of all materials)
+            cr_subtotal = sum(
+                float(mat.get('quantity', 0)) * float(mat.get('unit_price', 0))
+                for mat in materials_list
+            )
+            # Calculate total VAT for entire CR (not per material)
+            cr_total_vat = round((cr_subtotal * cr_vat_percent) / 100, 2)
+            num_materials = len(materials_list)
+
+            for idx, mat_info in enumerate(materials_list):
                 material_quantity = float(mat_info.get('quantity', 0))
                 material_unit_price = float(mat_info.get('unit_price', 0))
-                material_amount = float(mat_info.get('amount', 0))
+                # Always calculate subtotal from quantity * unit_price (stored amount may include VAT or be stale)
+                material_amount = material_quantity * material_unit_price
                 is_new_material = mat_info.get('is_new_material', False)
                 material_name = mat_info.get('material_name', '')
                 master_material_id = mat_info.get('master_material_id')  # Original value (can be null)
@@ -1902,6 +2025,12 @@ def get_purchase_comparision(project_id):
                 sub_item_name = mat_info.get('sub_item_name', '')
                 master_item_id = mat_info.get('master_item_id')
                 unit = mat_info.get('unit', '')
+
+                # VAT: Show full CR VAT only on LAST material of this CR (avoid splitting)
+                # For single-material CRs, show full VAT
+                # For multi-material CRs, show VAT only on last material
+                is_last_material = (idx == num_materials - 1)
+                material_vat_amount = cr_total_vat if is_last_material else 0
 
                 total_actual_quantity += material_quantity
                 total_actual_amount += Decimal(str(material_amount))
@@ -1922,7 +2051,9 @@ def get_purchase_comparision(project_id):
                     'is_new_material': is_new_material,
                     'change_request_id': cr_id,
                     'cr_status': cr_status,
-                    'vat_amount': cr_vat_amount  # VAT amount from LPOCustomization
+                    'vat_amount': material_vat_amount,  # VAT shown only on last material of CR
+                    'cr_total_vat': cr_total_vat,  # Total CR VAT for reference
+                    'cr_subtotal': cr_subtotal  # CR subtotal for reference
                 })
 
         # Build lookups for actual materials (for comparison matching)
@@ -1942,8 +2073,14 @@ def get_purchase_comparision(project_id):
                 'rate': mat.get('rate', 0),
                 'amount': mat.get('amount', 0),
                 'is_new_material': mat.get('is_new_material', False),
-                'vat_amount': mat.get('vat_amount', 0)  # VAT from LPOCustomization
+                'vat_amount': mat.get('vat_amount', 0),  # VAT (only on last material of CR)
+                'cr_total_vat': mat.get('cr_total_vat', 0),  # Total CR VAT for frontend grouping
+                'cr_subtotal': mat.get('cr_subtotal', 0)  # CR subtotal for frontend grouping
             }
+
+            # Calculate amount with VAT for aggregation
+            # Use vat_amount which is only set on last material of each CR
+            amount_with_vat = mat.get('amount', 0) + mat.get('vat_amount', 0)
 
             # Aggregate by master_material_id if available
             if mat_id:
@@ -1957,7 +2094,7 @@ def get_purchase_comparision(project_id):
                         'purchases': []
                     }
                 actual_by_id[mat_id]['quantity'] += mat.get('quantity', 0)
-                actual_by_id[mat_id]['amount'] += mat.get('amount', 0)
+                actual_by_id[mat_id]['amount'] += amount_with_vat  # Include VAT in actual amount
                 actual_by_id[mat_id]['purchases'].append(purchase_record)
                 if mat.get('rate', 0) > 0:
                     actual_by_id[mat_id]['unit_price'] = mat.get('rate', 0)
@@ -1978,7 +2115,7 @@ def get_purchase_comparision(project_id):
                         'purchases': []
                     }
                 actual_by_name_subitem[name_key]['quantity'] += mat.get('quantity', 0)
-                actual_by_name_subitem[name_key]['amount'] += mat.get('amount', 0)
+                actual_by_name_subitem[name_key]['amount'] += amount_with_vat  # Include VAT in actual amount
                 actual_by_name_subitem[name_key]['purchases'].append(purchase_record)
                 if mat.get('rate', 0) > 0:
                     actual_by_name_subitem[name_key]['unit_price'] = mat.get('rate', 0)
@@ -2068,7 +2205,10 @@ def get_purchase_comparision(project_id):
                     'unit': mat.get('unit', ''),
                     'planned_amount': 0,
                     'actual_amount': float(mat.get('amount', 0)),
-                    'change_request_id': mat.get('change_request_id')
+                    'vat_amount': float(mat.get('vat_amount', 0)),
+                    'change_request_id': mat.get('change_request_id'),
+                    'cr_status': mat.get('cr_status', ''),
+                    'is_new_material': mat.get('is_new_material', True)
                 })
 
         # Calculate summary totals
