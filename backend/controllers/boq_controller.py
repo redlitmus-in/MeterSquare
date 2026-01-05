@@ -5,6 +5,7 @@ from models.boq import *
 from models.preliminary_master import BOQPreliminary, BOQInternalRevision
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm.attributes import flag_modified
 from utils.boq_email_service import BOQEmailService
 from models.user import User
 from models.role import Role
@@ -1153,30 +1154,30 @@ def create_boq():
 
             log.info(f"Saved {len(preliminary_selections_to_save)} preliminary selections to boq_preliminaries for BOQ {boq.boq_id}")
 
-        # Save terms & conditions selections to boq_terms_selections junction table
+        # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
         terms_conditions = data.get("terms_conditions", [])
         log.info(f"Received terms_conditions payload: {len(terms_conditions) if terms_conditions else 0} terms")
 
         if terms_conditions and isinstance(terms_conditions, list):
             from sqlalchemy import text
-            for term in terms_conditions:
-                term_id = term.get('term_id')
-                is_checked = term.get('checked', False)
+            # Extract only checked term IDs
+            selected_term_ids = [
+                term.get('term_id') for term in terms_conditions
+                if term.get('term_id') and term.get('checked', False)
+            ]
 
-                if term_id:  # Only save if it has a term_id (from master table)
-                    # Insert or update term selection
-                    db.session.execute(text("""
-                        INSERT INTO boq_terms_selections (boq_id, term_id, is_checked, created_at, updated_at)
-                        VALUES (:boq_id, :term_id, :is_checked, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        ON CONFLICT (boq_id, term_id)
-                        DO UPDATE SET is_checked = :is_checked, updated_at = CURRENT_TIMESTAMP
-                    """), {
-                        'boq_id': boq.boq_id,
-                        'term_id': term_id,
-                        'is_checked': is_checked
-                    })
+            # Insert or update single row with term_ids array
+            db.session.execute(text("""
+                INSERT INTO boq_terms_selections (boq_id, term_ids, created_at, updated_at)
+                VALUES (:boq_id, :term_ids, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (boq_id)
+                DO UPDATE SET term_ids = :term_ids, updated_at = CURRENT_TIMESTAMP
+            """), {
+                'boq_id': boq.boq_id,
+                'term_ids': selected_term_ids
+            })
 
-            log.info(f"✅ Saved terms selections to boq_terms_selections for BOQ {boq.boq_id}")
+            log.info(f"✅ Saved {len(selected_term_ids)} terms selections to boq_terms_selections for BOQ {boq.boq_id}")
         else:
             log.warning(f"No terms_conditions in payload for BOQ {boq.boq_id}")
 
@@ -1245,7 +1246,9 @@ def get_boq(boq_id):
         # Fetch project details
         project = Project.query.filter_by(project_id=boq.project_id).first()
         # Get BOQ history to track which items were added via new_purchase
-        boq_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.asc()).all()
+        # ✅ PERFORMANCE: Limit history to last 200 entries (sufficient for tracking new purchases)
+        boq_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).limit(200).all()
+        boq_history.reverse()  # Restore ascending order for processing
         # Track newly added items using master_item_id and item_name from history
         new_purchase_item_ids = set()  # Track by master_item_id
         new_purchase_item_names = set()  # Track by item_name as fallback
@@ -1644,31 +1647,31 @@ def get_boq(boq_id):
         # Get terms & conditions from boq_terms_selections junction table using JOIN
         try:
             from sqlalchemy import text
-            # Query to join boq_terms_selections with boq_terms to get term details
-            query = text("""
-                SELECT
-                    bt.term_id,
-                    bt.terms_text,
-                    bt.display_order,
-                    bts.is_checked,
-                    bts.id as selection_id
-                FROM boq_terms_selections bts
-                INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
-                WHERE bts.boq_id = :boq_id
-                AND bt.is_active = TRUE AND bt.is_deleted = FALSE
-                ORDER BY bt.display_order, bt.term_id
+            # First get selected term_ids for this BOQ (single row with term_ids array)
+            term_ids_query = text("""
+                SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
             """)
+            term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq_id}).fetchone()
+            selected_term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
 
-            terms_result = db.session.execute(query, {'boq_id': boq_id})
+            # Get all active terms from master
+            all_terms_query = text("""
+                SELECT term_id, terms_text, display_order
+                FROM boq_terms
+                WHERE is_active = TRUE AND is_deleted = FALSE
+                ORDER BY display_order, term_id
+            """)
+            all_terms_result = db.session.execute(all_terms_query)
             terms_items = []
 
-            for row in terms_result:
+            for row in all_terms_result:
+                term_id = row[0]
                 terms_items.append({
-                    'id': f'term-{row[0]}',
-                    'term_id': row[0],
+                    'id': f'term-{term_id}',
+                    'term_id': term_id,
                     'terms_text': row[1],
                     'display_order': row[2],
-                    'checked': row[3],
+                    'checked': term_id in selected_term_ids,
                     'isCustom': False
                 })
 
@@ -1758,10 +1761,11 @@ def get_boq(boq_id):
         try:
             from models.change_request import ChangeRequest
 
-            # Get approved and completed change requests for this BOQ
+            # Get change requests that consume/reserve material quantities
+            # Uses centralized config to prevent over-allocation
             approved_change_requests = ChangeRequest.query.filter(
                 ChangeRequest.boq_id == boq_id,
-                ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer']),
+                ChangeRequest.status.in_(CR_CONFIG.MATERIAL_CONSUMING_STATUSES),
                 ChangeRequest.is_deleted == False
             ).order_by(ChangeRequest.approval_date.desc()).all()
 
@@ -1894,8 +1898,9 @@ def get_all_boq():
             log.info(f"📊 Processing {len(boqs)} BOQs for user {user_id} (role: {user_role})")
 
         # OPTIMIZATION: Fetch all BOQ histories at once to avoid N+1 queries
+        # ✅ PERFORMANCE: Limit to 1000 most recent histories across all BOQs
         boq_ids = [boq.boq_id for boq, _ in boqs]
-        all_histories = BOQHistory.query.filter(BOQHistory.boq_id.in_(boq_ids)).order_by(BOQHistory.boq_id, BOQHistory.created_at.desc()).all() if boq_ids else []
+        all_histories = BOQHistory.query.filter(BOQHistory.boq_id.in_(boq_ids)).order_by(BOQHistory.boq_id, BOQHistory.created_at.desc()).limit(1000).all() if boq_ids else []
 
         # Group histories by boq_id for quick lookup
         history_by_boq = {}
@@ -2139,6 +2144,7 @@ def update_boq(boq_id):
 
             # Update BOQDetails with the raw payload directly
             boq_details.boq_details = payload_copy
+            flag_modified(boq_details, 'boq_details')
             boq_details.total_cost = total_boq_cost
             boq_details.total_items = total_items
             boq_details.total_materials = total_materials
@@ -2423,6 +2429,7 @@ def update_boq(boq_id):
 
             # Update BOQ details
             boq_details.boq_details = updated_json
+            flag_modified(boq_details, 'boq_details')
             boq_details.total_cost = final_boq_cost
             boq_details.total_items = len(boq_items)
             boq_details.total_materials = total_materials
@@ -2582,7 +2589,6 @@ def update_boq(boq_id):
             existing_history.action = current_actions
 
             # Mark JSONB field as modified for SQLAlchemy
-            from sqlalchemy.orm.attributes import flag_modified
             flag_modified(existing_history, "action")
 
             existing_history.action_by = user_name
@@ -2683,6 +2689,28 @@ def update_boq(boq_id):
                     db.session.add(boq_prelim)
                     preliminary_selections_saved += 1
 
+        # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
+        terms_conditions = data.get("terms_conditions", [])
+        if terms_conditions and isinstance(terms_conditions, list):
+            from sqlalchemy import text
+            # Extract only checked term IDs
+            selected_term_ids = [
+                term.get('term_id') for term in terms_conditions
+                if term.get('term_id') and term.get('checked', False)
+            ]
+
+            # Insert or update single row with term_ids array
+            db.session.execute(text("""
+                INSERT INTO boq_terms_selections (boq_id, term_ids, created_at, updated_at)
+                VALUES (:boq_id, :term_ids, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (boq_id)
+                DO UPDATE SET term_ids = :term_ids, updated_at = CURRENT_TIMESTAMP
+            """), {
+                'boq_id': boq_id,
+                'term_ids': selected_term_ids
+            })
+            log.info(f"✅ Updated {len(selected_term_ids)} terms selections in boq_terms_selections for BOQ {boq_id}")
+
         db.session.commit()
 
         # Return updated BOQ
@@ -2774,6 +2802,47 @@ def revision_boq(boq_id):
         boq_items = []
         total_boq_cost = 0
 
+        # ========== FIRST TIME EDIT: SAVE ORIGINAL BOQ TO HISTORY ==========
+        # Check if this is the first edit (no history exists for this BOQ)
+        existing_history_count = BOQDetailsHistory.query.filter_by(
+            boq_id=boq_id
+        ).count()
+
+        if existing_history_count == 0 and old_boq_details_json:
+            # This is the first edit - save the ORIGINAL/CURRENT BOQ data to history
+            log.info(f"📝 First edit detected for BOQ {boq_id} - storing original BOQ to history")
+
+            # Calculate totals from original BOQ data
+            original_items = old_boq_details_json.get("items", [])
+            original_total_items = len(original_items)
+            original_total_materials = 0
+            original_total_labour = 0
+            original_total_cost = 0
+
+            for item in original_items:
+                # Get selling price from original data
+                original_total_cost += item.get("selling_price", 0) or item.get("total_selling_price", 0) or 0
+
+                # Count materials and labour from sub_items
+                for sub_item in item.get("sub_items", []):
+                    original_total_materials += len(sub_item.get("materials", []))
+                    original_total_labour += len(sub_item.get("labour", []))
+
+            # Create history entry for ORIGINAL BOQ data (version 0)
+            original_boq_history = BOQDetailsHistory(
+                boq_detail_id=boq_details.boq_detail_id,
+                boq_id=boq_id,
+                version=0,  # Version 0 = original BOQ before any edits
+                boq_details=old_boq_details_json,  # Store original data
+                total_cost=old_total_cost or original_total_cost,
+                total_items=old_total_items or original_total_items,
+                total_materials=original_total_materials,
+                total_labour=original_total_labour,
+                created_by=f"System (Original by {boq.created_by})"
+            )
+            db.session.add(original_boq_history)
+            log.info(f"✅ Stored original BOQ data to history for BOQ {boq_id} (version 0)")
+
         # Store the payload directly in BOQDetailsHistory without recalculation
         if data.get("is_revision", False) and "items" in data:
             # Create history entry with payload data directly (no recalculation)
@@ -2799,11 +2868,26 @@ def revision_boq(boq_id):
             # Set total_boq_cost for later use
             total_boq_cost = total_cost
 
+            # ========== DETERMINE VERSION NUMBER FOR EDITED BOQ ==========
+            # Get the latest version from history to determine next version number
+            latest_history = BOQDetailsHistory.query.filter_by(
+                boq_id=boq_id
+            ).order_by(BOQDetailsHistory.version.desc()).first()
+
+            if latest_history:
+                # Increment from the latest version
+                edited_version = latest_history.version + 1
+            else:
+                # This shouldn't happen since we just added version 0, but fallback to next_version
+                edited_version = next_version if next_version > 0 else 1
+
+            log.info(f"📝 Storing edited BOQ to history for BOQ {boq_id} (version {edited_version})")
+
             # Create BOQDetailsHistory entry with the raw payload
             boq_detail_history = BOQDetailsHistory(
                 boq_detail_id=boq_details.boq_detail_id,
                 boq_id=boq_id,
-                version=next_version,
+                version=edited_version,
                 boq_details=payload_copy,  # Store payload directly as-is
                 total_cost=total_cost,
                 total_items=total_items,
@@ -2815,6 +2899,7 @@ def revision_boq(boq_id):
 
             # Also update BOQDetails with the raw payload (no recalculation)
             boq_details.boq_details = payload_copy
+            flag_modified(boq_details, 'boq_details')
             boq_details.total_cost = total_cost
             boq_details.total_items = total_items
             boq_details.total_materials = total_materials
@@ -2893,6 +2978,7 @@ def revision_boq(boq_id):
 
             # Update boq_details and history with master IDs
             boq_details.boq_details = payload_copy
+            flag_modified(boq_details, 'boq_details')
             boq_detail_history.boq_details = payload_copy
             # ===== END MASTER TABLES SYNC =====
 
@@ -2918,27 +3004,27 @@ def revision_boq(boq_id):
                             db.session.add(boq_prelim)
                     log.info(f"✅ Updated preliminary selections in boq_preliminaries for BOQ {boq_id} during revision")
 
-            # Save terms & conditions selections to boq_terms_selections junction table
+            # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
             terms_conditions = data.get("terms_conditions", [])
             if terms_conditions and isinstance(terms_conditions, list):
                 from sqlalchemy import text
-                for term in terms_conditions:
-                    term_id = term.get('term_id')
-                    is_checked = term.get('checked', False)
+                # Extract only checked term IDs
+                selected_term_ids = [
+                    term.get('term_id') for term in terms_conditions
+                    if term.get('term_id') and term.get('checked', False)
+                ]
 
-                    if term_id:  # Only save if it has a term_id (from master table)
-                        # Insert or update term selection
-                        db.session.execute(text("""
-                            INSERT INTO boq_terms_selections (boq_id, term_id, is_checked, created_at, updated_at)
-                            VALUES (:boq_id, :term_id, :is_checked, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (boq_id, term_id)
-                            DO UPDATE SET is_checked = :is_checked, updated_at = CURRENT_TIMESTAMP
-                        """), {
-                            'boq_id': boq_id,
-                            'term_id': term_id,
-                            'is_checked': is_checked
-                        })
-                log.info(f"✅ Updated terms selections in boq_terms_selections for BOQ {boq_id} during revision")
+                # Insert or update single row with term_ids array
+                db.session.execute(text("""
+                    INSERT INTO boq_terms_selections (boq_id, term_ids, created_at, updated_at)
+                    VALUES (:boq_id, :term_ids, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (boq_id)
+                    DO UPDATE SET term_ids = :term_ids, updated_at = CURRENT_TIMESTAMP
+                """), {
+                    'boq_id': boq_id,
+                    'term_ids': selected_term_ids
+                })
+                log.info(f"✅ Updated {len(selected_term_ids)} terms selections in boq_terms_selections for BOQ {boq_id} during revision")
 
         # If items are provided, update the JSON structure (for non-revision updates)
         elif "items" in data:
@@ -3511,6 +3597,7 @@ def revision_boq(boq_id):
 
             # Update BOQ details
             boq_details.boq_details = updated_json
+            flag_modified(boq_details, 'boq_details')
             boq_details.total_cost = final_boq_cost
             boq_details.total_items = len(boq_items)
             boq_details.total_materials = total_materials
@@ -3677,7 +3764,6 @@ def revision_boq(boq_id):
             existing_history.action = current_actions
 
             # Mark JSONB field as modified for SQLAlchemy
-            from sqlalchemy.orm.attributes import flag_modified
             flag_modified(existing_history, "action")
 
             existing_history.action_by = user_name
@@ -3883,7 +3969,8 @@ def get_sub_item_labours(sub_item_id):
 
 def get_all_item():
     try:
-        boq_items = MasterItem.query.filter_by(is_deleted=False).all()
+        # ✅ PERFORMANCE: Limit to 500 items (use search for larger datasets)
+        boq_items = MasterItem.query.filter_by(is_deleted=False).order_by(MasterItem.item_name.asc()).limit(500).all()
         item_details = []
         for item in boq_items:
             item_details.append({
@@ -4047,7 +4134,6 @@ def send_boq_email(boq_id):
                     current_actions.append(new_action)
                     existing_history.action = current_actions
                     # Mark JSONB field as modified for SQLAlchemy
-                    from sqlalchemy.orm.attributes import flag_modified
                     flag_modified(existing_history, "action")
 
                 existing_history.action_by = user_name
@@ -4215,7 +4301,6 @@ def send_boq_email(boq_id):
                     current_actions.append(new_action)
                     existing_history.action = current_actions
                     # Mark JSONB field as modified for SQLAlchemy
-                    from sqlalchemy.orm.attributes import flag_modified
                     flag_modified(existing_history, "action")
 
                 existing_history.action_by = user_name
@@ -4685,7 +4770,8 @@ def get_sub_item(item_id):
 def get_custom_units():
     """Get all custom units (non-deleted)"""
     try:
-        custom_units = CustomUnit.query.filter_by(is_deleted=False).order_by(CustomUnit.unit_label.asc()).all()
+        # ✅ PERFORMANCE: Limit to 200 units (typically much smaller dataset)
+        custom_units = CustomUnit.query.filter_by(is_deleted=False).order_by(CustomUnit.unit_label.asc()).limit(200).all()
 
         units_data = []
         for unit in custom_units:

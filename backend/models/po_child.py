@@ -31,6 +31,9 @@ class POChild(db.Model):
     materials_data = db.Column(JSONB, nullable=False)
     materials_total_cost = db.Column(db.Float, default=0.0)
 
+    # Child notes - additional specifications/requirements for this PO child
+    child_notes = db.Column(db.Text, nullable=True)
+
     # Vendor info
     vendor_id = db.Column(db.Integer, db.ForeignKey('vendors.vendor_id'), nullable=True, index=True)
     vendor_name = db.Column(db.String(255), nullable=True)
@@ -86,7 +89,7 @@ class POChild(db.Model):
 
     def to_dict(self):
         """Convert to dictionary for JSON response"""
-        return {
+        result = {
             'id': self.id,
             'parent_cr_id': self.parent_cr_id,
             'suffix': self.suffix,
@@ -100,6 +103,7 @@ class POChild(db.Model):
             'materials': self.materials_data,  # Alias for frontend compatibility
             'materials_count': len(self.materials_data) if self.materials_data else 0,
             'materials_total_cost': round(self.materials_total_cost, 2) if self.materials_total_cost else 0,
+            'child_notes': self.child_notes,
             'vendor_id': self.vendor_id,
             'vendor_name': self.vendor_name,
             'vendor_selected_by_buyer_id': self.vendor_selected_by_buyer_id,
@@ -122,6 +126,36 @@ class POChild(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'is_deleted': self.is_deleted
         }
+
+        # Include requested_by fields from parent Change Request if available
+        if self.parent_cr:
+            result['requested_by_user_id'] = self.parent_cr.requested_by_user_id if self.parent_cr.requested_by_user_id else None
+            result['requested_by_name'] = self.parent_cr.requested_by_name if self.parent_cr.requested_by_name else None
+            result['requested_by_role'] = self.parent_cr.requested_by_role if self.parent_cr.requested_by_role else None
+        else:
+            result['requested_by_user_id'] = None
+            result['requested_by_name'] = None
+            result['requested_by_role'] = None
+
+        # Include full vendor details if vendor relationship is loaded
+        # This data is used by ChangeRequestDetailsModal.tsx to display vendor information
+        if self.vendor:
+            result['vendor_details'] = {
+                'company_name': self.vendor.company_name,
+                'contact_person_name': self.vendor.contact_person_name,
+                'email': self.vendor.email,
+                'phone_code': self.vendor.phone_code,
+                'phone': self.vendor.phone,  # Frontend expects 'phone' (line 802)
+                'category': self.vendor.category,
+                'street_address': self.vendor.street_address,
+                'city': self.vendor.city,
+                'state': self.vendor.state,
+                'pin_code': self.vendor.pin_code,  # Frontend expects 'pin_code' (line 835)
+                'gst_number': self.vendor.gst_number,
+                'country': self.vendor.country
+            }
+
+        return result
 
     def __repr__(self):
         return f'<POChild {self.id}: {self.get_formatted_id()}>'

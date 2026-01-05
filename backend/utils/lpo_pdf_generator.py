@@ -76,6 +76,16 @@ class LPOPDFGenerator:
             textColor=colors.HexColor('#333333')
         ))
 
+        # Small italic text for supplier notes
+        self.styles.add(ParagraphStyle(
+            name='LPOSmallItalic',
+            parent=self.styles['Normal'],
+            fontSize=7,
+            fontName='Helvetica-Oblique',
+            textColor=colors.HexColor('#4B5563'),
+            leading=9
+        ))
+
     def _get_image_from_base64(self, base64_string, width=None, height=None):
         """Convert base64 string to ReportLab Image"""
         try:
@@ -241,8 +251,15 @@ class LPOPDFGenerator:
         elements.append(Spacer(1, 8))
         grand_total = lpo_data.get('totals', {}).get('grand_total', 0)
         amount_words = self._number_to_words(grand_total)
+        # Include fils (cents) in words if present
+        fils = int(round((grand_total - int(grand_total)) * 100))
+        if fils > 0:
+            fils_words = self._number_to_words(fils)
+            amount_text = f'{self._number_to_words(int(grand_total))} and Fils {fils_words}'
+        else:
+            amount_text = amount_words
         elements.append(Paragraph(
-            f'<b>AED: {grand_total:,.2f}/- ({amount_words} Only)</b>',
+            f'<b>AED: {grand_total:,.2f}/- (Dirhams: {amount_text} Only)</b>',
             self.styles['LPONormal']
         ))
 
@@ -296,30 +313,38 @@ class LPOPDFGenerator:
         header_data = []
 
         # Logo cell - compact size with proper aspect ratio (same as BOQ PDF)
+        # With "DUBAI | SHARJAH | MUSCAT | COCHIN" below the logo
         if os.path.exists(logo_path):
             try:
                 # Use kind='proportional' to maintain aspect ratio like BOQ PDF
-                logo = Image(logo_path, width=1.8*inch, height=0.7*inch, kind='proportional')
+                logo_img = Image(logo_path, width=1.8*inch, height=0.7*inch, kind='proportional')
+                # Create a table to stack logo and locations text
+                locations_text = Paragraph(
+                    '<font size="7" color="#666666">DUBAI | SHARJAH | MUSCAT | COCHIN</font>',
+                    ParagraphStyle('LocationsInfo', fontSize=7, alignment=TA_LEFT, leading=9)
+                )
+                logo = Table([[logo_img], [locations_text]], colWidths=[2*inch])
+                logo.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 0),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ]))
             except:
-                logo = Paragraph('<b>METER SQUARE</b><br/><font size="7">INTERIORS LLC</font>',
+                logo = Paragraph('<b>METER SQUARE</b><br/><font size="7">INTERIORS LLC</font><br/><font size="7" color="#666666">DUBAI | SHARJAH | MUSCAT | COCHIN</font>',
                                 self.styles['LPOBold'])
         else:
-            logo = Paragraph('<b>METER SQUARE</b><br/><font size="7">INTERIORS LLC</font>',
+            logo = Paragraph('<b>METER SQUARE</b><br/><font size="7">INTERIORS LLC</font><br/><font size="7" color="#666666">DUBAI | SHARJAH | MUSCAT | COCHIN</font>',
                             self.styles['LPOBold'])
 
-        # Company info cell
+        # Company info cell - contact numbers only (locations moved below logo)
         company = lpo_data.get('company', {})
         company_info = Paragraph(
-            f'''<font size="7" color="#666666">DUBAI | SHARJAH | MUSCAT | COCHIN</font><br/>
-            <font size="6">Sharjah: 66015 | 06 5398189/90 | Fax: 06 5398289</font><br/>
+            f'''<font size="6">Sharjah: 66015 | 06 5398189/90 | Fax: 06 5398289</font><br/>
             <font size="6">Dubai: 89381 | 04 2596772 | Fax: 04 2647603</font>''',
             ParagraphStyle('HeaderInfo', fontSize=7, alignment=TA_RIGHT, leading=9)
-        )
-
-        # Certification logos placeholder
-        cert_text = Paragraph(
-            '<font size="6" color="#666666">ISO 9001 | UKAS</font>',
-            ParagraphStyle('CertInfo', fontSize=6, alignment=TA_RIGHT)
         )
 
         header_data.append([logo, company_info])
@@ -343,7 +368,7 @@ class LPOPDFGenerator:
             colWidths=[7.5*inch]
         )
         contact_bar.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1a365d')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#ec2024')),  # Red color to match company branding
             ('TOPPADDING', (0, 0), (-1, -1), 3),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
         ]))
@@ -401,33 +426,64 @@ TRN# {company.get('trn', 'N/A')}'''
         items = lpo_data.get('items', [])
         totals = lpo_data.get('totals', {})
 
-        # Table header
-        table_data = [['SI#', 'Description', 'Qty', 'Unit', 'Rate', 'Amount']]
+        # Table header with separate columns for Material, Brand, Specification
+        table_data = [['SI#', 'Material', 'Brand', 'Specification', 'Qty', 'Unit', 'Rate', 'Amount']]
 
         # Add items
         for i, item in enumerate(items, 1):
+            material_name = item.get('material_name', '') or item.get('description', '')
+            brand = item.get('brand', '') or '-'
+            specification = item.get('specification', '') or '-'
+            supplier_notes = item.get('supplier_notes', '').strip()
+
+            # Add main material row
             table_data.append([
                 str(item.get('sl_no', i)),
-                Paragraph(str(item.get('description', '')), self.styles['LPOSmall']),
+                Paragraph(str(material_name), self.styles['LPOSmall']),
+                Paragraph(str(brand), self.styles['LPOSmall']),
+                Paragraph(str(specification), self.styles['LPOSmall']),
                 str(item.get('qty', '')),
                 str(item.get('unit', '')),
                 f"{item.get('rate', 0):,.2f}",
                 f"{item.get('amount', 0):,.2f}"
             ])
 
+            # Add supplier notes sub-row if notes exist
+            if supplier_notes:
+                # Escape HTML entities to prevent ReportLab parsing errors
+                safe_notes = supplier_notes.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                # Preserve line breaks
+                safe_notes = safe_notes.replace('\n', '<br/>')
+                table_data.append([
+                    '',  # Empty SI#
+                    Paragraph(
+                        f'<i>📝 <b>Note:</b> {safe_notes}</i>',
+                        self.styles['LPOSmallItalic']
+                    ),
+                    '', '', '', '', '', ''  # Empty other columns
+                ])
+
         # Add totals
         subtotal = totals.get('subtotal', 0)
-        vat_percent = totals.get('vat_percent', 5)
+        vat_percent = totals.get('vat_percent', 0)
         vat_amount = totals.get('vat_amount', 0)
         grand_total = totals.get('grand_total', 0)
 
-        table_data.append(['', '', '', '', 'Total', f"{subtotal:,.2f}"])
-        table_data.append(['', '', '', '', f'VAT {vat_percent}%', f"{vat_amount:,.2f}"])
-        table_data.append(['', '', '', '', 'Total', f"{grand_total:,.2f}"])
+        table_data.append(['', '', '', '', '', '', 'Total', f"{subtotal:,.2f}"])
+        # Only show VAT row if VAT is applicable (vat_percent > 0)
+        if vat_percent > 0:
+            table_data.append(['', '', '', '', '', '', f'VAT {vat_percent}%', f"{vat_amount:,.2f}"])
+            table_data.append(['', '', '', '', '', '', 'Total', f"{grand_total:,.2f}"])
 
-        # Create table
-        col_widths = [0.4*inch, 3.5*inch, 0.6*inch, 0.5*inch, 0.9*inch, 1*inch]
+        # Create table with adjusted column widths for 8 columns
+        col_widths = [0.35*inch, 1.6*inch, 1.0*inch, 1.2*inch, 0.5*inch, 0.45*inch, 0.8*inch, 0.9*inch]
         items_table = Table(table_data, colWidths=col_widths)
+
+        # Calculate styling offsets based on whether VAT is shown
+        # With VAT: 3 total rows (subtotal, VAT, grand total)
+        # Without VAT: 1 total row (just subtotal/total)
+        total_rows = 3 if vat_percent > 0 else 1
+        body_end_offset = -(total_rows + 1)  # Row before totals section
 
         # Style the table
         style = TableStyle([
@@ -438,21 +494,21 @@ TRN# {company.get('trn', 'N/A')}'''
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
 
             # Body
-            ('FONTNAME', (0, 1), (-1, -4), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -4), 8),
+            ('FONTNAME', (0, 1), (-1, body_end_offset), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, body_end_offset), 8),
             ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # SI#
-            ('ALIGN', (2, 1), (2, -1), 'CENTER'),  # Qty
-            ('ALIGN', (3, 1), (3, -1), 'CENTER'),  # Unit
-            ('ALIGN', (4, 1), (-1, -1), 'RIGHT'),  # Rate, Amount
+            ('ALIGN', (4, 1), (4, -1), 'CENTER'),  # Qty
+            ('ALIGN', (5, 1), (5, -1), 'CENTER'),  # Unit
+            ('ALIGN', (6, 1), (-1, -1), 'RIGHT'),  # Rate, Amount
 
             # Totals rows
-            ('FONTNAME', (4, -3), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (4, -3), (-1, -1), 8),
+            ('FONTNAME', (6, -total_rows), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (4, -total_rows), (-1, -1), 8),
 
             # Grid
-            ('GRID', (0, 0), (-1, -4), 0.5, colors.HexColor('#cccccc')),
-            ('BOX', (4, -3), (-1, -1), 0.5, colors.HexColor('#cccccc')),
-            ('LINEABOVE', (4, -3), (-1, -3), 0.5, colors.HexColor('#cccccc')),
+            ('GRID', (0, 0), (-1, body_end_offset), 0.5, colors.HexColor('#cccccc')),
+            ('BOX', (4, -total_rows), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+            ('LINEABOVE', (4, -total_rows), (-1, -total_rows), 0.5, colors.HexColor('#cccccc')),
             ('LINEABOVE', (4, -1), (-1, -1), 0.5, colors.HexColor('#cccccc')),
 
             # Padding
@@ -470,49 +526,39 @@ TRN# {company.get('trn', 'N/A')}'''
         return elements
 
     def _generate_terms_section(self, lpo_data):
-        """Generate general terms and conditions and payment terms"""
+        """Generate payment terms and delivery terms section"""
         elements = []
         terms = lpo_data.get('terms', {})
 
-        general_terms = terms.get('general_terms', [])
-        payment_terms_list = terms.get('payment_terms_list', [])
+        # Get custom/payment terms (selected ones only)
+        custom_terms = terms.get('custom_terms', [])
+        selected_terms = [t for t in custom_terms if t.get('selected', False)]
 
-        # General Terms and Conditions Section
-        if general_terms:
-            elements.append(Spacer(1, 10))
-            elements.append(Paragraph('<b><u>General Terms and Conditions:</u></b>', self.styles['SectionHeader']))
-            elements.append(Spacer(1, 3))
+        delivery_terms = terms.get('delivery_terms', '')
 
-            # Create numbered terms list
-            for i, term in enumerate(general_terms, 1):
-                # Escape HTML special characters
-                safe_term = term.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                term_text = f'<b>{i}</b>&nbsp;&nbsp;&nbsp;{safe_term}'
-                elements.append(Paragraph(term_text, self.styles['LPOSmall']))
-                elements.append(Spacer(1, 2))
+        elements.append(Spacer(1, 10))
 
-        # Payment Terms Section
-        if payment_terms_list:
-            elements.append(Spacer(1, 8))
-            elements.append(Paragraph('<b>Payment Terms:</b>', self.styles['SectionHeader']))
-
-            # Create bullet point payment terms
-            payment_text_parts = []
-            for term in payment_terms_list:
-                safe_term = term.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                payment_text_parts.append(safe_term)
-
-            # Join with line breaks for display
-            payment_content = '<br/>'.join([f'&nbsp;&nbsp;&nbsp;&nbsp;{t}' for t in payment_text_parts])
-            elements.append(Paragraph(payment_content, self.styles['LPONormal']))
+        # Payment Terms - show as numbered list if multiple, or single line if one
+        if selected_terms:
+            payment_text_parts = [t.get('text', '') for t in selected_terms if t.get('text', '')]
+            if len(payment_text_parts) == 1:
+                # Single term - show on same line
+                elements.append(Paragraph(f'<b>Payment Terms:</b> {payment_text_parts[0]}', self.styles['LPONormal']))
+            elif len(payment_text_parts) > 1:
+                # Multiple terms - show as numbered list
+                elements.append(Paragraph('<b>Payment Terms:</b>', self.styles['LPONormal']))
+                for idx, term_text in enumerate(payment_text_parts, 1):
+                    safe_term = term_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    elements.append(Paragraph(f'&nbsp;&nbsp;&nbsp;&nbsp;{idx}. {safe_term}', self.styles['LPONormal']))
         else:
-            # Fallback to old simple payment terms
-            payment_terms = terms.get('payment_terms', '100% after delivery')
-            completion_terms = terms.get('completion_terms', 'As agreed')
+            # Fallback to legacy payment_terms field
+            payment_terms_combined = terms.get('payment_terms', '100% CDC after delivery')
+            if payment_terms_combined:
+                elements.append(Paragraph(f'<b>Payment Terms:</b> {payment_terms_combined}', self.styles['LPONormal']))
 
-            elements.append(Spacer(1, 5))
-            elements.append(Paragraph(f'<b>Payment Terms:</b> {payment_terms}', self.styles['LPONormal']))
-            elements.append(Paragraph(f'<b>Completion Terms:</b> {completion_terms}', self.styles['LPONormal']))
+        # Delivery Terms line
+        if delivery_terms:
+            elements.append(Paragraph(f'<b>Delivery Terms:</b> {delivery_terms}', self.styles['LPONormal']))
 
         return elements
 
@@ -540,10 +586,17 @@ TRN# {company.get('trn', 'N/A')}'''
             md_img = self._get_image_from_base64(md_signature, width=1.2*inch, height=0.5*inch)
             if md_img:
                 md_content.append(md_img)
-        md_content.append(Paragraph(
-            f'<br/><b>{md_name}</b><br/><font color="#1a365d">Managing Director</font><br/>{system_sig_text}',
-            self.styles['LPOSmall']
-        ))
+        # Only show name above title if name is different from title (actual person name)
+        if md_name and md_name != 'Managing Director':
+            md_content.append(Paragraph(
+                f'<br/><b>{md_name}</b><br/><font color="#1a365d">Managing Director</font><br/>{system_sig_text}',
+                self.styles['LPOSmall']
+            ))
+        else:
+            md_content.append(Paragraph(
+                f'<br/><br/><font color="#1a365d"><b>Managing Director</b></font><br/>{system_sig_text}',
+                self.styles['LPOSmall']
+            ))
 
         # Stamp cell (center) - reduced size for better fit
         stamp_cell = []
@@ -558,10 +611,17 @@ TRN# {company.get('trn', 'N/A')}'''
             td_img = self._get_image_from_base64(td_signature, width=1.2*inch, height=0.5*inch)
             if td_img:
                 td_content.append(td_img)
-        td_content.append(Paragraph(
-            f'<br/><b>{td_name}</b><br/><font color="#1a365d">Technical Director</font><br/>{system_sig_text}',
-            self.styles['LPOSmall']
-        ))
+        # Only show name above title if name is different from title (actual person name)
+        if td_name and td_name != 'Technical Director':
+            td_content.append(Paragraph(
+                f'<br/><b>{td_name}</b><br/><font color="#1a365d">Technical Director</font><br/>{system_sig_text}',
+                self.styles['LPOSmall']
+            ))
+        else:
+            td_content.append(Paragraph(
+                f'<br/><br/><font color="#1a365d"><b>Technical Director</b></font><br/>{system_sig_text}',
+                self.styles['LPOSmall']
+            ))
 
         # Build signature table
         sig_data = []
@@ -578,7 +638,11 @@ TRN# {company.get('trn', 'N/A')}'''
             ]))
             row.append(md_table)
         else:
-            row.append(Paragraph(f'<br/><br/><b>{md_name}</b><br/><font color="#1a365d">Managing Director</font>', self.styles['LPOSmall']))
+            # Fallback - only show name if different from title
+            if md_name and md_name != 'Managing Director':
+                row.append(Paragraph(f'<br/><br/><b>{md_name}</b><br/><font color="#1a365d">Managing Director</font>', self.styles['LPOSmall']))
+            else:
+                row.append(Paragraph(f'<br/><br/><font color="#1a365d"><b>Managing Director</b></font>', self.styles['LPOSmall']))
 
         # Stamp column - center
         if stamp_cell:
@@ -600,7 +664,11 @@ TRN# {company.get('trn', 'N/A')}'''
             ]))
             row.append(td_table)
         else:
-            row.append(Paragraph(f'<br/><br/><b>{td_name}</b><br/><font color="#1a365d">Technical Director</font>', self.styles['LPOSmall']))
+            # Fallback - only show name if different from title
+            if td_name and td_name != 'Technical Director':
+                row.append(Paragraph(f'<br/><br/><b>{td_name}</b><br/><font color="#1a365d">Technical Director</font>', self.styles['LPOSmall']))
+            else:
+                row.append(Paragraph(f'<br/><br/><font color="#1a365d"><b>Technical Director</b></font>', self.styles['LPOSmall']))
 
         sig_data.append(row)
 

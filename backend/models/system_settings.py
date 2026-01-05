@@ -14,6 +14,7 @@ class SystemSettings(db.Model):
 
     # General Settings
     company_name = db.Column(db.String(255), nullable=False, default='MeterSquare ERP')
+    store_name = db.Column(db.String(255), default='M2 Store')  # Default store/warehouse name
     company_email = db.Column(db.String(255))
     company_phone = db.Column(db.String(50))
     company_address = db.Column(db.Text)
@@ -59,6 +60,7 @@ class SystemSettings(db.Model):
     company_stamp_image = db.Column(db.Text)  # Company stamp/seal image (base64)
 
     # LPO PDF Settings - Company Info
+    company_contact_person = db.Column(db.String(255), default='Mr. Mohammed Sabir')  # Contact person for LPO
     company_trn = db.Column(db.String(50))  # Company TRN number
     company_fax = db.Column(db.String(50))  # Company fax number
     default_payment_terms = db.Column(db.Text, default='100% after delivery')

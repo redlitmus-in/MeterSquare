@@ -33,9 +33,12 @@ def get_all_internal_revision():
         user_id = current_user.get('user_id') if current_user else None
         user_role = current_user.get('role', '').lower() if current_user else ''
 
-        # Get all BOQ IDs that have internal revision records
+        # Get all BOQ IDs that have internal revision records (handle NULL is_deleted as not deleted)
         boq_ids_with_revisions = db.session.query(BOQInternalRevision.boq_id).filter(
-            BOQInternalRevision.is_deleted == False
+            db.or_(
+                BOQInternalRevision.is_deleted == False,
+                BOQInternalRevision.is_deleted.is_(None)
+            )
         ).distinct().all()
 
         boq_ids = [row[0] for row in boq_ids_with_revisions]
@@ -54,38 +57,44 @@ def get_all_internal_revision():
                 db.func.lower(BOQ.status) != 'internal_revision_pending'
             )
             log.info(f"Technical Director {user_id} - showing all internal revision BOQs (excluding Internal_Revision_Pending)")
+        elif user_role == 'estimator' or user_role == 'admin':
+            # For Estimator and Admin: Show ALL BOQs with internal revisions INCLUDING Internal_Revision_Pending
+            # Estimators need to see their pending revisions to continue editing
+            # Admin can view as any role and needs to see all data
+            boqs_query = BOQ.query.filter(
+                BOQ.is_deleted == False,
+                db.or_(
+                    BOQ.has_internal_revisions == True,
+                    BOQ.boq_id.in_(boq_ids)
+                )
+                # NOTE: No status exclusion for estimators/admin - they see all internal revisions
+            )
+            log.info(f"{user_role.capitalize()} {user_id} - showing all internal revision BOQs (including Internal_Revision_Pending)")
         else:
-            # For Estimator and other roles: Show all BOQs with internal revisions
-            # EXCLUDE Internal_Revision_Pending (still editing, not sent to TD yet - stays in Rejected tab only)
+            # For other roles: Show all BOQs with internal revisions
+            # EXCLUDE Internal_Revision_Pending (still editing, not sent to TD yet)
             boqs_query = BOQ.query.filter(
                 BOQ.is_deleted == False,
                 db.or_(
                     BOQ.has_internal_revisions == True,
                     BOQ.boq_id.in_(boq_ids)
                 ),
-                # Exclude Internal_Revision_Pending for ALL users (only show after sent to TD)
+                # Exclude Internal_Revision_Pending for other users
                 db.func.lower(BOQ.status) != 'internal_revision_pending'
             )
 
         # Filter based on user role
+        # NOTE: For internal revisions, estimators see ALL BOQs (same as TD)
+        # This allows collaboration and visibility across all internal revision work
         if user_role == 'estimator':
-            # For estimators, only show BOQs for projects assigned to them
-            # First, get all project IDs assigned to this estimator
-            estimator_project_ids = db.session.query(Project.project_id).filter(
-                Project.estimator_id == user_id,
-                Project.is_deleted == False
-            ).all()
-            estimator_project_ids = [pid[0] for pid in estimator_project_ids]
-
-            log.info(f"Estimator {user_id} assigned to {len(estimator_project_ids)} projects: {estimator_project_ids}")
-
-            # Filter BOQs to only those belonging to the estimator's projects
-            boqs_query = boqs_query.filter(BOQ.project_id.in_(estimator_project_ids))
+            # Estimators see all internal revisions (no additional filter)
+            log.info(f"Estimator {user_id} - showing ALL internal revision BOQs (no project filter)")
         elif user_role != 'technical_director':
             # For other roles (not estimator, not TD), show all
             log.info(f"User role '{user_role}' - showing all internal revision BOQs")
 
         boqs = boqs_query.all()
+        log.info(f"📋 Internal Revisions Query: Found {len(boqs)} BOQs for user {user_id} (role: {user_role})")
 
         result = []
 
@@ -96,10 +105,13 @@ def get_all_internal_revision():
             # Get project details
             project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first() if boq.project_id else None
 
-            # Get all internal revisions for this BOQ
-            internal_revisions = BOQInternalRevision.query.filter_by(
-                boq_id=boq.boq_id,
-                is_deleted=False
+            # Get all internal revisions for this BOQ (handle NULL is_deleted as not deleted)
+            internal_revisions = BOQInternalRevision.query.filter(
+                BOQInternalRevision.boq_id == boq.boq_id,
+                db.or_(
+                    BOQInternalRevision.is_deleted == False,
+                    BOQInternalRevision.is_deleted.is_(None)
+                )
             ).order_by(BOQInternalRevision.internal_revision_number.desc()).all()
 
             # Format internal revisions
@@ -223,32 +235,33 @@ def get_all_internal_revision():
                                             sub_item["sub_item_image"] = master_sub_item.sub_item_image
                                             log.info(f"Added image (by name match) for sub-item {sub_item_name}: {master_sub_item.sub_item_image}")
 
-            # Get terms & conditions from boq_terms_selections junction table
+            # Get terms & conditions from boq_terms_selections (single row with term_ids array)
             try:
-                query = text("""
-                    SELECT
-                        bt.term_id,
-                        bt.terms_text,
-                        bt.display_order,
-                        bts.is_checked,
-                        bts.id as selection_id
-                    FROM boq_terms_selections bts
-                    INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
-                    WHERE bts.boq_id = :boq_id
-                    AND bt.is_active = TRUE AND bt.is_deleted = FALSE
-                    ORDER BY bt.display_order, bt.term_id
+                # First get selected term_ids for this BOQ
+                term_ids_query = text("""
+                    SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
                 """)
+                term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq.boq_id}).fetchone()
+                selected_term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
 
-                terms_result = db.session.execute(query, {'boq_id': boq.boq_id})
+                # Get all active terms from master
+                all_terms_query = text("""
+                    SELECT term_id, terms_text, display_order
+                    FROM boq_terms
+                    WHERE is_active = TRUE AND is_deleted = FALSE
+                    ORDER BY display_order, term_id
+                """)
+                all_terms_result = db.session.execute(all_terms_query)
                 terms_items = []
 
-                for row in terms_result:
+                for row in all_terms_result:
+                    term_id = row[0]
                     terms_items.append({
-                        'id': f'term-{row[0]}',
-                        'term_id': row[0],
+                        'id': f'term-{term_id}',
+                        'term_id': term_id,
                         'terms_text': row[1],
                         'display_order': row[2],
-                        'checked': row[3],
+                        'checked': term_id in selected_term_ids,
                         'isCustom': False
                     })
 
@@ -345,24 +358,30 @@ def get_internal_revisions(boq_id):
             import copy
             enriched = copy.deepcopy(changes_summary)
 
-            # Fetch terms & conditions from database
+            # Fetch terms & conditions from database (single row with term_ids array)
             try:
-                terms_query = text("""
-                    SELECT bt.term_id, bt.terms_text, bts.is_checked
-                    FROM boq_terms_selections bts
-                    INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
-                    WHERE bts.boq_id = :boq_id
-                    AND bt.is_active = TRUE
-                    AND bt.is_deleted = FALSE
-                    ORDER BY bt.display_order, bt.term_id
+                # First get selected term_ids for this BOQ
+                term_ids_query = text("""
+                    SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
                 """)
-                terms_result = db.session.execute(terms_query, {'boq_id': boq_id})
+                term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq_id}).fetchone()
+                selected_term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
+
+                # Get all active terms from master
+                all_terms_query = text("""
+                    SELECT term_id, terms_text, display_order
+                    FROM boq_terms
+                    WHERE is_active = TRUE AND is_deleted = FALSE
+                    ORDER BY display_order, term_id
+                """)
+                all_terms_result = db.session.execute(all_terms_query)
                 terms_items = []
-                for row in terms_result:
+                for row in all_terms_result:
+                    term_id = row[0]
                     terms_items.append({
-                        'term_id': row[0],
+                        'term_id': term_id,
                         'terms_text': row[1],
-                        'checked': row[2]
+                        'checked': term_id in selected_term_ids
                     })
 
                 # Add terms_conditions to changes_summary
@@ -396,10 +415,26 @@ def get_internal_revisions(boq_id):
 
         # ✅ Fix: Fetch all internal revisions linked to this BOQ (not filtered by < current)
         # Because BOQInternalRevision stores history snapshots, not only numeric sequence comparisons
+
+        # Debug: Check total records for this BOQ (including deleted)
+        total_revisions_all = BOQInternalRevision.query.filter(
+            BOQInternalRevision.boq_id == boq_id
+        ).count()
+        log.info(f"📋 BOQ {boq_id}: Total internal revision records (including deleted): {total_revisions_all}")
+
+        # Debug: Check if BOQ has has_internal_revisions flag set
+        log.info(f"📋 BOQ {boq_id}: has_internal_revisions flag = {boq.has_internal_revisions}, internal_revision_number = {boq.internal_revision_number}")
+
+        # Query internal revisions - handle NULL is_deleted as FALSE (not deleted)
         revisions = BOQInternalRevision.query.filter(
             BOQInternalRevision.boq_id == boq_id,
-            BOQInternalRevision.is_deleted == False
+            db.or_(
+                BOQInternalRevision.is_deleted == False,
+                BOQInternalRevision.is_deleted.is_(None)  # Handle NULL as not deleted
+            )
         ).order_by(BOQInternalRevision.internal_revision_number.asc()).all()
+
+        log.info(f"📋 BOQ {boq_id}: Found {len(revisions)} non-deleted internal revision records")
 
         internal_revisions = []
         original_boq = None
@@ -520,6 +555,11 @@ def update_internal_revision_boq(boq_id):
         boq.status = "Internal_Revision_Pending"
         boq.last_modified_by = user_name
         boq.last_modified_at = datetime.utcnow()
+
+        # 🔥 Fix: Explicitly add BOQ to session and flag as modified to ensure status is saved
+        db.session.add(boq)
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(boq, 'status')
 
         # Extract summary values from incoming payload (do NOT recalculate)
         # The frontend has already calculated everything, just use those values
@@ -748,26 +788,26 @@ def update_internal_revision_boq(boq_id):
                         db.session.add(boq_prelim)
                 log.info(f"✅ Updated preliminary selections in boq_preliminaries for BOQ {boq_id} during internal revision")
 
-        # Save terms & conditions selections to boq_terms_selections junction table
+        # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
         terms_conditions = data.get("terms_conditions", [])
         if terms_conditions and isinstance(terms_conditions, list):
-            for term in terms_conditions:
-                term_id = term.get('term_id')
-                is_checked = term.get('checked', False)
+            # Extract only checked term IDs
+            selected_term_ids = [
+                term.get('term_id') for term in terms_conditions
+                if term.get('term_id') and term.get('checked', False)
+            ]
 
-                if term_id:  # Only save if it has a term_id (from master table)
-                    # Insert or update term selection
-                    db.session.execute(text("""
-                        INSERT INTO boq_terms_selections (boq_id, term_id, is_checked, created_at, updated_at)
-                        VALUES (:boq_id, :term_id, :is_checked, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        ON CONFLICT (boq_id, term_id)
-                        DO UPDATE SET is_checked = :is_checked, updated_at = CURRENT_TIMESTAMP
-                    """), {
-                        'boq_id': boq_id,
-                        'term_id': term_id,
-                        'is_checked': is_checked
-                    })
-            log.info(f"✅ Updated terms selections in boq_terms_selections for BOQ {boq_id} during internal revision")
+            # Insert or update single row with term_ids array
+            db.session.execute(text("""
+                INSERT INTO boq_terms_selections (boq_id, term_ids, created_at, updated_at)
+                VALUES (:boq_id, :term_ids, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (boq_id)
+                DO UPDATE SET term_ids = :term_ids, updated_at = CURRENT_TIMESTAMP
+            """), {
+                'boq_id': boq_id,
+                'term_ids': selected_term_ids
+            })
+            log.info(f"✅ Updated {len(selected_term_ids)} terms selections in boq_terms_selections for BOQ {boq_id} during internal revision")
 
         # Create internal revision record using SQLAlchemy ORM
         internal_revision = BOQInternalRevision(

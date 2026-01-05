@@ -34,7 +34,7 @@ def check_boq_access():
     """Check if current user can access BOQ operations"""
     current_user = g.user
     user_role = current_user.get('role', '').lower()
-    allowed_roles = ['estimator', 'projectmanager', 'mep', 'technicaldirector', 'admin', 'siteengineer', 'sitesupervisor']
+    allowed_roles = ['estimator', 'projectmanager', 'productionmanager', 'mep', 'technicaldirector', 'admin', 'siteengineer', 'sitesupervisor']
     if user_role not in allowed_roles:
         return jsonify({"error": "Access denied. Estimator, PM, MEP, SE, TD, or Admin role required."}), 403
     return None
@@ -286,7 +286,7 @@ def client_revision_td_mail_send_route():
     return client_revision_td_mail_send()
 
 # Custom Units Management
-@boq_routes.route('/custom-units', methods=['GET'])
+@boq_routes.route('/boq/custom-units', methods=['GET'])
 @jwt_required
 def get_custom_units_route():
     """Get all custom units (Estimator, PM, SE, TD, or Admin)"""
@@ -295,7 +295,7 @@ def get_custom_units_route():
         return access_check
     return get_custom_units()
 
-@boq_routes.route('/custom-units', methods=['POST'])
+@boq_routes.route('/boq/custom-units', methods=['POST'])
 @jwt_required
 def create_custom_unit_route():
     """Create a new custom unit (Estimator, PM, SE, TD, or Admin)"""
@@ -303,3 +303,12 @@ def create_custom_unit_route():
     if access_check:
         return access_check
     return create_custom_unit()
+    
+@boq_routes.route('/send_client_revision/<int:boq_id>', methods=['GET'])
+@jwt_required
+def send_td_client_boq_email_route(boq_id):
+    """Send Client Revision BOQ to Technical Director for approval"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return send_td_client_boq_email(boq_id)

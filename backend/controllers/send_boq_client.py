@@ -152,19 +152,26 @@ def send_boq_to_client():
         # Fetch selected Terms & Conditions from database
         selected_terms = []
         try:
-            query = text("""
-                SELECT bt.terms_text
-                FROM boq_terms_selections bts
-                INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
-                WHERE bts.boq_id = :boq_id
-                AND bts.is_checked = TRUE
-                AND bt.is_active = TRUE
-                AND bt.is_deleted = FALSE
-                ORDER BY bt.display_order, bt.term_id
+            # First get the term_ids array for this BOQ
+            term_ids_query = text("""
+                SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
             """)
-            terms_result = db.session.execute(query, {'boq_id': boq_id})
-            for row in terms_result:
-                selected_terms.append({'terms_text': row[0]})
+            term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq_id}).fetchone()
+            term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
+
+            if term_ids:
+                # Fetch terms text for selected term IDs
+                query = text("""
+                    SELECT terms_text
+                    FROM boq_terms
+                    WHERE term_id = ANY(:term_ids)
+                    AND is_active = TRUE
+                    AND is_deleted = FALSE
+                    ORDER BY display_order, term_id
+                """)
+                terms_result = db.session.execute(query, {'term_ids': term_ids})
+                for row in terms_result:
+                    selected_terms.append({'terms_text': row[0]})
             log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
@@ -298,7 +305,7 @@ def send_boq_to_client():
             try:
                 from utils.comprehensive_notification_service import notification_service
                 from models.user import User, Role
-                td_role = Role.query.filter_by(role_name='Technical Director').first()
+                td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
                 if td_role:
                     td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
                     td_user_ids = [td.user_id for td in td_users]

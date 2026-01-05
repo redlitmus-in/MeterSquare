@@ -7,7 +7,7 @@ from flask import Blueprint, jsonify, request
 from functools import wraps
 import jwt
 from datetime import datetime
-from sqlalchemy import and_, or_
+from sqlalchemy import and_
 from models.notification import Notification
 from config.db import db
 from config.logging import get_logger
@@ -73,13 +73,10 @@ def get_notifications(current_user_id, current_user_role):
         limit = min(int(request.args.get('limit', 100)), 500)  # Max 500
         offset = int(request.args.get('offset', 0))
 
-        # Build query
+        # Build query - only show notifications for this specific user
         query = Notification.query.filter(
             and_(
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
         )
@@ -100,13 +97,10 @@ def get_notifications(current_user_id, current_user_role):
         # Apply pagination
         notifications = query.limit(limit).offset(offset).all()
 
-        # Get unread count
+        # Get unread count - only for this specific user
         unread_count = Notification.query.filter(
             and_(
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.read == False,
                 Notification.deleted_at.is_(None)
             )
@@ -136,10 +130,7 @@ def get_notification(current_user_id, current_user_role, notification_id):
         notification = Notification.query.filter(
             and_(
                 Notification.id == notification_id,
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
         ).first()
@@ -171,14 +162,11 @@ def mark_as_read(current_user_id, current_user_role):
         if not notification_ids:
             return jsonify({'error': 'notification_ids is required'}), 400
 
-        # Update notifications
+        # Update notifications - only for this specific user
         notifications = Notification.query.filter(
             and_(
                 Notification.id.in_(notification_ids),
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
         ).all()
@@ -205,13 +193,10 @@ def mark_as_read(current_user_id, current_user_role):
 def mark_all_as_read(current_user_id, current_user_role):
     """Mark all notifications as read for the current user"""
     try:
-        # Update all unread notifications
+        # Update all unread notifications - only for this specific user
         notifications = Notification.query.filter(
             and_(
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.read == False,
                 Notification.deleted_at.is_(None)
             )
@@ -242,10 +227,7 @@ def delete_notification(current_user_id, current_user_role, notification_id):
         notification = Notification.query.filter(
             and_(
                 Notification.id == notification_id,
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
         ).first()
@@ -274,10 +256,7 @@ def delete_all_notifications(current_user_id, current_user_role):
     try:
         notifications = Notification.query.filter(
             and_(
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
         ).all()
@@ -354,10 +333,7 @@ def get_notification_count(current_user_id, current_user_role):
     try:
         unread_count = Notification.query.filter(
             and_(
-                or_(
-                    Notification.user_id == current_user_id,
-                    Notification.target_role == current_user_role
-                ),
+                Notification.user_id == current_user_id,
                 Notification.read == False,
                 Notification.deleted_at.is_(None)
             )
@@ -421,4 +397,134 @@ def get_socketio_status(current_user_id, current_user_role):
         log.error(f"Error fetching Socket.IO status: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@notification_bp.route('/notifications/support/public', methods=['GET'])
+def get_support_notifications_public():
+    """
+    Get support ticket notifications without authentication.
+    This endpoint is for the support-management page which doesn't require login.
+    Only returns notifications targeted at the dev team (target_role='support-management').
+    Does NOT return client notifications like "Your ticket is approved".
+    Query params:
+        - unread_only: boolean (default: false)
+        - limit: integer (default: 50)
+        - offset: integer (default: 0)
+    """
+    try:
+        unread_only = request.args.get('unread_only', 'false').lower() == 'true'
+        limit = min(int(request.args.get('limit', 50)), 100)  # Max 100
+        offset = int(request.args.get('offset', 0))
+
+        # Build query - only get notifications targeted at support-management (dev team)
+        # Excludes client notifications (those with specific user_id but no target_role)
+        query = Notification.query.filter(
+            and_(
+                Notification.category == 'support',
+                Notification.target_role == 'support-management',
+                Notification.deleted_at.is_(None)
+            )
+        )
+
+        # Apply filters
+        if unread_only:
+            query = query.filter(Notification.read == False)
+
+        # Order by created_at descending
+        query = query.order_by(Notification.created_at.desc())
+
+        # Get total count before pagination
+        total_count = query.count()
+
+        # Apply pagination
+        notifications = query.limit(limit).offset(offset).all()
+
+        # Get unread count for support-management targeted notifications
+        unread_count = Notification.query.filter(
+            and_(
+                Notification.category == 'support',
+                Notification.target_role == 'support-management',
+                Notification.read == False,
+                Notification.deleted_at.is_(None)
+            )
+        ).count()
+
+        return jsonify({
+            'success': True,
+            'notifications': [n.to_dict() for n in notifications],
+            'total': total_count,
+            'unread_count': unread_count,
+            'limit': limit,
+            'offset': offset
+        }), 200
+
+    except ValueError as e:
+        return jsonify({'error': f'Invalid parameter: {str(e)}'}), 400
+    except Exception as e:
+        log.error(f"Error fetching support notifications: {e}")
+        return jsonify({'error': 'Failed to fetch support notifications'}), 500
+
+
+@notification_bp.route('/notifications/support/public/read', methods=['POST'])
+def mark_support_notifications_read_public():
+    """
+    Mark support notification(s) as read without authentication.
+    Only allows marking support-management targeted notifications.
+    Body: { "notification_ids": ["id1", "id2", ...] }
+    """
+    try:
+        data = request.get_json()
+        notification_ids = data.get('notification_ids', [])
+
+        if not notification_ids:
+            return jsonify({'error': 'notification_ids is required'}), 400
+
+        # Update notifications - only for support-management targeted notifications
+        notifications = Notification.query.filter(
+            and_(
+                Notification.id.in_(notification_ids),
+                Notification.category == 'support',
+                Notification.target_role == 'support-management',
+                Notification.deleted_at.is_(None)
+            )
+        ).all()
+
+        for notification in notifications:
+            notification.mark_as_read()
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': f'Marked {len(notifications)} notification(s) as read',
+            'updated_count': len(notifications)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error marking support notifications as read: {e}")
+        return jsonify({'error': 'Failed to mark notifications as read'}), 500
+
+
+@notification_bp.route('/notifications/support/public/count', methods=['GET'])
+def get_support_notification_count_public():
+    """Get unread support notification count without authentication.
+    Only counts support-management targeted notifications (for dev team)."""
+    try:
+        unread_count = Notification.query.filter(
+            and_(
+                Notification.category == 'support',
+                Notification.target_role == 'support-management',
+                Notification.read == False,
+                Notification.deleted_at.is_(None)
+            )
+        ).count()
+
+        return jsonify({
+            'success': True,
+            'unread_count': unread_count
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching support notification count: {e}")
+        return jsonify({'error': 'Failed to fetch notification count'}), 500
 

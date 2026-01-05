@@ -98,9 +98,9 @@ def calculate_boq_values(items, boq_json=None):
                 sub_item['materials_cost'] = sub_materials_cost
                 item_materials += sub_materials_cost
 
-                # Calculate labour cost
+                # Calculate labour cost (with fallback calculation)
                 labour = sub_item.get('labour', [])
-                sub_labour_cost = sum([l.get('total_cost', 0) for l in labour])
+                sub_labour_cost = sum([l.get('total_cost') or (l.get('hours', 0) * l.get('rate_per_hour', 0)) for l in labour])
                 sub_item['labour_cost'] = sub_labour_cost
                 item_labour += sub_labour_cost
 
@@ -140,7 +140,7 @@ def calculate_boq_values(items, boq_json=None):
             labour = item.get('labour', [])
 
             item_materials = sum([m.get('total_price', 0) for m in materials])
-            item_labour = sum([l.get('total_cost', 0) for l in labour])
+            item_labour = sum([l.get('total_cost') or (l.get('hours', 0) * l.get('rate_per_hour', 0)) for l in labour])
             item_base_cost = item_materials + item_labour
 
             # Calculate amounts if missing - use actual percentages from item

@@ -7,6 +7,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 from flask import request
 import jwt
 import os
+from datetime import datetime
 from functools import wraps
 from config.logging import get_logger
 
@@ -433,3 +434,37 @@ def init_socketio(app):
     socketio.init_app(app)
     log.info("Socket.IO server initialized")
     return socketio
+
+
+# ============ SUPPORT TICKET EVENTS ============
+
+@socketio.on('join:support')
+def handle_join_support():
+    """Handle support management page joining support room - NO AUTH REQUIRED"""
+    try:
+        room = 'support_tickets'
+        join_room(room)
+        log.info(f"Client joined support_tickets room [SID: {request.sid}]")
+        emit('room_joined', {'room': room, 'type': 'support'})
+    except Exception as e:
+        log.error(f"Error joining support room: {e}")
+
+
+def emit_support_ticket_event(event_type, ticket_data):
+    """
+    Emit support ticket event to support-management page
+
+    Args:
+        event_type: 'ticket_created', 'ticket_updated', 'ticket_comment', etc.
+        ticket_data: Ticket data dictionary
+    """
+    room = 'support_tickets'
+    event_data = {
+        'type': event_type,
+        'ticket': ticket_data,
+        'timestamp': datetime.utcnow().isoformat()
+    }
+
+    socketio.emit('support_ticket', event_data, room=room)
+    socketio.emit('support_ticket', event_data, broadcast=True)  # Also broadcast
+    log.info(f"Emitted support ticket event: {event_type} for ticket {ticket_data.get('ticket_number', 'N/A')}")

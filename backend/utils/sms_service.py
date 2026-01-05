@@ -11,8 +11,11 @@ log = get_logger()
 
 # Tuitone SMS API configuration
 SMS_API_URL = "https://tuitone.com/api/sms"
-SMS_ACCESS_TOKEN = "9187941f-64b7-4a2b-baff-85df46a9d583"
-SMS_CALLER_ID = "MeterSq"  # Sender ID (max 11 chars)
+SMS_ACCESS_TOKEN = os.environ.get("SMS_ACCESS_TOKEN")
+SMS_CALLER_ID = os.environ.get("SMS_CALLER_ID", "MeterSq")  # Sender ID (max 11 chars)
+
+if not SMS_ACCESS_TOKEN:
+    log.warning("SMS_ACCESS_TOKEN not set in environment variables - SMS functionality will be disabled")
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
 

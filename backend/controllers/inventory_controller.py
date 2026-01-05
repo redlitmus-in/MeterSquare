@@ -1,41 +1,268 @@
-from flask import jsonify, request, g
+from flask import jsonify, request, g, send_file
+from sqlalchemy import func
 from config.db import db
 from models.inventory import *
 from models.project import Project
 from models.user import User
+from models.system_settings import SystemSettings
 from datetime import datetime
+from utils.comprehensive_notification_service import ComprehensiveNotificationService
+from utils.rdn_pdf_generator import RDNPDFGenerator
+
+# Import shared helpers (these can also be used by other controllers)
+from controllers.inventory_helpers import (
+    DELIVERY_NOTE_PREFIX,
+    MAX_STOCK_ALERTS,
+    MAX_PAGINATION_LIMIT,
+    MAX_BATCH_SIZE,
+    MATERIAL_CONDITIONS,
+    RETURNABLE_DN_STATUSES,
+    DISPOSAL_PENDING_APPROVAL,
+    DISPOSAL_APPROVED,
+    DISPOSAL_PENDING_REVIEW,
+    DISPOSAL_APPROVED_DISPOSAL,
+    DISPOSAL_DISPOSED,
+    DISPOSAL_SENT_FOR_REPAIR,
+    DISPOSAL_REPAIRED,
+    DISPOSAL_REJECTED,
+    generate_material_code,
+    sanitize_search_term,
+    validate_pagination_params,
+    validate_quantity,
+    get_store_name,
+    get_inventory_config,
+    get_project_managers,
+    get_mep_supervisors,
+    get_site_supervisor,
+    enrich_project_details,
+    build_returnable_material_item,
+)
+
+# Note: Constants and helper functions are now imported from inventory_helpers.py
+# This file contains the main API endpoint functions
 
 
-# ==================== HELPER FUNCTIONS ====================
+def _build_returnable_material_item_local(delivery_note, item, material):
+    """Build returnable material dictionary for a delivery note item.
 
-def generate_material_code():
-    """Auto-generate sequential material code (MAT001, MAT002, ...)"""
+    Args:
+        delivery_note: MaterialDeliveryNote object
+        item: DeliveryNoteItem object
+        material: InventoryMaterial object
+
+    Returns:
+        dict with returnable material info, or None if nothing to return
+    """
+    # Check MaterialReturn table (legacy returns)
+    returns = MaterialReturn.query.filter_by(
+        delivery_note_item_id=item.item_id
+    ).all()
+    total_returned_legacy = sum(r.quantity for r in returns)
+
+    # Check ReturnDeliveryNoteItem table (new RDN-based returns)
+    # Only count items in RDNs that are not yet RECEIVED (to avoid double counting)
+    rdn_items_quantity = db.session.query(
+        db.func.coalesce(db.func.sum(ReturnDeliveryNoteItem.quantity), 0)
+    ).join(
+        ReturnDeliveryNote,
+        ReturnDeliveryNoteItem.return_note_id == ReturnDeliveryNote.return_note_id
+    ).filter(
+        ReturnDeliveryNoteItem.original_delivery_note_item_id == item.item_id,
+        # Exclude RECEIVED status as those are processed and would be in MaterialReturn
+        ReturnDeliveryNote.status.notin_(['RECEIVED', 'PARTIAL'])
+    ).scalar() or 0
+
+    total_returned = total_returned_legacy + float(rdn_items_quantity)
+    returnable_quantity = max(0, item.quantity - total_returned)
+
+    if returnable_quantity <= 0:
+        return None
+
+    return {
+        'delivery_note_item_id': item.item_id,
+        'delivery_note_id': delivery_note.delivery_note_id,
+        'delivery_note_number': delivery_note.delivery_note_number,
+        'delivery_date': delivery_note.delivery_date.isoformat() if delivery_note.delivery_date else None,
+        'inventory_material_id': item.inventory_material_id,
+        'material_code': material.material_code,
+        'material_name': material.material_name,
+        'brand': material.brand,
+        'unit': material.unit,
+        'is_returnable': material.is_returnable,
+        'dispatched_quantity': item.quantity,
+        'returned_quantity': total_returned,
+        'returnable_quantity': returnable_quantity
+    }
+
+
+def validate_quantity(value, field_name='quantity'):
+    """Validate that a value is a valid positive number.
+
+    Args:
+        value: The value to validate
+        field_name: Name of the field for error messages
+
+    Returns:
+        tuple: (is_valid: bool, parsed_value: float or None, error_message: str or None)
+    """
+    if value is None:
+        return False, None, f'{field_name} is required'
+
     try:
-        # Get the last material ordered by ID
-        last_material = InventoryMaterial.query.order_by(
-            InventoryMaterial.inventory_material_id.desc()
-        ).first()
+        parsed = float(value)
+        if parsed <= 0:
+            return False, None, f'{field_name} must be greater than 0'
+        return True, parsed, None
+    except (TypeError, ValueError):
+        return False, None, f'{field_name} must be a valid number'
 
-        if last_material and last_material.material_code:
-            # Extract number from last code (e.g., "MAT005" -> 5)
-            last_code = last_material.material_code
-            if last_code.startswith('MAT'):
-                last_number = int(last_code.replace('MAT', ''))
-                new_number = last_number + 1
-            else:
-                # Fallback if format is unexpected
-                new_number = 1
-        else:
-            # First material ever
-            new_number = 1
 
-        # Format as MAT001, MAT002, etc. (zero-padded to 3 digits)
-        return f"MAT{new_number:03d}"
+def get_store_name():
+    """Get store name from system settings"""
+    try:
+        settings = SystemSettings.query.first()
+        if settings and settings.store_name:
+            return settings.store_name
+        return 'M2 Store'  # Fallback default
+    except:
+        return 'M2 Store'
 
+
+def get_inventory_config():
+    """Get inventory configuration for frontend"""
+    try:
+        settings = SystemSettings.query.first()
+        store_name = settings.store_name if settings and settings.store_name else 'M2 Store'
+        company_name = settings.company_name if settings and settings.company_name else 'MeterSquare ERP'
+        currency = settings.currency if settings and settings.currency else 'AED'
+
+        return jsonify({
+            'store_name': store_name,
+            'company_name': company_name,
+            'currency': currency,
+            'delivery_note_prefix': DELIVERY_NOTE_PREFIX
+        }), 200
     except Exception as e:
-        # Fallback to timestamp-based code if something goes wrong
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        return f"MAT{timestamp}"
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== ENRICHMENT HELPERS ====================
+
+def get_project_managers(project):
+    """Extract project managers from project object"""
+    managers = []
+    if project and project.user_id:
+        pm_ids = project.user_id if isinstance(project.user_id, list) else []
+        for pm_id in pm_ids:
+            pm_user = User.query.get(pm_id)
+            if pm_user:
+                managers.append({
+                    'user_id': pm_user.user_id,
+                    'full_name': pm_user.full_name,
+                    'email': pm_user.email
+                })
+    return managers
+
+
+def get_mep_supervisors(project):
+    """Extract MEP supervisors from project object"""
+    supervisors = []
+    if project and project.mep_supervisor_id:
+        mep_ids = project.mep_supervisor_id if isinstance(project.mep_supervisor_id, list) else []
+        for mep_id in mep_ids:
+            mep_user = User.query.get(mep_id)
+            if mep_user:
+                supervisors.append({
+                    'user_id': mep_user.user_id,
+                    'full_name': mep_user.full_name,
+                    'email': mep_user.email
+                })
+    return supervisors
+
+
+def get_site_supervisors(project):
+    """Extract all site supervisors/engineers assigned to this project
+
+    Checks three sources:
+    1. project.site_supervisor_id (single SE from Project table)
+    2. PMAssignSS.ss_ids (array of SE IDs)
+    3. PMAssignSS.assigned_to_se_id (single SE assignment)
+
+    Returns array of site supervisor objects with user details
+    """
+    from models.pm_assign_ss import PMAssignSS
+
+    supervisors = []
+    seen_ids = set()
+
+    # First, check if project has direct site_supervisor_id
+    if project and project.site_supervisor_id:
+        site_user = User.query.get(project.site_supervisor_id)
+        if site_user:
+            supervisors.append({
+                'user_id': site_user.user_id,
+                'full_name': site_user.full_name,
+                'email': site_user.email
+            })
+            seen_ids.add(site_user.user_id)
+
+    # Then, check PMAssignSS table for additional site supervisors
+    if project:
+        assignments = PMAssignSS.query.filter_by(
+            project_id=project.project_id,
+            is_deleted=False
+        ).all()
+
+        for assignment in assignments:
+            # Check ss_ids array
+            if assignment.ss_ids:  # ss_ids is an array
+                for ss_id in assignment.ss_ids:
+                    if ss_id not in seen_ids:
+                        ss_user = User.query.get(ss_id)
+                        if ss_user:
+                            supervisors.append({
+                                'user_id': ss_user.user_id,
+                                'full_name': ss_user.full_name,
+                                'email': ss_user.email
+                            })
+                            seen_ids.add(ss_user.user_id)
+
+            # Also check assigned_to_se_id (single SE assignment)
+            if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in seen_ids:
+                se_user = User.query.get(assignment.assigned_to_se_id)
+                if se_user:
+                    supervisors.append({
+                        'user_id': se_user.user_id,
+                        'full_name': se_user.full_name,
+                        'email': se_user.email
+                    })
+                    seen_ids.add(se_user.user_id)
+
+    return supervisors if supervisors else None
+
+
+def get_site_supervisor(project):
+    """Legacy function - returns first site supervisor for backward compatibility"""
+    supervisors = get_site_supervisors(project)
+    return supervisors[0] if supervisors else None
+
+
+def enrich_project_details(project, include_mep=True):
+    """Get enriched project details including managers and supervisors"""
+    if not project:
+        return None
+    details = {
+        'project_id': project.project_id,
+        'project_name': project.project_name,
+        'project_code': project.project_code,
+        'location': project.location,
+        'project_managers': get_project_managers(project),
+        'site_supervisor': get_site_supervisor(project),  # First SE for backward compatibility
+        'site_supervisors': get_site_supervisors(project)  # All SEs - NEW
+    }
+    if include_mep:
+        details['mep_managers'] = get_mep_supervisors(project)
+    return details
 
 
 # ==================== INVENTORY MATERIAL APIs ====================
@@ -52,9 +279,50 @@ def create_inventory_item():
             if not data.get(field):
                 return jsonify({'error': f'{field} is required'}), 400
 
+        # Check for duplicate materials (case-insensitive comparison)
+        material_name = data['material_name'].strip().lower()
+        brand = (data.get('brand') or '').strip().lower()
+        size = (data.get('size') or '').strip().lower()
+
+        # Build duplicate query - match on material_name, brand, and size
+        duplicate_query = InventoryMaterial.query.filter(
+            db.func.lower(InventoryMaterial.material_name) == material_name
+        )
+
+        # Add brand filter
+        if brand:
+            duplicate_query = duplicate_query.filter(
+                db.func.lower(InventoryMaterial.brand) == brand
+            )
+        else:
+            duplicate_query = duplicate_query.filter(
+                (InventoryMaterial.brand == None) | (InventoryMaterial.brand == '')
+            )
+
+        # Add size filter
+        if size:
+            duplicate_query = duplicate_query.filter(
+                db.func.lower(InventoryMaterial.size) == size
+            )
+        else:
+            duplicate_query = duplicate_query.filter(
+                (InventoryMaterial.size == None) | (InventoryMaterial.size == '')
+            )
+
+        existing_material = duplicate_query.first()
+
+        if existing_material:
+            return jsonify({
+                'error': f'Material already exists: {existing_material.material_code} - {existing_material.material_name}' +
+                         (f' ({existing_material.brand})' if existing_material.brand else '') +
+                         (f' - {existing_material.size}' if existing_material.size else ''),
+                'existing_material': existing_material.to_dict()
+            }), 409
+
         # Auto-generate material code
         material_code = generate_material_code()
 
+        # unit_price defaults to 0.0 and will be updated from first Stock In transaction
         new_material = InventoryMaterial(
             material_code=material_code,
             material_name=data['material_name'],
@@ -64,7 +332,7 @@ def create_inventory_item():
             unit=data['unit'],
             current_stock=data.get('current_stock', 0.0),
             min_stock_level=data.get('min_stock_level', 0.0),
-            unit_price=data.get('unit_price', 0.0),
+            unit_price=0.0,  # Will be set from first purchase transaction
             description=data.get('description'),
             is_active=data.get('is_active', True),
             created_by=current_user,
@@ -85,12 +353,22 @@ def create_inventory_item():
 
 
 def get_all_inventory_items():
-    """Get all materials in inventory with optional filters"""
+    """Get all materials in inventory with optional filters and pagination"""
     try:
         # Get query parameters
         category = request.args.get('category')
         is_active = request.args.get('is_active')
         low_stock = request.args.get('low_stock')
+        search = request.args.get('search')
+
+        # Pagination parameters
+        page = request.args.get('page', type=int)
+        limit = request.args.get('limit', type=int)
+
+        # Validate pagination parameters
+        validation_error = validate_pagination_params(page, limit)
+        if validation_error:
+            return jsonify(validation_error[0]), validation_error[1]
 
         query = InventoryMaterial.query
 
@@ -101,13 +379,46 @@ def get_all_inventory_items():
             query = query.filter_by(is_active=is_active.lower() == 'true')
         if low_stock and low_stock.lower() == 'true':
             query = query.filter(InventoryMaterial.current_stock <= InventoryMaterial.min_stock_level)
+        if search:
+            # Sanitize search term to prevent SQL wildcard injection
+            search_term = f"%{sanitize_search_term(search)}%"
+            query = query.filter(
+                db.or_(
+                    InventoryMaterial.material_name.ilike(search_term),
+                    InventoryMaterial.material_code.ilike(search_term),
+                    InventoryMaterial.brand.ilike(search_term),
+                    InventoryMaterial.category.ilike(search_term)
+                )
+            )
 
-        materials = query.all()
+        # Order by latest first
+        query = query.order_by(InventoryMaterial.inventory_material_id.desc())
 
-        return jsonify({
-            'materials': [material.to_dict() for material in materials],
-            'total': len(materials)
-        }), 200
+        # Get total count before pagination
+        total = query.count()
+
+        # Apply pagination if requested
+        if page is not None and limit is not None:
+            offset = (page - 1) * limit
+            materials = query.offset(offset).limit(limit).all()
+            total_pages = (total + limit - 1) // limit
+
+            return jsonify({
+                'materials': [material.to_dict() for material in materials],
+                'total': total,
+                'page': page,
+                'limit': limit,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1
+            }), 200
+        else:
+            # Return all (backward compatible)
+            materials = query.all()
+            return jsonify({
+                'materials': [material.to_dict() for material in materials],
+                'total': total
+            }), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -208,9 +519,18 @@ def delete_inventory_item(inventory_material_id):
 # ==================== INVENTORY TRANSACTION APIs ====================
 
 def create_inventory_transaction():
-    """Create a new material transaction (purchase or withdrawal)"""
+    """Create a new material transaction (purchase or withdrawal) with optional file upload"""
     try:
-        data = request.get_json()
+        # Check if request has FormData (with file) or JSON
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # Handle FormData (with file upload)
+            data = request.form.to_dict()
+            delivery_note_file = request.files.get('delivery_note_file')
+        else:
+            # Handle JSON (backward compatibility)
+            data = request.get_json()
+            delivery_note_file = None
+
         current_user = g.user.get('email', 'system')
 
         # Validate required fields
@@ -219,8 +539,9 @@ def create_inventory_transaction():
             if field not in data:
                 return jsonify({'error': f'{field} is required'}), 400
 
-        # Validate transaction type
-        if data['transaction_type'] not in ['purchase', 'withdrawl']:
+        # Validate transaction type (accept both cases for flexibility)
+        transaction_type = data['transaction_type'].upper()
+        if transaction_type not in ['PURCHASE', 'WITHDRAWAL']:
             return jsonify({'error': 'Invalid transaction type. Must be PURCHASE or WITHDRAWAL'}), 400
 
         # Check if material exists
@@ -233,7 +554,7 @@ def create_inventory_transaction():
         unit_price = float(data.get('unit_price', material.unit_price))
 
         # Validate withdrawal quantity
-        if data['transaction_type'] == 'withdrawl':
+        if transaction_type == 'WITHDRAWAL':
             if quantity > material.current_stock:
                 return jsonify({
                     'error': f'Insufficient stock. Available: {material.current_stock} {material.unit}'
@@ -242,22 +563,89 @@ def create_inventory_transaction():
         # Calculate total amount
         total_amount = quantity * unit_price
 
+        # Handle file upload to Supabase if provided
+        delivery_note_url = None
+        if delivery_note_file:
+            try:
+                import os
+                from datetime import datetime as dt
+                from supabase import create_client
+
+                # Get Supabase credentials based on environment
+                # Use SERVICE_ROLE key for server-side uploads (has admin privileges)
+                environment = os.environ.get('ENVIRONMENT', 'production')
+                if environment == 'development':
+                    supabase_url = os.environ.get('DEV_SUPABASE_URL')
+                    supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')  # SERVICE_ROLE key
+                else:
+                    supabase_url = os.environ.get('SUPABASE_URL')
+                    supabase_key = os.environ.get('SUPABASE_ANON_KEY')  # SERVICE_ROLE key
+
+                if not supabase_url or not supabase_key:
+                    raise Exception('Supabase credentials must be set in environment variables')
+
+                # Create Supabase client with service role key
+                print(f"[DEBUG] Environment: {environment}")
+                print(f"[DEBUG] Supabase URL: {supabase_url}")
+                print(f"[DEBUG] Using service role key: {supabase_key[:20]}...")
+
+                supabase = create_client(supabase_url, supabase_key)
+
+                # Generate unique filename
+                timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
+                original_filename = delivery_note_file.filename
+                file_extension = os.path.splitext(original_filename)[1]
+                unique_filename = f"delivery-notes/{timestamp}_{original_filename}"
+
+                print(f"[DEBUG] Uploading file: {unique_filename}")
+                print(f"[DEBUG] Content type: {delivery_note_file.content_type}")
+
+                # Upload to Supabase Storage
+                file_data = delivery_note_file.read()
+
+                # Use the correct API format for supabase-py
+                # The upload method signature: upload(path, file, file_options=None)
+                bucket = supabase.storage.from_('inventory-files')
+
+                try:
+                    response = bucket.upload(
+                        unique_filename,  # path (positional)
+                        file_data,  # file bytes (positional)
+                        {"content-type": delivery_note_file.content_type, "upsert": "false"}  # file_options (positional)
+                    )
+                    print(f"[DEBUG] Upload response: {response}")
+                except Exception as e:
+                    print(f"[DEBUG] Upload error details: {e}")
+                    print(f"[DEBUG] Error type: {type(e)}")
+                    raise
+
+                # Get public URL
+                delivery_note_url = bucket.get_public_url(unique_filename)
+                print(f"[DEBUG] Public URL: {delivery_note_url}")
+
+            except Exception as upload_error:
+                return jsonify({'error': f'File upload failed: {str(upload_error)}'}), 500
+
         # Create transaction
         new_transaction = InventoryTransaction(
             inventory_material_id=data['inventory_material_id'],
-            transaction_type=data['transaction_type'],
+            transaction_type=transaction_type,
             quantity=quantity,
             unit_price=unit_price,
             total_amount=total_amount,
             reference_number=data.get('reference_number'),
             project_id=data.get('project_id'),
             notes=data.get('notes'),
+            delivery_note_url=delivery_note_url,
             created_by=current_user
         )
 
         # Update material stock
-        if data['transaction_type'] == 'purchase':
+        if transaction_type == 'PURCHASE':
             material.current_stock += quantity
+            # Auto-update reference price if this is the first purchase (unit_price is 0.0)
+            if material.unit_price == 0.0:
+                material.unit_price = unit_price
         else:  # WITHDRAWAL
             material.current_stock -= quantity
 
@@ -279,7 +667,7 @@ def create_inventory_transaction():
 
 
 def get_all_inventory_transactions():
-    """Get all material transactions with optional filters"""
+    """Get all material transactions with optional filters and pagination"""
     try:
         # Get query parameters
         inventory_material_id = request.args.get('inventory_material_id')
@@ -287,6 +675,16 @@ def get_all_inventory_transactions():
         project_id = request.args.get('project_id')
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
+        search = request.args.get('search')
+
+        # Pagination parameters
+        page = request.args.get('page', type=int)
+        limit = request.args.get('limit', type=int)
+
+        # Validate pagination parameters
+        validation_error = validate_pagination_params(page, limit)
+        if validation_error:
+            return jsonify(validation_error[0]), validation_error[1]
 
         query = InventoryTransaction.query
 
@@ -302,8 +700,32 @@ def get_all_inventory_transactions():
         if end_date:
             query = query.filter(InventoryTransaction.created_at <= end_date)
 
+        # Search across joined material data
+        if search:
+            # Sanitize search term to prevent SQL wildcard injection
+            search_term = f"%{sanitize_search_term(search)}%"
+            query = query.join(InventoryMaterial).filter(
+                db.or_(
+                    InventoryMaterial.material_name.ilike(search_term),
+                    InventoryMaterial.material_code.ilike(search_term),
+                    InventoryTransaction.reference_number.ilike(search_term)
+                )
+            )
+
         # Order by latest first
-        transactions = query.order_by(InventoryTransaction.created_at.desc()).all()
+        query = query.order_by(InventoryTransaction.created_at.desc())
+
+        # Get total count before pagination
+        total = query.count()
+
+        # Apply pagination if requested
+        if page is not None and limit is not None:
+            offset = (page - 1) * limit
+            transactions = query.offset(offset).limit(limit).all()
+            total_pages = (total + limit - 1) // limit
+        else:
+            transactions = query.all()
+            total_pages = 1
 
         # Enrich with material details
         result = []
@@ -318,10 +740,22 @@ def get_all_inventory_transactions():
                 txn_data['unit'] = txn.material.unit
             result.append(txn_data)
 
-        return jsonify({
+        response_data = {
             'transactions': result,
-            'total': len(result)
-        }), 200
+            'total': total
+        }
+
+        # Include pagination info if pagination was requested
+        if page is not None and limit is not None:
+            response_data.update({
+                'page': page,
+                'limit': limit,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1
+            })
+
+        return jsonify(response_data), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -371,40 +805,7 @@ def get_item_transaction_history(inventory_material_id):
             if txn.project_id:
                 project = Project.query.get(txn.project_id)
                 if project:
-                    # Get project managers
-                    project_managers = []
-                    if project.user_id:
-                        pm_ids = project.user_id if isinstance(project.user_id, list) else []
-                        for pm_id in pm_ids:
-                            pm_user = User.query.get(pm_id)
-                            if pm_user:
-                                project_managers.append({
-                                    'user_id': pm_user.user_id,
-                                    'full_name': pm_user.full_name,
-                                    'email': pm_user.email
-                                })
-
-                    # Get MEP managers
-                    mep_managers = []
-                    if project.mep_supervisor_id:
-                        mep_ids = project.mep_supervisor_id if isinstance(project.mep_supervisor_id, list) else []
-                        for mep_id in mep_ids:
-                            mep_user = User.query.get(mep_id)
-                            if mep_user:
-                                mep_managers.append({
-                                    'user_id': mep_user.user_id,
-                                    'full_name': mep_user.full_name,
-                                    'email': mep_user.email
-                                })
-
-                    # Add project details to transaction
-                    txn_data['project_details'] = {
-                        'project_name': project.project_name,
-                        'project_code': project.project_code,
-                        'location': project.location,
-                        'project_managers': project_managers,
-                        'mep_managers': mep_managers
-                    }
+                    txn_data['project_details'] = enrich_project_details(project)
 
             enriched_transactions.append(txn_data)
 
@@ -618,40 +1019,8 @@ def internal_inventory_material_request():
             'request': new_request.to_dict()
         }
 
-        # Get project managers
-        project_managers = []
-        if project.user_id:
-            pm_ids = project.user_id if isinstance(project.user_id, list) else []
-            for pm_id in pm_ids:
-                pm_user = User.query.get(pm_id)
-                if pm_user:
-                    project_managers.append({
-                        'user_id': pm_user.user_id,
-                        'full_name': pm_user.full_name,
-                        'email': pm_user.email
-                    })
-
-        # Get MEP managers
-        mep_managers = []
-        if project.mep_supervisor_id:
-            mep_ids = project.mep_supervisor_id if isinstance(project.mep_supervisor_id, list) else []
-            for mep_id in mep_ids:
-                mep_user = User.query.get(mep_id)
-                if mep_user:
-                    mep_managers.append({
-                        'user_id': mep_user.user_id,
-                        'full_name': mep_user.full_name,
-                        'email': mep_user.email
-                    })
-
         # Add project details to response
-        response_data['project_details'] = {
-            'project_name': project.project_name,
-            'project_code': project.project_code,
-            'location': project.location,
-            'project_managers': project_managers,
-            'mep_managers': mep_managers
-        }
+        response_data['project_details'] = enrich_project_details(project)
 
         return jsonify(response_data), 201
 
@@ -673,39 +1042,7 @@ def get_internal_material_request_by_id(request_id):
         # Get project details
         project = Project.query.get(internal_req.project_id)
         if project:
-            # Get project managers
-            project_managers = []
-            if project.user_id:
-                pm_ids = project.user_id if isinstance(project.user_id, list) else []
-                for pm_id in pm_ids:
-                    pm_user = User.query.get(pm_id)
-                    if pm_user:
-                        project_managers.append({
-                            'user_id': pm_user.user_id,
-                            'full_name': pm_user.full_name,
-                            'email': pm_user.email
-                        })
-
-            # Get MEP managers
-            mep_managers = []
-            if project.mep_supervisor_id:
-                mep_ids = project.mep_supervisor_id if isinstance(project.mep_supervisor_id, list) else []
-                for mep_id in mep_ids:
-                    mep_user = User.query.get(mep_id)
-                    if mep_user:
-                        mep_managers.append({
-                            'user_id': mep_user.user_id,
-                            'full_name': mep_user.full_name,
-                            'email': mep_user.email
-                        })
-
-            req_data['project_details'] = {
-                'project_name': project.project_name,
-                'project_code': project.project_code,
-                'location': project.location,
-                'project_managers': project_managers,
-                'mep_managers': mep_managers
-            }
+            req_data['project_details'] = enrich_project_details(project)
 
         # Get material details if allocated
         material = None
@@ -736,10 +1073,10 @@ def get_internal_material_request_by_id(request_id):
         # Calculate withdrawal statistics
         withdrawal_stats = {}
         if internal_req.inventory_material_id:
-            # Get all withdrawal transactions for this material
-            all_withdrawals = InventoryTransaction.query.filter_by(
-                inventory_material_id=internal_req.inventory_material_id,
-                transaction_type='withdrawl'
+            # Get all withdrawal transactions for this material (check both cases for legacy data)
+            all_withdrawals = InventoryTransaction.query.filter(
+                InventoryTransaction.inventory_material_id == internal_req.inventory_material_id,
+                InventoryTransaction.transaction_type.in_(['WITHDRAWAL', 'withdrawl'])
             ).all()
 
             total_internal_withdraw = len(all_withdrawals)
@@ -901,8 +1238,8 @@ def get_sent_internal_requests():
         if project_id:
             query = query.filter_by(project_id=int(project_id))
 
-        # Order by latest first
-        requests = query.order_by(InternalMaterialRequest.created_at.desc()).all()
+        # Order by latest first - PERFORMANCE: Limit to 200 records max
+        requests = query.order_by(InternalMaterialRequest.created_at.desc()).limit(200).all()
 
         # Enrich with project and material details
         result = []
@@ -912,39 +1249,7 @@ def get_sent_internal_requests():
             # Get project details
             project = Project.query.get(req.project_id)
             if project:
-                # Get project managers
-                project_managers = []
-                if project.user_id:
-                    pm_ids = project.user_id if isinstance(project.user_id, list) else []
-                    for pm_id in pm_ids:
-                        pm_user = User.query.get(pm_id)
-                        if pm_user:
-                            project_managers.append({
-                                'user_id': pm_user.user_id,
-                                'full_name': pm_user.full_name,
-                                'email': pm_user.email
-                            })
-
-                # Get MEP managers
-                mep_managers = []
-                if project.mep_supervisor_id:
-                    mep_ids = project.mep_supervisor_id if isinstance(project.mep_supervisor_id, list) else []
-                    for mep_id in mep_ids:
-                        mep_user = User.query.get(mep_id)
-                        if mep_user:
-                            mep_managers.append({
-                                'user_id': mep_user.user_id,
-                                'full_name': mep_user.full_name,
-                                'email': mep_user.email
-                            })
-
-                req_data['project_details'] = {
-                    'project_name': project.project_name,
-                    'project_code': project.project_code,
-                    'location': project.location,
-                    'project_managers': project_managers,
-                    'mep_managers': mep_managers
-                }
+                req_data['project_details'] = enrich_project_details(project)
 
             # Get material details if allocated
             if req.inventory_material_id:
@@ -995,8 +1300,8 @@ def get_all_internal_material_requests():
         if status:
             query = query.filter_by(status=status.upper())
 
-        # Order by latest first
-        requests = query.order_by(InternalMaterialRequest.created_at.desc()).all()
+        # Order by latest first - PERFORMANCE: Limit to 200 records max
+        requests = query.order_by(InternalMaterialRequest.created_at.desc()).limit(200).all()
 
         # Enrich with project details
         result = []
@@ -1006,39 +1311,7 @@ def get_all_internal_material_requests():
             # Get project details
             project = Project.query.get(req.project_id)
             if project:
-                # Get project managers
-                project_managers = []
-                if project.user_id:
-                    pm_ids = project.user_id if isinstance(project.user_id, list) else []
-                    for pm_id in pm_ids:
-                        pm_user = User.query.get(pm_id)
-                        if pm_user:
-                            project_managers.append({
-                                'user_id': pm_user.user_id,
-                                'full_name': pm_user.full_name,
-                                'email': pm_user.email
-                            })
-
-                # Get MEP managers
-                mep_managers = []
-                if project.mep_supervisor_id:
-                    mep_ids = project.mep_supervisor_id if isinstance(project.mep_supervisor_id, list) else []
-                    for mep_id in mep_ids:
-                        mep_user = User.query.get(mep_id)
-                        if mep_user:
-                            mep_managers.append({
-                                'user_id': mep_user.user_id,
-                                'full_name': mep_user.full_name,
-                                'email': mep_user.email
-                            })
-
-                req_data['project_details'] = {
-                    'project_name': project.project_name,
-                    'project_code': project.project_code,
-                    'location': project.location,
-                    'project_managers': project_managers,
-                    'mep_managers': mep_managers
-                }
+                req_data['project_details'] = enrich_project_details(project)
 
             result.append(req_data)
 
@@ -1056,17 +1329,299 @@ def get_all_internal_material_requests():
 
 
 def approve_internal_request(request_id):
-    """Approve an internal material request and deduct material from inventory"""
+    """Approve an internal material request and deduct material from inventory
+
+    For 'from_vendor_delivery' requests:
+    - Materials are coming from vendor, not from existing inventory
+    - PM confirms vendor delivery receipt and routes to site
+    - No inventory deduction needed (materials go directly to site)
+
+    For regular store requests:
+    - Deduct material from existing inventory stock
+    - Create withdrawal transaction
+    """
     try:
-        internal_req = InternalMaterialRequest.query.get(request_id)
+        # Use row locking to prevent race conditions on concurrent approvals
+        internal_req = InternalMaterialRequest.query.with_for_update().get(request_id)
 
         if not internal_req:
             return jsonify({'error': 'Internal request not found'}), 404
 
-        if internal_req.status not in ['pending', 'PENDING', 'send_request']:
+        if internal_req.status not in ['pending', 'PENDING', 'send_request', 'awaiting_vendor_delivery']:
             return jsonify({'error': f'Request is already {internal_req.status}'}), 400
 
-        # Validate that inventory_material_id exists
+        current_user = g.user.get('email', 'system')
+
+        # Handle vendor delivery requests - ADD to inventory then DEDUCT (proper audit trail)
+        if internal_req.source_type == 'from_vendor_delivery':
+            # Validate destination site exists for vendor deliveries
+            if not internal_req.final_destination_site or not internal_req.final_destination_site.strip():
+                return jsonify({'error': 'Final destination site is required for vendor deliveries'}), 400
+
+            # Check if this is a grouped materials request
+            materials_data = internal_req.materials_data
+            transaction_details = []
+
+            if materials_data and isinstance(materials_data, list) and len(materials_data) > 0:
+                # GROUPED VENDOR DELIVERY - Multiple materials
+                print(f"Processing grouped vendor delivery: {len(materials_data)} materials")
+
+                for mat in materials_data:
+                    mat_name = mat.get('material_name', '')
+                    mat_qty = float(mat.get('quantity', 0))
+                    mat_unit = mat.get('unit', 'nos')
+                    mat_price = float(mat.get('unit_price', 0) or 0)
+
+                    # Find matching inventory material by name (case-insensitive)
+                    inv_material = InventoryMaterial.query.filter(
+                        db.func.lower(InventoryMaterial.material_name) == mat_name.lower()
+                    ).first()
+
+                    if inv_material:
+                        # Step 1: ADD to inventory (received from vendor)
+                        inv_material.current_stock += mat_qty
+                        inv_material.last_modified_at = datetime.utcnow()
+                        inv_material.last_modified_by = current_user
+
+                        # Create RECEIVING transaction
+                        receive_transaction = InventoryTransaction(
+                            inventory_material_id=inv_material.inventory_material_id,
+                            transaction_type='RECEIVING',
+                            quantity=mat_qty,
+                            unit_price=mat_price or inv_material.unit_price,
+                            total_amount=mat_qty * (mat_price or inv_material.unit_price),
+                            reference_number=f'VD-{internal_req.request_number}',
+                            project_id=internal_req.project_id,
+                            notes=f'Received from vendor - Request #{internal_req.request_number}',
+                            created_by=current_user
+                        )
+                        db.session.add(receive_transaction)
+
+                        # Step 2: DEDUCT from inventory (sent to site)
+                        inv_material.current_stock -= mat_qty
+                        inv_material.last_modified_at = datetime.utcnow()
+
+                        # Create WITHDRAWAL transaction
+                        withdraw_transaction = InventoryTransaction(
+                            inventory_material_id=inv_material.inventory_material_id,
+                            transaction_type='WITHDRAWAL',
+                            quantity=mat_qty,
+                            unit_price=mat_price or inv_material.unit_price,
+                            total_amount=mat_qty * (mat_price or inv_material.unit_price),
+                            reference_number=f'VD-{internal_req.request_number}',
+                            project_id=internal_req.project_id,
+                            notes=f'Dispatched to {internal_req.final_destination_site} - Vendor Delivery #{internal_req.request_number}',
+                            created_by=current_user
+                        )
+                        db.session.add(withdraw_transaction)
+
+                        transaction_details.append({
+                            'material_name': mat_name,
+                            'quantity': mat_qty,
+                            'unit': mat_unit,
+                            'action': 'received_and_dispatched'
+                        })
+                        print(f"Vendor delivery: {mat_name} x{mat_qty} {mat_unit} → received and dispatched to {internal_req.final_destination_site}")
+                    else:
+                        # Material not in inventory - just log it
+                        transaction_details.append({
+                            'material_name': mat_name,
+                            'quantity': mat_qty,
+                            'unit': mat_unit,
+                            'action': 'skipped_not_in_inventory'
+                        })
+                        print(f"Material '{mat_name}' not found in inventory - skipping transaction")
+
+            else:
+                # SINGLE MATERIAL VENDOR DELIVERY
+                mat_name = internal_req.material_name
+                mat_qty = internal_req.quantity
+
+                # Find matching inventory material
+                inv_material = InventoryMaterial.query.filter(
+                    db.func.lower(InventoryMaterial.material_name) == mat_name.lower()
+                ).first()
+
+                if inv_material:
+                    # Step 1: ADD to inventory
+                    inv_material.current_stock += mat_qty
+                    inv_material.last_modified_at = datetime.utcnow()
+                    inv_material.last_modified_by = current_user
+
+                    receive_transaction = InventoryTransaction(
+                        inventory_material_id=inv_material.inventory_material_id,
+                        transaction_type='RECEIVING',
+                        quantity=mat_qty,
+                        unit_price=inv_material.unit_price,
+                        total_amount=mat_qty * inv_material.unit_price,
+                        reference_number=f'VD-{internal_req.request_number}',
+                        project_id=internal_req.project_id,
+                        notes=f'Received from vendor - Request #{internal_req.request_number}',
+                        created_by=current_user
+                    )
+                    db.session.add(receive_transaction)
+
+                    # Step 2: DEDUCT from inventory
+                    inv_material.current_stock -= mat_qty
+
+                    withdraw_transaction = InventoryTransaction(
+                        inventory_material_id=inv_material.inventory_material_id,
+                        transaction_type='WITHDRAWAL',
+                        quantity=mat_qty,
+                        unit_price=inv_material.unit_price,
+                        total_amount=mat_qty * inv_material.unit_price,
+                        reference_number=f'VD-{internal_req.request_number}',
+                        project_id=internal_req.project_id,
+                        notes=f'Dispatched to {internal_req.final_destination_site} - Vendor Delivery #{internal_req.request_number}',
+                        created_by=current_user
+                    )
+                    db.session.add(withdraw_transaction)
+
+                    transaction_details.append({
+                        'material_name': mat_name,
+                        'quantity': mat_qty,
+                        'action': 'received_and_dispatched'
+                    })
+                    print(f"Vendor delivery: {mat_name} x{mat_qty} → received and dispatched to {internal_req.final_destination_site}")
+                else:
+                    transaction_details.append({
+                        'material_name': mat_name,
+                        'quantity': mat_qty,
+                        'action': 'skipped_not_in_inventory'
+                    })
+                    print(f"Material '{mat_name}' not found in inventory - skipping transaction")
+
+            # Approve the request
+            internal_req.status = 'APPROVED'
+            internal_req.approved_by = current_user
+            internal_req.approved_at = datetime.utcnow()
+            internal_req.vendor_delivery_confirmed = True
+            internal_req.last_modified_by = current_user
+
+            db.session.commit()
+
+            processed_count = len([t for t in transaction_details if t.get('action') == 'received_and_dispatched'])
+            skipped_count = len([t for t in transaction_details if t.get('action') == 'skipped_not_in_inventory'])
+
+            return jsonify({
+                'success': True,
+                'message': f'Vendor delivery confirmed! {processed_count} materials tracked in inventory, {skipped_count} skipped (not in inventory).',
+                'request': internal_req.to_dict(),
+                'source_type': 'from_vendor_delivery',
+                'transaction_details': transaction_details,
+                'destination': internal_req.final_destination_site
+            }), 200
+
+        # Regular store request - validate and deduct from inventory
+        # Check if this is a grouped materials request
+        materials_data = internal_req.materials_data
+
+        if materials_data and isinstance(materials_data, list) and len(materials_data) > 0:
+            # GROUPED MATERIALS REQUEST - Handle multiple materials
+            print(f"Processing grouped materials request: {len(materials_data)} materials")
+
+            # Step 1: Find inventory items for all materials and check stock
+            materials_to_deduct = []
+            insufficient_stock = []
+
+            for mat in materials_data:
+                mat_name = mat.get('material_name', '')
+                mat_qty = float(mat.get('quantity', 0))
+                mat_unit = mat.get('unit', 'nos')
+
+                # Find matching inventory material by name (case-insensitive)
+                inv_material = InventoryMaterial.query.filter(
+                    db.func.lower(InventoryMaterial.material_name) == mat_name.lower()
+                ).first()
+
+                if inv_material:
+                    # Check if sufficient stock available
+                    if inv_material.current_stock < mat_qty:
+                        insufficient_stock.append({
+                            'material_name': mat_name,
+                            'requested': mat_qty,
+                            'available': inv_material.current_stock,
+                            'unit': mat_unit
+                        })
+                    else:
+                        materials_to_deduct.append({
+                            'inventory_material': inv_material,
+                            'quantity': mat_qty,
+                            'material_name': mat_name,
+                            'unit': mat_unit
+                        })
+                else:
+                    # Material not found in inventory - skip deduction but log
+                    print(f"Material '{mat_name}' not found in inventory - skipping deduction")
+
+            # If any material has insufficient stock, return error
+            if insufficient_stock:
+                error_details = ', '.join([
+                    f"{item['material_name']}: need {item['requested']} {item['unit']}, have {item['available']}"
+                    for item in insufficient_stock
+                ])
+                return jsonify({
+                    'error': f'Insufficient stock for some materials: {error_details}',
+                    'insufficient_materials': insufficient_stock
+                }), 400
+
+            # Step 2: Deduct all materials from inventory
+            transactions = []
+            deduction_details = []
+
+            for item in materials_to_deduct:
+                inv_mat = item['inventory_material']
+                qty = item['quantity']
+
+                previous_stock = inv_mat.current_stock
+                inv_mat.current_stock -= qty
+                inv_mat.last_modified_at = datetime.utcnow()
+                inv_mat.last_modified_by = current_user
+
+                # Create withdrawal transaction
+                total_amount = qty * inv_mat.unit_price
+                new_transaction = InventoryTransaction(
+                    inventory_material_id=inv_mat.inventory_material_id,
+                    transaction_type='WITHDRAWAL',
+                    quantity=qty,
+                    unit_price=inv_mat.unit_price,
+                    total_amount=total_amount,
+                    reference_number=f'REQ-{internal_req.request_number}',
+                    project_id=internal_req.project_id,
+                    notes=f'Approved grouped request #{internal_req.request_number} - {item["material_name"]}',
+                    created_by=current_user
+                )
+                db.session.add(new_transaction)
+                transactions.append(new_transaction)
+
+                deduction_details.append({
+                    'material_name': item['material_name'],
+                    'previous_stock': previous_stock,
+                    'deducted': qty,
+                    'new_stock': inv_mat.current_stock,
+                    'unit': item['unit']
+                })
+
+                print(f"Deducted {qty} {item['unit']} of '{item['material_name']}' from inventory (was {previous_stock}, now {inv_mat.current_stock})")
+
+            # Step 3: Approve the request
+            internal_req.status = 'APPROVED'
+            internal_req.approved_by = current_user
+            internal_req.approved_at = datetime.utcnow()
+            internal_req.last_modified_by = current_user
+
+            db.session.commit()
+
+            return jsonify({
+                'success': True,
+                'message': f'Grouped request approved! {len(materials_to_deduct)} materials deducted from inventory.',
+                'request': internal_req.to_dict(),
+                'deduction_details': deduction_details,
+                'materials_processed': len(materials_to_deduct),
+                'materials_skipped': len(materials_data) - len(materials_to_deduct)
+            }), 200
+
+        # SINGLE MATERIAL REQUEST - Original logic
         if not internal_req.inventory_material_id:
             return jsonify({'error': 'inventory_material_id is required for approval'}), 400
 
@@ -1080,8 +1635,6 @@ def approve_internal_request(request_id):
             return jsonify({
                 'error': f'Insufficient stock. Available: {material.current_stock} {material.unit}, Requested: {internal_req.quantity}'
             }), 400
-
-        current_user = g.user.get('email', 'system')
 
         # Deduct material from inventory
         material.current_stock -= internal_req.quantity
@@ -1103,7 +1656,7 @@ def approve_internal_request(request_id):
         )
 
         # Approve the request
-        internal_req.status = 'approved'
+        internal_req.status = 'APPROVED'
         internal_req.approved_by = current_user
         internal_req.approved_at = datetime.utcnow()
         internal_req.inventory_transaction_id = new_transaction.inventory_transaction_id
@@ -1113,6 +1666,7 @@ def approve_internal_request(request_id):
         db.session.commit()
 
         return jsonify({
+            'success': True,
             'message': 'Internal request approved successfully and material deducted from inventory',
             'request': internal_req.to_dict(),
             'transaction': new_transaction.to_dict(),
@@ -1139,7 +1693,7 @@ def reject_internal_request(request_id):
         if not internal_req:
             return jsonify({'error': 'Internal request not found'}), 404
 
-        if internal_req.status not in ['pending', 'PENDING', 'send_request']:
+        if internal_req.status not in ['pending', 'PENDING', 'send_request', 'awaiting_vendor_delivery']:
             return jsonify({'error': f'Request is already {internal_req.status}'}), 400
 
         data = request.get_json()
@@ -1185,7 +1739,7 @@ def dispatch_material(request_id):
         current_user = g.user.get('email', 'system')
 
         # Update status to DISPATCHED and set dispatch timestamp
-        internal_req.status = 'dispatched'
+        internal_req.status = 'DISPATCHED'
         internal_req.dispatch_date = datetime.utcnow()  # Automatically calculate and store dispatch time
         internal_req.last_modified_by = current_user
 
@@ -1400,4 +1954,3373 @@ def issue_material_from_inventory(request_id):
 
     except Exception as e:
         db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== MATERIAL RETURN APIs ====================
+
+def create_material_return():
+    """Create a material return record with condition tracking linked to specific delivery note item"""
+    try:
+        data = request.get_json()
+        current_user = g.user.get('email', 'system')
+
+        # Validate required fields - delivery_note_item_id is now required
+        required_fields = ['delivery_note_item_id', 'quantity', 'condition']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                return jsonify({'error': f'{field} is required'}), 400
+
+        # Validate condition value using constant
+        if data['condition'] not in MATERIAL_CONDITIONS:
+            return jsonify({'error': f'Invalid condition. Must be one of: {", ".join(MATERIAL_CONDITIONS)}'}), 400
+
+        # Validate quantity using helper
+        is_valid, quantity, error_msg = validate_quantity(data['quantity'])
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
+
+        # Validate delivery note item exists
+        delivery_note_item = DeliveryNoteItem.query.get(data['delivery_note_item_id'])
+        if not delivery_note_item:
+            return jsonify({'error': 'Delivery note item not found'}), 404
+
+        # Get the delivery note to extract project_id
+        delivery_note = MaterialDeliveryNote.query.get(delivery_note_item.delivery_note_id)
+        if not delivery_note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        # Validate delivery note status - only delivered materials can be returned
+        if delivery_note.status not in RETURNABLE_DN_STATUSES:
+            return jsonify({'error': 'Can only return materials from delivered shipments'}), 400
+
+        # Get material from the delivery note item
+        material = InventoryMaterial.query.get(delivery_note_item.inventory_material_id)
+        if not material:
+            return jsonify({'error': 'Material not found in inventory'}), 404
+
+        # Get project from delivery note
+        project = Project.query.get(delivery_note.project_id)
+        if not project:
+            return jsonify({'error': 'Project not found'}), 404
+
+        condition = data['condition']
+
+        # Calculate already returned quantity for this specific delivery note item
+        existing_returns = MaterialReturn.query.filter_by(
+            delivery_note_item_id=data['delivery_note_item_id']
+        ).all()
+        total_returned = sum(r.quantity for r in existing_returns)
+        returnable_quantity = delivery_note_item.quantity - total_returned
+
+        # Validate return quantity against returnable
+        if quantity > returnable_quantity:
+            return jsonify({
+                'error': f'Return quantity ({quantity}) exceeds returnable quantity ({returnable_quantity})'
+            }), 400
+
+        # ALL returns require PM approval - do not auto-add to stock
+        add_to_stock = False
+
+        # Set disposal status based on condition using constants
+        if condition == 'Good':
+            disposal_status = DISPOSAL_PENDING_APPROVAL
+        else:
+            disposal_status = DISPOSAL_PENDING_REVIEW
+
+        # Create the return record with delivery_note_item_id
+        new_return = MaterialReturn(
+            delivery_note_item_id=data['delivery_note_item_id'],
+            inventory_material_id=delivery_note_item.inventory_material_id,
+            project_id=delivery_note.project_id,
+            quantity=quantity,
+            condition=condition,
+            add_to_stock=add_to_stock,
+            return_reason=data.get('return_reason'),
+            reference_number=data.get('reference_number'),
+            notes=data.get('notes'),
+            disposal_status=disposal_status,
+            created_by=current_user
+        )
+
+        new_stock_level = material.current_stock
+
+        db.session.add(new_return)
+        db.session.commit()
+
+        # Send notification for damaged/defective returns that need review
+        if condition in ['Damaged', 'Defective']:
+            try:
+                # Get the user who created the return
+                returned_by_user = User.query.filter_by(email=current_user).first()
+                returned_by_name = returned_by_user.full_name if returned_by_user else current_user
+
+                ComprehensiveNotificationService.notify_damaged_return_needs_review(
+                    material_name=material.material_name,
+                    material_code=material.material_code,
+                    quantity=quantity,
+                    unit=material.unit,
+                    condition=condition,
+                    return_id=new_return.return_id,
+                    project_name=project.project_name,
+                    returned_by_name=returned_by_name
+                )
+            except Exception as notif_err:
+                print(f"Error sending damaged return notification: {notif_err}")
+
+        # Get project details for response
+        project_info = {
+            'project_id': project.project_id,
+            'project_name': project.project_name,
+            'project_code': project.project_code
+        }
+
+        # Get delivery note details for response
+        delivery_info = {
+            'delivery_note_id': delivery_note.delivery_note_id,
+            'delivery_note_number': delivery_note.delivery_note_number,
+            'delivery_date': delivery_note.delivery_date.isoformat() if delivery_note.delivery_date else None
+        }
+
+        return jsonify({
+            'message': 'Material return recorded successfully. Awaiting PM approval.',
+            'return': new_return.to_dict(),
+            'stock_updated': False,
+            'new_stock_level': new_stock_level,
+            'project_details': project_info,
+            'delivery_details': delivery_info,
+            'requires_approval': True
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_all_material_returns():
+    """Get all material returns with optional filters"""
+    try:
+        # Get query parameters
+        project_id = request.args.get('project_id')
+        condition = request.args.get('condition')
+        disposal_status = request.args.get('disposal_status')
+        inventory_material_id = request.args.get('inventory_material_id')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+
+        query = MaterialReturn.query
+
+        # Apply filters
+        if project_id:
+            query = query.filter_by(project_id=int(project_id))
+        if condition:
+            query = query.filter_by(condition=condition)
+        if disposal_status:
+            query = query.filter_by(disposal_status=disposal_status)
+        if inventory_material_id:
+            query = query.filter_by(inventory_material_id=int(inventory_material_id))
+        if start_date:
+            query = query.filter(MaterialReturn.created_at >= start_date)
+        if end_date:
+            query = query.filter(MaterialReturn.created_at <= end_date)
+
+        # Order by latest first - PERFORMANCE: Limit to 200 records max
+        returns = query.order_by(MaterialReturn.created_at.desc()).limit(200).all()
+
+        # Enrich with project details
+        result = []
+        for ret in returns:
+            ret_data = ret.to_dict()
+
+            # Get project details
+            project = Project.query.get(ret.project_id)
+            if project:
+                ret_data['project_details'] = {
+                    'project_id': project.project_id,
+                    'project_name': project.project_name,
+                    'project_code': project.project_code,
+                    'location': project.location
+                }
+
+            result.append(ret_data)
+
+        return jsonify({
+            'returns': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def get_material_return_by_id(return_id):
+    """Get a specific material return by ID with full details"""
+    try:
+        material_return = MaterialReturn.query.get(return_id)
+
+        if not material_return:
+            return jsonify({'error': 'Material return not found'}), 404
+
+        ret_data = material_return.to_dict()
+
+        # Get project details
+        project = Project.query.get(material_return.project_id)
+        if project:
+            ret_data['project_details'] = enrich_project_details(project, include_mep=False)
+
+        # Get full material details
+        if material_return.inventory_material:
+            ret_data['material_details'] = material_return.inventory_material.to_dict()
+
+        return jsonify({'return': ret_data}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def get_dispatched_materials_for_project(project_id):
+    """Get materials dispatched to a project that can be returned.
+
+    Returns materials from delivered delivery notes tracked per delivery note item
+    with their dispatched quantity, already returned quantity, and returnable quantity.
+    """
+    try:
+        # Get all delivery notes for this project with delivered status
+        delivery_notes = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.project_id == project_id,
+            MaterialDeliveryNote.status.in_(RETURNABLE_DN_STATUSES)
+        ).order_by(MaterialDeliveryNote.delivery_date.desc()).all()
+
+        # Track each delivery note item separately using helper function
+        result = []
+
+        for dn in delivery_notes:
+            for item in dn.items:
+                material = InventoryMaterial.query.get(item.inventory_material_id)
+                if not material:
+                    continue
+
+                # Use helper function to build returnable material dict
+                material_data = build_returnable_material_item(dn, item, material)
+                if material_data:
+                    result.append(material_data)
+
+        # Sort by material name, then by delivery date
+        result.sort(key=lambda x: (x['material_name'], x['delivery_date'] or ''))
+
+        return jsonify({
+            'project_id': project_id,
+            'materials': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def get_pending_disposal_returns():
+    """Get all material returns pending disposal review"""
+    try:
+        returns = MaterialReturn.query.filter_by(
+            disposal_status=DISPOSAL_PENDING_REVIEW
+        ).order_by(MaterialReturn.created_at.desc()).all()
+
+        # Enrich with project and material details
+        result = []
+        for ret in returns:
+            ret_data = ret.to_dict()
+
+            # Get project details (skip for catalog disposals where project_id = 0)
+            if ret.project_id and ret.project_id > 0:
+                project = Project.query.get(ret.project_id)
+                if project:
+                    ret_data['project_details'] = {
+                        'project_id': project.project_id,
+                        'project_name': project.project_name,
+                        'project_code': project.project_code
+                    }
+            else:
+                # Catalog disposal (not from a project)
+                ret_data['project_details'] = {
+                    'project_id': 0,
+                    'project_name': 'Materials Catalog',
+                    'project_code': 'CATALOG'
+                }
+
+            # Get material details
+            material = InventoryMaterial.query.get(ret.inventory_material_id)
+            if material:
+                ret_data['material_details'] = {
+                    'material_code': material.material_code,
+                    'material_name': material.material_name,
+                    'brand': material.brand,
+                    'unit': material.unit,
+                    'current_stock': material.current_stock
+                }
+
+            result.append(ret_data)
+
+        return jsonify({
+            'pending_disposals': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def review_disposal(return_id):
+    """Review and approve disposal of damaged/defective materials.
+
+    Options:
+    - 'approve': Mark for disposal (material is completely unusable)
+    - 'backup': Add to backup stock (material is partially usable)
+    """
+    try:
+        material_return = MaterialReturn.query.get(return_id)
+
+        if not material_return:
+            return jsonify({'error': 'Material return not found'}), 404
+
+        if material_return.disposal_status != DISPOSAL_PENDING_REVIEW:
+            return jsonify({'error': f'Cannot review disposal. Current status is {material_return.disposal_status}'}), 400
+
+        data = request.get_json()
+        action = data.get('action')
+
+        # Valid actions: approve (disposal) or backup (add to backup stock)
+        if action not in ['approve', 'backup']:
+            return jsonify({'error': 'Invalid action. Use "approve" for disposal or "backup" for partial use'}), 400
+
+        current_user = g.user.get('email', 'system')
+
+        if action == 'backup':
+            # Add to backup stock (partially usable material)
+            usable_quantity = data.get('usable_quantity')
+            notes = data.get('notes')
+
+            if not usable_quantity or usable_quantity <= 0:
+                return jsonify({'error': 'Usable quantity is required for backup stock'}), 400
+
+            if usable_quantity > material_return.quantity:
+                return jsonify({'error': f'Usable quantity cannot exceed returned quantity ({material_return.quantity})'}), 400
+
+            if not notes:
+                return jsonify({'error': 'Condition notes are required for backup stock'}), 400
+
+            # Get the inventory material
+            material = InventoryMaterial.query.get(material_return.inventory_material_id)
+            if not material:
+                return jsonify({'error': 'Material not found in inventory'}), 404
+
+            # Update backup stock on the material
+            material.backup_stock = (material.backup_stock or 0) + usable_quantity
+
+            # Append condition notes (with date and source info)
+            condition_note = f"[{datetime.utcnow().strftime('%Y-%m-%d')}] {usable_quantity} {material.unit} from return #{return_id}: {notes}"
+            if material.backup_condition_notes:
+                material.backup_condition_notes = f"{material.backup_condition_notes}\n{condition_note}"
+            else:
+                material.backup_condition_notes = condition_note
+
+            material.last_modified_by = current_user
+            material.last_modified_at = datetime.utcnow()
+
+            # Update the return record
+            material_return.disposal_status = 'backup_added'
+            material_return.disposal_reviewed_by = current_user
+            material_return.disposal_reviewed_at = datetime.utcnow()
+            material_return.disposal_notes = notes
+
+            db.session.commit()
+
+            # Send notification for backup stock added
+            try:
+                # Get the user who created the return (site engineer)
+                site_engineer_id = None
+                if material_return.created_by:
+                    se_user = User.query.filter_by(email=material_return.created_by).first()
+                    if se_user:
+                        site_engineer_id = se_user.user_id
+
+                # Get reviewer name
+                reviewer_user = User.query.filter_by(email=current_user).first()
+                reviewer_name = reviewer_user.full_name if reviewer_user else current_user
+
+                ComprehensiveNotificationService.notify_material_added_to_backup(
+                    material_name=material.material_name,
+                    material_code=material.material_code,
+                    quantity=usable_quantity,
+                    unit=material.unit,
+                    condition_notes=notes,
+                    return_id=return_id,
+                    reviewed_by_name=reviewer_name,
+                    site_engineer_id=site_engineer_id
+                )
+            except Exception as notif_err:
+                print(f"Error sending backup stock notification: {notif_err}")
+
+            return jsonify({
+                'message': f'{usable_quantity} {material.unit} added to backup stock',
+                'return': material_return.to_dict(),
+                'new_backup_stock': material.backup_stock
+            }), 200
+
+        else:
+            # Mark for disposal (original behavior)
+            # Get material info for notification
+            material = InventoryMaterial.query.get(material_return.inventory_material_id)
+            if not material:
+                return jsonify({'error': 'Material not found in inventory'}), 404
+
+            # For catalog disposals (project_id = 0), reduce stock immediately
+            if material_return.project_id == 0:
+                if material.current_stock < material_return.quantity:
+                    return jsonify({'error': f'Insufficient stock. Available: {material.current_stock}, Requested: {material_return.quantity}'}), 400
+
+                material.current_stock -= material_return.quantity
+                material.last_modified_by = current_user
+                material.last_modified_at = datetime.utcnow()
+
+            material_return.disposal_status = DISPOSAL_APPROVED_DISPOSAL
+            material_return.disposal_value = data.get('disposal_value', material_return.disposal_value or 0)
+            material_return.disposal_reviewed_by = current_user
+            material_return.disposal_reviewed_at = datetime.utcnow()
+            material_return.disposal_notes = data.get('notes')
+
+            db.session.commit()
+
+            # Send notification for disposal approved
+            try:
+                # Get the user who created the return (site engineer)
+                site_engineer_id = None
+                if material_return.created_by:
+                    se_user = User.query.filter_by(email=material_return.created_by).first()
+                    if se_user:
+                        site_engineer_id = se_user.user_id
+
+                # Get reviewer name
+                reviewer_user = User.query.filter_by(email=current_user).first()
+                reviewer_name = reviewer_user.full_name if reviewer_user else current_user
+
+                if material:
+                    ComprehensiveNotificationService.notify_material_disposal_approved(
+                        material_name=material.material_name,
+                        material_code=material.material_code,
+                        quantity=material_return.quantity,
+                        unit=material.unit,
+                        disposal_value=material_return.disposal_value,
+                        return_id=return_id,
+                        reviewed_by_name=reviewer_name,
+                        site_engineer_id=site_engineer_id
+                    )
+            except Exception as notif_err:
+                print(f"Error sending disposal notification: {notif_err}")
+
+            return jsonify({
+                'message': 'Material approved for disposal',
+                'return': material_return.to_dict()
+            }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def mark_as_disposed(return_id):
+    """Mark a material return as physically disposed"""
+    try:
+        material_return = MaterialReturn.query.get(return_id)
+
+        if not material_return:
+            return jsonify({'error': 'Material return not found'}), 404
+
+        if material_return.disposal_status != DISPOSAL_APPROVED_DISPOSAL:
+            return jsonify({'error': f'Cannot mark as disposed. Status must be approved_disposal, current: {material_return.disposal_status}'}), 400
+
+        data = request.get_json()
+        current_user = g.user.get('email', 'system')
+
+        material_return.disposal_status = DISPOSAL_DISPOSED
+        material_return.disposal_notes = data.get('notes', material_return.disposal_notes)
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Material marked as disposed',
+            'return': material_return.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def add_repaired_to_stock(return_id):
+    """
+    Mark material as repaired and move from backup stock to main stock.
+    This is called when PM confirms the repair is complete.
+
+    Flow: sent_for_repair -> repaired (and backup_stock -> current_stock)
+    """
+    try:
+        material_return = MaterialReturn.query.get(return_id)
+
+        if not material_return:
+            return jsonify({'error': 'Material return not found'}), 404
+
+        # Must be in sent_for_repair status
+        if material_return.disposal_status != DISPOSAL_SENT_FOR_REPAIR:
+            return jsonify({'error': f'Material must be sent for repair first. Current status: {material_return.disposal_status}'}), 400
+
+        if material_return.add_to_stock:
+            return jsonify({'error': 'Material has already been added to main stock'}), 400
+
+        current_user = g.user.get('email', 'system')
+        data = request.get_json() or {}
+
+        # Get material
+        material = InventoryMaterial.query.get(material_return.inventory_material_id)
+        if not material:
+            return jsonify({'error': 'Material not found in inventory'}), 404
+
+        # Get quantity to move (defaults to full return quantity)
+        quantity_to_move = data.get('quantity', material_return.quantity)
+        if quantity_to_move > (material.backup_stock or 0):
+            return jsonify({'error': f'Insufficient backup stock. Available: {material.backup_stock or 0}, Requested: {quantity_to_move}'}), 400
+
+        # Create RETURN transaction (moving from backup to main)
+        total_amount = quantity_to_move * material.unit_price
+        new_transaction = InventoryTransaction(
+            inventory_material_id=material_return.inventory_material_id,
+            transaction_type='RETURN',
+            quantity=quantity_to_move,
+            unit_price=material.unit_price,
+            total_amount=total_amount,
+            reference_number=material_return.reference_number,
+            project_id=material_return.project_id,
+            notes=f'Repaired material moved from backup to main stock - {data.get("notes", "")}',
+            created_by=current_user
+        )
+        db.session.add(new_transaction)
+
+        # Move from backup stock to main stock
+        material.backup_stock = (material.backup_stock or 0) - quantity_to_move
+        material.current_stock = (material.current_stock or 0) + quantity_to_move
+        material.last_modified_at = datetime.utcnow()
+        material.last_modified_by = current_user
+
+        # Update return record - mark as fully repaired
+        material_return.add_to_stock = True
+        material_return.disposal_status = DISPOSAL_REPAIRED  # Repair complete
+        material_return.disposal_notes = data.get('notes', f'Repair completed - Moved {quantity_to_move} to main stock')
+        material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Repaired material added to main stock successfully',
+            'return': material_return.to_dict(),
+            'new_stock_level': material.current_stock,
+            'new_backup_stock': material.backup_stock
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def request_disposal_from_repair(return_id):
+    """
+    When repair is not possible, request disposal from TD.
+    This moves item from sent_for_repair status to pending_review for TD approval.
+
+    Flow: sent_for_repair -> pending_review (awaiting TD approval for disposal)
+    """
+    try:
+        material_return = MaterialReturn.query.get(return_id)
+
+        if not material_return:
+            return jsonify({'error': 'Material return not found'}), 404
+
+        # Must be in sent_for_repair status
+        if material_return.disposal_status != DISPOSAL_SENT_FOR_REPAIR:
+            return jsonify({'error': f'Material must be sent for repair first. Current status: {material_return.disposal_status}'}), 400
+
+        current_user = g.user.get('email', 'system')
+        data = request.get_json() or {}
+
+        # Get material
+        material = InventoryMaterial.query.get(material_return.inventory_material_id)
+        if not material:
+            return jsonify({'error': 'Material not found in inventory'}), 404
+
+        # Calculate disposal value
+        estimated_value = material_return.quantity * material.unit_price
+
+        # Update return record - send for disposal review
+        material_return.disposal_status = DISPOSAL_PENDING_REVIEW
+        material_return.disposal_value = estimated_value
+        material_return.disposal_notes = data.get('notes', 'Cannot repair - Disposal requested')
+        material_return.disposal_reviewed_by = current_user
+        material_return.disposal_reviewed_at = datetime.utcnow()
+
+        db.session.commit()
+
+        # Notify TD for disposal approval
+        try:
+            tds = User.query.filter_by(user_role='Technical Director').all()
+            project = Project.query.get(material_return.project_id) if material_return.project_id else None
+            project_name = project.project_name if project else 'N/A'
+
+            for td in tds:
+                ComprehensiveNotificationService.send_email_notification(
+                    recipient=td.email,
+                    subject=f'Material Disposal Request - Repair Failed - {material.material_name}',
+                    message=f'''
+                    <p>A material disposal request has been submitted because repair was not possible.</p>
+
+                    <h3>Material Details:</h3>
+                    <ul>
+                        <li>Material: {material.material_name} ({material.material_code})</li>
+                        <li>Brand: {material.brand or 'N/A'}</li>
+                        <li>Quantity: {material_return.quantity} {material.unit}</li>
+                        <li>Condition: {material_return.condition}</li>
+                        <li>Estimated Value: AED {estimated_value:.2f}</li>
+                        <li>Project: {project_name}</li>
+                    </ul>
+
+                    <h3>Reason:</h3>
+                    <p>{data.get('notes', 'Cannot repair - Disposal requested')}</p>
+
+                    <p>Please review and approve/reject this disposal request in the system.</p>
+
+                    <p>Requested by: {current_user}</p>
+                    ''',
+                    notification_type='disposal_request',
+                    action_url=f'/inventory/disposal-requests'
+                )
+
+            print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
+        except Exception as email_error:
+            print(f"Failed to send TD notification: {str(email_error)}")
+
+        return jsonify({
+            'message': 'Disposal request sent to TD for approval',
+            'return': material_return.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def approve_return_to_stock(return_id):
+    """PM approves a Good condition return and adds it to stock"""
+    try:
+        material_return = MaterialReturn.query.get(return_id)
+
+        if not material_return:
+            return jsonify({'error': 'Material return not found'}), 404
+
+        # Only Good condition returns with pending_approval status can be approved
+        if material_return.condition != 'Good':
+            return jsonify({'error': f'Only Good condition returns can be approved. This return is: {material_return.condition}'}), 400
+
+        if material_return.disposal_status != DISPOSAL_PENDING_APPROVAL:
+            return jsonify({'error': f'Return is not pending approval. Current status: {material_return.disposal_status}'}), 400
+
+        if material_return.add_to_stock:
+            return jsonify({'error': 'Material has already been added to stock'}), 400
+
+        current_user = g.user.get('email', 'system')
+        data = request.get_json() or {}
+
+        # Get material
+        material = InventoryMaterial.query.get(material_return.inventory_material_id)
+        if not material:
+            return jsonify({'error': 'Material not found in inventory'}), 404
+
+        # Create RETURN transaction
+        total_amount = material_return.quantity * material.unit_price
+        new_transaction = InventoryTransaction(
+            inventory_material_id=material_return.inventory_material_id,
+            transaction_type='RETURN',
+            quantity=material_return.quantity,
+            unit_price=material.unit_price,
+            total_amount=total_amount,
+            reference_number=material_return.reference_number,
+            project_id=material_return.project_id,
+            notes=f'Approved return from site - {material_return.return_reason or "Material returned in good condition"}',
+            created_by=current_user
+        )
+        db.session.add(new_transaction)
+
+        # Update material stock
+        material.current_stock += material_return.quantity
+        material.last_modified_at = datetime.utcnow()
+        material.last_modified_by = current_user
+
+        # Update return record
+        material_return.add_to_stock = True
+        material_return.disposal_status = 'approved'
+        material_return.disposal_reviewed_by = current_user
+        material_return.disposal_reviewed_at = datetime.utcnow()
+        material_return.disposal_notes = data.get('notes', 'Approved and added to stock')
+        material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+        db.session.commit()
+
+        # Send notification to Site Engineer
+        try:
+            site_engineer_id = None
+            if material_return.created_by:
+                se_user = User.query.filter_by(email=material_return.created_by).first()
+                if se_user:
+                    site_engineer_id = se_user.user_id
+
+            approver_user = User.query.filter_by(email=current_user).first()
+            approver_name = approver_user.full_name if approver_user else current_user
+
+            ComprehensiveNotificationService.notify_return_approved_to_stock(
+                material_name=material.material_name,
+                material_code=material.material_code,
+                quantity=material_return.quantity,
+                unit=material.unit,
+                return_id=return_id,
+                approved_by_name=approver_name,
+                site_engineer_id=site_engineer_id
+            )
+        except Exception as notif_err:
+            print(f"Error sending return approved notification: {notif_err}")
+
+        return jsonify({
+            'message': 'Return approved and added to stock successfully',
+            'return': material_return.to_dict(),
+            'new_stock_level': material.current_stock
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def reject_return(return_id):
+    """PM rejects a return (for Good condition items that shouldn't be added to stock)"""
+    try:
+        material_return = MaterialReturn.query.get(return_id)
+
+        if not material_return:
+            return jsonify({'error': 'Material return not found'}), 404
+
+        if material_return.disposal_status not in [DISPOSAL_PENDING_APPROVAL, DISPOSAL_PENDING_REVIEW]:
+            return jsonify({'error': f'Return is not pending. Current status: {material_return.disposal_status}'}), 400
+
+        current_user = g.user.get('email', 'system')
+        data = request.get_json() or {}
+
+        # Get material info for notification
+        material = InventoryMaterial.query.get(material_return.inventory_material_id)
+
+        # Update return record
+        material_return.disposal_status = DISPOSAL_REJECTED
+        material_return.disposal_reviewed_by = current_user
+        material_return.disposal_reviewed_at = datetime.utcnow()
+        material_return.disposal_notes = data.get('notes', 'Return rejected by PM')
+
+        db.session.commit()
+
+        # Send notification to Site Engineer
+        try:
+            site_engineer_id = None
+            if material_return.created_by:
+                se_user = User.query.filter_by(email=material_return.created_by).first()
+                if se_user:
+                    site_engineer_id = se_user.user_id
+
+            rejector_user = User.query.filter_by(email=current_user).first()
+            rejector_name = rejector_user.full_name if rejector_user else current_user
+
+            if material:
+                ComprehensiveNotificationService.notify_return_rejected(
+                    material_name=material.material_name,
+                    material_code=material.material_code,
+                    quantity=material_return.quantity,
+                    unit=material.unit,
+                    return_id=return_id,
+                    rejected_by_name=rejector_name,
+                    rejection_reason=data.get('notes'),
+                    site_engineer_id=site_engineer_id
+                )
+        except Exception as notif_err:
+            print(f"Error sending return rejected notification: {notif_err}")
+
+        return jsonify({
+            'message': 'Return rejected',
+            'return': material_return.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== MATERIAL DELIVERY NOTE APIs ====================
+
+def generate_delivery_note_number():
+    """Auto-generate sequential delivery note number (MDN-2025-001, MDN-2025-002, ...)"""
+    try:
+        current_year = datetime.now().year
+        prefix = f"{DELIVERY_NOTE_PREFIX}-{current_year}-"
+
+        # Get the last delivery note for current year
+        last_note = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.delivery_note_number.like(f'{prefix}%')
+        ).order_by(MaterialDeliveryNote.delivery_note_id.desc()).first()
+
+        if last_note and last_note.delivery_note_number:
+            last_number = int(last_note.delivery_note_number.split('-')[-1])
+            new_number = last_number + 1
+        else:
+            new_number = 1
+
+        return f"{prefix}{new_number:03d}"
+
+    except Exception:
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        return f"{DELIVERY_NOTE_PREFIX}-{timestamp}"
+
+
+def create_delivery_note():
+    """Create a new material delivery note"""
+    try:
+        data = request.get_json()
+        current_user_email = g.user.get('email', 'system')
+        current_user_id = g.user.get('user_id')
+
+        # Get user's full name for prepared_by field
+        prepared_by_name = current_user_email
+        if current_user_id:
+            user = User.query.get(current_user_id)
+            if user and user.full_name:
+                prepared_by_name = user.full_name
+
+        # Validate required fields
+        required_fields = ['project_id', 'delivery_date']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'{field} is required'}), 400
+
+        # Validate project exists
+        project = Project.query.get(data['project_id'])
+        if not project:
+            return jsonify({'error': 'Project not found'}), 404
+
+        delivery_note_number = generate_delivery_note_number()
+
+        # Parse delivery date
+        delivery_date = datetime.fromisoformat(data['delivery_date'].replace('Z', '+00:00')) if isinstance(data['delivery_date'], str) else data['delivery_date']
+
+        # Parse request date if provided
+        request_date = None
+        if data.get('request_date'):
+            request_date = datetime.fromisoformat(data['request_date'].replace('Z', '+00:00')) if isinstance(data['request_date'], str) else data['request_date']
+
+        new_note = MaterialDeliveryNote(
+            delivery_note_number=delivery_note_number,
+            project_id=data['project_id'],
+            delivery_date=delivery_date,
+            attention_to=data.get('attention_to'),
+            delivery_from=data.get('delivery_from', get_store_name()),
+            requested_by=data.get('requested_by'),
+            request_date=request_date,
+            vehicle_number=data.get('vehicle_number'),
+            driver_name=data.get('driver_name'),
+            driver_contact=data.get('driver_contact'),
+            prepared_by=prepared_by_name,
+            checked_by=data.get('checked_by'),
+            status='DRAFT',
+            notes=data.get('notes'),
+            created_by=current_user_email
+        )
+
+        db.session.add(new_note)
+        db.session.commit()
+
+        project_info = {
+            'project_id': project.project_id,
+            'project_name': project.project_name,
+            'project_code': project.project_code,
+            'location': project.location
+        }
+
+        return jsonify({
+            'message': 'Delivery note created successfully',
+            'delivery_note': new_note.to_dict(),
+            'project_details': project_info
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_all_delivery_notes():
+    """Get all delivery notes with optional filters and pagination"""
+    try:
+        project_id = request.args.get('project_id')
+        status = request.args.get('status')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        search = request.args.get('search')
+
+        # Pagination parameters
+        page = request.args.get('page', type=int)
+        limit = request.args.get('limit', type=int)
+
+        # Validate pagination parameters
+        validation_error = validate_pagination_params(page, limit)
+        if validation_error:
+            return jsonify(validation_error[0]), validation_error[1]
+
+        query = MaterialDeliveryNote.query
+
+        if project_id:
+            query = query.filter_by(project_id=int(project_id))
+        if status:
+            query = query.filter_by(status=status.upper())
+        if start_date:
+            query = query.filter(MaterialDeliveryNote.delivery_date >= start_date)
+        if end_date:
+            query = query.filter(MaterialDeliveryNote.delivery_date <= end_date)
+        if search:
+            # Sanitize search term to prevent SQL wildcard injection
+            search_term = f"%{sanitize_search_term(search)}%"
+            query = query.outerjoin(Project).filter(
+                db.or_(
+                    MaterialDeliveryNote.delivery_note_number.ilike(search_term),
+                    Project.project_name.ilike(search_term),
+                    Project.project_code.ilike(search_term)
+                )
+            )
+
+        query = query.order_by(MaterialDeliveryNote.created_at.desc())
+
+        # Get total count before pagination
+        total = query.count()
+
+        # Apply pagination if requested
+        if page is not None and limit is not None:
+            offset = (page - 1) * limit
+            notes = query.offset(offset).limit(limit).all()
+            total_pages = (total + limit - 1) // limit
+        else:
+            notes = query.all()
+            total_pages = 1
+
+        result = []
+        for note in notes:
+            note_data = note.to_dict()
+            project = Project.query.get(note.project_id)
+            if project:
+                note_data['project_details'] = {
+                    'project_id': project.project_id,
+                    'project_name': project.project_name,
+                    'project_code': project.project_code,
+                    'location': project.location
+                }
+            result.append(note_data)
+
+        response_data = {
+            'delivery_notes': result,
+            'total': total
+        }
+
+        if page is not None and limit is not None:
+            response_data.update({
+                'page': page,
+                'limit': limit,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1
+            })
+
+        return jsonify(response_data), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def get_delivery_note_by_id(delivery_note_id):
+    """Get a specific delivery note by ID with full details"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        note_data = note.to_dict()
+
+        project = Project.query.get(note.project_id)
+        if project:
+            note_data['project_details'] = enrich_project_details(project, include_mep=False)
+
+        return jsonify({'delivery_note': note_data}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def update_delivery_note(delivery_note_id):
+    """Update a delivery note (only if status is DRAFT)"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status != 'DRAFT':
+            return jsonify({'error': f'Cannot update delivery note with status {note.status}. Only DRAFT notes can be updated.'}), 400
+
+        data = request.get_json()
+        current_user = g.user.get('email', 'system')
+
+        if 'delivery_date' in data:
+            note.delivery_date = datetime.fromisoformat(data['delivery_date'].replace('Z', '+00:00')) if isinstance(data['delivery_date'], str) else data['delivery_date']
+        if 'attention_to' in data:
+            note.attention_to = data['attention_to']
+        if 'delivery_from' in data:
+            note.delivery_from = data['delivery_from']
+        if 'requested_by' in data:
+            note.requested_by = data['requested_by']
+        if 'request_date' in data and data['request_date']:
+            note.request_date = datetime.fromisoformat(data['request_date'].replace('Z', '+00:00')) if isinstance(data['request_date'], str) else data['request_date']
+        if 'vehicle_number' in data:
+            note.vehicle_number = data['vehicle_number']
+        if 'driver_name' in data:
+            note.driver_name = data['driver_name']
+        if 'driver_contact' in data:
+            note.driver_contact = data['driver_contact']
+        if 'checked_by' in data:
+            note.checked_by = data['checked_by']
+        if 'notes' in data:
+            note.notes = data['notes']
+
+        note.last_modified_by = current_user
+        note.last_modified_at = datetime.utcnow()
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Delivery note updated successfully',
+            'delivery_note': note.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def add_item_to_delivery_note(delivery_note_id):
+    """Add an item to a delivery note"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status != 'DRAFT':
+            return jsonify({'error': f'Cannot add items to delivery note with status {note.status}.'}), 400
+
+        data = request.get_json()
+
+        if not data.get('inventory_material_id'):
+            return jsonify({'error': 'inventory_material_id is required'}), 400
+
+        # Validate quantity with proper type checking
+        try:
+            quantity = float(data.get('quantity', 0))
+            if quantity <= 0:
+                return jsonify({'error': 'Quantity must be greater than zero'}), 400
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Quantity must be a valid number'}), 400
+
+        material = InventoryMaterial.query.get(data['inventory_material_id'])
+        if not material:
+            return jsonify({'error': 'Material not found in inventory'}), 404
+
+        existing_item = DeliveryNoteItem.query.filter_by(
+            delivery_note_id=delivery_note_id,
+            inventory_material_id=data['inventory_material_id']
+        ).first()
+
+        if existing_item:
+            return jsonify({'error': 'This material is already in the delivery note.'}), 400
+
+        new_item = DeliveryNoteItem(
+            delivery_note_id=delivery_note_id,
+            inventory_material_id=data['inventory_material_id'],
+            internal_request_id=data.get('internal_request_id'),
+            quantity=quantity,
+            unit_price=material.unit_price,
+            notes=data.get('notes'),
+            use_backup=data.get('use_backup', False)
+        )
+
+        db.session.add(new_item)
+
+        # If linked to a request, update the request status to indicate DN is pending
+        if data.get('internal_request_id'):
+            internal_req = InternalMaterialRequest.query.get(data['internal_request_id'])
+            if internal_req and internal_req.status in ['APPROVED', 'approved']:
+                internal_req.status = 'DN_PENDING'
+                internal_req.last_modified_by = g.user.get('email', 'system')
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Item added to delivery note successfully',
+            'item': new_item.to_dict(),
+            'delivery_note': note.to_dict()
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def add_items_to_delivery_note_bulk(delivery_note_id):
+    """Add multiple items to a delivery note in a single request (batch operation)
+
+    For vendor delivery items (is_vendor_delivery=True):
+    - Auto-creates inventory material entry if material_name provided
+    - Links delivery note item to newly created inventory entry
+    """
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status != 'DRAFT':
+            return jsonify({'error': f'Cannot add items to delivery note with status {note.status}.'}), 400
+
+        data = request.get_json()
+        items = data.get('items', [])
+
+        if not items:
+            return jsonify({'error': 'No items provided'}), 400
+
+        if len(items) > MAX_BATCH_SIZE:
+            return jsonify({'error': f'Cannot process more than {MAX_BATCH_SIZE} items at once'}), 400
+
+        added_items = []
+        errors = []
+        current_user = g.user.get('email', 'system')
+
+        for idx, item_data in enumerate(items):
+            try:
+                # Validate quantity first
+                try:
+                    quantity = float(item_data.get('quantity', 0))
+                    if quantity <= 0:
+                        errors.append(f"Item {idx + 1}: Quantity must be greater than zero")
+                        continue
+                except (TypeError, ValueError):
+                    errors.append(f"Item {idx + 1}: Quantity must be a valid number")
+                    continue
+
+                material = None
+                inventory_material_id = item_data.get('inventory_material_id')
+
+                # Handle vendor delivery items - auto-create inventory entry if needed
+                if item_data.get('is_vendor_delivery') and not inventory_material_id:
+                    material_name = (item_data.get('material_name') or '').strip()
+                    brand = (item_data.get('brand') or '').strip()
+
+                    # Validate material_name
+                    if not material_name:
+                        errors.append(f"Item {idx + 1}: material_name is required for vendor delivery items")
+                        continue
+                    if len(material_name) > 255:
+                        errors.append(f"Item {idx + 1}: material_name too long (max 255 characters)")
+                        continue
+
+                    # Validate brand
+                    if len(brand) > 100:
+                        errors.append(f"Item {idx + 1}: brand too long (max 100 characters)")
+                        continue
+
+                    # Check if material already exists in inventory by name (case-insensitive exact match)
+                    existing_material = InventoryMaterial.query.filter(
+                        func.lower(InventoryMaterial.material_name) == material_name.lower()
+                    ).first()
+
+                    if existing_material:
+                        # Use existing material
+                        material = existing_material
+                        inventory_material_id = existing_material.inventory_material_id
+                    else:
+                        # Create new inventory material entry for vendor delivery
+                        try:
+                            material_code = generate_material_code()
+                        except Exception as code_gen_error:
+                            errors.append(f"Item {idx + 1}: Failed to generate material code: {str(code_gen_error)}")
+                            continue
+
+                        new_material = InventoryMaterial(
+                            material_code=material_code,
+                            material_name=material_name,
+                            brand=brand,
+                            category='Vendor Delivery',  # Category for vendor-delivered materials
+                            unit='pcs',  # Default unit
+                            current_stock=0,  # Not adding to stock, just creating catalog entry
+                            unit_price=0.0,  # Price to be updated later if needed
+                            description=f'Auto-created from vendor delivery - DN #{note.delivery_note_number}',
+                            created_by=current_user,
+                            last_modified_by=current_user
+                        )
+                        db.session.add(new_material)
+                        db.session.flush()  # Get the ID without committing
+
+                        material = new_material
+                        inventory_material_id = new_material.inventory_material_id
+                        print(f"Auto-created inventory material: {material_name} (ID: {inventory_material_id})")
+
+                elif inventory_material_id:
+                    material = InventoryMaterial.query.get(inventory_material_id)
+                    if not material:
+                        errors.append(f"Item {idx + 1}: Material not found in inventory")
+                        continue
+                else:
+                    errors.append(f"Item {idx + 1}: inventory_material_id is required")
+                    continue
+
+                # Check for duplicate in delivery note
+                existing_item = DeliveryNoteItem.query.filter_by(
+                    delivery_note_id=delivery_note_id,
+                    inventory_material_id=inventory_material_id
+                ).first()
+
+                if existing_item:
+                    errors.append(f"Item {idx + 1}: Material '{material.material_name}' already in delivery note")
+                    continue
+
+                new_item = DeliveryNoteItem(
+                    delivery_note_id=delivery_note_id,
+                    inventory_material_id=inventory_material_id,
+                    internal_request_id=item_data.get('internal_request_id'),
+                    quantity=quantity,
+                    unit_price=material.unit_price if material else 0.0,
+                    notes=item_data.get('notes'),
+                    use_backup=item_data.get('use_backup', False)
+                )
+
+                db.session.add(new_item)
+                added_items.append(new_item)
+
+                # If linked to a request, update the request status and link inventory material
+                if item_data.get('internal_request_id'):
+                    internal_req = InternalMaterialRequest.query.get(item_data['internal_request_id'])
+                    if internal_req:
+                        if internal_req.status in ['APPROVED', 'approved']:
+                            internal_req.status = 'DN_PENDING'
+                        # Link the inventory material to the request for future reference
+                        if not internal_req.inventory_material_id:
+                            internal_req.inventory_material_id = inventory_material_id
+                        internal_req.last_modified_by = current_user
+
+            except Exception as item_error:
+                errors.append(f"Item {idx + 1}: {str(item_error)}")
+
+        if added_items:
+            db.session.commit()
+
+        return jsonify({
+            'message': f'{len(added_items)} items added to delivery note',
+            'added_items': [item.to_dict() for item in added_items],
+            'errors': errors,
+            'delivery_note': note.to_dict()
+        }), 201 if added_items else 400
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def update_delivery_note_item(delivery_note_id, item_id):
+    """Update an item in a delivery note"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status != 'DRAFT':
+            return jsonify({'error': f'Cannot update items in delivery note with status {note.status}.'}), 400
+
+        item = DeliveryNoteItem.query.get(item_id)
+        if not item or item.delivery_note_id != delivery_note_id:
+            return jsonify({'error': 'Item not found in this delivery note'}), 404
+
+        data = request.get_json()
+
+        if 'quantity' in data:
+            if float(data['quantity']) <= 0:
+                return jsonify({'error': 'Quantity must be greater than 0'}), 400
+            item.quantity = float(data['quantity'])
+        if 'notes' in data:
+            item.notes = data['notes']
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Item updated successfully',
+            'item': item.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def remove_delivery_note_item(delivery_note_id, item_id):
+    """Remove an item from a delivery note"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status != 'DRAFT':
+            return jsonify({'error': f'Cannot remove items from delivery note with status {note.status}.'}), 400
+
+        item = DeliveryNoteItem.query.get(item_id)
+        if not item or item.delivery_note_id != delivery_note_id:
+            return jsonify({'error': 'Item not found in this delivery note'}), 404
+
+        db.session.delete(item)
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Item removed from delivery note successfully',
+            'delivery_note': note.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def issue_delivery_note(delivery_note_id):
+    """Issue a delivery note - deducts stock and marks as ISSUED"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status != 'DRAFT':
+            return jsonify({'error': f'Cannot issue delivery note with status {note.status}.'}), 400
+
+        if not note.items or len(note.items) == 0:
+            return jsonify({'error': 'Cannot issue delivery note with no items'}), 400
+
+        current_user = g.user.get('email', 'system')
+
+        # Check stock availability for all items
+        for item in note.items:
+            material = InventoryMaterial.query.get(item.inventory_material_id)
+            if not material:
+                return jsonify({'error': f'Material with ID {item.inventory_material_id} not found'}), 404
+
+            # Check appropriate stock based on use_backup flag
+            if item.use_backup:
+                available_backup = material.backup_stock or 0
+                if available_backup < item.quantity:
+                    return jsonify({
+                        'error': f'Insufficient backup stock for {material.material_name}. Available: {available_backup} {material.unit}, Required: {item.quantity}'
+                    }), 400
+            else:
+                if material.current_stock < item.quantity:
+                    return jsonify({
+                        'error': f'Insufficient stock for {material.material_name}. Available: {material.current_stock} {material.unit}, Required: {item.quantity}'
+                    }), 400
+
+        # Deduct stock and create transactions
+        for item in note.items:
+            material = InventoryMaterial.query.get(item.inventory_material_id)
+
+            total_amount = item.quantity * material.unit_price
+            transaction_notes = f'Material delivery - {note.delivery_note_number}'
+            if item.use_backup:
+                transaction_notes += ' (from backup stock)'
+
+            new_transaction = InventoryTransaction(
+                inventory_material_id=item.inventory_material_id,
+                transaction_type='WITHDRAWAL',
+                quantity=item.quantity,
+                unit_price=material.unit_price,
+                total_amount=total_amount,
+                reference_number=note.delivery_note_number,
+                project_id=note.project_id,
+                notes=transaction_notes,
+                created_by=current_user
+            )
+            db.session.add(new_transaction)
+
+            # Deduct from appropriate stock
+            if item.use_backup:
+                material.backup_stock = (material.backup_stock or 0) - item.quantity
+            else:
+                material.current_stock -= item.quantity
+
+            material.last_modified_at = datetime.utcnow()
+            material.last_modified_by = current_user
+
+            db.session.flush()
+            item.inventory_transaction_id = new_transaction.inventory_transaction_id
+            item.unit_price = material.unit_price
+
+            if item.internal_request_id:
+                internal_req = InternalMaterialRequest.query.get(item.internal_request_id)
+                if internal_req:
+                    internal_req.status = 'DISPATCHED'
+                    internal_req.dispatch_date = datetime.utcnow()
+                    internal_req.last_modified_by = current_user
+
+        note.status = 'ISSUED'
+        note.issued_at = datetime.utcnow()
+        note.issued_by = current_user
+        note.last_modified_by = current_user
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Delivery note issued successfully. Stock has been deducted.',
+            'delivery_note': note.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def dispatch_delivery_note(delivery_note_id):
+    """Mark delivery note as dispatched (in transit)"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status != 'ISSUED':
+            return jsonify({'error': f'Cannot dispatch delivery note with status {note.status}.'}), 400
+
+        data = request.get_json() or {}
+        current_user = g.user.get('email', 'system')
+
+        if data.get('vehicle_number'):
+            note.vehicle_number = data['vehicle_number']
+        if data.get('driver_name'):
+            note.driver_name = data['driver_name']
+        if data.get('driver_contact'):
+            note.driver_contact = data['driver_contact']
+
+        note.status = 'IN_TRANSIT'
+        note.dispatched_at = datetime.utcnow()
+        note.dispatched_by = current_user
+        note.last_modified_by = current_user
+
+        # Update linked internal requests to DISPATCHED
+        for item in note.items:
+            if item.internal_request_id:
+                internal_req = InternalMaterialRequest.query.get(item.internal_request_id)
+                if internal_req and internal_req.status in ['APPROVED', 'approved']:
+                    internal_req.status = 'DISPATCHED'
+                    internal_req.dispatch_date = datetime.utcnow()
+                    internal_req.last_modified_by = current_user
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Delivery note dispatched successfully',
+            'delivery_note': note.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def confirm_delivery(delivery_note_id):
+    """Confirm delivery receipt at site"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status not in ['ISSUED', 'IN_TRANSIT']:
+            return jsonify({'error': f'Cannot confirm delivery for note with status {note.status}.'}), 400
+
+        data = request.get_json() or {}
+        current_user = g.user.get('email', 'system')
+
+        is_partial = False
+        if data.get('items_received'):
+            for item_data in data['items_received']:
+                item = DeliveryNoteItem.query.get(item_data['item_id'])
+                if item and item.delivery_note_id == delivery_note_id:
+                    item.quantity_received = float(item_data.get('quantity_received', item.quantity))
+                    if item.quantity_received < item.quantity:
+                        is_partial = True
+
+        note.status = 'PARTIAL' if is_partial else 'DELIVERED'
+        note.received_by = data.get('received_by', current_user)
+        note.received_at = datetime.utcnow()
+        note.receiver_notes = data.get('receiver_notes')
+        note.last_modified_by = current_user
+
+        for item in note.items:
+            if item.internal_request_id:
+                internal_req = InternalMaterialRequest.query.get(item.internal_request_id)
+                if internal_req:
+                    internal_req.status = 'FULFILLED'
+                    internal_req.actual_delivery_date = datetime.utcnow()
+                    internal_req.last_modified_by = current_user
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Delivery confirmed successfully',
+            'delivery_note': note.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def cancel_delivery_note(delivery_note_id):
+    """Cancel a delivery note - only DRAFT notes can be cancelled"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status != 'DRAFT':
+            return jsonify({'error': f'Cannot cancel delivery note with status {note.status}.'}), 400
+
+        current_user = g.user.get('email', 'system')
+        note.status = 'CANCELLED'
+        note.last_modified_by = current_user
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Delivery note cancelled successfully',
+            'delivery_note': note.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def delete_delivery_note(delivery_note_id):
+    """Delete a delivery note - only DRAFT or CANCELLED notes can be deleted"""
+    try:
+        note = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not note:
+            return jsonify({'error': 'Delivery note not found'}), 404
+
+        if note.status not in ['DRAFT', 'CANCELLED']:
+            return jsonify({'error': f'Cannot delete delivery note with status {note.status}.'}), 400
+
+        db.session.delete(note)
+        db.session.commit()
+
+        return jsonify({'message': 'Delivery note deleted successfully'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_delivery_notes_for_se():
+    """Get delivery notes for Site Engineer's assigned projects
+
+    Checks three sources for SE assignment:
+    1. Project.site_supervisor_id (direct assignment)
+    2. PMAssignSS.ss_ids (array of SE IDs)
+    3. PMAssignSS.assigned_to_se_id (single SE assignment)
+    """
+    try:
+        current_user_id = g.user.get('user_id')
+        from models.project import Project
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import or_, any_
+
+        # Collect all project IDs from multiple sources
+        project_ids = set()
+
+        # Source 1: Direct assignment via Project.site_supervisor_id
+        direct_projects = Project.query.filter(
+            Project.site_supervisor_id == current_user_id,
+            Project.is_deleted == False
+        ).all()
+        for p in direct_projects:
+            project_ids.add(p.project_id)
+
+        # Source 2 & 3: Assignment via pm_assign_ss table
+        pm_assignments = PMAssignSS.query.filter(
+            PMAssignSS.is_deleted == False,
+            or_(
+                PMAssignSS.assigned_to_se_id == current_user_id,
+                PMAssignSS.ss_ids.any(current_user_id)
+            )
+        ).all()
+
+        for assignment in pm_assignments:
+            if assignment.project_id:
+                project_ids.add(assignment.project_id)
+
+        project_ids = list(project_ids)
+
+        if not project_ids:
+            return jsonify({
+                'delivery_notes': [],
+                'message': 'No assigned projects found'
+            }), 200
+
+        # Get project details for all assigned projects
+        assigned_projects = Project.query.filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).all()
+
+        # Get delivery notes for these projects that have been dispatched or in transit
+        status_filter = request.args.get('status')
+        query = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.project_id.in_(project_ids)
+        )
+
+        if status_filter:
+            query = query.filter_by(status=status_filter.upper())
+        else:
+            # By default, show issued/dispatched and in-transit notes (not draft or cancelled)
+            query = query.filter(MaterialDeliveryNote.status.in_(['ISSUED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'PARTIAL']))
+
+        # PERFORMANCE: Limit to 200 records max
+        notes = query.order_by(MaterialDeliveryNote.created_at.desc()).limit(200).all()
+
+        # Enrich with project details
+        project_map = {p.project_id: {'project_name': p.project_name, 'project_code': p.project_code} for p in assigned_projects}
+
+        result = []
+        for note in notes:
+            note_dict = note.to_dict()
+            note_dict['project_name'] = project_map.get(note.project_id, {}).get('project_name', f'Project #{note.project_id}')
+            note_dict['project_code'] = project_map.get(note.project_id, {}).get('project_code', '')
+            result.append(note_dict)
+
+        return jsonify({
+            'delivery_notes': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_returnable_materials_for_se():
+    """Get all returnable materials for Site Engineer's assigned projects.
+
+    Returns materials from delivered delivery notes that can still be returned,
+    tracked per delivery note item and grouped by project.
+
+    Checks three sources for SE assignment:
+    1. Project.site_supervisor_id (direct assignment)
+    2. PMAssignSS.ss_ids (array of SE IDs)
+    3. PMAssignSS.assigned_to_se_id (single SE assignment)
+    """
+    try:
+        current_user_id = g.user.get('user_id')
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import or_
+
+        # Collect all project IDs from multiple sources
+        project_ids = set()
+
+        # Source 1: Direct assignment via Project.site_supervisor_id
+        direct_projects = Project.query.filter(
+            Project.site_supervisor_id == current_user_id,
+            Project.is_deleted == False
+        ).all()
+        for p in direct_projects:
+            project_ids.add(p.project_id)
+
+        # Source 2 & 3: Assignment via pm_assign_ss table
+        pm_assignments = PMAssignSS.query.filter(
+            PMAssignSS.is_deleted == False,
+            or_(
+                PMAssignSS.assigned_to_se_id == current_user_id,
+                PMAssignSS.ss_ids.any(current_user_id)
+            )
+        ).all()
+
+        for assignment in pm_assignments:
+            if assignment.project_id:
+                project_ids.add(assignment.project_id)
+
+        if not project_ids:
+            return jsonify({
+                'projects': [],
+                'message': 'No assigned projects found'
+            }), 200
+
+        # Get project details for all assigned projects
+        assigned_projects = Project.query.filter(
+            Project.project_id.in_(list(project_ids)),
+            Project.is_deleted == False
+        ).all()
+
+        if not assigned_projects:
+            return jsonify({
+                'projects': [],
+                'message': 'No assigned projects found'
+            }), 200
+
+        result = []
+
+        for project in assigned_projects:
+            # Get delivery notes for this project with returnable status
+            delivery_notes = MaterialDeliveryNote.query.filter(
+                MaterialDeliveryNote.project_id == project.project_id,
+                MaterialDeliveryNote.status.in_(RETURNABLE_DN_STATUSES)
+            ).order_by(MaterialDeliveryNote.delivery_date.desc()).all()
+
+            if not delivery_notes:
+                continue
+
+            # Track each delivery note item separately using helper function
+            materials = []
+
+            for dn in delivery_notes:
+                for item in dn.items:
+                    material = InventoryMaterial.query.get(item.inventory_material_id)
+                    if not material:
+                        continue
+
+                    # Use helper function to build returnable material dict
+                    material_data = build_returnable_material_item(dn, item, material)
+                    if material_data:
+                        materials.append(material_data)
+
+            if materials:
+                # Sort by material name, then by delivery date
+                materials.sort(key=lambda x: (x['material_name'], x['delivery_date'] or ''))
+
+                result.append({
+                    'project_id': project.project_id,
+                    'project_name': project.project_name,
+                    'project_code': project.project_code,
+                    'location': project.location,
+                    'materials': materials,
+                    'total_materials': len(materials)
+                })
+
+        return jsonify({
+            'projects': result,
+            'total_projects': len(result)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_material_returns_for_se():
+    """Get all material returns submitted by or for Site Engineer's assigned projects.
+
+    Checks three sources for SE assignment:
+    1. Project.site_supervisor_id (direct assignment)
+    2. PMAssignSS.ss_ids (array of SE IDs)
+    3. PMAssignSS.assigned_to_se_id (single SE assignment)
+    """
+    try:
+        current_user_id = g.user.get('user_id')
+        from models.project import Project
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import or_
+
+        # Collect all project IDs from multiple sources
+        project_ids = set()
+
+        # Source 1: Direct assignment via Project.site_supervisor_id
+        direct_projects = Project.query.filter(
+            Project.site_supervisor_id == current_user_id,
+            Project.is_deleted == False
+        ).all()
+        for p in direct_projects:
+            project_ids.add(p.project_id)
+
+        # Source 2 & 3: Assignment via pm_assign_ss table
+        pm_assignments = PMAssignSS.query.filter(
+            PMAssignSS.is_deleted == False,
+            or_(
+                PMAssignSS.assigned_to_se_id == current_user_id,
+                PMAssignSS.ss_ids.any(current_user_id)
+            )
+        ).all()
+
+        for assignment in pm_assignments:
+            if assignment.project_id:
+                project_ids.add(assignment.project_id)
+
+        project_ids = list(project_ids)
+
+        if not project_ids:
+            return jsonify({
+                'returns': [],
+                'message': 'No assigned projects found'
+            }), 200
+
+        # Get project details for all assigned projects
+        assigned_projects = Project.query.filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).all()
+
+        # Get all returns for these projects
+        returns = MaterialReturn.query.filter(
+            MaterialReturn.project_id.in_(project_ids)
+        ).order_by(MaterialReturn.created_at.desc()).all()
+
+        # Enrich with project details
+        project_map = {p.project_id: {
+            'project_name': p.project_name,
+            'project_code': p.project_code,
+            'location': p.location
+        } for p in assigned_projects}
+
+        result = []
+        for ret in returns:
+            ret_data = ret.to_dict()
+            ret_data['project_name'] = project_map.get(ret.project_id, {}).get('project_name', f'Project #{ret.project_id}')
+            ret_data['project_code'] = project_map.get(ret.project_id, {}).get('project_code', '')
+            ret_data['project_location'] = project_map.get(ret.project_id, {}).get('location', '')
+
+            # Add delivery note info if available
+            if ret.delivery_note_item_id:
+                delivery_note_item = DeliveryNoteItem.query.get(ret.delivery_note_item_id)
+                if delivery_note_item:
+                    delivery_note = MaterialDeliveryNote.query.get(delivery_note_item.delivery_note_id)
+                    if delivery_note:
+                        ret_data['delivery_note_number'] = delivery_note.delivery_note_number
+                        ret_data['delivery_date'] = delivery_note.delivery_date.isoformat() if delivery_note.delivery_date else None
+
+            result.append(ret_data)
+
+        return jsonify({
+            'returns': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+
+# ==================== RETURN DELIVERY NOTE (RDN) WORKFLOW ====================
+
+def generate_return_note_number():
+    """Auto-generate sequential return delivery note number (RDN-2025-001, RDN-2025-002, ...)"""
+    try:
+        current_year = datetime.now().year
+
+        # Get the last RDN for current year
+        last_rdn = ReturnDeliveryNote.query.filter(
+            ReturnDeliveryNote.return_note_number.like(f'RDN-{current_year}-%')
+        ).order_by(ReturnDeliveryNote.return_note_id.desc()).first()
+
+        if last_rdn and last_rdn.return_note_number:
+            # Extract number from last code (e.g., "RDN-2025-005" -> 5)
+            parts = last_rdn.return_note_number.split('-')
+            if len(parts) == 3:
+                last_number = int(parts[2])
+                new_number = last_number + 1
+            else:
+                new_number = 1
+        else:
+            # First RDN for this year
+            new_number = 1
+
+        # Format as RDN-2025-001, RDN-2025-002, etc. (zero-padded to 3 digits)
+        return f"RDN-{current_year}-{new_number:03d}"
+
+    except Exception as e:
+        # Fallback to timestamp-based code if something goes wrong
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        return f"RDN-{timestamp}"
+
+
+def create_return_delivery_note():
+    """STEP 1: Create a new return delivery note (RDN) - SE creates DRAFT"""
+    try:
+        data = request.get_json()
+        current_user_email = g.user.get('email', 'system')
+        current_user_id = g.user.get('user_id')
+
+        # Get user's full name for prepared_by field
+        prepared_by_name = current_user_email
+        if current_user_id:
+            user = User.query.get(current_user_id)
+            if user and user.full_name:
+                prepared_by_name = user.full_name
+
+        # Validate required fields
+        required_fields = ['project_id', 'return_date', 'driver_name']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'{field} is required'}), 400
+
+        # Validate project exists
+        project = Project.query.get(data['project_id'])
+        if not project:
+            return jsonify({'error': 'Project not found'}), 404
+
+        # Generate RDN number
+        return_note_number = generate_return_note_number()
+
+        # Parse return date
+        return_date = datetime.fromisoformat(data['return_date'].replace('Z', '+00:00')) if isinstance(data['return_date'], str) else data['return_date']
+
+        # Create RDN
+        new_rdn = ReturnDeliveryNote(
+            return_note_number=return_note_number,
+            project_id=data['project_id'],
+            return_date=return_date,
+            returned_by=prepared_by_name,
+            return_to=data.get('return_to', get_store_name()),
+            original_delivery_note_id=data.get('original_delivery_note_id'),
+            vehicle_number=data.get('vehicle_number'),
+            driver_name=data['driver_name'],
+            driver_contact=data.get('driver_contact'),
+            prepared_by=prepared_by_name,
+            checked_by=data.get('checked_by'),
+            status='DRAFT',
+            notes=data.get('notes'),
+            created_by=current_user_email
+        )
+
+        db.session.add(new_rdn)
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Return delivery note created successfully',
+            'return_delivery_note': new_rdn.to_dict()
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_all_return_delivery_notes():
+    """Get all return delivery notes with optional filters"""
+    try:
+        project_id = request.args.get('project_id')
+        status = request.args.get('status')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+
+        query = ReturnDeliveryNote.query
+
+        if project_id:
+            query = query.filter_by(project_id=int(project_id))
+        if status:
+            query = query.filter_by(status=status.upper())
+        if start_date:
+            query = query.filter(ReturnDeliveryNote.return_date >= start_date)
+        if end_date:
+            query = query.filter(ReturnDeliveryNote.return_date <= end_date)
+
+        # PERFORMANCE: Limit to 200 records max
+        rdns = query.order_by(ReturnDeliveryNote.created_at.desc()).limit(200).all()
+
+        result = []
+        for rdn in rdns:
+            rdn_data = rdn.to_dict()
+            project = Project.query.get(rdn.project_id)
+            if project:
+                rdn_data['project_details'] = {
+                    'project_id': project.project_id,
+                    'project_name': project.project_name,
+                    'project_code': project.project_code,
+                    'location': project.location
+                }
+            result.append(rdn_data)
+
+        return jsonify({
+            'return_delivery_notes': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def get_return_delivery_note_by_id(return_note_id):
+    """Get specific return delivery note by ID with full details"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        rdn_data = rdn.to_dict()
+
+        # Add project details
+        project = Project.query.get(rdn.project_id)
+        if project:
+            rdn_data['project_details'] = {
+                'project_id': project.project_id,
+                'project_name': project.project_name,
+                'project_code': project.project_code,
+                'location': project.location
+            }
+
+        return jsonify({'return_delivery_note': rdn_data}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def update_return_delivery_note(return_note_id):
+    """Update return delivery note details (only in DRAFT status)"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status != 'DRAFT':
+            return jsonify({'error': f'Cannot update RDN with status {rdn.status}. Only DRAFT can be edited.'}), 400
+
+        data = request.get_json()
+        current_user = g.user.get('email', 'system')
+
+        # Update allowed fields
+        if 'return_date' in data:
+            rdn.return_date = datetime.fromisoformat(data['return_date'].replace('Z', '+00:00')) if isinstance(data['return_date'], str) else data['return_date']
+        if 'vehicle_number' in data:
+            rdn.vehicle_number = data['vehicle_number']
+        if 'driver_name' in data:
+            rdn.driver_name = data['driver_name']
+        if 'driver_contact' in data:
+            rdn.driver_contact = data['driver_contact']
+        if 'notes' in data:
+            rdn.notes = data['notes']
+
+        rdn.last_modified_by = current_user
+        rdn.last_modified_at = datetime.utcnow()
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Return delivery note updated successfully',
+            'return_delivery_note': rdn.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def delete_return_delivery_note(return_note_id):
+    """Delete return delivery note (only in DRAFT status)"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status != 'DRAFT':
+            return jsonify({'error': f'Cannot delete RDN with status {rdn.status}. Only DRAFT can be deleted.'}), 400
+
+        db.session.delete(rdn)
+        db.session.commit()
+
+        return jsonify({'message': 'Return delivery note deleted successfully'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def add_item_to_return_delivery_note(return_note_id):
+    """STEP 2: Add an item to return delivery note (only in DRAFT status)"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status != 'DRAFT':
+            return jsonify({'error': f'Cannot add items to RDN with status {rdn.status}. Only DRAFT can be modified.'}), 400
+
+        data = request.get_json()
+
+        # Validate required fields
+        required_fields = ['inventory_material_id', 'quantity', 'condition']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'{field} is required'}), 400
+
+        # Validate condition
+        if data['condition'] not in MATERIAL_CONDITIONS:
+            return jsonify({'error': f'Invalid condition. Must be one of: {", ".join(MATERIAL_CONDITIONS)}'}), 400
+
+        # Validate material exists
+        material = InventoryMaterial.query.get(data['inventory_material_id'])
+        if not material:
+            return jsonify({'error': 'Material not found'}), 404
+
+        # If original_delivery_note_item_id provided, validate returnable quantity
+        if data.get('original_delivery_note_item_id'):
+            dn_item = DeliveryNoteItem.query.get(data['original_delivery_note_item_id'])
+            if not dn_item:
+                return jsonify({'error': 'Original delivery note item not found'}), 404
+
+            # Check already returned quantity
+            existing_returns = db.session.query(db.func.sum(ReturnDeliveryNoteItem.quantity)).filter(
+                ReturnDeliveryNoteItem.original_delivery_note_item_id == data['original_delivery_note_item_id']
+            ).scalar() or 0
+
+            returnable_quantity = dn_item.quantity - existing_returns
+
+            if data['quantity'] > returnable_quantity:
+                return jsonify({
+                    'error': f'Return quantity ({data["quantity"]}) exceeds returnable quantity ({returnable_quantity})'
+                }), 400
+
+        # Create RDN item
+        new_item = ReturnDeliveryNoteItem(
+            return_note_id=return_note_id,
+            inventory_material_id=data['inventory_material_id'],
+            original_delivery_note_item_id=data.get('original_delivery_note_item_id'),
+            quantity=data['quantity'],
+            condition=data['condition'],
+            return_reason=data.get('return_reason'),
+            notes=data.get('notes')
+        )
+
+        db.session.add(new_item)
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Item added to return delivery note successfully',
+            'item': new_item.to_dict()
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def update_return_delivery_note_item(return_note_id, item_id):
+    """Update an item in return delivery note (only in DRAFT status)"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status != 'DRAFT':
+            return jsonify({'error': f'Cannot update items in RDN with status {rdn.status}'}), 400
+
+        item = ReturnDeliveryNoteItem.query.get(item_id)
+
+        if not item or item.return_note_id != return_note_id:
+            return jsonify({'error': 'Item not found in this return delivery note'}), 404
+
+        data = request.get_json()
+
+        # Update allowed fields
+        if 'quantity' in data:
+            item.quantity = data['quantity']
+        if 'condition' in data:
+            if data['condition'] not in MATERIAL_CONDITIONS:
+                return jsonify({'error': f'Invalid condition. Must be one of: {", ".join(MATERIAL_CONDITIONS)}'}), 400
+            item.condition = data['condition']
+        if 'return_reason' in data:
+            item.return_reason = data['return_reason']
+        if 'notes' in data:
+            item.notes = data['notes']
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Item updated successfully',
+            'item': item.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def remove_return_delivery_note_item(return_note_id, item_id):
+    """Remove an item from return delivery note (only in DRAFT status)"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status != 'DRAFT':
+            return jsonify({'error': f'Cannot remove items from RDN with status {rdn.status}'}), 400
+
+        item = ReturnDeliveryNoteItem.query.get(item_id)
+
+        if not item or item.return_note_id != return_note_id:
+            return jsonify({'error': 'Item not found in this return delivery note'}), 404
+
+        db.session.delete(item)
+        db.session.commit()
+
+        return jsonify({'message': 'Item removed successfully'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def issue_return_delivery_note(return_note_id):
+    """STEP 3: Issue RDN - SE finalizes, validates, locks for editing"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status != 'DRAFT':
+            return jsonify({'error': f'Cannot issue RDN with status {rdn.status}. Only DRAFT can be issued.'}), 400
+
+        # Validate RDN has items
+        if not rdn.items or len(rdn.items) == 0:
+            return jsonify({'error': 'Cannot issue RDN with no items'}), 400
+
+        current_user = g.user.get('email', 'system')
+
+        # Validate all items
+        for item in rdn.items:
+            material = InventoryMaterial.query.get(item.inventory_material_id)
+            if not material:
+                return jsonify({'error': f'Material with ID {item.inventory_material_id} not found'}), 404
+
+            # Validate returnable quantity if linked to original delivery
+            if item.original_delivery_note_item_id:
+                dn_item = DeliveryNoteItem.query.get(item.original_delivery_note_item_id)
+                if dn_item:
+                    # Check total returned quantity including this RDN
+                    existing_returns = db.session.query(db.func.sum(ReturnDeliveryNoteItem.quantity)).filter(
+                        ReturnDeliveryNoteItem.original_delivery_note_item_id == item.original_delivery_note_item_id,
+                        ReturnDeliveryNoteItem.return_item_id != item.return_item_id
+                    ).scalar() or 0
+
+                    returnable = dn_item.quantity - existing_returns
+                    if item.quantity > returnable:
+                        return jsonify({
+                            'error': f'{material.material_name}: Return quantity ({item.quantity}) exceeds returnable ({returnable})'
+                        }), 400
+
+        # Issue the RDN
+        rdn.status = 'ISSUED'
+        rdn.issued_at = datetime.utcnow()
+        rdn.issued_by = current_user
+        rdn.last_modified_by = current_user
+
+        db.session.commit()
+
+        # Send notification to PM
+        try:
+            project = Project.query.get(rdn.project_id)
+            # TODO: Implement notification - RDN ready for pickup
+            print(f"Notification: RDN {rdn.return_note_number} ready for pickup from {project.project_name}")
+        except Exception as notif_err:
+            print(f"Error sending RDN issue notification: {notif_err}")
+
+        return jsonify({
+            'message': 'Return delivery note issued successfully. Ready for dispatch.',
+            'return_delivery_note': rdn.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def dispatch_return_delivery_note(return_note_id):
+    """STEP 4: Dispatch RDN - Materials picked up, in transit to store"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status != 'ISSUED':
+            return jsonify({'error': f'Cannot dispatch RDN with status {rdn.status}. Must be ISSUED first.'}), 400
+
+        data = request.get_json() or {}
+        current_user = g.user.get('email', 'system')
+
+        # Update transport details if provided
+        if data.get('vehicle_number'):
+            rdn.vehicle_number = data['vehicle_number']
+        if data.get('driver_name'):
+            rdn.driver_name = data['driver_name']
+        if data.get('driver_contact'):
+            rdn.driver_contact = data['driver_contact']
+
+        # Dispatch the RDN
+        rdn.status = 'IN_TRANSIT'
+        rdn.dispatched_at = datetime.utcnow()
+        rdn.dispatched_by = current_user
+        rdn.last_modified_by = current_user
+
+        db.session.commit()
+
+        # Send notification to PM
+        try:
+            project = Project.query.get(rdn.project_id)
+            print(f"Notification: RDN {rdn.return_note_number} dispatched from {project.project_name}, materials in transit")
+        except Exception as notif_err:
+            print(f"Error sending RDN dispatch notification: {notif_err}")
+
+        return jsonify({
+            'message': 'Return delivery note dispatched successfully. Materials in transit.',
+            'return_delivery_note': rdn.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def confirm_return_delivery_receipt(return_note_id):
+    """STEP 5: PM confirms receipt of returned materials at store"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status not in ['ISSUED', 'IN_TRANSIT']:
+            return jsonify({'error': f'Cannot confirm receipt for RDN with status {rdn.status}.'}), 400
+
+        data = request.get_json() or {}
+        current_user = g.user.get('email', 'system')
+
+        # Check for partial receipt
+        is_partial = False
+        if data.get('items_received'):
+            for item_data in data['items_received']:
+                item = ReturnDeliveryNoteItem.query.get(item_data['return_item_id'])
+                if item and item.return_note_id == return_note_id:
+                    quantity_accepted = float(item_data.get('quantity_accepted', item.quantity))
+                    item.quantity_accepted = quantity_accepted
+                    item.acceptance_status = item_data.get('acceptance_status', 'ACCEPTED')
+
+                    if quantity_accepted < item.quantity:
+                        is_partial = True
+        else:
+            # Accept all items fully
+            for item in rdn.items:
+                item.quantity_accepted = item.quantity
+                item.acceptance_status = 'ACCEPTED'
+
+        # Update RDN status
+        rdn.status = 'PARTIAL' if is_partial else 'RECEIVED'
+        rdn.accepted_by = current_user
+        rdn.accepted_at = datetime.utcnow()
+        rdn.acceptance_notes = data.get('acceptance_notes')
+        rdn.last_modified_by = current_user
+
+        db.session.commit()
+
+        # Send notification to SE
+        try:
+            project = Project.query.get(rdn.project_id)
+            # TODO: Implement notification - RDN received at store
+            print(f"Notification: RDN {rdn.return_note_number} received at store from {project.project_name}")
+        except Exception as notif_err:
+            print(f"Error sending RDN receipt notification: {notif_err}")
+
+        return jsonify({
+            'message': 'Return delivery confirmed successfully. Ready for processing.',
+            'return_delivery_note': rdn.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def process_return_delivery_item(return_note_id, item_id):
+    """STEP 6: PM processes individual RDN item - creates MaterialReturn and updates stock"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status not in ['RECEIVED', 'PARTIAL']:
+            return jsonify({'error': f'Cannot process items for RDN with status {rdn.status}. Must be RECEIVED first.'}), 400
+
+        item = ReturnDeliveryNoteItem.query.get(item_id)
+
+        if not item or item.return_note_id != return_note_id:
+            return jsonify({'error': 'Item not found in this return delivery note'}), 404
+
+        # Check if already processed (has material_return_id)
+        if item.material_return_id:
+            return jsonify({'error': 'This item has already been processed'}), 400
+
+        data = request.get_json()
+        current_user = g.user.get('email', 'system')
+
+        # Get material
+        material = InventoryMaterial.query.get(item.inventory_material_id)
+        if not material:
+            return jsonify({'error': 'Material not found'}), 404
+
+        # Create MaterialReturn record
+        material_return = MaterialReturn(
+            delivery_note_item_id=item.original_delivery_note_item_id,
+            return_delivery_note_id=rdn.return_note_id,
+            inventory_material_id=item.inventory_material_id,
+            project_id=rdn.project_id,
+            quantity=item.quantity_accepted or item.quantity,
+            condition=item.condition,
+            add_to_stock=False,  # Will be set when approved
+            return_reason=item.return_reason,
+            reference_number=rdn.return_note_number,
+            notes=item.notes,
+            disposal_status='pending_approval',  # PM needs to approve/process
+            created_by=rdn.created_by
+        )
+
+        db.session.add(material_return)
+        db.session.flush()
+
+        # Link RDN item to material return
+        item.material_return_id = material_return.return_id
+
+        # If PM action specified in request, process immediately
+        # Supports both old actions (approve, backup, reject) and new actions (add_to_stock, repair, disposal)
+        pm_action = data.get('action')
+
+        if pm_action in ['approve', 'add_to_stock'] and item.condition == 'Good':
+            # Add to stock immediately
+            total_amount = material_return.quantity * material.unit_price
+
+            # Create RETURN transaction
+            new_transaction = InventoryTransaction(
+                inventory_material_id=item.inventory_material_id,
+                transaction_type='RETURN',
+                quantity=material_return.quantity,
+                unit_price=material.unit_price,
+                total_amount=total_amount,
+                reference_number=rdn.return_note_number,
+                project_id=rdn.project_id,
+                notes=f'Return from RDN {rdn.return_note_number} - {item.return_reason or "Material returned"}',
+                created_by=current_user
+            )
+            db.session.add(new_transaction)
+            db.session.flush()
+
+            # Update stock
+            material.current_stock += material_return.quantity
+            material.last_modified_at = datetime.utcnow()
+            material.last_modified_by = current_user
+
+            # Update return record
+            material_return.add_to_stock = True
+            material_return.disposal_status = 'approved'
+            material_return.disposal_reviewed_by = current_user
+            material_return.disposal_reviewed_at = datetime.utcnow()
+            material_return.disposal_notes = data.get('notes', 'Approved and added to stock')
+            material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+            # Update RDN item
+            item.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+        elif pm_action in ['backup', 'repair'] and item.condition in ['Damaged', 'Defective']:
+            # Send for repair - Add to backup stock for repair
+            usable_quantity = data.get('usable_quantity', material_return.quantity)
+
+            total_amount = usable_quantity * material.unit_price
+
+            # Create RETURN transaction
+            new_transaction = InventoryTransaction(
+                inventory_material_id=item.inventory_material_id,
+                transaction_type='RETURN',
+                quantity=usable_quantity,
+                unit_price=material.unit_price,
+                total_amount=total_amount,
+                reference_number=rdn.return_note_number,
+                project_id=rdn.project_id,
+                notes=f'Return to backup stock for repair from RDN {rdn.return_note_number} - {item.condition} condition',
+                created_by=current_user
+            )
+            db.session.add(new_transaction)
+            db.session.flush()
+
+            # Update backup stock
+            material.backup_stock = (material.backup_stock or 0) + usable_quantity
+            material.last_modified_at = datetime.utcnow()
+            material.last_modified_by = current_user
+
+            # Update return record - mark as sent for repair (NOT add_to_stock yet, waiting for repair)
+            # IMPORTANT: Update quantity to match what was actually sent for repair
+            material_return.quantity = usable_quantity  # Track actual quantity sent for repair
+            material_return.add_to_stock = False  # Will be set to True when repair is complete
+            material_return.disposal_status = DISPOSAL_SENT_FOR_REPAIR  # In backup stock, awaiting repair
+            material_return.disposal_reviewed_by = current_user
+            material_return.disposal_reviewed_at = datetime.utcnow()
+            material_return.disposal_notes = data.get('notes', f'Sent for repair - Added {usable_quantity} to backup stock')
+            material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+            item.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+        elif pm_action == 'disposal' and item.condition in ['Damaged', 'Defective']:
+            # Mark for disposal - Send to TD for approval
+            estimated_value = material_return.quantity * material.unit_price
+
+            # Update return record with disposal pending TD review
+            material_return.add_to_stock = False
+            material_return.disposal_status = DISPOSAL_PENDING_REVIEW  # Requires TD approval
+            material_return.disposal_value = estimated_value
+            material_return.disposal_notes = data.get('notes', f'Material beyond repair - Disposal requested from RDN {rdn.return_note_number}')
+
+            # Notify TD for approval
+            try:
+                tds = User.query.filter_by(user_role='Technical Director').all()
+                project = Project.query.get(rdn.project_id)
+                project_name = project.project_name if project else 'Unknown Project'
+
+                for td in tds:
+                    ComprehensiveNotificationService.send_email_notification(
+                        recipient=td.email,
+                        subject=f'Material Disposal Request - {material.material_name}',
+                        message=f'''
+                        <p>A material disposal request has been submitted from a return delivery note and requires your review.</p>
+
+                        <h3>Return Details:</h3>
+                        <ul>
+                            <li>RDN: {rdn.return_note_number}</li>
+                            <li>Project: {project_name}</li>
+                        </ul>
+
+                        <h3>Material Details:</h3>
+                        <ul>
+                            <li>Material: {material.material_name} ({material.material_code})</li>
+                            <li>Brand: {material.brand or 'N/A'}</li>
+                            <li>Quantity: {material_return.quantity} {material.unit}</li>
+                            <li>Condition: {item.condition}</li>
+                            <li>Estimated Value: AED {estimated_value:.2f}</li>
+                        </ul>
+
+                        <h3>Return Reason:</h3>
+                        <p>{item.return_reason or 'Not specified'}</p>
+
+                        <h3>Disposal Notes:</h3>
+                        <p>{data.get('notes', 'Material beyond repair')}</p>
+
+                        <p>Please review and approve/reject this disposal request in the system.</p>
+
+                        <p>Requested by: {current_user}</p>
+                        ''',
+                        notification_type='disposal_request',
+                        action_url=f'/inventory/disposal-requests'
+                    )
+
+                print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
+
+            except Exception as notif_error:
+                print(f"Error sending disposal request notification: {notif_error}")
+                # Don't fail the request if notification fails
+
+        elif pm_action == 'reject':
+            material_return.disposal_status = 'rejected'
+            material_return.disposal_reviewed_by = current_user
+            material_return.disposal_reviewed_at = datetime.utcnow()
+            material_return.disposal_notes = data.get('notes', 'Return rejected by PM')
+
+        db.session.commit()
+
+        # Check if all items processed - update RDN to APPROVED
+        all_processed = all(item.material_return_id is not None for item in rdn.items)
+        if all_processed:
+            rdn.status = 'APPROVED'
+            rdn.last_modified_by = current_user
+            db.session.commit()
+
+        return jsonify({
+            'message': 'Return item processed successfully',
+            'material_return': material_return.to_dict(),
+            'new_stock_level': material.current_stock if pm_action == 'approve' else None,
+            'rdn_status': rdn.status
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def process_all_return_delivery_items(return_note_id):
+    """STEP 6 (Batch): PM processes all RDN items in a single request"""
+    try:
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        if rdn.status not in ['RECEIVED', 'PARTIAL']:
+            return jsonify({'error': f'Cannot process items for RDN with status {rdn.status}. Must be RECEIVED first.'}), 400
+
+        data = request.get_json()
+        items_data = data.get('items', [])
+        current_user = g.user.get('email', 'system')
+
+        if not items_data:
+            return jsonify({'error': 'No items provided'}), 400
+
+        if len(items_data) > MAX_BATCH_SIZE:
+            return jsonify({'error': f'Cannot process more than {MAX_BATCH_SIZE} items at once'}), 400
+
+        processed_items = []
+        errors = []
+
+        for item_action in items_data:
+            item_id = item_action.get('item_id')
+            pm_action = item_action.get('action')
+
+            try:
+                item = ReturnDeliveryNoteItem.query.get(item_id)
+
+                if not item or item.return_note_id != return_note_id:
+                    errors.append(f"Item {item_id}: not found in this RDN")
+                    continue
+
+                if item.material_return_id:
+                    errors.append(f"Item {item_id}: already processed")
+                    continue
+
+                material = InventoryMaterial.query.get(item.inventory_material_id)
+                if not material:
+                    errors.append(f"Item {item_id}: material not found")
+                    continue
+
+                # Create MaterialReturn record
+                material_return = MaterialReturn(
+                    delivery_note_item_id=item.original_delivery_note_item_id,
+                    return_delivery_note_id=rdn.return_note_id,
+                    inventory_material_id=item.inventory_material_id,
+                    project_id=rdn.project_id,
+                    quantity=item.quantity_accepted or item.quantity,
+                    condition=item.condition,
+                    add_to_stock=False,
+                    return_reason=item.return_reason,
+                    reference_number=rdn.return_note_number,
+                    notes=item.notes,
+                    disposal_status='pending_approval',
+                    created_by=rdn.created_by
+                )
+
+                db.session.add(material_return)
+                db.session.flush()
+
+                item.material_return_id = material_return.return_id
+
+                # Support both old actions (approve, backup, reject) and new actions (add_to_stock, repair, disposal)
+                if pm_action in ['approve', 'add_to_stock'] and item.condition == 'Good':
+                    total_amount = material_return.quantity * material.unit_price
+
+                    new_transaction = InventoryTransaction(
+                        inventory_material_id=item.inventory_material_id,
+                        transaction_type='RETURN',
+                        quantity=material_return.quantity,
+                        unit_price=material.unit_price,
+                        total_amount=total_amount,
+                        reference_number=rdn.return_note_number,
+                        project_id=rdn.project_id,
+                        notes=f'Return from RDN {rdn.return_note_number} - {item.return_reason or "Material returned"}',
+                        created_by=current_user
+                    )
+                    db.session.add(new_transaction)
+                    db.session.flush()
+
+                    material.current_stock += material_return.quantity
+                    material.last_modified_at = datetime.utcnow()
+                    material.last_modified_by = current_user
+
+                    material_return.add_to_stock = True
+                    material_return.disposal_status = 'approved'
+                    material_return.disposal_reviewed_by = current_user
+                    material_return.disposal_reviewed_at = datetime.utcnow()
+                    material_return.disposal_notes = item_action.get('notes', 'Approved and added to stock')
+                    material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
+                    item.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+                elif pm_action in ['backup', 'repair'] and item.condition in ['Damaged', 'Defective']:
+                    # Send for repair - Add to backup stock
+                    usable_quantity = item_action.get('usable_quantity', material_return.quantity)
+                    total_amount = usable_quantity * material.unit_price
+
+                    new_transaction = InventoryTransaction(
+                        inventory_material_id=item.inventory_material_id,
+                        transaction_type='RETURN',
+                        quantity=usable_quantity,
+                        unit_price=material.unit_price,
+                        total_amount=total_amount,
+                        reference_number=rdn.return_note_number,
+                        project_id=rdn.project_id,
+                        notes=f'Return to backup stock for repair from RDN {rdn.return_note_number} - {item.condition} condition',
+                        created_by=current_user
+                    )
+                    db.session.add(new_transaction)
+                    db.session.flush()
+
+                    material.backup_stock = (material.backup_stock or 0) + usable_quantity
+                    material.last_modified_at = datetime.utcnow()
+                    material.last_modified_by = current_user
+
+                    # Mark as sent for repair (NOT add_to_stock yet, waiting for repair)
+                    # IMPORTANT: Update quantity to match what was actually sent for repair
+                    material_return.quantity = usable_quantity  # Track actual quantity sent for repair
+                    material_return.add_to_stock = False  # Will be set to True when repair is complete
+                    material_return.disposal_status = DISPOSAL_SENT_FOR_REPAIR  # In backup stock, awaiting repair
+                    material_return.disposal_reviewed_by = current_user
+                    material_return.disposal_reviewed_at = datetime.utcnow()
+                    material_return.disposal_notes = item_action.get('notes', f'Sent for repair - Added {usable_quantity} to backup stock')
+                    material_return.inventory_transaction_id = new_transaction.inventory_transaction_id
+                    item.inventory_transaction_id = new_transaction.inventory_transaction_id
+
+                elif pm_action == 'disposal' and item.condition in ['Damaged', 'Defective']:
+                    # Mark for disposal - Send to TD for approval
+                    estimated_value = material_return.quantity * material.unit_price
+
+                    material_return.add_to_stock = False
+                    material_return.disposal_status = DISPOSAL_PENDING_REVIEW
+                    material_return.disposal_value = estimated_value
+                    material_return.disposal_notes = item_action.get('notes', f'Material beyond repair - Disposal requested from RDN {rdn.return_note_number}')
+
+                    # Notify TD for approval (collect for batch notification)
+                    try:
+                        tds = User.query.filter_by(user_role='Technical Director').all()
+                        project = Project.query.get(rdn.project_id)
+                        project_name = project.project_name if project else 'Unknown Project'
+
+                        for td in tds:
+                            ComprehensiveNotificationService.send_email_notification(
+                                recipient=td.email,
+                                subject=f'Material Disposal Request - {material.material_name}',
+                                message=f'''
+                                <p>A material disposal request has been submitted from a return delivery note and requires your review.</p>
+
+                                <h3>Return Details:</h3>
+                                <ul>
+                                    <li>RDN: {rdn.return_note_number}</li>
+                                    <li>Project: {project_name}</li>
+                                </ul>
+
+                                <h3>Material Details:</h3>
+                                <ul>
+                                    <li>Material: {material.material_name} ({material.material_code})</li>
+                                    <li>Brand: {material.brand or 'N/A'}</li>
+                                    <li>Quantity: {material_return.quantity} {material.unit}</li>
+                                    <li>Condition: {item.condition}</li>
+                                    <li>Estimated Value: AED {estimated_value:.2f}</li>
+                                </ul>
+
+                                <h3>Return Reason:</h3>
+                                <p>{item.return_reason or 'Not specified'}</p>
+
+                                <h3>Disposal Notes:</h3>
+                                <p>{item_action.get('notes', 'Material beyond repair')}</p>
+
+                                <p>Please review and approve/reject this disposal request in the system.</p>
+
+                                <p>Requested by: {current_user}</p>
+                                ''',
+                                notification_type='disposal_request',
+                                action_url=f'/inventory/disposal-requests'
+                            )
+                    except Exception as notif_error:
+                        print(f"Error sending disposal notification: {notif_error}")
+
+                elif pm_action == 'reject':
+                    material_return.disposal_status = 'rejected'
+                    material_return.disposal_reviewed_by = current_user
+                    material_return.disposal_reviewed_at = datetime.utcnow()
+                    material_return.disposal_notes = item_action.get('notes', 'Return rejected by PM')
+
+                processed_items.append({
+                    'item_id': item_id,
+                    'action': pm_action,
+                    'material_return_id': material_return.return_id
+                })
+
+            except Exception as item_error:
+                errors.append(f"Item {item_id}: {str(item_error)}")
+
+        if processed_items:
+            # Check if all items processed - update RDN to APPROVED (before commit for atomicity)
+            all_processed = all(item.material_return_id is not None for item in rdn.items)
+            if all_processed:
+                rdn.status = 'APPROVED'
+                rdn.last_modified_by = current_user
+
+            # Single commit for all changes (atomic transaction)
+            db.session.commit()
+
+        return jsonify({
+            'message': f'{len(processed_items)} items processed successfully',
+            'processed_items': processed_items,
+            'errors': errors,
+            'rdn_status': rdn.status
+        }), 200 if processed_items else 400
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_return_delivery_notes_for_se():
+    """Get return delivery notes for Site Engineer's assigned projects
+
+    Checks three sources for SE assignment:
+    1. Project.site_supervisor_id (direct assignment)
+    2. PMAssignSS.ss_ids (array of SE IDs)
+    3. PMAssignSS.assigned_to_se_id (single SE assignment)
+    """
+    try:
+        current_user_id = g.user.get('user_id')
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import or_
+
+        # Collect all project IDs from multiple sources
+        project_ids = set()
+
+        # Source 1: Direct assignment via Project.site_supervisor_id
+        direct_projects = Project.query.filter(
+            Project.site_supervisor_id == current_user_id,
+            Project.is_deleted == False
+        ).all()
+        for p in direct_projects:
+            project_ids.add(p.project_id)
+
+        # Source 2 & 3: Assignment via pm_assign_ss table
+        pm_assignments = PMAssignSS.query.filter(
+            PMAssignSS.is_deleted == False,
+            or_(
+                PMAssignSS.assigned_to_se_id == current_user_id,
+                PMAssignSS.ss_ids.any(current_user_id)
+            )
+        ).all()
+
+        for assignment in pm_assignments:
+            if assignment.project_id:
+                project_ids.add(assignment.project_id)
+
+        project_ids = list(project_ids)
+
+        if not project_ids:
+            return jsonify({
+                'return_delivery_notes': [],
+                'message': 'No assigned projects found'
+            }), 200
+
+        # Get project details for all assigned projects
+        assigned_projects = Project.query.filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).all()
+
+        # Get RDNs for these projects
+        status_filter = request.args.get('status')
+        query = ReturnDeliveryNote.query.filter(
+            ReturnDeliveryNote.project_id.in_(project_ids)
+        )
+
+        if status_filter:
+            query = query.filter_by(status=status_filter.upper())
+
+        rdns = query.order_by(ReturnDeliveryNote.created_at.desc()).all()
+
+        # Enrich with project details
+        project_map = {p.project_id: {
+            'project_name': p.project_name,
+            'project_code': p.project_code
+        } for p in assigned_projects}
+
+        result = []
+        for rdn in rdns:
+            rdn_dict = rdn.to_dict()
+            rdn_dict['project_name'] = project_map.get(rdn.project_id, {}).get('project_name', f'Project #{rdn.project_id}')
+            rdn_dict['project_code'] = project_map.get(rdn.project_id, {}).get('project_code', '')
+            result.append(rdn_dict)
+
+        return jsonify({
+            'return_delivery_notes': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_return_delivery_notes_for_pm():
+    """Get all return delivery notes for Production Manager"""
+    try:
+        status_filter = request.args.get('status')
+
+        query = ReturnDeliveryNote.query
+
+        if status_filter:
+            query = query.filter_by(status=status_filter.upper())
+        else:
+            # By default, show received/in-transit RDNs (need PM action)
+            query = query.filter(ReturnDeliveryNote.status.in_(['IN_TRANSIT', 'RECEIVED', 'PARTIAL', 'APPROVED']))
+
+        rdns = query.order_by(ReturnDeliveryNote.created_at.desc()).all()
+
+        # Enrich with project details
+        result = []
+        for rdn in rdns:
+            rdn_dict = rdn.to_dict()
+            project = Project.query.get(rdn.project_id)
+            if project:
+                rdn_dict['project_name'] = project.project_name
+                rdn_dict['project_code'] = project.project_code
+                rdn_dict['project_location'] = project.location
+            result.append(rdn_dict)
+
+        return jsonify({
+            'return_delivery_notes': result,
+            'total': len(result)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def download_dn_pdf(delivery_note_id):
+    """Download Material Delivery Note as PDF"""
+    import re
+    from flask import send_file
+    from config.constants import is_admin_role, is_project_manager_role, is_buyer_role, is_site_engineer_role, DefaultValues, ErrorMessages
+
+    try:
+        current_user_email = g.user.get('email')
+        current_user_id = g.user.get('user_id')
+        user_role = g.user.get('role')
+
+        dn = MaterialDeliveryNote.query.get(delivery_note_id)
+
+        if not dn:
+            return jsonify({'error': ErrorMessages.NOT_FOUND}), 404
+
+        # Get project details
+        project = Project.query.get(dn.project_id)
+        if not project:
+            return jsonify({'error': ErrorMessages.NOT_FOUND}), 404
+
+        # Helper to check if role is Production Manager
+        def is_production_manager_role(role):
+            if not role:
+                return False
+            normalized = role.lower().strip().replace(' ', '').replace('_', '').replace('-', '')
+            return normalized in ['productionmanager', 'pm']
+
+        # Authorization check using centralized role helpers
+        # Admin, PM, Production Manager, and Buyer have full access
+        has_full_access = (
+            is_admin_role(user_role) or
+            is_project_manager_role(user_role) or
+            is_production_manager_role(user_role) or
+            is_buyer_role(user_role)
+        )
+
+        if not has_full_access:
+            # Site Engineers/Supervisors can only access DNs for their assigned projects
+            if is_site_engineer_role(user_role):
+                # Check BOTH site_supervisor_id AND site_supervisors relationship (multi-SE support)
+                is_assigned = False
+
+                # Check primary supervisor
+                if project.site_supervisor_id == current_user_id:
+                    is_assigned = True
+
+                # Check site_supervisors relationship (many-to-many)
+                if hasattr(project, 'site_supervisors') and project.site_supervisors:
+                    assigned_se_ids = [se.user_id for se in project.site_supervisors]
+                    if current_user_id in assigned_se_ids:
+                        is_assigned = True
+
+                if not is_assigned:
+                    return jsonify({'error': ErrorMessages.UNAUTHORIZED}), 403
+            else:
+                return jsonify({'error': ErrorMessages.UNAUTHORIZED}), 403
+
+        # Get company name from system settings using centralized default
+        settings = SystemSettings.query.first()
+        company_name = getattr(settings, 'company_name', None) or DefaultValues.DEFAULT_COMPANY_NAME
+
+        # Prepare DN data using centralized defaults (no hardcoded values!)
+        dn_data = {
+            'delivery_note_number': dn.delivery_note_number,
+            'status': dn.status,
+            'delivery_date': dn.delivery_date,
+            'attention_to': dn.attention_to,
+            'delivery_from': dn.delivery_from or DefaultValues.DEFAULT_STORE_NAME,
+            'vehicle_number': dn.vehicle_number,
+            'driver_name': dn.driver_name,
+            'driver_contact': dn.driver_contact,
+            'notes': dn.notes,
+            'prepared_by': dn.prepared_by,
+            'created_by': dn.created_by,
+            'requested_by': dn.requested_by,
+            'request_date': dn.request_date
+        }
+
+        # Prepare project data
+        project_data = {
+            'project_id': project.project_id,
+            'project_name': project.project_name,
+            'project_code': project.project_code,
+            'location': project.location
+        }
+
+        # Prepare items data - PERFORMANCE: Batch load materials to avoid N+1 query
+        material_ids = [item.inventory_material_id for item in dn.items]
+        materials = {
+            m.inventory_material_id: m
+            for m in InventoryMaterial.query.filter(
+                InventoryMaterial.inventory_material_id.in_(material_ids)
+            ).all()
+        } if material_ids else {}
+
+        items_data = []
+        for item in dn.items:
+            material = materials.get(item.inventory_material_id)
+            items_data.append({
+                'material_name': material.material_name if material else 'Unknown Material',
+                'brand': material.brand if material else None,
+                'quantity': item.quantity,
+                'unit': material.unit if material else '',
+                'notes': item.notes
+            })
+
+        # Generate PDF
+        from utils.dn_pdf_generator import DNPDFGenerator
+        pdf_generator = DNPDFGenerator()
+        pdf_buffer = pdf_generator.generate_pdf(dn_data, project_data, items_data, company_name)
+
+        # Verify PDF was generated successfully
+        # Check buffer size, not position (tell() returns 0 after seek(0) which is correct)
+        if not pdf_buffer:
+            return jsonify({'error': 'PDF generation failed: no buffer returned'}), 500
+
+        # Check actual content size
+        pdf_buffer.seek(0, 2)  # Seek to end
+        size = pdf_buffer.tell()
+        pdf_buffer.seek(0)  # Seek back to start
+
+        if size == 0:
+            return jsonify({'error': 'PDF generation failed: empty buffer'}), 500
+
+        # Clean filename for safe download
+        safe_filename = re.sub(r'[^a-zA-Z0-9-]', '-', dn.delivery_note_number)
+        filename = f"{safe_filename}.pdf"
+
+        # Send PDF file
+        return send_file(
+            pdf_buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        print(f"Error downloading DN PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def download_rdn_pdf(return_note_id):
+    """Download RDN as PDF"""
+    import re
+    from werkzeug.utils import secure_filename
+
+    try:
+        current_user_email = g.user.get('email')
+        current_user_id = g.user.get('user_id')
+        user_role = g.user.get('role')
+
+        rdn = ReturnDeliveryNote.query.get(return_note_id)
+
+        if not rdn:
+            return jsonify({'error': 'Return delivery note not found'}), 404
+
+        # Get project details
+        project = Project.query.get(rdn.project_id)
+        if not project:
+            return jsonify({'error': 'Project not found'}), 404
+
+        # Authorization check - verify user has access to this project's RDN
+        # Normalize role name for comparison (handle both snake_case and camelCase)
+        normalized_role = user_role.lower().replace('_', '')
+
+        # Admin and PM have full access
+        if normalized_role not in ['admin', 'productionmanager', 'production_manager']:
+            # Site Engineers/Supervisors can only access RDNs for their assigned projects
+            if normalized_role in ['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']:
+                # Check if SE/SS is assigned to this project via multiple sources
+                from models.pm_assign_ss import PMAssignSS
+                from sqlalchemy import or_
+
+                is_assigned = False
+
+                # Source 1: Direct assignment via Project.site_supervisor_id
+                if project.site_supervisor_id == current_user_id:
+                    is_assigned = True
+
+                # Source 2 & 3: Assignment via pm_assign_ss table
+                if not is_assigned:
+                    pm_assignment = PMAssignSS.query.filter(
+                        PMAssignSS.project_id == project.project_id,
+                        PMAssignSS.is_deleted == False,
+                        or_(
+                            PMAssignSS.assigned_to_se_id == current_user_id,
+                            PMAssignSS.ss_ids.any(current_user_id)
+                        )
+                    ).first()
+                    if pm_assignment:
+                        is_assigned = True
+
+                if not is_assigned:
+                    return jsonify({'error': 'Unauthorized: You are not assigned to this project'}), 403
+            else:
+                return jsonify({'error': 'Unauthorized: Insufficient permissions'}), 403
+
+        # Get company name from system settings
+        try:
+            settings = SystemSettings.query.first()
+            company_name = settings.company_name if settings and settings.company_name else "MeterSquare"
+        except Exception as e:
+            print(f"Warning: Failed to load company name from settings: {e}")
+            company_name = "MeterSquare"
+
+        # Get the user's full name from email (created_by stores email)
+        created_by_name = rdn.created_by  # Fallback to email
+        if rdn.created_by:
+            created_by_user = User.query.filter_by(email=rdn.created_by).first()
+            if created_by_user and created_by_user.full_name:
+                created_by_name = created_by_user.full_name
+
+        # Prepare RDN data
+        rdn_data = {
+            'return_note_number': rdn.return_note_number,
+            'status': rdn.status,
+            'return_date': rdn.return_date.strftime('%d %B %Y') if rdn.return_date else 'N/A',
+            'created_by': created_by_name,
+            'issued_at': rdn.issued_at.strftime('%d %B %Y %I:%M %p') if rdn.issued_at else None,
+            'issued_by': rdn.issued_by,
+            'dispatched_at': rdn.dispatched_at.strftime('%d %B %Y %I:%M %p') if rdn.dispatched_at else None,
+            'dispatched_by': rdn.dispatched_by,
+            'vehicle_number': rdn.vehicle_number,
+            'driver_name': rdn.driver_name,
+            'driver_contact': rdn.driver_contact,
+            'notes': rdn.notes,
+        }
+
+        # Prepare project data
+        project_data = {
+            'project_name': project.project_name,
+            'project_code': project.project_code,
+            'project_location': project.location,
+        }
+
+        # Prepare items data - Fix N+1 query by loading all materials at once
+        material_ids = [item.inventory_material_id for item in rdn.items]
+        materials = {
+            m.inventory_material_id: m
+            for m in InventoryMaterial.query.filter(
+                InventoryMaterial.inventory_material_id.in_(material_ids)
+            ).all()
+        } if material_ids else {}
+
+        items_data = []
+        for item in rdn.items:
+            material = materials.get(item.inventory_material_id)
+            items_data.append({
+                'material_name': material.material_name if material else 'Unknown',
+                'material_code': material.material_code if material else 'N/A',
+                'quantity': item.quantity,
+                'unit': material.unit if material else '',
+                'size': (material.size or '') if material else '',
+                'condition': item.condition,
+                'return_reason': item.return_reason or '',
+            })
+
+        # Generate PDF
+        pdf_generator = RDNPDFGenerator()
+        pdf_buffer = pdf_generator.generate_pdf(rdn_data, project_data, items_data, company_name)
+
+        # Verify PDF was generated successfully
+        if pdf_buffer.getbuffer().nbytes == 0:
+            return jsonify({'error': 'PDF generation failed: empty buffer'}), 500
+
+        # Sanitize filename to prevent path traversal
+        safe_filename = secure_filename(rdn.return_note_number)
+        safe_filename = re.sub(r'[^\w\-.]', '-', safe_filename)
+        filename = f"{safe_filename}.pdf"
+
+        # Create response with security headers
+        response = send_file(
+            pdf_buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+
+        # Add security headers
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Content-Security-Policy'] = "default-src 'none'"
+        response.headers['X-Frame-Options'] = 'DENY'
+
+        return response
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def request_material_disposal(material_id):
+    """
+    Create disposal request for damaged/wasted material from catalog
+    PM/Production Manager requests TD approval to dispose material
+    """
+    try:
+        data = request.get_json()
+
+        # Get current user
+        current_user = g.user.get('email', 'system')
+
+        # Validate material exists
+        material = InventoryMaterial.query.get(material_id)
+        if not material:
+            return jsonify({'error': 'Material not found'}), 404
+
+        # Validate quantity
+        quantity = float(data.get('quantity', 0))
+        if quantity <= 0 or quantity > material.current_stock:
+            return jsonify({'error': f'Invalid quantity. Must be between 1 and {material.current_stock}'}), 400
+
+        # Get disposal details
+        reason = data.get('reason', 'damaged')
+        notes = data.get('notes', '')
+        estimated_value = float(data.get('estimated_value', quantity * material.unit_price))
+
+        if not notes.strip():
+            return jsonify({'error': 'Notes/explanation is required for disposal requests'}), 400
+
+        # Create MaterialReturn record for disposal request
+        # Using MaterialReturn model with special flags to indicate it's from catalog
+        disposal_return = MaterialReturn(
+            inventory_material_id=material_id,
+            project_id=0,  # 0 indicates it's from catalog, not project return
+            quantity=quantity,
+            condition='Damaged',  # Use Damaged for all disposal reasons
+            add_to_stock=False,
+            return_reason=f"CATALOG_DISPOSAL: {reason}",  # Prefix to identify catalog disposals
+            notes=notes,
+            disposal_status=DISPOSAL_PENDING_REVIEW,  # Requires TD approval
+            disposal_value=estimated_value,
+            created_by=current_user
+        )
+
+        db.session.add(disposal_return)
+        db.session.commit()
+
+        # Notify TD for approval
+        try:
+            # Get all TDs
+            tds = User.query.filter_by(user_role='Technical Director').all()
+
+            for td in tds:
+                ComprehensiveNotificationService.send_email_notification(
+                    recipient=td.email,
+                    subject=f'Material Disposal Request - {material.material_name}',
+                    message=f'''
+                    <p>A material disposal request has been submitted and requires your review.</p>
+
+                    <h3>Material Details:</h3>
+                    <ul>
+                        <li>Material: {material.material_name} ({material.material_code})</li>
+                        <li>Brand: {material.brand or 'N/A'}</li>
+                        <li>Quantity: {quantity} {material.unit}</li>
+                        <li>Estimated Value: AED {estimated_value:.2f}</li>
+                        <li>Reason: {reason.replace('_', ' ').title()}</li>
+                    </ul>
+
+                    <h3>Justification:</h3>
+                    <p>{notes}</p>
+
+                    <p>Please review and approve/reject this disposal request in the system.</p>
+
+                    <p>Requested by: {current_user}</p>
+                    ''',
+                    notification_type='disposal_request',
+                    action_url=f'/inventory/disposal-requests'
+                )
+
+            print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
+
+        except Exception as notif_error:
+            print(f"Error sending disposal request notification: {notif_error}")
+            # Don't fail the request if notification fails
+
+        return jsonify({
+            'message': 'Disposal request submitted for TD approval',
+            'return_id': disposal_return.return_id,
+            'material_name': material.material_name,
+            'quantity': quantity,
+            'estimated_value': estimated_value,
+            'status': disposal_return.disposal_status
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error creating disposal request: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500

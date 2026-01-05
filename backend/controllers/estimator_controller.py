@@ -252,7 +252,7 @@ def cancel_boq(boq_id):
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
 
-            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
             if td_role:
                 td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
                 for td_user in td_users:
@@ -334,24 +334,30 @@ def get_boq_details_history(boq_id):
             import copy
             enriched = copy.deepcopy(boq_details_json)
 
-            # Fetch terms & conditions from database
+            # Fetch terms & conditions from database (single row with term_ids array)
             try:
-                query = text("""
-                    SELECT bt.term_id, bt.terms_text, bts.is_checked
-                    FROM boq_terms_selections bts
-                    INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
-                    WHERE bts.boq_id = :boq_id
-                    AND bt.is_active = TRUE
-                    AND bt.is_deleted = FALSE
-                    ORDER BY bt.display_order, bt.term_id
+                # First get selected term_ids for this BOQ
+                term_ids_query = text("""
+                    SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
                 """)
-                terms_result = db.session.execute(query, {'boq_id': boq_id})
+                term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq_id}).fetchone()
+                selected_term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
+
+                # Get all active terms from master
+                all_terms_query = text("""
+                    SELECT term_id, terms_text, display_order
+                    FROM boq_terms
+                    WHERE is_active = TRUE AND is_deleted = FALSE
+                    ORDER BY display_order, term_id
+                """)
+                all_terms_result = db.session.execute(all_terms_query)
                 terms_items = []
-                for row in terms_result:
+                for row in all_terms_result:
+                    term_id = row[0]
                     terms_items.append({
-                        'term_id': row[0],
+                        'term_id': term_id,
                         'terms_text': row[1],
-                        'checked': row[2]
+                        'checked': term_id in selected_term_ids
                     })
 
                 # Add terms_conditions to boq_details

@@ -3,11 +3,18 @@ Migration script to add completion confirmation tracking fields
 This adds fields to track SE completion requests and PM confirmations
 Author: System
 Date: 2025-11-15
+
+Usage: DATABASE_URL='postgresql://...' python migrations/add_completion_confirmation_tracking.py
 """
 
+import os
 import psycopg2
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add parent directory to path to import config
 sys.path.append(str(Path(__file__).parent.parent))
@@ -15,21 +22,19 @@ sys.path.append(str(Path(__file__).parent.parent))
 def run_migration():
     """Add completion tracking columns to pm_assign_ss and project tables"""
 
-    # Database connection parameters (Supabase)
-    DB_CONFIG = {
-        'dbname': 'postgres',
-        'user': 'postgres.wgddnoiakkoskbbkbygw',
-        'password': 'Rameshdev$08',
-        'host': 'aws-0-ap-south-1.pooler.supabase.com',
-        'port': '6543'
-    }
+    # Get database URL from environment
+    database_url = os.getenv('DATABASE_URL')
+    if not database_url:
+        print("ERROR: DATABASE_URL environment variable not set")
+        print("Usage: DATABASE_URL='postgresql://...' python migrations/add_completion_confirmation_tracking.py")
+        sys.exit(1)
 
     conn = None
     cursor = None
 
     try:
         # Connect to database
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = psycopg2.connect(database_url)
         cursor = conn.cursor()
 
         print("Connected to database successfully")

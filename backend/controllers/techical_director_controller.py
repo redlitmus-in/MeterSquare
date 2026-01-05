@@ -6,6 +6,7 @@ from models.preliminary_master import BOQInternalRevision
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload  # ✅ PERFORMANCE: Eager loading for N+1 fix
+from sqlalchemy import func, and_  # For aggregations and conditions
 from datetime import datetime  # For datetime.min in sorting
 from utils.boq_email_service import BOQEmailService
 from models.user import User
@@ -13,6 +14,65 @@ from models.role import Role
 from utils.comprehensive_notification_service import notification_service
 
 log = get_logger()
+
+
+def calculate_boq_financial_data(boq, boq_details):
+    """
+    Calculate financial data from BOQ and BOQDetails
+    Returns dict with total_cost, material_cost, labour_cost, etc.
+    """
+    if not boq_details or not boq_details.boq_details:
+        return {
+            'total_cost': 0,
+            'total_material_cost': 0,
+            'total_labour_cost': 0,
+            'items_count': 0
+        }
+
+    total_material_cost = 0
+    total_labour_cost = 0
+    total_selling_price = 0
+    items_count = 0
+
+    boq_json = boq_details.boq_details
+    items = boq_json.get('items', [])
+    items_count = len(items)
+
+    for item in items:
+        # Check for sub_items (new format)
+        if 'sub_items' in item and item.get('sub_items'):
+            for sub_item in item.get('sub_items', []):
+                # Materials
+                for mat in sub_item.get('materials', []):
+                    total_material_cost += mat.get('total_price', 0) or 0
+                # Labour
+                for lab in sub_item.get('labour', []):
+                    lab_cost = lab.get('total_cost') or (lab.get('hours', 0) * lab.get('rate_per_hour', 0))
+                    total_labour_cost += lab_cost
+                # Selling price from quantity * rate
+                sub_quantity = sub_item.get('quantity', 0) or 0
+                sub_rate = sub_item.get('rate', 0) or 0
+                total_selling_price += sub_quantity * sub_rate
+        else:
+            # Old format
+            for mat in item.get('materials', []):
+                total_material_cost += mat.get('total_price', 0) or 0
+            for lab in item.get('labour', []):
+                lab_cost = lab.get('total_cost') or (lab.get('hours', 0) * lab.get('rate_per_hour', 0))
+                total_labour_cost += lab_cost
+
+    # Use database total_cost if no selling price calculated
+    final_total = total_selling_price if total_selling_price > 0 else (float(boq_details.total_cost) if boq_details.total_cost else 0)
+
+    return {
+        'total_cost': final_total,
+        'selling_price': final_total,
+        'total_material_cost': total_material_cost,
+        'total_labour_cost': total_labour_cost,
+        'items_count': items_count,
+        'material_count': boq_details.total_materials if boq_details.total_materials else 0,
+        'labour_count': boq_details.total_labour if boq_details.total_labour else 0
+    }
 
 def get_all_td_boqs():
     try:
@@ -82,6 +142,7 @@ def get_all_td_boqs():
 
             if boq_details and boq_details.boq_details and "items" in boq_details.boq_details:
                 items = boq_details.boq_details["items"]
+                log.info(f"🔍 BOQ {boq.boq_id} ({boq.boq_name}): Processing {len(items)} items for cost calculation")
                 for item in items:
                     item_materials_cost = 0
                     item_labour_cost = 0
@@ -105,8 +166,12 @@ def get_all_td_boqs():
                                 item_materials_cost += mat_cost
                             # Sum up labour cost from sub_item (for internal tracking)
                             labour = sub_item.get("labour", [])
+                            if labour:
+                                log.debug(f"  Sub-item has {len(labour)} labour entries")
                             for lab in labour:
-                                lab_cost = lab.get("total_cost", 0)
+                                lab_cost = lab.get("total_cost") or (lab.get("hours", 0) * lab.get("rate_per_hour", 0))
+                                if lab_cost > 0:
+                                    log.debug(f"    Labour cost: AED {lab_cost}")
                                 total_labour_cost += lab_cost
                                 item_labour_cost += lab_cost
                     else:
@@ -117,8 +182,12 @@ def get_all_td_boqs():
                             total_material_cost += mat_cost
                             item_materials_cost += mat_cost
                         labour = item.get("labour", [])
+                        if labour:
+                            log.debug(f"  Item has {len(labour)} labour entries (old format)")
                         for lab in labour:
-                            lab_cost = lab.get("total_cost", 0)
+                            lab_cost = lab.get("total_cost") or (lab.get("hours", 0) * lab.get("rate_per_hour", 0))
+                            if lab_cost > 0:
+                                log.debug(f"    Labour cost: AED {lab_cost}")
                             total_labour_cost += lab_cost
                             item_labour_cost += lab_cost
 
@@ -151,7 +220,8 @@ def get_all_td_boqs():
 
                     total_selling_price += item_selling_price
 
-                    log.debug(f"Item '{item.get('item_name', 'Unknown')}': client_amount={item_client_amount}, selling_price={item_selling_price}, materials={item_materials_cost}, labour={item_labour_cost}")
+                    # Enhanced logging for labor cost debugging
+                    log.info(f"  Item '{item.get('item_name', 'Unknown')}': materials={item_materials_cost}, labour={item_labour_cost}, selling_price={item_selling_price}")
 
                     # Get overhead and profit percentages (use first item's values)
                     if overhead_percentage == 0:
@@ -188,6 +258,7 @@ def get_all_td_boqs():
             final_total_cost = subtotal_before_discount - discount_amount
 
             log.info(f"BOQ {boq.boq_id}: Items={items_subtotal}, Preliminaries={preliminaries_amount}, Subtotal={subtotal_before_discount}, Discount={discount_amount}, Grand Total={final_total_cost}")
+            log.info(f"💰 BOQ {boq.boq_id} COST SUMMARY: Material={total_material_cost}, Labour={total_labour_cost}, Total={final_total_cost}")
 
             boq_data = {
                 "boq_id": boq.boq_id,
@@ -268,7 +339,7 @@ def td_mail_send():
         td_name = current_user['full_name']
         td_email = current_user['email']
         td_user_id = current_user['user_id']
-
+ 
         # Get request data
         data = request.get_json(silent=True)
         if not data:
@@ -276,37 +347,37 @@ def td_mail_send():
                 "error": "Invalid request",
                 "message": "Request body must be valid JSON"
             }), 400
-
+ 
         boq_id = data.get("boq_id")
         comments = data.get("comments", "")
         rejection_reason = data.get("rejection_reason", "")
         technical_director_status = data.get("technical_director_status")
-
+ 
         # Validate required fields
         if not boq_id:
             return jsonify({"error": "boq_id is required"}), 400
-
+ 
         if not technical_director_status:
             return jsonify({"error": "technical_director_status is required (approved/rejected)"}), 400
-
+ 
         if technical_director_status.lower() not in ['approved', 'rejected']:
             return jsonify({"error": "technical_director_status must be 'approved' or 'rejected'"}), 400
-
+ 
         # Get BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
-
+ 
         # Get BOQ details
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq_details:
             return jsonify({"error": "BOQ details not found"}), 404
-
+ 
         # Get project
         project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
         if not project:
             return jsonify({"error": "Project not found"}), 404
-
+ 
         # Prepare BOQ data for email
         boq_data = {
             'boq_id': boq.boq_id,
@@ -315,60 +386,69 @@ def td_mail_send():
             'created_by': boq.created_by,
             'created_at': boq.created_at.strftime('%d-%b-%Y %I:%M %p') if boq.created_at else 'N/A'
         }
-
+ 
         project_data = {
             'project_name': project.project_name,
             'client': project.client or 'N/A',
             'location': project.location or 'N/A'
         }
-
+ 
         # Handle both old and new data structures
         boq_json = boq_details.boq_details if boq_details.boq_details else {}
-
+ 
         if 'existing_purchase' in boq_json and 'items' in boq_json['existing_purchase']:
             items = boq_json['existing_purchase']['items']
             items_summary = boq_json.get('combined_summary', {})
         else:
             items = boq_json.get('items', [])
             items_summary = boq_json.get('summary', {})
-
+ 
         items_summary['items'] = items
-
+ 
         # Initialize email service
         # boq_email_service = BOQEmailService()
-
-        # Find Estimator (sender of original BOQ)
-        estimator_role = Role.query.filter(
-            Role.role.in_(['estimator', 'Estimator']),
-            Role.is_deleted == False
-        ).first()
-
+ 
+        # Find Estimator from project.estimator_id (most reliable and simple)
+        # The project table has estimator_id which directly links to the estimator user
         estimator = None
-        if estimator_role:
+ 
+        if project.estimator_id:
             estimator = User.query.filter_by(
-                role_id=estimator_role.role_id,
+                user_id=project.estimator_id,
                 is_active=True,
                 is_deleted=False
-            ).filter(
-                db.or_(
-                    User.full_name == boq.created_by,
-                    User.email == boq.created_by
-                )
             ).first()
-
-            if not estimator:
+            if estimator:
+                log.info(f"Found estimator from project.estimator_id: {estimator.full_name} (ID: {estimator.user_id})")
+ 
+        # Fallback: Try to find by boq.created_by name if project.estimator_id not set
+        if not estimator:
+            estimator_role = Role.query.filter(
+                Role.role.in_(['estimator', 'Estimator']),
+                Role.is_deleted == False
+            ).first()
+ 
+            if estimator_role:
+                # Try exact match on full_name (case-insensitive)
                 estimator = User.query.filter_by(
                     role_id=estimator_role.role_id,
                     is_active=True,
                     is_deleted=False
+                ).filter(
+                    db.func.lower(User.full_name) == db.func.lower(boq.created_by)
                 ).first()
-
+ 
+                if estimator:
+                    log.info(f"Found estimator by name match: {estimator.full_name} (ID: {estimator.user_id})")
+                else:
+                    log.warning(f"Could not find estimator for BOQ {boq_id}, project.estimator_id: {project.estimator_id}, created_by: {boq.created_by}")
+ 
         estimator_email = estimator.email if estimator and estimator.email else boq.created_by
         estimator_name = estimator.full_name if estimator else boq.created_by
-
+ 
         # Get existing BOQ history
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
-
+ 
         # Handle existing actions - ensure it's always a list
         if existing_history:
             if existing_history.action is None:
@@ -381,44 +461,44 @@ def td_mail_send():
                 current_actions = []
         else:
             current_actions = []
-
+ 
         log.info(f"BOQ {boq_id} - Existing history found: {existing_history is not None}")
         log.info(f"BOQ {boq_id} - Current actions before append: {current_actions}")
-
+ 
         new_status = None
         email_sent = False
         recipient_email = None
         recipient_name = None
         recipient_role = None
-
+ 
         # ==================== APPROVED STATUS ====================
         if technical_director_status.lower() == 'approved':
             log.info(f"BOQ {boq_id} approved by TD, sending to Estimator")
-
+ 
             # Check if this is a revision approval (status was Pending_Revision)
             # or a regular approval from Pending_TD_Approval
             is_revision_approval = boq.status.lower() == 'pending_revision'
             new_status = "Revision_Approved" if is_revision_approval else "Approved"
-
+ 
             # DO NOT increment revision_number here!
             # Revision number is already incremented when estimator clicks "Make Revision" and saves
             # (see boq_controller.py revision_boq function line 1436-1438)
             # TD approval should only change status, not increment revision number
-
+ 
             if not estimator or not estimator_email:
                 return jsonify({
                     "success": False,
                     "message": "Cannot send approval email - Estimator email not found"
                 }), 400
-
+ 
             recipient_email = estimator_email
             recipient_name = estimator_name
             recipient_role = "estimator"
-
+ 
             # Email sending disabled - approval proceeds without emails
             email_sent = True
             log.info(f"TD approved BOQ {boq_id} for Estimator {recipient_name} - Email disabled")
-
+ 
             # Prepare new action for APPROVED
             new_action = {
                 "role": "technicalDirector",
@@ -437,26 +517,26 @@ def td_mail_send():
                 "recipient_name": recipient_name,
                 "is_revision": is_revision_approval
             }
-
+ 
         # ==================== REJECTED STATUS ====================
         else:  # rejected
             log.info(f"BOQ {boq_id} rejected by TD, sending back to Estimator")
             new_status = "Rejected"
-
+ 
             if not estimator or not estimator_email:
                 return jsonify({
                     "success": False,
                     "message": "Cannot send rejection email - Estimator email not found"
                 }), 400
-
+ 
             recipient_email = estimator_email
             recipient_name = estimator_name
             recipient_role = "estimator"
-
+ 
             # Email sending disabled - rejection proceeds without emails
             email_sent = True
             log.info(f"TD rejected BOQ {boq_id} for Estimator {recipient_name} - Email disabled")
-
+ 
             # Prepare new action for REJECTED
             new_action = {
                 "role": "technicalDirector",
@@ -475,33 +555,33 @@ def td_mail_send():
                 "recipient_email": recipient_email,
                 "recipient_name": recipient_name
             }
-
+ 
             # ==================== TD REJECTION - DO NOT CREATE INTERNAL REVISION ====================
             # TD rejection should ONLY show in Rejected tab, NOT in Internal Revisions tab
             # Internal revisions are for tracking estimator edits during internal approval cycle
             # TD rejection is a final decision that sends BOQ back to estimator for complete rework
             log.info(f"✅ TD rejection - BOQ {boq_id} will show only in Rejected tab")
-
+ 
         # ==================== UPDATE BOQ & HISTORY ====================
         # Update BOQ status
         boq.status = new_status
         boq.email_sent = True
         boq.last_modified_by = td_name
         boq.last_modified_at = datetime.utcnow()
-
+ 
         # Append new action to existing actions array
         current_actions.append(new_action)
-
+ 
         log.info(f"BOQ {boq_id} - New action created: {new_action}")
         log.info(f"BOQ {boq_id} - Current actions after append: {current_actions}")
-
+ 
         if existing_history:
             # Update existing history
             existing_history.action = current_actions
             # Mark the JSONB field as modified for SQLAlchemy to detect changes
             from sqlalchemy.orm.attributes import flag_modified
             flag_modified(existing_history, "action")
-
+ 
             existing_history.action_by = td_name
             existing_history.boq_status = new_status
             existing_history.sender = td_name
@@ -512,7 +592,7 @@ def td_mail_send():
             existing_history.action_date = datetime.utcnow()
             existing_history.last_modified_by = td_name
             existing_history.last_modified_at = datetime.utcnow()
-
+ 
             log.info(f"BOQ {boq_id} - Updated existing history with {len(current_actions)} actions")
         else:
             # Create new history entry
@@ -531,42 +611,64 @@ def td_mail_send():
             )
             db.session.add(boq_history)
             log.info(f"BOQ {boq_id} - Created new history with {len(current_actions)} actions")
-
+ 
         db.session.commit()
         log.info(f"BOQ {boq_id} - Database committed successfully")
-
+ 
         # Send notification about TD's decision
         try:
-            # Get estimator user_id for notification from BOQHistory actions
-            # This ensures we notify the CORRECT estimator who sent the BOQ to TD
-            estimator_user_id = None
-
-            # Find the latest "sent_to_td" action to get the estimator's user_id
-            if current_actions:
-                for action in reversed(current_actions):  # Check from most recent
-                    if action.get('type') == 'sent_to_td' and action.get('decided_by_user_id'):
-                        estimator_user_id = action.get('decided_by_user_id')
-                        break
-
-            # Fallback: Try to get from estimator object (old logic for backwards compatibility)
-            if not estimator_user_id and estimator and hasattr(estimator, 'user_id'):
-                estimator_user_id = estimator.user_id
-
+            # Get estimator user_id from the estimator object we found earlier
+            # (already retrieved from project.estimator_id - most reliable)
+            estimator_user_id = estimator.user_id if estimator else None
+ 
             if estimator_user_id:
-                notification_service.notify_td_boq_decision(
-                    boq_id=boq_id,
-                    project_name=project.project_name,
-                    td_id=td_user_id,
-                    td_name=td_name,
-                    recipient_user_ids=[estimator_user_id],
-                    approved=(technical_director_status.lower() == 'approved'),
-                    rejection_reason=rejection_reason if technical_director_status.lower() == 'rejected' else None
-                )
+                log.info(f"Sending notification to estimator user_id {estimator_user_id} ({estimator_name})")
+                # Check if this BOQ has internal revisions - send specific notification
+                if boq.has_internal_revisions and boq.internal_revision_number and boq.internal_revision_number > 0:
+                    from utils.comprehensive_notification_service import ComprehensiveNotificationService
+                    if technical_director_status.lower() == 'approved':
+                        ComprehensiveNotificationService.notify_internal_revision_approved(
+                            boq_id=boq_id,
+                            project_name=project.project_name,
+                            revision_number=boq.internal_revision_number,
+                            td_id=td_user_id,
+                            td_name=td_name,
+                            actor_user_id=estimator_user_id,
+                            actor_name=estimator_name
+                        )
+                        log.info(f"Sent internal revision approved notification for BOQ {boq_id}")
+                    else:
+                        ComprehensiveNotificationService.notify_internal_revision_rejected(
+                            boq_id=boq_id,
+                            project_name=project.project_name,
+                            revision_number=boq.internal_revision_number,
+                            td_id=td_user_id,
+                            td_name=td_name,
+                            actor_user_id=estimator_user_id,
+                            actor_name=estimator_name,
+                            rejection_reason=rejection_reason or comments or "No reason provided"
+                        )
+                        log.info(f"Sent internal revision rejected notification for BOQ {boq_id}")
+                else:
+                    # Regular BOQ approval/rejection notification
+                    notification_service.notify_td_boq_decision(
+                        boq_id=boq_id,
+                        project_name=project.project_name,
+                        td_id=td_user_id,
+                        td_name=td_name,
+                        recipient_user_ids=[estimator_user_id],
+                        approved=(technical_director_status.lower() == 'approved'),
+                        rejection_reason=rejection_reason if technical_director_status.lower() == 'rejected' else None
+                    )
+            else:
+                log.warning(f"Could not find estimator user_id for BOQ {boq_id} notification")
         except Exception as notif_error:
             log.error(f"Failed to send TD decision notification: {notif_error}")
-
+            import traceback
+            log.error(traceback.format_exc())
+ 
         log.info(f"BOQ {boq_id} {new_status.lower()} by TD, email sent to {recipient_email}")
-
+ 
         return jsonify({
             "success": True,
             "message": f"BOQ {new_status.lower()} successfully and email sent to {recipient_role}",
@@ -576,7 +678,7 @@ def td_mail_send():
             "recipient_role": recipient_role,
             "recipient_name": recipient_name
         }), 200
-
+ 
     except Exception as e:
         db.session.rollback()
         import traceback
@@ -595,34 +697,40 @@ def get_td_se_boq_vendor_requests():
         from models.boq import BOQ
         from models.vendor import Vendor
         from datetime import datetime
+        # PERFORMANCE: Import eager loading functions
+        from sqlalchemy.orm import selectinload, joinedload
 
         current_user = g.user
         td_id = current_user['user_id']
 
-        # Get all assignments with pending TD approval or already approved/rejected
-        assignments = BOQMaterialAssignment.query.filter(
+        # PERFORMANCE: Get all assignments with eager loading to prevent N+1 queries
+        assignments = BOQMaterialAssignment.query.options(
+            joinedload(BOQMaterialAssignment.boq).selectinload(BOQ.details),
+            joinedload(BOQMaterialAssignment.project),
+            joinedload(BOQMaterialAssignment.vendor)
+        ).filter(
             BOQMaterialAssignment.is_deleted == False,
             BOQMaterialAssignment.selected_vendor_id != None
         ).order_by(BOQMaterialAssignment.vendor_selection_date.desc()).all()
 
         assignments_list = []
         for assignment in assignments:
-            # Get BOQ
-            boq = BOQ.query.filter_by(boq_id=assignment.boq_id, is_deleted=False).first()
-            if not boq:
+            # PERFORMANCE: Use preloaded relationships instead of queries
+            boq = assignment.boq
+            if not boq or boq.is_deleted:
                 continue
 
-            # Get project
-            project = Project.query.filter_by(project_id=assignment.project_id, is_deleted=False).first()
-            if not project:
+            # PERFORMANCE: Use preloaded project
+            project = assignment.project
+            if not project or project.is_deleted:
                 continue
 
-            # Get vendor
+            # PERFORMANCE: Use preloaded vendor
             vendor = None
             vendor_info = None
             if assignment.selected_vendor_id:
-                vendor = Vendor.query.filter_by(vendor_id=assignment.selected_vendor_id, is_deleted=False).first()
-                if vendor:
+                vendor = assignment.vendor
+                if vendor and not vendor.is_deleted:
                     vendor_info = {
                         'vendor_id': vendor.vendor_id,
                         'company_name': vendor.company_name,
@@ -639,8 +747,8 @@ def get_td_se_boq_vendor_requests():
             total_cost = 0
 
             if boq:
-                # Get BOQ details which contains materials as JSON
-                boq_detail = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+                # PERFORMANCE: Use preloaded BOQ details
+                boq_detail = next((d for d in boq.details if not d.is_deleted), None)
 
                 if boq_detail and boq_detail.boq_details:
                     items = boq_detail.boq_details.get('items', [])
@@ -1054,3 +1162,369 @@ def get_td_dashboard_stats():
             "error": f"Failed to fetch dashboard statistics: {str(e)}",
             "error_type": type(e).__name__
         }), 500
+
+
+def get_td_purchase_orders():
+    """Get all purchase orders for TD (read-only view)"""
+    try:
+        from models.change_request import ChangeRequest
+        from models.po_child import POChild
+        from sqlalchemy import or_, and_
+
+        current_user = g.user
+        td_id = current_user['user_id']
+        user_role = current_user.get('role_name', '').lower()
+
+        # Get pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 50, type=int), 100)
+        status_filter = request.args.get('status', 'all')  # all, pending, approved, completed, rejected
+
+        # Build base query - TD sees ALL change requests (read-only)
+        # Include both change requests and PO children
+        base_query = db.session.query(ChangeRequest).options(
+            selectinload(ChangeRequest.project),
+            selectinload(ChangeRequest.boq),
+            selectinload(ChangeRequest.vendor)
+        ).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status.in_([
+                'vendor_approval_pending',
+                'pending_td_approval',
+                'vendor_approved',
+                'purchase_completed',
+                'rejected'
+            ])
+        )
+
+        # Apply status filter
+        if status_filter == 'pending':
+            base_query = base_query.filter(ChangeRequest.status == 'pending_td_approval')
+        elif status_filter == 'approved':
+            base_query = base_query.filter(ChangeRequest.status == 'vendor_approved')
+        elif status_filter == 'completed':
+            base_query = base_query.filter(ChangeRequest.status == 'purchase_completed')
+        elif status_filter == 'rejected':
+            base_query = base_query.filter(ChangeRequest.status == 'rejected')
+
+        # Order by created_at desc
+        base_query = base_query.order_by(ChangeRequest.created_at.desc())
+
+        # Paginate
+        paginated = base_query.paginate(page=page, per_page=per_page, error_out=False)
+
+        # Build response
+        purchases_list = []
+        for cr in paginated.items:
+            project = cr.project
+            boq = cr.boq
+            vendor = cr.vendor
+
+            # Get materials from sub_items_data or materials_data
+            materials_list = cr.sub_items_data or cr.materials_data or []
+
+            purchase_data = {
+                'cr_id': cr.cr_id,
+                'formatted_cr_id': f"CR-{cr.cr_id}",
+                'project_id': cr.project_id,
+                'project_name': project.project_name if project else None,
+                'project_code': project.project_code if project else None,
+                'client': project.client if project else None,
+                'location': project.location if project else None,
+                'boq_id': cr.boq_id,
+                'boq_name': boq.boq_name if boq else None,
+                'item_name': cr.item_id,
+                'request_type': cr.request_type,
+                'status': cr.status,
+                'materials': materials_list if isinstance(materials_list, list) else [],
+                'materials_count': len(materials_list) if isinstance(materials_list, list) else 0,
+                'total_cost': float(cr.materials_total_cost) if cr.materials_total_cost else 0,
+                'requested_by_name': cr.requested_by_name,
+                'created_at': cr.created_at.isoformat() if cr.created_at else None,
+                'vendor_id': cr.selected_vendor_id,
+                'vendor_name': vendor.company_name if vendor else None,
+                'vendor_selection_status': cr.vendor_selection_status,
+                'vendor_approved_by_td_name': cr.vendor_approved_by_td_name,
+                'vendor_approval_date': cr.vendor_approval_date.isoformat() if cr.vendor_approval_date else None,
+                'purchase_completed_by_name': cr.purchase_completed_by_name,
+                'purchase_completion_date': cr.purchase_completion_date.isoformat() if cr.purchase_completion_date else None
+            }
+            purchases_list.append(purchase_data)
+
+        # Get summary counts
+        pending_count = db.session.query(ChangeRequest).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status == 'pending_td_approval'
+        ).count()
+
+        approved_count = db.session.query(ChangeRequest).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status == 'vendor_approved'
+        ).count()
+
+        completed_count = db.session.query(ChangeRequest).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status == 'purchase_completed'
+        ).count()
+
+        rejected_count = db.session.query(ChangeRequest).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status == 'rejected'
+        ).count()
+
+        return jsonify({
+            'success': True,
+            'purchases': purchases_list,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': paginated.total,
+                'pages': paginated.pages,
+                'has_prev': paginated.has_prev,
+                'has_next': paginated.has_next
+            },
+            'summary': {
+                'pending_count': pending_count,
+                'approved_count': approved_count,
+                'completed_count': completed_count,
+                'rejected_count': rejected_count,
+                'total_count': pending_count + approved_count + completed_count + rejected_count
+            }
+        }), 200
+
+    except Exception as e:
+        import traceback
+        log.error(f"Error fetching TD purchase orders: {str(e)}")
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to fetch purchase orders: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
+
+
+def get_td_purchase_order_by_id(cr_id):
+    """Get specific purchase order details for TD view"""
+    try:
+        from models.change_request import ChangeRequest
+
+        current_user = g.user
+        td_id = current_user['user_id']
+
+        # Get change request with relationships
+        cr = db.session.query(ChangeRequest).options(
+            selectinload(ChangeRequest.project),
+            selectinload(ChangeRequest.boq),
+            selectinload(ChangeRequest.vendor)
+        ).filter(
+            ChangeRequest.cr_id == cr_id,
+            ChangeRequest.is_deleted == False
+        ).first()
+
+        if not cr:
+            return jsonify({
+                "success": False,
+                "error": "Purchase order not found"
+            }), 404
+
+        project = cr.project
+        boq = cr.boq
+        vendor = cr.vendor
+
+        # Get materials from sub_items_data or materials_data
+        materials_list = cr.sub_items_data or cr.materials_data or []
+
+        purchase_data = {
+            'cr_id': cr.cr_id,
+            'formatted_cr_id': f"CR-{cr.cr_id}",
+            'project_id': cr.project_id,
+            'project_name': project.project_name if project else None,
+            'project_code': project.project_code if project else None,
+            'client': project.client if project else None,
+            'location': project.location if project else None,
+            'boq_id': cr.boq_id,
+            'boq_name': boq.boq_name if boq else None,
+            'item_name': cr.item_id,
+            'sub_item_name': cr.sub_item_id,
+            'request_type': cr.request_type,
+            'reason': cr.justification,
+            'status': cr.status,
+            'materials': materials_list if isinstance(materials_list, list) else [],
+            'materials_count': len(materials_list) if isinstance(materials_list, list) else 0,
+            'total_cost': float(cr.materials_total_cost) if cr.materials_total_cost else 0,
+            'requested_by_user_id': cr.requested_by_user_id,
+            'requested_by_name': cr.requested_by_name,
+            'requested_by_role': cr.requested_by_role,
+            'created_at': cr.created_at.isoformat() if cr.created_at else None,
+            'approved_by': cr.approved_by,
+            'approved_at': cr.approved_at.isoformat() if cr.approved_at else None,
+            'vendor_id': cr.selected_vendor_id,
+            'vendor_name': vendor.company_name if vendor else None,
+            'vendor_phone': vendor.phone if vendor else None,
+            'vendor_email': vendor.email if vendor else None,
+            'vendor_selection_status': cr.vendor_selection_status,
+            'vendor_selected_by_buyer_name': cr.vendor_selected_by_buyer_name,
+            'vendor_selection_date': cr.vendor_selection_date.isoformat() if cr.vendor_selection_date else None,
+            'vendor_approved_by_td_id': cr.vendor_approved_by_td_id,
+            'vendor_approved_by_td_name': cr.vendor_approved_by_td_name,
+            'vendor_approval_date': cr.vendor_approval_date.isoformat() if cr.vendor_approval_date else None,
+            'vendor_rejection_reason': cr.vendor_rejection_reason,
+            'purchase_completed_by_user_id': cr.purchase_completed_by_user_id,
+            'purchase_completed_by_name': cr.purchase_completed_by_name,
+            'purchase_completion_date': cr.purchase_completion_date.isoformat() if cr.purchase_completion_date else None,
+            'purchase_notes': cr.purchase_notes
+        }
+
+        return jsonify({
+            'success': True,
+            'purchase': purchase_data
+        }), 200
+
+    except Exception as e:
+        import traceback
+        log.error(f"Error fetching TD purchase order details: {str(e)}")
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "success": False,
+            "error": f"Failed to fetch purchase order details: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
+
+def get_td_production_management_boqs():
+    """
+    Get ALL BOQs for TD Production Management view (including completed)
+    Returns all project BOQs regardless of assignment or completion status
+    Frontend handles filtering between live and completed projects
+    This is different from td_approved_boq which only shows unassigned projects
+    """
+    try:
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)
+ 
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+ 
+        # OPTIMIZED: Join BOQDetails and User to eliminate N+1 queries
+        query = (
+            db.session.query(
+                BOQ,
+                Project.project_name,
+                Project.project_code,
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.start_date,
+                Project.end_date,
+                Project.status.label('project_status'),
+                Project.user_id,
+                User.full_name.label('last_pm_name'),
+                BOQDetails
+            )
+            .join(Project, BOQ.project_id == Project.project_id)
+            .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
+            .outerjoin(BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False))
+            .filter(
+                BOQ.is_deleted == False,
+                Project.is_deleted == False,
+                BOQ.status != 'Rejected'  # Exclude rejected BOQs
+                # NOTE: Removed completed project filter - frontend handles live/completed tab filtering
+            )
+            .order_by(BOQ.created_at.desc())
+        )
+ 
+        # OPTIMIZED: Use func.count() for better performance
+        if page is not None:
+            total_count = query.with_entities(func.count()).scalar()
+            if total_count == 0:
+                return jsonify({
+                    "message": "No BOQs found for production management",
+                    "count": 0,
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_count": 0,
+                        "total_pages": 0,
+                        "has_next": False,
+                        "has_prev": False
+                    }
+                }), 200
+            offset = (page - 1) * page_size
+            rows = query.offset(offset).limit(page_size).all()
+        else:
+            rows = query.all()
+            if not rows:
+                return jsonify({"message": "No BOQs found for production management", "count": 0, "data": []}), 200
+            total_count = len(rows)
+ 
+        # Build response with financial data
+        production_boqs = []
+        for row in rows:
+            # Use already-loaded BOQ and BOQDetails from JOIN (no additional queries)
+            boq_obj = row.BOQ
+            boq_details = row.BOQDetails
+ 
+            # Calculate financial data
+            financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
+ 
+            boq_entry = {
+                "boq_id": boq_obj.boq_id,
+                "boq_name": boq_obj.boq_name,
+                "project_id": boq_obj.project_id,
+                "project_name": row.project_name,
+                "project_code": row.project_code,
+                "client": row.client,
+                "location": row.location,
+                "floor": row.floor_name,
+                "hours": row.working_hours,
+                "start_date": row.start_date.isoformat() if row.start_date else None,
+                "end_date": row.end_date.isoformat() if row.end_date else None,
+                "status": boq_obj.status,
+                "boq_status": boq_obj.status,
+                "project_status": row.project_status,
+                "client_status": boq_obj.client_status,
+                "revision_number": boq_obj.revision_number or 0,
+                "email_sent": boq_obj.email_sent,
+                "user_id": row.user_id,
+                "created_at": boq_obj.created_at.isoformat() if boq_obj.created_at else None,
+                "created_by": boq_obj.created_by,
+                "client_rejection_reason": boq_obj.client_rejection_reason,
+                "last_pm_user_id": boq_obj.last_pm_user_id,
+                "last_pm_name": row.last_pm_name,
+                # Flag to indicate if PM is assigned
+                "pm_assigned": bool(row.user_id and row.user_id not in [None, '[]', 'null', '']),
+                # Add financial data
+                **financial_data
+            }
+            production_boqs.append(boq_entry)
+ 
+        response = {
+            "message": "TD Production Management BOQs retrieved successfully",
+            "count": len(production_boqs),
+            "data": production_boqs
+        }
+ 
+        if page is not None:
+            total_pages = (total_count + page_size - 1) // page_size
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+ 
+        return jsonify(response), 200
+ 
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error retrieving TD production management BOQs: {str(e)}")
+        return jsonify({
+            'error': 'Failed to retrieve TD production management BOQs',
+            'details': str(e)
+        }), 500
+ 
+ 

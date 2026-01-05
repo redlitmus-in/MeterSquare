@@ -1958,6 +1958,7 @@ class BOQEmailService:
             specification = material.get('specification', '-')
             quantity = material.get('quantity') or 0
             unit = material.get('unit', 'unit')
+            supplier_notes = material.get('supplier_notes', '').strip()
 
             # Alternate row background color
             bg_color = '#f0f9ff' if idx % 2 == 0 else '#ffffff'
@@ -1971,6 +1972,16 @@ class BOQEmailService:
                     <td style="padding: 12px 10px; color: #000000; font-size: 13px;">{quantity} {unit}</td>
                 </tr>
             """
+
+            # Add supplier notes sub-row if notes exist
+            if supplier_notes:
+                materials_table_rows += f"""
+                <tr style="background-color: {bg_color};">
+                    <td colspan="5" style="padding: 8px 10px 12px 30px; color: #1e40af; font-size: 12px; font-style: italic; border-bottom: 1px solid #3b82f6;">
+                        📝 <strong>Note:</strong> {supplier_notes}
+                    </td>
+                </tr>
+                """
 
         email_body = f"""
         <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f0f9ff; padding: 20px; font-family: Arial, Helvetica, sans-serif;">
@@ -1997,42 +2008,6 @@ class BOQEmailService:
                                     We are pleased to place a purchase order with <strong>{vendor_name}</strong> for the materials
                                     listed below. This order is for our ongoing project and requires your prompt attention.
                                 </p>
-
-                                <div style="height: 2px; background: linear-gradient(90deg, transparent, #3b82f6, transparent); margin: 25px 0;"></div>
-
-                                <!-- Purchase Order Information -->
-                                <h2 style="color: #000000; font-size: 20px; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Purchase Order Details</h2>
-                                <table width="100%" cellpadding="10" cellspacing="0" border="0" style="background: #f0f9ff; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold; width: 30%;">PO Number:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">PO-{cr_id}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Vendor:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{vendor_name}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Total Items:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{len(materials)}</td>
-                                    </tr>
-                                </table>
-
-                                <!-- Materials Table -->
-                                <h2 style="color: #000000; font-size: 20px; margin: 30px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Materials Required</h2>
-                                <table width="100%" cellpadding="12" cellspacing="0" border="0" style="border: 2px solid #3b82f6; border-radius: 8px; overflow: hidden; margin: 20px 0;">
-                                    <thead>
-                                        <tr style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);">
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">S.No</th>
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Material Name</th>
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Brand</th>
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Specs</th>
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Quantity</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {materials_table_rows}
-                                    </tbody>
-                                </table>
 
                                 <div style="height: 2px; background: linear-gradient(90deg, transparent, #3b82f6, transparent); margin: 25px 0;"></div>
 

@@ -12,6 +12,7 @@ class Vendor(db.Model):
     email = db.Column(db.String(255), nullable=False, unique=True)
     phone_code = db.Column(db.String(10), nullable=True)
     phone = db.Column(db.String(20), nullable=True)
+    fax = db.Column(db.String(50), nullable=True)
     street_address = db.Column(db.Text, nullable=True)
     city = db.Column(db.String(100), nullable=True)
     state = db.Column(db.String(100), nullable=True)
@@ -40,6 +41,7 @@ class Vendor(db.Model):
             'email': self.email,
             'phone_code': self.phone_code,
             'phone': self.phone,
+            'fax': self.fax,
             'street_address': self.street_address,
             'city': self.city,
             'state': self.state,

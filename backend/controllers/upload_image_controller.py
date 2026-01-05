@@ -14,9 +14,14 @@ import io
 
 log = get_logger()
 
-# Configuration constants
-supabase_url = os.environ.get('SUPABASE_URL')
-supabase_key = os.environ.get('SUPABASE_KEY')
+# Configuration constants from environment variables based on ENVIRONMENT
+environment = os.environ.get('ENVIRONMENT', 'production')
+if environment == 'development':
+    supabase_url = os.environ.get('DEV_SUPABASE_URL')
+    supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
+else:
+    supabase_url = os.environ.get('SUPABASE_URL')
+    supabase_key = os.environ.get('SUPABASE_ANON_KEY')
 SUPABASE_BUCKET = "file_upload"
 ITEM_SUPABASE_BUCKET = "boq_file"
 ALLOWED_EXTENSIONS = {

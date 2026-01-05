@@ -8,6 +8,10 @@ Run this migration: python backend/migrations/revert_project_user_id_type.py
 
 import sys
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -19,9 +23,15 @@ from flask import Flask
 def run_migration():
     """Revert project.user_id column type from INTEGER to JSON"""
 
+    database_url = os.environ.get('DATABASE_URL')
+    if not database_url:
+        print("ERROR: DATABASE_URL environment variable not set")
+        print("Usage: DATABASE_URL='postgresql://...' python migrations/revert_project_user_id_type.py")
+        return False
+
     # Create Flask app context
     app = Flask(__name__)
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/corporate_interiors')
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     db.init_app(app)

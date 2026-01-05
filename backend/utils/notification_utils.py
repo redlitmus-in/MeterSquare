@@ -6,7 +6,6 @@ Helper functions to create and send notifications
 from models.notification import Notification
 from config.db import db
 from typing import List, Dict, Optional
-import uuid
 
 class NotificationManager:
     """Manager class for creating and sending notifications"""

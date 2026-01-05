@@ -22,64 +22,27 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT")
 
 log = get_logger()
 
-def jwt_required(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        token = request.headers.get('Authorization')
+# Frontend to Database role mapping
+# Maps frontend role names to database role names
+FRONTEND_TO_DB_ROLE_MAP = {
+    'procurement': 'buyer',  # Frontend sends 'procurement', DB has 'buyer'
+    'buyer': 'buyer',        # Also accept 'buyer' directly
+}
 
-        # Extract token from Bearer header or cookie
-        if token and token.startswith("Bearer "):
-            token = token.split(" ")[1]
-        else:
-            token = request.cookies.get('access_token')
+def map_frontend_role_to_db(frontend_role):
+    """
+    Map frontend role name to database role name
+    Returns the database role name or the original if no mapping exists
+    """
+    if not frontend_role:
+        return frontend_role
 
-        if not token:
-            return jsonify({"error": "Authorization token is missing"}), 401
+    frontend_role_lower = frontend_role.lower().strip()
+    return FRONTEND_TO_DB_ROLE_MAP.get(frontend_role_lower, frontend_role_lower)
 
-        try:
-            secret_key = current_app.config.get('SECRET_KEY')
-            if not secret_key:
-                raise Exception("SECRET_KEY not set in app configuration")
-
-            decoded = jwt.decode(token, secret_key, algorithms=["HS256"])
-            email = decoded.get("username") or decoded.get("email")
-            user = User.query.filter_by(email=email, is_deleted=False, is_active=True).first()
-            if not user:
-                return jsonify({"error": "User not found"}), 404
-
-            # Get role name safely
-            role_name = "user"
-            if user.role_id:
-                role = Role.query.filter_by(role_id=user.role_id, is_deleted=False).first()
-                if role:
-                    role_name = role.role
-
-            # Manually create user dict since no to_dict method
-            g.user = {
-                "user_id": user.user_id,
-                "email": user.email,
-                "full_name": user.full_name,
-                "phone": user.phone,
-                "role_id": user.role_id,
-                "role": role_name,
-                "role_name": role_name,
-                "department": user.department,
-                "is_active": user.is_active,
-                "user_status": user.user_status or 'offline'
-            }
-            g.user_id = user.user_id
-
-        except jwt.ExpiredSignatureError:
-            return jsonify({"error": "Token expired"}), 401
-        except jwt.InvalidTokenError as e:
-            return jsonify({"error": f"Invalid token: {str(e)}"}), 401
-        except Exception as e:
-            log.error(f"Auth error: {str(e)}")
-            return jsonify({"error": "Authentication failed"}), 401
-
-        return func(*args, **kwargs)
-
-    return wrapper
+# ✅ CONSOLIDATED: Import jwt_required from utils.authentication to avoid duplicates
+# This ensures consistent token validation across all routes
+from utils.authentication import jwt_required
 
 def user_register():
     """
@@ -101,8 +64,15 @@ def user_register():
         if User.query.filter_by(email=email, is_deleted=False).first():
             return jsonify({"error": "User with this email already exists"}), 409
 
+        # Map frontend role to database role (e.g., 'procurement' -> 'buyer')
+        db_role_name = map_frontend_role_to_db(role_name)
+        log.info(f"Registration: frontend_role={role_name}, db_role={db_role_name}")
+
         # Get or create role
-        role = Role.query.filter(db.func.lower(Role.role) == role_name, Role.is_deleted == False).first()
+        role = Role.query.filter(
+            db.func.lower(db.func.trim(Role.role)) == db_role_name.lower(),
+            Role.is_deleted == False
+        ).first()
         if not role:
             return jsonify({"error": f"Role '{role_name}' not found. Please contact admin."}), 404
 
@@ -148,11 +118,16 @@ def user_login():
     """
     try:
         data = request.get_json()
-        email = data.get("email") 
+        email = data.get("email")
         role_name = data.get("role")  # Optional role parameter
-        
+
         if not email:
             return jsonify({"error": "Email is required"}), 400
+
+        # Map frontend role to database role (e.g., 'procurement' -> 'buyer')
+        db_role_name = map_frontend_role_to_db(role_name) if role_name else None
+
+        log.info(f"Login attempt: email={email}, frontend_role={role_name}, db_role={db_role_name}")
 
         # Build query to check user exists
         query = db.session.query(User).join(
@@ -162,13 +137,13 @@ def user_login():
             User.is_deleted == False,
             User.is_active == True
         )
-        
-        # If role specified, validate user has that role
-        if role_name:
+
+        # If role specified, validate user has that role (using mapped DB role)
+        if db_role_name:
             query = query.filter(
-                db.func.lower(Role.role) == role_name.lower()
+                db.func.lower(db.func.trim(Role.role)) == db_role_name.lower()
             )
-            
+
         user = query.first()
 
         if not user:
@@ -176,6 +151,8 @@ def user_login():
                 return jsonify({"error": f"User not found with role '{role_name}' or account inactive"}), 404
             else:
                 return jsonify({"error": "User not found or inactive"}), 404
+
+        log.info(f"User found: user_id={user.user_id}, email={user.email}")
         
         # Send OTP to user's email ASYNCHRONOUSLY (instant return)
         otp = send_otp_async(email)
@@ -185,8 +162,9 @@ def user_login():
             from utils.authentication import otp_storage
             if email in otp_storage:
                 otp_storage[email]['user_id'] = user.user_id
-                if role_name:
-                    otp_storage[email]['role'] = role_name
+                if db_role_name:
+                    # Store the DB role name for verification
+                    otp_storage[email]['role'] = db_role_name
             
             response_data = {
                 "message": "OTP sent successfully to your email",

@@ -45,12 +45,20 @@ def initialize_db(app):
     - Added echo_pool for debugging (disable in production)
     - Optimized pool_recycle to 1 hour (was 30 minutes)
     """
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default-secret-key")
-
     # Get environment
     environment = os.getenv("ENVIRONMENT", "development")
+    print("Environment: ", environment)
+
+    # Set DATABASE_URL based on ENVIRONMENT
+    if environment == "production":
+        database_url = os.getenv("DATABASE_URL")
+    else:
+        database_url = os.getenv("DEV_DATABASE_URL")
+
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    print("app.config['SQLALCHEMY_DATABASE_URI']:",app.config['SQLALCHEMY_DATABASE_URI'])
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default-secret-key")
 
     # ✅ OPTIMIZED connection pool settings
     pool_config = {
@@ -60,10 +68,13 @@ def initialize_db(app):
         "pool_recycle": 3600,      # ✅ Recycle connections after 1 hour (was 30 min)
         "pool_pre_ping": True,     # ✅ NEW: Test connections before using (prevents stale connections)
         "echo_pool": environment == "development",  # ✅ Debug pool in dev only
+        # ✅ PERFORMANCE: Query timeout to prevent long-running queries from blocking
+        "connect_args": {
+            "options": "-c statement_timeout=30000"  # 30 second query timeout
+        }
     }
 
     # For Supabase or connection-limited databases, use smaller pool
-    database_url = os.getenv('DATABASE_URL', '')
     if 'supabase' in database_url.lower() or os.getenv('USE_SMALL_POOL') == 'true':
         pool_config["pool_size"] = 20
         pool_config["max_overflow"] = 10

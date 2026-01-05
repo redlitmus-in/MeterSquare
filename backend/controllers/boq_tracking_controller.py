@@ -1,11 +1,13 @@
 from flask import request, jsonify, g
 from config.db import db
 from models.boq import *
+from models.project import Project
 from config.logging import get_logger
 from datetime import datetime
 from decimal import Decimal
 import json
 from models.change_request import ChangeRequest
+from models.lpo_customization import LPOCustomization
 
 log = get_logger()
 
@@ -35,6 +37,23 @@ def get_boq_planned_vs_actual(boq_id):
         # Extract discount from top-level BOQ data
         boq_level_discount_percentage = Decimal(str(boq_data.get('discount_percentage', 0)))
         boq_level_discount_amount = Decimal(str(boq_data.get('discount_amount', 0)))
+
+        # Extract preliminaries data from BOQ
+        preliminaries_data = boq_data.get('preliminaries', {})
+        preliminary_cost_details = preliminaries_data.get('cost_details', {})
+
+        # Convert all preliminary values to Decimal for consistent calculations
+        preliminary_amount = Decimal(str(preliminary_cost_details.get('amount', 0) or 0))
+        preliminary_quantity = float(preliminary_cost_details.get('quantity', 0) or 0)
+        preliminary_unit = preliminary_cost_details.get('unit', 'Nos') or 'Nos'
+        preliminary_rate = Decimal(str(preliminary_cost_details.get('rate', 0) or 0))
+
+        # Calculate preliminary internal cost breakdown
+        preliminary_internal_cost = Decimal(str(preliminary_cost_details.get('internal_cost', 0) or 0))
+        preliminary_misc_amount = Decimal(str(preliminary_cost_details.get('misc_amount', 0) or 0))
+        preliminary_overhead_profit_amount = Decimal(str(preliminary_cost_details.get('overhead_profit_amount', 0) or 0))
+        preliminary_transport_amount = Decimal(str(preliminary_cost_details.get('transport_amount', 0) or 0))
+        preliminary_planned_profit = Decimal(str(preliminary_cost_details.get('planned_profit', 0) or 0))
 
         # Fetch ALL change requests (regardless of status) to show in comparison
         change_requests = ChangeRequest.query.filter_by(
@@ -165,6 +184,45 @@ def get_boq_planned_vs_actual(boq_id):
             "boq_name": boq.boq_name,
             "items": []
         }
+
+        # Calculate total items base cost for preliminary distribution
+        # This is needed to calculate each item's proportional share of preliminaries
+        # Use base_total (same as planned_base calculation) to ensure consistency
+        total_items_base_cost = Decimal('0')
+        for item in boq_data.get('items', []):
+            for sub_item in item.get('sub_items', []):
+                # IMPORTANT: Calculate base_total from quantity × rate to ensure correctness
+                sub_item_quantity = Decimal(str(sub_item.get('quantity', 1)))
+                sub_item_rate = Decimal(str(sub_item.get('rate', 0)))
+
+                # Calculate base_total as quantity × rate if both are available
+                if sub_item_quantity > 0 and sub_item_rate > 0:
+                    sub_item_base_total = sub_item_quantity * sub_item_rate
+                else:
+                    # Fallback: Get base_total from stored value
+                    sub_item_base_total = Decimal(str(
+                        sub_item.get('base_total') or
+                        sub_item.get('per_unit_cost') or
+                        sub_item.get('client_rate') or
+                        0
+                    ))
+
+                    # If still no base_total, calculate from materials + labour
+                    if sub_item_base_total == 0:
+                        sub_item_materials = sub_item.get('materials', [])
+                        sub_item_labour = sub_item.get('labour', [])
+
+                        sub_item_materials_cost = sum(
+                            Decimal(str(mat.get('quantity', 0))) * Decimal(str(mat.get('unit_price', 0)))
+                            for mat in sub_item_materials
+                        )
+                        sub_item_labour_cost = sum(
+                            Decimal(str(lab.get('hours', 0))) * Decimal(str(lab.get('rate_per_hour', 0)))
+                            for lab in sub_item_labour
+                        )
+                        sub_item_base_total = sub_item_materials_cost + sub_item_labour_cost
+
+                total_items_base_cost += sub_item_base_total
 
         # Process each item
         for planned_item in boq_data.get('items', []):
@@ -550,7 +608,8 @@ def get_boq_planned_vs_actual(boq_id):
                     # IMPORTANT: source should be "original_boq" if material was in original BOQ
                     # Only NEW materials from CRs should have source="change_request"
                     # cr_update_data means: material exists in original BOQ but was updated by CR
-                    "source": "change_request" if is_from_change_request else "original_boq"
+                    "source": "change_request" if is_from_change_request else "original_boq",
+                    "balance": float(planned_total - actual_total)  # Planned - Actual balance
                 })
 
                 # Check for unplanned materials (purchased but not in BOQ)
@@ -661,7 +720,8 @@ def get_boq_planned_vs_actual(boq_id):
                                             "note": "This material was purchased but was not in the original BOQ plan",
                                             "is_from_change_request": is_from_cr,
                                             "change_request_id": cr_id,
-                                            "source": "change_request" if is_from_cr else "unplanned"
+                                            "source": "change_request" if is_from_cr else "unplanned",
+                                            "balance": float(-purchase_total)  # Unplanned = 0 planned - actual
                                         })
 
             # Add NEW CR materials (that don't update existing materials)
@@ -736,7 +796,8 @@ def get_boq_planned_vs_actual(boq_id):
                     "justification": justification_text,
                     "is_from_change_request": True,
                     "change_request_id": cr_id,
-                    "source": "change_request"
+                    "source": "change_request",
+                    "balance": float(-actual_total)  # CR materials: 0 planned - actual
                 })
 
             # Labour comparison
@@ -874,6 +935,9 @@ def get_boq_planned_vs_actual(boq_id):
 
             # Track if item-level labour has been assigned to a sub-item
             item_level_labour_assigned = False
+            # Track which labour IDs and roles have been processed across ALL sub-items to prevent double-counting
+            item_level_labour_ids_processed = set()
+            item_level_labour_roles_processed = set()
 
             for sub_item in planned_item.get('sub_items', []):
                 sub_item_name = sub_item.get('sub_item_name', '')
@@ -915,18 +979,25 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Get the base_total (client rate) from sub-item
                 # This is the main amount on which percentages are calculated
-                # Try base_total first, then fall back to per_unit_cost or client_rate
-                # If none provided, use internal_cost as base
-                sub_item_base_total = Decimal(str(
-                    sub_item.get('base_total') or
-                    sub_item.get('per_unit_cost') or
-                    sub_item.get('client_rate') or
-                    0
-                ))
+                # IMPORTANT: Calculate base_total from quantity × rate to ensure correctness
+                sub_item_quantity = Decimal(str(sub_item.get('quantity', 1)))
+                sub_item_rate = Decimal(str(sub_item.get('rate', 0)))
 
-                # If no base_total provided, use internal_cost as the base
-                if sub_item_base_total == 0:
-                    sub_item_base_total = sub_item_internal_cost
+                # Calculate base_total as quantity × rate if both are available
+                if sub_item_quantity > 0 and sub_item_rate > 0:
+                    sub_item_base_total = sub_item_quantity * sub_item_rate
+                else:
+                    # Fallback: Try base_total first, then fall back to per_unit_cost or client_rate
+                    sub_item_base_total = Decimal(str(
+                        sub_item.get('base_total') or
+                        sub_item.get('per_unit_cost') or
+                        sub_item.get('client_rate') or
+                        0
+                    ))
+
+                    # If no base_total provided, use internal_cost as the base
+                    if sub_item_base_total == 0:
+                        sub_item_base_total = sub_item_internal_cost
 
                 # Get percentages from sub-item or use defaults
                 misc_pct = Decimal(str(sub_item.get('misc_percentage', 10)))
@@ -989,12 +1060,32 @@ def get_boq_planned_vs_actual(boq_id):
                 # Case 1: Process labour from sub-item's labour array
                 for planned_labour_entry in sub_item.get('labour', []):
                     labour_id = planned_labour_entry.get('master_labour_id')
+                    labour_role = planned_labour_entry.get('labour_role', '').lower().strip()
+                    # Skip labour entries with both empty ID and empty role (invalid)
+                    if not labour_id and not labour_role:
+                        continue
+
+                    # Skip if this labour was already processed in a previous sub-item
+                    if labour_id and labour_id in item_level_labour_ids_processed:
+                        continue
+                    if labour_role and labour_role in item_level_labour_roles_processed:
+                        continue
 
                     # Find matching entry in labour_comparison
-                    matching_labour = next(
-                        (lab for lab in labour_comparison if lab.get('master_labour_id') == labour_id),
-                        None
-                    )
+                    # Match by ID if available, otherwise match by role
+                    if labour_id:
+                        matching_labour = next(
+                            (lab for lab in labour_comparison if lab.get('master_labour_id') == labour_id),
+                            None
+                        )
+                    elif labour_role:
+                        matching_labour = next(
+                            (lab for lab in labour_comparison
+                             if lab.get('labour_role', '').lower().strip() == labour_role),
+                            None
+                        )
+                    else:
+                        matching_labour = None
 
                     if matching_labour:
                         # Use actual if available, otherwise use planned for pending labour
@@ -1004,6 +1095,11 @@ def get_boq_planned_vs_actual(boq_id):
                             # Pending labour - use planned cost
                             lab_cost = Decimal(str(matching_labour['planned']['total']))
                         sub_actual_labour_cost += lab_cost
+                        # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
+                        if labour_id:
+                            item_level_labour_ids_processed.add(labour_id)
+                        if labour_role:
+                            item_level_labour_roles_processed.add(labour_role)
                     else:
                         # If no tracking data found, use planned from sub_item
                         lab_cost = Decimal(str(planned_labour_entry.get('total_cost', 0)))
@@ -1012,18 +1108,45 @@ def get_boq_planned_vs_actual(boq_id):
                             lab_rate = Decimal(str(planned_labour_entry.get('rate_per_hour', 0)))
                             lab_cost = lab_hours * lab_rate
                         sub_actual_labour_cost += lab_cost
+                        # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
+                        if labour_id:
+                            item_level_labour_ids_processed.add(labour_id)
+                        if labour_role:
+                            item_level_labour_roles_processed.add(labour_role)
 
                 # Case 2: If this is the first non-CR sub-item and item-level labour hasn't been assigned yet,
                 # assign item-level labour to this sub-item
                 if not item_level_labour_assigned and not is_cr_sub_item:
                     for item_labour_entry in planned_item.get('labour', []):
                         labour_id = item_labour_entry.get('master_labour_id')
+                        labour_role = item_labour_entry.get('labour_role', '').lower().strip()
+
+                        # Skip labour entries with both empty ID and empty role (invalid)
+                        if not labour_id and not labour_role:
+                            continue
+
+                        # Skip if this labour was already processed from any sub-item's labour array
+                        # Check both by ID (if available) and by role name
+                        if labour_id and labour_id in item_level_labour_ids_processed:
+                            continue
+                        if labour_role and labour_role in item_level_labour_roles_processed:
+                            continue
 
                         # Find matching entry in labour_comparison
-                        matching_labour = next(
-                            (lab for lab in labour_comparison if lab.get('master_labour_id') == labour_id),
-                            None
-                        )
+                        # Match by ID if available, otherwise match by role
+                        if labour_id:
+                            matching_labour = next(
+                                (lab for lab in labour_comparison if lab.get('master_labour_id') == labour_id),
+                                None
+                            )
+                        elif labour_role:
+                            matching_labour = next(
+                                (lab for lab in labour_comparison
+                                 if lab.get('labour_role', '').lower().strip() == labour_role),
+                                None
+                            )
+                        else:
+                            matching_labour = None
 
                         if matching_labour:
                             # Use actual if available, otherwise use planned for pending labour
@@ -1033,6 +1156,11 @@ def get_boq_planned_vs_actual(boq_id):
                                 # Pending labour - use planned cost
                                 lab_cost = Decimal(str(matching_labour['planned']['total']))
                             sub_actual_labour_cost += lab_cost
+                            # Track this labour to prevent processing in future sub-items
+                            if labour_id:
+                                item_level_labour_ids_processed.add(labour_id)
+                            if labour_role:
+                                item_level_labour_roles_processed.add(labour_role)
                         else:
                             # If no tracking data found, use planned from item
                             lab_cost = Decimal(str(item_labour_entry.get('total_cost', 0)))
@@ -1041,6 +1169,11 @@ def get_boq_planned_vs_actual(boq_id):
                                 lab_rate = Decimal(str(item_labour_entry.get('rate_per_hour', 0)))
                                 lab_cost = lab_hours * lab_rate
                             sub_actual_labour_cost += lab_cost
+                            # Track this labour to prevent processing in future sub-items
+                            if labour_id:
+                                item_level_labour_ids_processed.add(labour_id)
+                            if labour_role:
+                                item_level_labour_roles_processed.add(labour_role)
 
                     # Mark that item-level labour has been assigned
                     item_level_labour_assigned = True
@@ -1144,8 +1277,17 @@ def get_boq_planned_vs_actual(boq_id):
             overhead_pct = overhead_profit_pct * Decimal('0.4')
             profit_pct = overhead_profit_pct * Decimal('0.6')
 
-            # The selling price BEFORE discount is calculated from sub-items
-            selling_price_before_discount = planned_base
+            # Calculate item's proportional share of preliminaries
+            # This ensures discount is applied to the combined amount (items + preliminaries)
+            item_preliminary_share = Decimal('0')
+            if total_items_base_cost > 0 and preliminary_amount > 0:
+                # Item's proportion of total items base cost
+                item_proportion = planned_base / total_items_base_cost
+                # Item's share of preliminaries
+                item_preliminary_share = preliminary_amount * item_proportion
+
+            # The selling price BEFORE discount includes item base cost + preliminary share
+            selling_price_before_discount = planned_base + item_preliminary_share
 
             # USE BOQ-LEVEL DISCOUNT (from top-level boq_data)
             # If sub-item level discount exists, use that; otherwise use BOQ-level discount
@@ -1153,17 +1295,17 @@ def get_boq_planned_vs_actual(boq_id):
             item_discount_percentage = Decimal('0')
 
             # If no sub-item discount and BOQ has discount, calculate item's share
-            if item_discount_amount == 0 and boq_level_discount_amount > 0:
-                # Apply BOQ-level discount amount directly to this item
-                item_discount_amount = boq_level_discount_amount
+            if item_discount_amount == 0 and boq_level_discount_percentage > 0:
+                # Apply BOQ-level discount PERCENTAGE to this item's selling price (including preliminary share)
                 item_discount_percentage = boq_level_discount_percentage
+                item_discount_amount = selling_price_before_discount * (item_discount_percentage / Decimal('100'))
             elif item_discount_amount > 0 and selling_price_before_discount > 0:
                 # Calculate percentage from sub-item discount
-                item_discount_percentage = (item_discount_amount / selling_price_before_discount) * 100
+                item_discount_percentage = (item_discount_amount / selling_price_before_discount) * Decimal('100')
 
             # If still no discount amount but have percentage, calculate it
             if item_discount_amount == 0 and item_discount_percentage > 0 and selling_price_before_discount > 0:
-                item_discount_amount = selling_price_before_discount * (item_discount_percentage / 100)
+                item_discount_amount = selling_price_before_discount * (item_discount_percentage / Decimal('100'))
 
             # Calculate Client Amount (Grand Total) after discount
             # This is the actual amount client will pay
@@ -1280,11 +1422,14 @@ def get_boq_planned_vs_actual(boq_id):
                     "miscellaneous_percentage": float(misc_pct),
                     "overhead_amount": float(planned_overhead),
                     "overhead_percentage": float(overhead_pct),
-                    "profit_amount": float(combined_overhead_profit),
-                    "profit_percentage": float(overhead_profit_pct),
+                    "profit_amount": float(planned_profit),
+                    "profit_percentage": float(profit_pct),
                     "transport_amount": float(planned_transport),
                     "total": float(planned_total),
-                    "selling_price": float(selling_price)
+                    "selling_price": float(selling_price),
+                    "balance": float(planned_total - actual_total),  # Item-level balance
+                    "materials_balance": float(planned_materials_total - actual_materials_total),
+                    "labour_balance": float(planned_labour_total - actual_labour_total)
                 },
                 "actual": {
                     "materials_total": float(actual_materials_total),
@@ -1363,14 +1508,18 @@ def get_boq_planned_vs_actual(boq_id):
             comparison['items'].append(item_comparison)
 
         # Calculate overall summary
-        total_base_cost = sum(float(item['planned']['base_cost']) for item in comparison['items'])  # Base cost
-        total_client_amount_before_discount = sum(float(item['planned']['client_amount_before_discount']) for item in comparison['items'])
+        total_base_cost = sum(float(item['planned']['base_cost']) for item in comparison['items'])  # Base cost (items only, no preliminaries)
+        total_client_amount_before_discount = sum(float(item['planned']['client_amount_before_discount']) for item in comparison['items'])  # Includes preliminary shares
         total_planned = sum(float(item['planned']['total']) for item in comparison['items'])
         total_actual = sum(float(item['actual']['total']) for item in comparison['items'])
         total_discount_amount = sum(float(item['planned']['discount_amount']) for item in comparison['items'])
         total_client_amount_after_discount = sum(float(item['planned']['client_amount_after_discount']) for item in comparison['items'])
         total_profit_before_discount = sum(float(item['actual']['profit_before_discount']) for item in comparison['items'])
         total_after_discount_profit = sum(float(item['actual']['negotiable_margin']) for item in comparison['items'])
+
+        # Calculate items subtotal (base cost only, without preliminary shares)
+        # This is the sum of items' base costs before adding preliminaries
+        items_only_subtotal = Decimal(str(total_base_cost))
 
         # Add materials and labour totals for variance display
         total_planned_materials = sum(float(item['planned']['materials_total']) for item in comparison['items'])
@@ -1415,6 +1564,27 @@ def get_boq_planned_vs_actual(boq_id):
         # This is the REAL profit/loss - what client pays minus what we spent
         actual_project_profit = total_client_amount_after_discount - total_actual
 
+        # Calculate combined subtotal and discount
+        # NOTE: total_client_amount_before_discount already includes each item's preliminary share
+        # So we DON'T add preliminary_amount again (that would be double-counting)
+        combined_subtotal_before_discount = Decimal(str(total_client_amount_before_discount))
+
+        # Calculate discount on combined subtotal
+        combined_discount_amount = Decimal('0')
+        combined_discount_percentage = Decimal('0')
+
+        if boq_level_discount_percentage > 0:
+            combined_discount_percentage = boq_level_discount_percentage
+            combined_discount_amount = combined_subtotal_before_discount * (combined_discount_percentage / Decimal('100'))
+
+        # Calculate grand total after discount
+        combined_grand_total_after_discount = combined_subtotal_before_discount - combined_discount_amount
+
+        # Calculate profit impact on combined totals
+        combined_profit_before_discount = combined_subtotal_before_discount - Decimal(str(total_actual))
+        combined_profit_after_discount = combined_grand_total_after_discount - Decimal(str(total_actual))
+        combined_profit_reduction = combined_profit_before_discount - combined_profit_after_discount
+
         comparison['summary'] = {
             "base_cost": float(total_base_cost),  # Add base cost to summary
             "client_amount_before_discount": float(total_client_amount_before_discount),
@@ -1425,15 +1595,15 @@ def get_boq_planned_vs_actual(boq_id):
             "profit_before_discount": float(total_profit_before_discount),
             "negotiable_margin": float(actual_project_profit),  # Use the correctly calculated profit
             "discount_details": {
-                "has_discount": float(total_discount_amount) > 0,
-                "client_cost_before_discount": float(total_client_amount_before_discount),
-                "discount_percentage": float(total_discount_percentage),
-                "discount_amount": float(total_discount_amount),
-                "grand_total_after_discount": float(total_client_amount_after_discount),
+                "has_discount": float(combined_discount_amount) > 0,
+                "client_cost_before_discount": float(combined_subtotal_before_discount),
+                "discount_percentage": float(combined_discount_percentage),
+                "discount_amount": float(combined_discount_amount),
+                "grand_total_after_discount": float(combined_grand_total_after_discount),
                 "profit_impact": {
-                    "profit_before_discount": float(total_profit_before_discount),
-                    "profit_after_discount": float(actual_project_profit),  # Use the correctly calculated profit
-                    "profit_reduction": float(total_profit_before_discount - actual_project_profit)
+                    "profit_before_discount": float(combined_profit_before_discount),
+                    "profit_after_discount": float(combined_profit_after_discount),
+                    "profit_reduction": float(combined_profit_reduction)
                 }
             },
             "planned_total": float(total_planned),
@@ -1448,6 +1618,11 @@ def get_boq_planned_vs_actual(boq_id):
             "planned_labour_total": float(total_planned_labour),
             "actual_labour_total": float(total_actual_labour),
 
+            # Balance calculations (Planned - Actual)
+            "balance": float(total_planned - total_actual),
+            "materials_balance": float(total_planned_materials - total_actual_materials),
+            "labour_balance": float(total_planned_labour - total_actual_labour),
+
             "total_planned_miscellaneous": float(total_planned_miscellaneous),
             "total_actual_miscellaneous": float(total_actual_miscellaneous),
             "miscellaneous_variance": float(abs(total_actual_miscellaneous - total_planned_miscellaneous)),
@@ -1455,9 +1630,9 @@ def get_boq_planned_vs_actual(boq_id):
             "total_actual_overhead": float(total_actual_overhead),
             "overhead_variance": float(abs(total_actual_overhead - total_planned_overhead)),
             "total_planned_profit": float(total_planned_profit),
-            "total_negotiable_margin": float(actual_project_profit),  # Use simple formula: Client Amount - Actual Spending
-            "total_actual_profit": float(actual_project_profit),  # Add this for frontend compatibility
-            "profit_variance": float(abs(actual_project_profit - total_planned_profit)),
+            "total_negotiable_margin": float(actual_project_profit),  # Overall project profit: Client Amount - Actual Spending
+            "total_actual_profit": float(total_negotiable_margin),  # Sum of actual profit components from items
+            "profit_variance": float(abs(total_negotiable_margin - total_planned_profit)),
             "profit_status": "loss" if actual_project_profit < 0 else ("reduced" if actual_project_profit < total_planned_profit else "maintained" if actual_project_profit == total_planned_profit else "increased"),
             "total_planned_transport": float(total_planned_transport),
             "total_actual_transport": float(total_actual_transport),
@@ -1469,7 +1644,25 @@ def get_boq_planned_vs_actual(boq_id):
             "total_overhead_consumed": float(total_overhead_consumed),
             "total_profit_consumed": float(total_profit_consumed),
             "total_loss_beyond_buffers": float(total_loss_beyond_buffers),
-            "calculation_note": "Client Amount (Before Discount) is the base selling price. Discount = Client Amount × Discount %. Grand Total (Client Amount After Discount) = Client Amount - Discount. Actual Profit = Grand Total - Actual Total Spending."
+            "calculation_note": "Client Amount (Before Discount) is the base selling price. Discount = Client Amount × Discount %. Grand Total (Client Amount After Discount) = Client Amount - Discount. Actual Profit = Grand Total - Actual Total Spending.",
+
+            # Add preliminaries data
+            "preliminaries": {
+                "client_amount": float(preliminary_amount),
+                "quantity": preliminary_quantity,
+                "unit": preliminary_unit,
+                "rate": float(preliminary_rate) if preliminary_rate else 0,
+                "internal_cost": float(preliminary_internal_cost),
+                "misc_amount": float(preliminary_misc_amount),
+                "overhead_profit_amount": float(preliminary_overhead_profit_amount),
+                "transport_amount": float(preliminary_transport_amount),
+                "planned_profit": float(preliminary_planned_profit),
+                "items": preliminaries_data.get('items', []),
+                "notes": preliminaries_data.get('notes', '')
+            },
+            "items_subtotal": float(items_only_subtotal),
+            "combined_subtotal": float(items_only_subtotal) + float(preliminary_amount),
+            "grand_total_with_preliminaries": float(combined_grand_total_after_discount)
         }
 
         return jsonify(comparison), 200
@@ -1477,3 +1670,680 @@ def get_boq_planned_vs_actual(boq_id):
     except Exception as e:
         log.error(f"Error getting planned vs actual: {str(e)}")
         return jsonify({"error": f"Failed to get comparison: {str(e)}"}), 500
+
+
+def get_purchase_comparision(project_id):
+    """
+    Get material purchase comparison for a specific project.
+    Compares planned materials (from BOQ) vs actual purchased materials.
+    Returns data split into planned_materials and actual_materials sections.
+
+    Args:
+        project_id: The project ID to compare materials for
+
+    Returns:
+        JSON response with planned and actual materials data separated
+    """
+    try:
+        # Get project and its BOQ
+        project = Project.query.filter_by(project_id=project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Get BOQ for this project
+        boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found for this project"}), 404
+
+        boq_id = boq.boq_id
+
+        # Get BOQ details (planned data)
+        boq_detail = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq_detail or not boq_detail.boq_details:
+            return jsonify({"error": "BOQ details not found"}), 404
+
+        # Parse BOQ details
+        boq_data = json.loads(boq_detail.boq_details) if isinstance(boq_detail.boq_details, str) else boq_detail.boq_details
+
+        # Extract all planned materials from BOQ (same method as get_boq_planned_vs_actual)
+        # Materials can exist at two levels:
+        # 1. item.sub_items[].materials[] - sub-item level materials
+        # 2. item.materials[] - item level materials (from change requests)
+        planned_materials_list = []
+        total_planned_quantity = 0
+        total_planned_amount = Decimal('0')
+
+        for item in boq_data.get('items', []):
+            item_name = item.get('item_name', '')
+            master_item_id = item.get('master_item_id')
+
+            # 1. Extract materials from sub_items
+            for sub_item in item.get('sub_items', []):
+                sub_item_name = sub_item.get('sub_item_name', '')
+
+                for material in sub_item.get('materials', []):
+                    # Skip materials that are from change requests (they have is_from_change_request flag)
+                    # These will be counted as actual, not planned
+                    if material.get('is_from_change_request'):
+                        continue
+
+                    # Get quantity
+                    mat_qty = Decimal(str(material.get('quantity', 0) or 0))
+
+                    # Get rate/unit_price (try multiple field names for compatibility)
+                    mat_rate = Decimal(str(
+                        material.get('unit_price') or
+                        material.get('rate') or
+                        material.get('price') or
+                        0
+                    ))
+
+                    # Get amount or calculate from quantity * rate
+                    mat_amount = Decimal(str(material.get('amount', 0) or 0))
+                    if mat_amount == 0:
+                        mat_amount = Decimal(str(material.get('total_price', 0) or 0))
+                    if mat_amount == 0:
+                        # Calculate from quantity * rate
+                        mat_amount = mat_qty * mat_rate
+
+                    planned_materials_list.append({
+                        'item_name': item_name,
+                        'master_item_id': master_item_id,
+                        'sub_item_name': sub_item_name,
+                        'material_name': material.get('material_name', ''),
+                        'master_material_id': material.get('master_material_id'),
+                        'quantity': float(mat_qty),
+                        'unit': material.get('unit', ''),
+                        'rate': float(mat_rate),
+                        'amount': float(mat_amount)
+                    })
+                    total_planned_quantity += float(mat_qty)
+                    total_planned_amount += mat_amount
+
+            # 2. Extract materials directly from item level (if any)
+            # These are usually from change requests added to item level
+            for material in item.get('materials', []):
+                # Skip materials that are from change requests
+                if material.get('is_from_change_request'):
+                    continue
+
+                mat_qty = Decimal(str(material.get('quantity', 0) or 0))
+                mat_rate = Decimal(str(
+                    material.get('unit_price') or
+                    material.get('rate') or
+                    material.get('price') or
+                    0
+                ))
+                mat_amount = Decimal(str(material.get('amount', 0) or 0))
+                if mat_amount == 0:
+                    mat_amount = Decimal(str(material.get('total_price', 0) or 0))
+                if mat_amount == 0:
+                    mat_amount = mat_qty * mat_rate
+
+                sub_item_name = material.get('sub_item_name', '')
+
+                planned_materials_list.append({
+                    'item_name': item_name,
+                    'master_item_id': master_item_id,
+                    'sub_item_name': sub_item_name,
+                    'material_name': material.get('material_name', ''),
+                    'master_material_id': material.get('master_material_id'),
+                    'quantity': float(mat_qty),
+                    'unit': material.get('unit', ''),
+                    'rate': float(mat_rate),
+                    'amount': float(mat_amount)
+                })
+                total_planned_quantity += float(mat_qty)
+                total_planned_amount += mat_amount
+
+        # Get actual purchase data for this project using MaterialPurchaseTracking as mapping
+        purchase_records = MaterialPurchaseTracking.query.filter_by(
+            project_id=project_id,
+            is_deleted=False
+        ).all()
+
+        # Collect all change_request_ids to fetch actual amounts from ChangeRequest table
+        cr_ids = set()
+        for record in purchase_records:
+            if record.change_request_id:
+                cr_ids.add(record.change_request_id)
+
+        # Fetch all ChangeRequests for this project with status: vendor_approved, purchase_completed, pending_td_approval
+        # These are the only statuses that should show in actual materials
+        valid_statuses = ['vendor_approved', 'purchase_completed', 'pending_td_approval', 'split_to_sub_crs']
+
+        all_project_crs = ChangeRequest.query.filter(
+            ChangeRequest.project_id == project_id,
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status.in_(valid_statuses)
+        ).all()
+
+        for cr in all_project_crs:
+            cr_ids.add(cr.cr_id)
+
+        # Fetch all related change requests - only with valid statuses
+        # Actual material amount comes from ChangeRequest.materials_data JSON
+        change_requests_lookup = {}
+        if cr_ids:
+            change_requests = ChangeRequest.query.filter(
+                ChangeRequest.cr_id.in_(list(cr_ids)),
+                ChangeRequest.is_deleted == False,
+                ChangeRequest.status.in_(valid_statuses)
+            ).all()
+            for cr in change_requests:
+                # Build per-material list from sub_items_data JSON (PRIMARY source)
+                # sub_items_data format: [{master_material_id, material_name, quantity, unit_price, total_price, is_new, ...}]
+                materials_list = []  # List of all materials with original data
+
+                # Get item_name from ChangeRequest record (not from sub_items_data)
+                cr_item_name = cr.item_name or ''
+
+                # Parse material_vendor_selections for negotiated prices
+                # Format: {"material_name": {"negotiated_price": 44.0, ...}, ...}
+                vendor_selections = {}
+                if cr.material_vendor_selections:
+                    mvs = cr.material_vendor_selections
+                    if isinstance(mvs, str):
+                        mvs = json.loads(mvs)
+                    if isinstance(mvs, dict):
+                        vendor_selections = mvs
+
+                # Parse sub_items_data (PRIMARY source with unit_price, total_price)
+                if cr.sub_items_data:
+                    sub_items_data = cr.sub_items_data
+                    if isinstance(sub_items_data, str):
+                        sub_items_data = json.loads(sub_items_data)
+
+                    if isinstance(sub_items_data, list):
+                        for mat in sub_items_data:
+                            material_name = mat.get('material_name', '') or mat.get('sub_item_name', '')
+                            quantity = float(mat.get('quantity') if mat.get('quantity') is not None else 0)
+                            boq_unit_price = float(mat.get('unit_price') if mat.get('unit_price') is not None else 0)
+
+                            # Check for negotiated (vendor) price in material_vendor_selections
+                            # This is the actual price paid to vendor, which may differ from BOQ price
+                            negotiated_price = None
+                            if material_name and material_name in vendor_selections:
+                                negotiated_price = vendor_selections[material_name].get('negotiated_price')
+
+                            # Use negotiated price if available, otherwise fall back to BOQ price
+                            actual_unit_price = float(negotiated_price) if negotiated_price else boq_unit_price
+
+                            mat_info = {
+                                'master_material_id': mat.get('master_material_id'),
+                                'material_name': material_name,
+                                'amount': quantity * actual_unit_price,  # Calculate from qty * actual price
+                                'quantity': quantity,
+                                'unit_price': actual_unit_price,  # Use vendor price if available
+                                'is_new_material': mat.get('is_new', False),
+                                'item_name': cr_item_name,  # Use item_name from CR record
+                                'sub_item_name': mat.get('sub_item_name', ''),
+                                'master_item_id': mat.get('master_item_id') or cr.item_id,
+                                'unit': mat.get('unit', '')
+                            }
+                            materials_list.append(mat_info)
+
+                change_requests_lookup[cr.cr_id] = {
+                    'materials_total_cost': float(cr.materials_total_cost or 0),
+                    'materials_list': materials_list,  # List of all materials
+                    'status': cr.status,
+                    'material_vendor_selections': vendor_selections  # Include for PO children lookup
+                }
+
+        # Fetch VAT percent from LPOCustomization table for all cr_ids
+        # We use vat_percent to calculate VAT per material (not stored vat_amount which is total)
+        lpo_vat_percent_lookup = {}  # {cr_id: vat_percent}
+        lpo_vat_percent_by_po_child = {}  # {po_child_id: vat_percent} for split CRs
+        if cr_ids:
+            lpo_customizations = LPOCustomization.query.filter(
+                LPOCustomization.cr_id.in_(list(cr_ids))
+            ).all()
+            for lpo_custom in lpo_customizations:
+                if lpo_custom.po_child_id is None:
+                    # VAT for parent CR (applies when not split)
+                    lpo_vat_percent_lookup[lpo_custom.cr_id] = float(lpo_custom.vat_percent or 5.0)
+                else:
+                    # VAT for specific PO child (applies when CR is split)
+                    lpo_vat_percent_by_po_child[lpo_custom.po_child_id] = float(lpo_custom.vat_percent or 5.0)
+
+        # Fetch PO children for CRs with split_to_sub_crs status
+        from models.po_child import POChild
+        po_children_by_cr = {}  # {cr_id: [po_child, ...]}
+        split_cr_ids = [cr_id for cr_id, cr_data in change_requests_lookup.items() if cr_data.get('status') == 'split_to_sub_crs']
+        if split_cr_ids:
+            po_children = POChild.query.filter(
+                POChild.parent_cr_id.in_(split_cr_ids),
+                POChild.is_deleted == False,
+                POChild.status.in_(['vendor_approved', 'purchase_completed', 'pending_td_approval'])
+            ).all()
+            for po_child in po_children:
+                if po_child.parent_cr_id not in po_children_by_cr:
+                    po_children_by_cr[po_child.parent_cr_id] = []
+                po_children_by_cr[po_child.parent_cr_id].append(po_child)
+
+        # Build actual materials list from ChangeRequest.materials_data directly
+        # This ensures ALL materials from CRs are included (not just those in MaterialPurchaseTracking)
+        actual_materials_list = []
+        total_actual_quantity = 0
+        total_actual_amount = Decimal('0')
+
+        # Add all materials directly from ChangeRequest.materials_data (keep original data)
+        for cr_id, cr_data in change_requests_lookup.items():
+            cr_status = cr_data.get('status', '')
+
+            # For split CRs, get materials from PO children instead of parent CR
+            if cr_status == 'split_to_sub_crs' and cr_id in po_children_by_cr:
+                # Process PO children materials
+                for po_child in po_children_by_cr[cr_id]:
+                    po_child_id = po_child.id
+                    # Get VAT percent for this PO child (or fall back to parent CR's VAT)
+                    po_child_vat_percent = lpo_vat_percent_by_po_child.get(po_child_id, lpo_vat_percent_lookup.get(cr_id, 5.0))
+
+                    # Parse PO child materials_data
+                    materials_data = po_child.materials_data
+                    if isinstance(materials_data, str):
+                        materials_data = json.loads(materials_data)
+
+                    if isinstance(materials_data, list):
+                        # Get vendor selections from parent CR for negotiated prices
+                        parent_vendor_selections = cr_data.get('material_vendor_selections', {})
+
+                        # Calculate PO child total subtotal first (sum of all materials)
+                        po_child_subtotal = 0
+                        materials_with_prices = []
+                        for mat in materials_data:
+                            mat_qty = float(mat.get('quantity', 0))
+                            mat_name = mat.get('material_name', '') or mat.get('sub_item_name', '')
+                            neg_price = mat.get('negotiated_price')
+                            if not neg_price and mat_name in parent_vendor_selections:
+                                neg_price = parent_vendor_selections[mat_name].get('negotiated_price')
+                            mat_unit_price = float(neg_price) if neg_price else float(mat.get('unit_price', 0))
+                            mat_amount = mat_qty * mat_unit_price
+                            po_child_subtotal += mat_amount
+                            materials_with_prices.append((mat, mat_qty, mat_unit_price, mat_amount, mat_name))
+
+                        # Calculate total VAT for entire PO child (not per material)
+                        po_child_total_vat = round((po_child_subtotal * po_child_vat_percent) / 100, 2)
+                        num_po_child_materials = len(materials_with_prices)
+
+                        for idx, (mat, material_quantity, material_unit_price, material_amount, material_name) in enumerate(materials_with_prices):
+                            is_new_material = mat.get('is_new', False) or mat.get('is_new_material', False)
+
+                            # VAT: Show full PO child VAT only on LAST material (avoid splitting)
+                            is_last_material = (idx == num_po_child_materials - 1)
+                            material_vat_amount = po_child_total_vat if is_last_material else 0
+
+                            total_actual_quantity += material_quantity
+                            total_actual_amount += Decimal(str(material_amount))
+
+                            actual_materials_list.append({
+                                'material_name': material_name,
+                                'master_material_id': mat.get('master_material_id'),
+                                'item_name': po_child.item_name or cr_data.get('item_name', ''),
+                                'master_item_id': mat.get('master_item_id'),
+                                'sub_item_name': mat.get('sub_item_name', ''),
+                                'unit': mat.get('unit', ''),
+                                'quantity': material_quantity,
+                                'quantity_used': 0,
+                                'remaining_quantity': 0,
+                                'rate': material_unit_price,
+                                'amount': material_amount,
+                                'is_from_change_request': True,
+                                'is_new_material': is_new_material,
+                                'change_request_id': cr_id,
+                                'po_child_id': po_child_id,
+                                'cr_status': po_child.status,
+                                'vat_amount': material_vat_amount,  # VAT shown only on last material
+                                'cr_total_vat': po_child_total_vat,  # Total PO child VAT for reference
+                                'cr_subtotal': po_child_subtotal  # PO child subtotal for reference
+                            })
+                continue  # Skip parent CR materials for split CRs
+
+            # For non-split CRs, use parent CR materials
+            materials_list = cr_data.get('materials_list', [])
+            # Get VAT percent for this CR from LPOCustomization (default 5%)
+            cr_vat_percent = lpo_vat_percent_lookup.get(cr_id, 5.0)
+
+            # Calculate CR total subtotal first (sum of all materials)
+            cr_subtotal = sum(
+                float(mat.get('quantity', 0)) * float(mat.get('unit_price', 0))
+                for mat in materials_list
+            )
+            # Calculate total VAT for entire CR (not per material)
+            cr_total_vat = round((cr_subtotal * cr_vat_percent) / 100, 2)
+            num_materials = len(materials_list)
+
+            for idx, mat_info in enumerate(materials_list):
+                material_quantity = float(mat_info.get('quantity', 0))
+                material_unit_price = float(mat_info.get('unit_price', 0))
+                # Always calculate subtotal from quantity * unit_price (stored amount may include VAT or be stale)
+                material_amount = material_quantity * material_unit_price
+                is_new_material = mat_info.get('is_new_material', False)
+                material_name = mat_info.get('material_name', '')
+                master_material_id = mat_info.get('master_material_id')  # Original value (can be null)
+                item_name = mat_info.get('item_name', '')
+                sub_item_name = mat_info.get('sub_item_name', '')
+                master_item_id = mat_info.get('master_item_id')
+                unit = mat_info.get('unit', '')
+
+                # VAT: Show full CR VAT only on LAST material of this CR (avoid splitting)
+                # For single-material CRs, show full VAT
+                # For multi-material CRs, show VAT only on last material
+                is_last_material = (idx == num_materials - 1)
+                material_vat_amount = cr_total_vat if is_last_material else 0
+
+                total_actual_quantity += material_quantity
+                total_actual_amount += Decimal(str(material_amount))
+
+                actual_materials_list.append({
+                    'material_name': material_name,
+                    'master_material_id': master_material_id,  # Keep original (null for new materials)
+                    'item_name': item_name,
+                    'master_item_id': master_item_id,
+                    'sub_item_name': sub_item_name,
+                    'unit': unit,
+                    'quantity': material_quantity,
+                    'quantity_used': 0,
+                    'remaining_quantity': 0,
+                    'rate': material_unit_price,
+                    'amount': material_amount,
+                    'is_from_change_request': True,
+                    'is_new_material': is_new_material,
+                    'change_request_id': cr_id,
+                    'cr_status': cr_status,
+                    'vat_amount': material_vat_amount,  # VAT shown only on last material of CR
+                    'cr_total_vat': cr_total_vat,  # Total CR VAT for reference
+                    'cr_subtotal': cr_subtotal  # CR subtotal for reference
+                })
+
+        # Build lookups for actual materials (for comparison matching)
+        actual_by_id = {}  # {master_material_id: aggregated_data with purchases list}
+        actual_by_name_subitem = {}  # {material_name + sub_item_name: aggregated_data}
+
+        for mat in actual_materials_list:
+            mat_id = mat.get('master_material_id')
+            mat_name = mat.get('material_name', '')
+            sub_item_name = mat.get('sub_item_name', '')
+
+            # Individual purchase record with cr_id
+            purchase_record = {
+                'cr_id': mat.get('change_request_id'),
+                'cr_status': mat.get('cr_status', ''),
+                'quantity': mat.get('quantity', 0),
+                'rate': mat.get('rate', 0),
+                'amount': mat.get('amount', 0),
+                'is_new_material': mat.get('is_new_material', False),
+                'vat_amount': mat.get('vat_amount', 0),  # VAT (only on last material of CR)
+                'cr_total_vat': mat.get('cr_total_vat', 0),  # Total CR VAT for frontend grouping
+                'cr_subtotal': mat.get('cr_subtotal', 0)  # CR subtotal for frontend grouping
+            }
+
+            # Calculate amount with VAT for aggregation
+            # Use vat_amount which is only set on last material of each CR
+            amount_with_vat = mat.get('amount', 0) + mat.get('vat_amount', 0)
+
+            # Aggregate by master_material_id if available
+            if mat_id:
+                if mat_id not in actual_by_id:
+                    actual_by_id[mat_id] = {
+                        'quantity': 0,
+                        'unit_price': mat.get('rate', 0),
+                        'amount': 0,
+                        'material_name': mat_name,
+                        'is_new_material': mat.get('is_new_material', False),
+                        'purchases': []
+                    }
+                actual_by_id[mat_id]['quantity'] += mat.get('quantity', 0)
+                actual_by_id[mat_id]['amount'] += amount_with_vat  # Include VAT in actual amount
+                actual_by_id[mat_id]['purchases'].append(purchase_record)
+                if mat.get('rate', 0) > 0:
+                    actual_by_id[mat_id]['unit_price'] = mat.get('rate', 0)
+
+            # Aggregate by material_name + sub_item_name combination (unique key)
+            if mat_name:
+                # Create unique key using material_name + sub_item_name
+                name_key = f"{mat_name.lower().strip()}|{sub_item_name.lower().strip()}"
+                if name_key not in actual_by_name_subitem:
+                    actual_by_name_subitem[name_key] = {
+                        'quantity': 0,
+                        'unit_price': mat.get('rate', 0),
+                        'amount': 0,
+                        'material_name': mat_name,
+                        'sub_item_name': sub_item_name,
+                        'master_material_id': mat_id,
+                        'is_new_material': mat.get('is_new_material', False),
+                        'purchases': []
+                    }
+                actual_by_name_subitem[name_key]['quantity'] += mat.get('quantity', 0)
+                actual_by_name_subitem[name_key]['amount'] += amount_with_vat  # Include VAT in actual amount
+                actual_by_name_subitem[name_key]['purchases'].append(purchase_record)
+                if mat.get('rate', 0) > 0:
+                    actual_by_name_subitem[name_key]['unit_price'] = mat.get('rate', 0)
+
+        # Build comparison for materials that exist in both planned and actual
+        comparison_list = []
+        matched_material_ids = set()
+        matched_material_names = set()
+
+        for planned in planned_materials_list:
+            master_material_id = planned.get('master_material_id')
+            planned_name = planned.get('material_name', '')
+            planned_sub_item = planned.get('sub_item_name', '')
+            actual = {}
+            matched_key = None
+
+            # First try to match by master_material_id
+            if master_material_id and master_material_id in actual_by_id:
+                actual = actual_by_id[master_material_id]
+                matched_key = master_material_id
+
+            # If no match by ID, try matching by material_name + sub_item_name combination
+            if not actual and planned_name:
+                name_subitem_key = f"{planned_name.lower().strip()}|{planned_sub_item.lower().strip()}"
+                if name_subitem_key in actual_by_name_subitem:
+                    actual = actual_by_name_subitem[name_subitem_key]
+                    matched_key = name_subitem_key
+
+            if matched_key:
+                matched_material_ids.add(matched_key)
+                matched_material_names.add(f"{planned_name.lower().strip()}|{planned_sub_item.lower().strip()}")
+
+            planned_qty = planned['quantity']
+            planned_rate = planned['rate']
+            planned_amount = planned['amount']
+
+            actual_qty = float(actual.get('quantity', 0))
+            actual_unit_price = float(actual.get('unit_price', 0))
+            actual_spent = float(actual.get('amount', 0))
+
+            # Determine status
+            if actual_spent > planned_amount:
+                status = 'over_budget'
+            elif actual_spent < planned_amount and actual_spent > 0:
+                status = 'under_budget'
+            elif actual_spent == 0:
+                status = 'not_purchased'
+            else:
+                status = 'on_budget'
+
+            # Get individual purchases list (each purchase with cr_id)
+            purchases_list = actual.get('purchases', [])
+
+            comparison_list.append({
+                'material_name': planned['material_name'],
+                'master_material_id': master_material_id,
+                'item_name': planned['item_name'],
+                'sub_item_name': planned['sub_item_name'],
+                'unit': planned['unit'],
+                'planned_amount': planned_amount,
+                'actual_amount': actual_spent,
+                'purchases': purchases_list
+            })
+
+        # Find unplanned materials (purchased but not in BOQ)
+        unplanned_materials = []
+        for mat in actual_materials_list:
+            mat_id = mat.get('master_material_id')
+            mat_name = mat.get('material_name', '').lower().strip()
+
+            # Check if this material was matched (by ID or name+subitem)
+            is_matched = False
+            mat_sub_item = mat.get('sub_item_name', '')
+            name_subitem_key = f"{mat_name}|{mat_sub_item.lower().strip()}"
+
+            if mat_id and mat_id in matched_material_ids:
+                is_matched = True
+            elif name_subitem_key in matched_material_names:
+                is_matched = True
+
+            if not is_matched:
+                unplanned_materials.append({
+                    'material_name': mat['material_name'],
+                    'master_material_id': mat_id,
+                    'item_name': mat.get('item_name', ''),
+                    'sub_item_name': mat.get('sub_item_name', ''),
+                    'unit': mat.get('unit', ''),
+                    'planned_amount': 0,
+                    'actual_amount': float(mat.get('amount', 0)),
+                    'vat_amount': float(mat.get('vat_amount', 0)),
+                    'change_request_id': mat.get('change_request_id'),
+                    'cr_status': mat.get('cr_status', ''),
+                    'is_new_material': mat.get('is_new_material', True)
+                })
+
+        # Calculate summary totals
+        unplanned_total = sum(m['actual_amount'] for m in unplanned_materials)
+
+        # Group comparison by item_name
+        comparison_by_item = {}
+        for comp in comparison_list:
+            item_name = comp.get('item_name', '') or 'Other'
+            if item_name not in comparison_by_item:
+                comparison_by_item[item_name] = {
+                    'item_name': item_name,
+                    'materials': [],
+                    'summary': {
+                        'planned_amount': 0,
+                        'actual_amount': 0
+                    }
+                }
+            comparison_by_item[item_name]['materials'].append(comp)
+            comparison_by_item[item_name]['summary']['planned_amount'] += comp['planned_amount']
+            comparison_by_item[item_name]['summary']['actual_amount'] += comp['actual_amount']
+
+        # Convert to list
+        comparison_items_list = list(comparison_by_item.values())
+
+        # Group unplanned materials by item_name
+        unplanned_by_item = {}
+        for mat in unplanned_materials:
+            item_name = mat.get('item_name', '') or 'Other'
+            if item_name not in unplanned_by_item:
+                unplanned_by_item[item_name] = {
+                    'item_name': item_name,
+                    'materials': [],
+                    'summary': {
+                        'actual_amount': 0
+                    }
+                }
+            unplanned_by_item[item_name]['materials'].append(mat)
+            unplanned_by_item[item_name]['summary']['actual_amount'] += mat['actual_amount']
+
+        # Convert to list
+        unplanned_items_list = list(unplanned_by_item.values())
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "project_id": project_id,
+                "project_name": project.project_name,
+                "boq_id": boq_id,
+
+                # Comparison grouped by item
+                "comparison": {
+                    "items": comparison_items_list,
+                    "summary": {
+                        "total_items": len(comparison_items_list),
+                        "total_materials": len(comparison_list),
+                        "planned_total_amount": float(total_planned_amount),
+                        "actual_total_amount": float(total_actual_amount)
+                    }
+                },
+
+                # Unplanned materials grouped by item
+                "unplanned_materials": {
+                    "items": unplanned_items_list,
+                    "summary": {
+                        "total_items": len(unplanned_items_list),
+                        "total_materials": len(unplanned_materials),
+                        "actual_total_amount": unplanned_total
+                    }
+                },
+
+                # Overall summary
+                "overall_summary": {
+                    "planned_total_amount": float(total_planned_amount),
+                    "actual_total_amount": float(total_actual_amount),
+                    "unplanned_total_amount": unplanned_total
+                }
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error in get_purchase_comparision: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+def get_all_purchase_comparision_projects():
+    """
+    Get all projects that have at least one ChangeRequest with valid purchase status.
+    Valid statuses: vendor_approved, purchase_completed, pending_td_approval, split_to_sub_crs
+    """
+    try:
+        valid_statuses = ['vendor_approved', 'purchase_completed', 'pending_td_approval', 'split_to_sub_crs']
+
+        # Get distinct project_ids that have CRs with valid statuses
+        project_ids_with_purchases = db.session.query(ChangeRequest.project_id).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status.in_(valid_statuses)
+        ).distinct().all()
+
+        project_ids = [p[0] for p in project_ids_with_purchases]
+
+        if not project_ids:
+            return jsonify({
+                "success": True,
+                "data": [],
+                "count": 0
+            }), 200
+
+        # Get projects with their BOQ info
+        projects = Project.query.filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).all()
+
+        project_list = []
+        for project in projects:
+            # Get BOQ for this project
+            boq = BOQ.query.filter_by(
+                project_id=project.project_id,
+                is_deleted=False
+            ).first()
+
+            project_list.append({
+                'project_id': project.project_id,
+                'project_name': project.project_name,
+                'boq_id': boq.boq_id if boq else None,
+                'boq_status': boq.status if boq else None,
+                'end_date': project.end_date.isoformat() if project.end_date else None
+            })
+
+        return jsonify({
+            "success": True,
+            "data": project_list,
+            "count": len(project_list)
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error in get_all_purchase_boq: {str(e)}")
+        return jsonify({"error": str(e)}), 500

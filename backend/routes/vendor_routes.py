@@ -17,16 +17,16 @@ from controllers.auth_controller import jwt_required
 # Create blueprint with URL prefix
 vendor_routes = Blueprint('vendor_routes', __name__, url_prefix='/api/vendor')
 
-# Helper function - Vendor routes accessible by Buyer, TD (for approval), or Admin
+# Helper function - Vendor routes accessible by Buyer, TD (for approval), PM, or Admin
 def check_vendor_access():
     """Check if current user can access Vendor operations"""
     current_user = g.user
     original_role = current_user.get('role', '')
     user_role = original_role.lower().replace('_', '').replace(' ', '')
 
-    allowed_roles = ['buyer', 'technicaldirector', 'admin']
+    allowed_roles = ['buyer', 'technicaldirector', 'admin', 'productionmanager']
     if user_role not in allowed_roles:
-        return jsonify({"error": "Access denied. Buyer, TD, or Admin role required."}), 403
+        return jsonify({"error": "Access denied. Buyer, TD, PM, or Admin role required."}), 403
 
     return None
 

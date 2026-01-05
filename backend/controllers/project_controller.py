@@ -8,6 +8,7 @@ from sqlalchemy import or_, func
 from sqlalchemy.orm import selectinload, joinedload
 from models.role import Role
 from models.boq import *
+from models.pm_assign_ss import PMAssignSS
 from config.db import db
 from models.project import Project
 from models.user import User
@@ -140,12 +141,16 @@ def get_all_projects():
     - search: search term for project name, client, or location
     - status: filter by status
     - work_type: filter by work type
+    - has_se_assigned: if 'true', only return projects with at least one SE assigned
     """
     try:
         current_user = getattr(g, 'user', None)
         user_id = current_user.get('user_id') if current_user else None
         user_role = current_user.get('role', '').lower() if current_user else ''
         user_name = current_user.get('full_name') or current_user.get('username') or 'Unknown' if current_user else 'Unknown'
+
+        log.info(f"get_all_projects - user_id: {user_id}, user_role: '{user_role}'")
+
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 10, type=int), 100)
@@ -153,12 +158,18 @@ def get_all_projects():
         status = request.args.get('status', '')
         work_type = request.args.get('work_type', '')
         project_code = request.args.get('project_code', '')
+        has_se_assigned = request.args.get('has_se_assigned', '').lower() == 'true'
 
         # Build query - Admin sees all projects, Estimators see only their assigned projects
         query = Project.query.filter(Project.is_deleted == False)
 
         # Apply role-based filtering
-        if user_role != 'admin':
+        # Admin, Production Manager, and Inventory roles can see all projects
+        roles_with_full_access = ['admin', 'productionmanager', 'inventory']
+        # Normalize role for comparison (lowercase, remove all spaces/underscores)
+        normalized_role = user_role.lower().replace('_', '').replace(' ', '').replace('-', '')
+        log.info(f"get_all_projects - normalized_role: '{normalized_role}', has_access: {normalized_role in roles_with_full_access}")
+        if normalized_role not in roles_with_full_access:
             # Non-admin users only see projects assigned to them OR projects with no estimator
             query = query.filter(
                 or_(
@@ -189,13 +200,84 @@ def get_all_projects():
         if project_code:
             query = query.filter(Project.project_code.ilike(f"%{project_code}%"))
 
+        # Filter to only projects with Site Engineers assigned (via pm_assign_ss table)
+        # and exclude completed projects (pm_confirmed_completion = False)
+        if has_se_assigned:
+            # Get project IDs that have at least one SE assigned AND not completed
+            projects_with_active_se = db.session.query(PMAssignSS.project_id).filter(
+                PMAssignSS.is_deleted == False,
+                PMAssignSS.assigned_to_se_id != None,
+                PMAssignSS.pm_confirmed_completion == False  # Exclude completed assignments
+            ).distinct().subquery()
+            query = query.filter(Project.project_id.in_(projects_with_active_se))
+
         # Order by most recent first
         query = query.order_by(Project.created_at.desc())
 
         # Paginate
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
 
-        projects = [project.to_dict() for project in paginated.items]
+        # Helper function to get user details by IDs
+        def get_user_details(user_ids):
+            if not user_ids:
+                return []
+            ids_list = user_ids if isinstance(user_ids, list) else [user_ids]
+            users = []
+            for uid in ids_list:
+                user = User.query.get(uid)
+                if user:
+                    users.append({
+                        'user_id': user.user_id,
+                        'full_name': user.full_name,
+                        'email': user.email
+                    })
+            return users
+
+        # Helper function to get Site Engineers from PM assignments (pm_assign_ss table)
+        def get_site_engineers_from_pm_assignments(project_id, existing_se_ids):
+            """Get unique Site Engineers who have been assigned items for this project"""
+            try:
+                # Get distinct site engineers assigned to this project via pm_assign_ss
+                assignments = PMAssignSS.query.filter(
+                    PMAssignSS.project_id == project_id,
+                    PMAssignSS.is_deleted == False,
+                    PMAssignSS.assigned_to_se_id != None
+                ).all()
+
+                site_engineers = []
+                seen_ids = set(existing_se_ids)  # Avoid duplicates with formally assigned SE
+
+                for assignment in assignments:
+                    if assignment.assigned_to_se_id not in seen_ids:
+                        user = User.query.get(assignment.assigned_to_se_id)
+                        if user:
+                            site_engineers.append({
+                                'user_id': user.user_id,
+                                'full_name': user.full_name,
+                                'email': user.email
+                            })
+                            seen_ids.add(assignment.assigned_to_se_id)
+
+                return site_engineers
+            except Exception:
+                return []
+
+        # Enrich projects with manager names
+        projects = []
+        for project in paginated.items:
+            project_data = project.to_dict()
+            # Add project managers details
+            project_data['project_managers'] = get_user_details(project.user_id)
+            # Add MEP supervisors details
+            project_data['mep_supervisors'] = get_user_details(project.mep_supervisor_id)
+            # Add site supervisors/engineers details (from project assignment)
+            site_supervisors = get_user_details(project.site_supervisor_id)
+            existing_se_ids = [se['user_id'] for se in site_supervisors]
+            # Also add Site Engineers from PM assignments (pm_assign_ss table)
+            pm_assigned_site_engineers = get_site_engineers_from_pm_assignments(project.project_id, existing_se_ids)
+            site_supervisors.extend(pm_assigned_site_engineers)
+            project_data['site_supervisors'] = site_supervisors
+            projects.append(project_data)
 
         return jsonify({
             "projects": projects,

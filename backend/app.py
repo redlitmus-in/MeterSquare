@@ -42,7 +42,7 @@ def create_app():
         ]
         CORS(app,
              origins=allowed_origins,
-             allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Viewing-As-Role", "X-Viewing-As-Role-Id"],
+             allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Viewing-As-Role", "X-Viewing-As-Role-Id", "X-Viewing-As-User-Id", "X-User-Name", "X-User-Id", "Cache-Control", "Pragma", "X-Skip-Cache", "Expires"],
              methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
              supports_credentials=True,
              max_age=3600)  # ✅ NEW: Cache preflight requests for 1 hour
@@ -51,7 +51,7 @@ def create_app():
         # ⚠️ IMPORTANT: Never use origins="*" with supports_credentials=True in production!
         CORS(app,
              origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:3001", "http://127.0.0.1:5173"],
-             allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Viewing-As-Role", "X-Viewing-As-Role-Id"],
+             allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Viewing-As-Role", "X-Viewing-As-Role-Id", "X-Viewing-As-User-Id", "X-User-Name", "X-User-Id", "Cache-Control", "Pragma", "X-Skip-Cache", "Expires"],
              methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
              supports_credentials=True,
              max_age=3600)  # ✅ Cache preflight requests for 1 hour

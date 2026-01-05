@@ -120,6 +120,13 @@ def get_all_sitesupervisor_boqs():
 
         log.info(f"=== Found {len(item_assignments)} item assignments for SE {effective_user_id if is_admin_viewing else user_id} ===")
 
+        # DEBUG: Log all SE assignments to help troubleshoot
+        if len(item_assignments) == 0:
+            all_assignments = PMAssignSS.query.filter(PMAssignSS.is_deleted == False).limit(20).all()
+            log.info(f"=== DEBUG: No assignments found for user_id={user_id}. Sample of all assignments: ===")
+            for a in all_assignments:
+                log.info(f"    Assignment {a.pm_assign_id}: project={a.project_id}, boq={a.boq_id}, assigned_to_se_id={a.assigned_to_se_id}, assigned_by_pm_id={a.assigned_by_pm_id}")
+
         # Get unique project IDs from assignments
         project_ids_from_assignments = list(set([a.project_id for a in item_assignments if a.project_id]))
 
@@ -169,10 +176,13 @@ def get_all_sitesupervisor_boqs():
 
         # ✅ PERFORMANCE OPTIMIZATION: Batch load all related data before the loop
         # Collect all BOQ IDs from all projects for batch queries
+        # FIX: Include BOQs with item assignments regardless of email_sent status
+        boq_ids_with_assignments = set([a.boq_id for a in item_assignments if a.boq_id])
         all_boq_ids = []
         all_project_ids = [p.project_id for p in projects]
         for project in projects:
-            boqs = [boq for boq in project.boqs if not boq.is_deleted and boq.email_sent] if hasattr(project, 'boqs') and project.boqs else []
+            # Include BOQs that are either email_sent OR have item assignments to this SE
+            boqs = [boq for boq in project.boqs if not boq.is_deleted and (boq.email_sent or boq.boq_id in boq_ids_with_assignments)] if hasattr(project, 'boqs') and project.boqs else []
             all_boq_ids.extend([boq.boq_id for boq in boqs])
 
         # Batch load BOQ History (was: N queries per project, now: 1 query total)
@@ -218,7 +228,8 @@ def get_all_sitesupervisor_boqs():
         projects_list = []
         for project in projects:
             # Use pre-loaded relationship instead of querying
-            boqs = [boq for boq in project.boqs if not boq.is_deleted and boq.email_sent] if hasattr(project, 'boqs') and project.boqs else []
+            # FIX: Include BOQs that are either email_sent OR have item assignments to this SE
+            boqs = [boq for boq in project.boqs if not boq.is_deleted and (boq.email_sent or boq.boq_id in boq_ids_with_assignments)] if hasattr(project, 'boqs') and project.boqs else []
 
             # Collect BOQ IDs for this project
             boq_ids = [boq.boq_id for boq in boqs]
@@ -260,6 +271,10 @@ def get_all_sitesupervisor_boqs():
             assigned_items_details = []
             boqs_with_items = []
 
+            # FIX: Define target_se_id at project loop level for consistency
+            # Use effective_user_id when admin is viewing as SE, otherwise use user_id
+            target_se_id = effective_user_id if is_admin_viewing and effective_user_id else user_id
+
             if boq_ids:
                 # Get ALL assignments for these BOQs from pre-loaded data (NO QUERY)
                 boq_assignments_list = []
@@ -276,16 +291,27 @@ def get_all_sitesupervisor_boqs():
 
                         # Get assignments from pre-loaded data (NO QUERY)
                         assignments = [pa for pa in all_pm_assign_ss.get(boq_id, [])
-                                      if pa.assigned_to_se_id == user_id]  # ✅ Filter from pre-loaded data
+                                      if pa.assigned_to_se_id == target_se_id]  # Filter from pre-loaded data
 
                         # Collect items assigned to this SE for this BOQ
                         boq_assigned_items = []
 
                         # Get all assigned item indices for this SE from pm_assign_ss
+                        # Build a map of index -> assignment for PM info lookup
                         assigned_indices = set()
+                        index_to_assignment = {}
                         for assignment in assignments:
                             if assignment.item_indices:
-                                assigned_indices.update(assignment.item_indices)
+                                for idx in assignment.item_indices:
+                                    assigned_indices.add(idx)
+                                    index_to_assignment[idx] = assignment
+
+                        # Pre-load PM names for assignments
+                        pm_ids = set(a.assigned_by_pm_id for a in assignments if a.assigned_by_pm_id)
+                        pm_names_map = {}
+                        if pm_ids:
+                            pm_users = User.query.filter(User.user_id.in_(pm_ids)).all()
+                            pm_names_map = {u.user_id: u.full_name for u in pm_users}
 
                         # Process assigned items
                         for idx in assigned_indices:
@@ -293,12 +319,18 @@ def get_all_sitesupervisor_boqs():
                                 item = items[idx]
                                 items_assigned_to_me += 1
 
+                                # Get PM info from the assignment record, not the item
+                                assignment_for_idx = index_to_assignment.get(idx)
+                                pm_user_id = assignment_for_idx.assigned_by_pm_id if assignment_for_idx else None
+                                pm_name = pm_names_map.get(pm_user_id, 'Unknown') if pm_user_id else 'Unknown'
+                                assignment_date = assignment_for_idx.assignment_date if assignment_for_idx else None
+                                assignment_status = assignment_for_idx.assignment_status if assignment_for_idx else 'assigned'
+
                                 # Group by PM
-                                pm_name = item.get('assigned_by_pm_name', 'Unknown')
                                 if pm_name not in items_by_pm:
                                     items_by_pm[pm_name] = {
                                         "pm_name": pm_name,
-                                        "pm_user_id": item.get('assigned_by_pm_user_id'),
+                                        "pm_user_id": pm_user_id,
                                         "items_count": 0
                                     }
                                 items_by_pm[pm_name]["items_count"] += 1
@@ -334,12 +366,15 @@ def get_all_sitesupervisor_boqs():
                                                         for field in price_fields + ['wage_per_day', 'total_wage']:
                                                             labour.pop(field, None)
 
-                                # Add assignment metadata
+                                # Add assignment metadata from pm_assign_ss record
                                 item_detail["item_index"] = idx
                                 item_detail["assigned_by_pm_name"] = pm_name
-                                item_detail["assigned_by_pm_user_id"] = item.get('assigned_by_pm_user_id')
-                                item_detail["assignment_date"] = item.get('assignment_date')
-                                item_detail["assignment_status"] = item.get('assignment_status', 'assigned')
+                                item_detail["assigned_by_pm_user_id"] = pm_user_id
+                                item_detail["assigned_to_se_name"] = current_user.get('full_name', 'Site Engineer')
+                                item_detail["assigned_to_se_user_id"] = target_se_id
+                                item_detail["assigned_by_role"] = 'projectManager'
+                                item_detail["assignment_date"] = assignment_date.isoformat() if assignment_date else None
+                                item_detail["assignment_status"] = assignment_status or 'assigned'
 
                                 assigned_items_details.append(item_detail)
                                 boq_assigned_items.append(item_detail)
@@ -376,16 +411,17 @@ def get_all_sitesupervisor_boqs():
 
             # Check if all SE's work has been PM-confirmed using pre-loaded data (NO QUERY)
             # Filter from pre-loaded data instead of querying
+            # FIX: Use target_se_id for consistency with admin-viewing-as-SE feature
             project_assignments = all_pm_assign_ss_by_project.get(project.project_id, [])
             se_assignments = [a for a in project_assignments
-                            if a.assigned_to_se_id == user_id and a.se_completion_requested]  # ✅ Uses pre-loaded dict
+                            if a.assigned_to_se_id == target_se_id and a.se_completion_requested]
 
             # SE's work is confirmed if ALL their requested assignments are PM-confirmed
             all_my_work_confirmed = all(a.pm_confirmed_completion for a in se_assignments) if se_assignments else False
 
             # Check if THIS SE has requested completion using pre-loaded data (NO QUERY)
             # Filter from pre-loaded data instead of querying
-            my_se_assignments = [a for a in project_assignments if a.assigned_to_se_id == user_id]  # ✅ Uses pre-loaded dict
+            my_se_assignments = [a for a in project_assignments if a.assigned_to_se_id == target_se_id]
             my_completion_requested = any(a.se_completion_requested for a in my_se_assignments)
 
             projects_list.append({
@@ -739,6 +775,8 @@ def get_sitesupervisor_dashboard():
 
 def get_all_sitesupervisor():
     try:
+        from models.pm_assign_ss import PMAssignSS
+
         role = Role.query.filter_by(role='siteEngineer').first()
         if not role:
             return jsonify({"error": "Role 'siteEngineer' not found"}), 404
@@ -756,6 +794,42 @@ def get_all_sitesupervisor():
             Project.site_supervisor_id.in_(supervisor_ids),
             Project.is_deleted == False
         ).all()
+
+        # ✅ Query ongoing item assignments for all SEs in ONE query
+        # Ongoing items = assigned but NOT yet confirmed completed by PM
+        # Fetch item_indices count and item_details in a single query
+        ongoing_assignments_query = db.session.query(
+            PMAssignSS.assigned_to_se_id,
+            PMAssignSS.item_indices,
+            PMAssignSS.item_details
+        ).filter(
+            PMAssignSS.assigned_to_se_id.in_(supervisor_ids),
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.pm_confirmed_completion == False  # Not yet completed
+        ).all()
+
+        # Calculate ongoing items count and amount per SE in memory
+        ongoing_items_by_se = {}
+        ongoing_amount_by_se = {}
+        for row in ongoing_assignments_query:
+            se_id = row.assigned_to_se_id
+            if se_id not in ongoing_items_by_se:
+                ongoing_items_by_se[se_id] = 0
+                ongoing_amount_by_se[se_id] = 0
+
+            # Count items from item_indices array
+            if row.item_indices and isinstance(row.item_indices, list):
+                ongoing_items_by_se[se_id] += len(row.item_indices)
+
+            # Sum amounts from item_details JSONB with type safety
+            if row.item_details and isinstance(row.item_details, list):
+                for item in row.item_details:
+                    if isinstance(item, dict):
+                        amount = item.get('amount') or item.get('totalAmount') or 0
+                        try:
+                            ongoing_amount_by_se[se_id] += float(amount)
+                        except (ValueError, TypeError):
+                            pass  # Skip invalid amount values
 
         # Group projects by supervisor_id in memory
         projects_by_supervisor = {}
@@ -792,6 +866,10 @@ def get_all_sitesupervisor():
             # Count only ongoing projects for assignment limit
             ongoing_count = len(ongoing_projects)
 
+            # Get ongoing items count and amount for this SE
+            se_ongoing_items = ongoing_items_by_se.get(sitesupervisor.user_id, 0)
+            se_ongoing_amount = ongoing_amount_by_se.get(sitesupervisor.user_id, 0)
+
             if all_projects and len(all_projects) > 0:
                 # Add single entry for this sitesupervisor with all their projects
                 assigned_list.append({
@@ -803,7 +881,9 @@ def get_all_sitesupervisor():
                     "projects": all_project_list,
                     "project_count": ongoing_count,  # Only count ongoing projects
                     "total_projects": len(all_projects),
-                    "completed_projects_count": len(completed_projects)
+                    "completed_projects_count": len(completed_projects),
+                    "ongoing_items_count": se_ongoing_items,  # Count of assigned items not yet completed
+                    "ongoing_items_amount": se_ongoing_amount  # Total amount of ongoing items
                 })
             else:
                 # sitesupervisor without project assignment
@@ -816,7 +896,9 @@ def get_all_sitesupervisor():
                     "projects": [],
                     "project_count": 0,
                     "total_projects": 0,
-                    "completed_projects_count": 0
+                    "completed_projects_count": 0,
+                    "ongoing_items_count": se_ongoing_items,  # May have items from other projects
+                    "ongoing_items_amount": se_ongoing_amount
                 })
 
         return jsonify({
@@ -1271,6 +1353,152 @@ def assign_projects_sitesupervisor():
             "error_type": type(e).__name__
         }), 500
 
+def validate_completion_request(project_id):
+    """
+    Validate if SE can request project completion WITHOUT actually submitting.
+    This is a read-only check for the frontend to show blocking items.
+    """
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+
+        # Get the project - check both traditional and item-level assignments
+        project = Project.query.filter_by(
+            project_id=project_id,
+            site_supervisor_id=user_id,
+            is_deleted=False
+        ).first()
+
+        # If not found via traditional assignment, check for item-level assignment
+        if not project:
+            from models.pm_assign_ss import PMAssignSS
+
+            item_assignment = PMAssignSS.query.filter_by(
+                project_id=project_id,
+                assigned_to_se_id=user_id,
+                is_deleted=False
+            ).first()
+
+            if item_assignment:
+                project = Project.query.filter_by(
+                    project_id=project_id,
+                    is_deleted=False
+                ).first()
+
+        if not project:
+            return jsonify({
+                "success": False,
+                "error": "Project not found or not assigned to you"
+            }), 404
+
+        # Check if already completed
+        if project.status and project.status.lower() == 'completed':
+            return jsonify({
+                "success": False,
+                "error": "Project is already completed"
+            }), 400
+
+        # Get BOQ
+        boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({
+                "success": False,
+                "error": "BOQ not found for this project"
+            }), 404
+
+        # Check for incomplete CRs (only this SE's)
+        from models.change_request import ChangeRequest
+        from models.returnable_assets import AssetReturnRequest
+        from models.pm_assign_ss import PMAssignSS
+        from config.change_request_config import CR_CONFIG
+
+        incomplete_crs = ChangeRequest.query.filter(
+            ChangeRequest.project_id == project_id,
+            ChangeRequest.requested_by_user_id == user_id,
+            ChangeRequest.is_deleted == False,
+            ~ChangeRequest.status.in_(CR_CONFIG.COMPLETION_STATUSES)
+        ).all()
+
+        blocking_purchases = [{
+            "cr_id": cr.cr_id,
+            "item_name": cr.item_name or f"Item {cr.item_id}",
+            "status": cr.status,
+            "requested_by": cr.requested_by_name,
+            "reason": "Purchase not completed"
+        } for cr in incomplete_crs]
+
+        # Check for incomplete asset returns (only this SE's)
+        from sqlalchemy.orm import joinedload
+        incomplete_returns = AssetReturnRequest.query.options(
+            joinedload(AssetReturnRequest.category)
+        ).filter(
+            AssetReturnRequest.project_id == project_id,
+            AssetReturnRequest.requested_by_id == user_id,
+            AssetReturnRequest.status.in_(CR_CONFIG.ASSET_RETURN_INCOMPLETE_STATUSES)
+        ).all()
+
+        blocking_returns = [{
+            "request_id": req.request_id,
+            "category": req.category.category_name if req.category else "Asset",
+            "quantity": req.quantity,
+            "status": req.status
+        } for req in incomplete_returns]
+
+        # Check if SE has any assignments
+        se_assignments = PMAssignSS.query.filter(
+            PMAssignSS.project_id == project_id,
+            PMAssignSS.assigned_to_se_id == user_id,
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.assigned_by_pm_id.isnot(None)
+        ).all()
+
+        is_project_level_se = project.site_supervisor_id == user_id
+
+        if not se_assignments:
+            if is_project_level_se:
+                return jsonify({
+                    "success": False,
+                    "can_proceed": False,
+                    "error": "No items have been assigned to you for this project yet",
+                    "details": "The Project Manager needs to assign specific BOQ items to you before you can request completion."
+                }), 400
+            else:
+                return jsonify({
+                    "success": False,
+                    "can_proceed": False,
+                    "error": "No items have been assigned to you for this project yet"
+                }), 400
+
+        # Return validation result
+        if blocking_purchases or blocking_returns:
+            return jsonify({
+                "success": True,
+                "can_proceed": False,
+                "message": "Please complete all purchases and asset returns before requesting project completion",
+                "incomplete_purchases_count": len(blocking_purchases),
+                "incomplete_returns_count": len(blocking_returns),
+                "blocking_items": {
+                    "purchases": blocking_purchases,
+                    "returns": blocking_returns
+                }
+            }), 200
+
+        # All clear - can proceed
+        return jsonify({
+            "success": True,
+            "can_proceed": True,
+            "message": "Ready to request completion",
+            "project_name": project.project_name
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error validating completion request: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            "success": False,
+            "error": f"Failed to validate: {str(e)}"
+        }), 500
+
+
 def request_project_completion(project_id):
     """Site Engineer requests project completion - sends notification to PM"""
     try:
@@ -1314,16 +1542,93 @@ def request_project_completion(project_id):
                 "error": "Project is already completed"
             }), 400
 
-        # Get BOQ and BOQ history
+        # Get BOQ
         boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
-        boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
-        boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).first()
-
         if not boq:
             return jsonify({
                 "error": "BOQ not found for this project"
             }), 404
 
+        # ============ VALIDATION: Check Incomplete Purchases & Returns ============
+        from models.change_request import ChangeRequest
+        from models.returnable_assets import AssetReturnRequest
+        from models.pm_assign_ss import PMAssignSS
+        from config.change_request_config import CR_CONFIG
+
+        # Get SE's assigned items
+        se_assignments = PMAssignSS.query.filter_by(
+            project_id=project_id,
+            assigned_to_se_id=user_id,
+            is_deleted=False
+        ).all()
+
+        # Extract item indices assigned to this SE
+        se_item_indices = set()
+        se_boq_ids = set()
+        for assignment in se_assignments:
+            if assignment.boq_id:
+                se_boq_ids.add(assignment.boq_id)
+            if assignment.item_indices:
+                se_item_indices.update(assignment.item_indices)
+
+        # Get incomplete change requests
+        # Use centralized completion statuses from config
+        # Only check CRs created by THIS SE (not other SEs)
+        incomplete_crs = ChangeRequest.query.filter(
+            ChangeRequest.project_id == project_id,
+            ChangeRequest.requested_by_user_id == user_id,  # Filter by current SE
+            ChangeRequest.is_deleted == False,
+            ~ChangeRequest.status.in_(CR_CONFIG.COMPLETION_STATUSES)
+        ).all()
+
+        log.info(f"Validation for SE {user_id} on project {project_id}: Found {len(incomplete_crs)} incomplete CRs for this SE")
+
+        # Block only THIS SE's incomplete purchases
+        blocking_purchases = []
+        for cr in incomplete_crs:
+            blocking_purchases.append({
+                "cr_id": cr.cr_id,
+                "item_name": cr.item_name or f"Item {cr.item_id}",
+                "status": cr.status,
+                "requested_by": cr.requested_by_name,
+                "reason": "Purchase not completed"
+            })
+
+        # Get incomplete asset returns (only this SE's returns) with eager loading
+        from sqlalchemy.orm import joinedload
+        incomplete_returns = AssetReturnRequest.query.options(
+            joinedload(AssetReturnRequest.category)
+        ).filter(
+            AssetReturnRequest.project_id == project_id,
+            AssetReturnRequest.requested_by_id == user_id,
+            AssetReturnRequest.status.in_(CR_CONFIG.ASSET_RETURN_INCOMPLETE_STATUSES)
+        ).all()
+
+        blocking_returns = [{
+            "request_id": req.request_id,
+            "category": req.category.category_name if req.category else "Asset",
+            "quantity": req.quantity,
+            "status": req.status
+        } for req in incomplete_returns]
+
+        # Block if incomplete items exist
+        if blocking_purchases or blocking_returns:
+            log.warning(f"SE {user_id} completion blocked: {len(blocking_purchases)} purchases, {len(blocking_returns)} returns incomplete")
+
+            return jsonify({
+                "success": False,
+                "error": "Cannot request completion - incomplete purchases or returns exist",
+                "message": f"Please complete all purchases and asset returns before requesting project completion",
+                "incomplete_purchases_count": len(blocking_purchases),
+                "incomplete_returns_count": len(blocking_returns),
+                "blocking_items": {
+                    "purchases": blocking_purchases,
+                    "returns": blocking_returns
+                }
+            }), 400
+        # ============ END VALIDATION ============
+
+        # Get latest BOQ history
         boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).first()
 
         # Get Project Manager details (user_id is now JSONB array)
@@ -1401,14 +1706,35 @@ def request_project_completion(project_id):
         from models.pm_assign_ss import PMAssignSS
 
         # Find all assignments for this SE in this project
-        se_assignments = PMAssignSS.query.filter_by(
-            project_id=project_id,
-            assigned_to_se_id=user_id,
-            is_deleted=False
+        # Only include records with valid assigned_by_pm_id (these are the ones PM can confirm)
+        se_assignments = PMAssignSS.query.filter(
+            PMAssignSS.project_id == project_id,
+            PMAssignSS.assigned_to_se_id == user_id,
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.assigned_by_pm_id.isnot(None)
         ).all()
 
+        # Check if SE is assigned at project level but has no item assignments
+        is_project_level_se = project.site_supervisor_id == user_id
+
+        if not se_assignments:
+            if is_project_level_se:
+                # SE is assigned to project but no specific items assigned yet
+                return jsonify({
+                    "error": "No items have been assigned to you for this project yet",
+                    "details": "The Project Manager needs to assign specific BOQ items to you before you can request completion. Please contact your PM.",
+                    "assignment_type": "project_level_only"
+                }), 400
+            else:
+                return jsonify({
+                    "error": "No items have been assigned to you for this project yet"
+                }), 400
+
         # Mark all SE assignments as completion requested
+        log.info(f"SE {user_id} requesting completion for project {project_id}. Found {len(se_assignments)} assignments to update.")
         for assignment in se_assignments:
+            log.info(f"  - Updating assignment {assignment.pm_assign_id}: PM {assignment.assigned_by_pm_id} -> SE {assignment.assigned_to_se_id}, "
+                    f"was se_completion_requested={assignment.se_completion_requested}, setting to True")
             assignment.se_completion_requested = True
             assignment.se_completion_request_date = datetime.utcnow()
             assignment.last_modified_by = se_name
@@ -1443,6 +1769,16 @@ def request_project_completion(project_id):
         # boq_history.boq_status = "completed"  # REMOVED - premature completion
 
         db.session.commit()
+
+        # Verify the update was successful
+        verification = PMAssignSS.query.filter(
+            PMAssignSS.project_id == project_id,
+            PMAssignSS.assigned_to_se_id == user_id,
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.assigned_by_pm_id.isnot(None)
+        ).all()
+        for v in verification:
+            log.info(f"  VERIFICATION: Assignment {v.pm_assign_id} - se_completion_requested = {v.se_completion_requested}")
 
         # Send notification to PM about completion request
         try:
