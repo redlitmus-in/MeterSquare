@@ -422,181 +422,326 @@ export default function PurchaseComparison() {
       const autoTable = (await import('jspdf-autotable')).default;
 
       const doc = new jsPDF('landscape', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 14;
+      const midPoint = pageWidth / 2;
+      const leftColWidth = midPoint - margin - 5;
+      const rightColWidth = pageWidth - midPoint - margin - 5;
+
       const projectName = selectedProject.project_name || selectedProject.project?.name || 'N/A';
       const totalPlanned = groupedByItem.reduce((sum, group) => sum + group.totals.planned_amount, 0);
       const totalActual = groupedByItem.reduce((sum, group) => sum + group.totals.actual_amount, 0);
       const totalBalance = totalPlanned - totalActual;
 
-      // Header
-      doc.setFontSize(18);
-      doc.setTextColor(34, 139, 34); // Green
-      doc.text('Purchase Comparison Report', 14, 15);
+      // ============ Corporate Header (compact style matching second image) ============
+      // Load logo image - use hosted URL (same as BOQ PDF exports)
+      const logoUrl = 'https://i.postimg.cc/q7x6zrYt/logo.png';
+      let logoLoaded = false;
 
-      doc.setFontSize(12);
-      doc.setTextColor(60);
-      doc.text(`Project: ${projectName}`, 14, 23);
-      doc.text(`Generated: ${new Date().toLocaleString('en-GB')}`, 14, 30);
-
-      // Summary Box
-      doc.setFillColor(240, 253, 244); // Light green
-      doc.rect(200, 10, 85, 28, 'F');
-      doc.setFontSize(10);
-      doc.setTextColor(0);
-      doc.text('Summary', 205, 17);
-      doc.setFontSize(9);
-      doc.text(`Planned: AED ${totalPlanned.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 205, 24);
-      doc.text(`Actual: AED ${totalActual.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 205, 30);
-      doc.setTextColor(totalBalance >= 0 ? 34 : 220, totalBalance >= 0 ? 139 : 53, totalBalance >= 0 ? 34 : 69);
-      doc.text(`Balance: AED ${totalBalance.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 205, 36);
-
-      // Comparison Table
-      doc.setTextColor(0);
-      let yPos = 45;
-
-      const comparisonTableData = groupedByItem.map((group) => {
-        const balance = group.totals.planned_amount - group.totals.actual_amount;
-        return [
-          group.item_name,
-          group.totals.planned_amount.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-          group.totals.actual_amount.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-          balance.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-          balance >= 0 ? 'Under Budget' : 'Over Budget'
-        ];
-      });
-
-      // Add total row
-      comparisonTableData.push([
-        'GRAND TOTAL',
-        totalPlanned.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        totalActual.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        totalBalance.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        totalBalance >= 0 ? 'Under Budget' : 'Over Budget'
-      ]);
-
-      autoTable(doc, {
-        startY: yPos,
-        head: [['Item', 'Planned (AED)', 'Actual (incl. VAT)', 'Balance (AED)', 'Status']],
-        body: comparisonTableData,
-        theme: 'grid',
-        headStyles: {
-          fillColor: [34, 139, 34],
-          textColor: 255,
-          fontSize: 10,
-          fontStyle: 'bold',
-          halign: 'center'
-        },
-        bodyStyles: {
-          fontSize: 9,
-          valign: 'middle'
-        },
-        columnStyles: {
-          0: { cellWidth: 70, halign: 'left' },
-          1: { cellWidth: 40, halign: 'right' },
-          2: { cellWidth: 45, halign: 'right' },
-          3: { cellWidth: 40, halign: 'right' },
-          4: { cellWidth: 30, halign: 'center' }
-        },
-        alternateRowStyles: { fillColor: [245, 245, 245] },
-        didParseCell: (data: any) => {
-          // Color the last row (total)
-          if (data.row.index === comparisonTableData.length - 1) {
-            data.cell.styles.fontStyle = 'bold';
-            data.cell.styles.fillColor = [220, 252, 231];
-          }
-          // Color status column
-          if (data.column.index === 4 && data.row.index < comparisonTableData.length) {
-            if (data.cell.raw === 'Over Budget') {
-              data.cell.styles.textColor = [220, 53, 69];
-            } else {
-              data.cell.styles.textColor = [34, 139, 34];
-            }
-          }
-        }
-      });
-
-      // New page for detailed breakdown
-      doc.addPage();
-      doc.setFontSize(14);
-      doc.setTextColor(34, 139, 34);
-      doc.text('Detailed Actual Spending by Item', 14, 15);
-
-      yPos = 25;
-
-      groupedByItem.forEach((group) => {
-        const actualMaterials = group.actualMaterials.filter((material: any) => {
-          const purchases = material.purchases || [];
-          const hasActivePurchase = purchases.some((p: any) =>
-            ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
-          );
-          return (material.actual_amount || 0) > 0 || hasActivePurchase || material.is_new_material === true;
+      try {
+        const logoImg = new Image();
+        logoImg.crossOrigin = 'anonymous';
+        await new Promise<void>((resolve, reject) => {
+          logoImg.onload = () => {
+            // Add logo to PDF (left side) - compact size matching second image
+            doc.addImage(logoImg, 'PNG', margin, 8, 50, 12);
+            logoLoaded = true;
+            resolve();
+          };
+          logoImg.onerror = () => {
+            console.warn('Logo failed to load, using text fallback');
+            resolve();
+          };
+          logoImg.src = logoUrl;
         });
+      } catch (e) {
+        console.warn('Logo loading error:', e);
+      }
 
-        if (actualMaterials.length === 0) return;
+      // If logo didn't load, draw text placeholder
+      if (!logoLoaded) {
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 64, 175);
+        doc.text('METER SQUARE', margin, 14);
+        doc.setFontSize(7);
+        doc.setTextColor(100, 100, 100);
+        doc.text('INTERIORS LLC', margin, 18);
+      }
+
+      // Company info - Right side (compact fonts)
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(50, 50, 50);
+      doc.text('METERSQUARE INTERIORS LLC', pageWidth - margin, 12, { align: 'right' });
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(128, 128, 128);
+      doc.text('Business Bay, Dubai, UAE', pageWidth - margin, 18, { align: 'right' });
+
+      // Line below header (red-blue gradient effect - red on left, blue on right)
+      // Draw red portion (left half)
+      doc.setDrawColor(236, 32, 36); // Red
+      doc.setLineWidth(0.5);
+      doc.line(margin, 24, pageWidth / 2, 24);
+      // Draw blue portion (right half)
+      doc.setDrawColor(30, 64, 175); // Blue
+      doc.line(pageWidth / 2, 24, pageWidth - margin, 24);
+
+      // Contact info (centered style matching second image)
+      const contactY = 30;
+      doc.setFontSize(7);
+
+      // Build centered contact line: "Sharjah P.O. Box 66015 | Tel: 06 5398189  |  Dubai P.O. Box 89381 | Tel: 04 2596772"
+      const centerX = pageWidth / 2;
+
+      // Sharjah section (red "Sharjah" text)
+      doc.setTextColor(236, 32, 36); // Red
+      doc.text('Sharjah', centerX - 68, contactY);
+      doc.setTextColor(100, 100, 100);
+      doc.text('P.O. Box 66015 | Tel: 06 5398189', centerX - 56, contactY);
+
+      // Separator
+      doc.setTextColor(180, 180, 180);
+      doc.text('|', centerX, contactY, { align: 'center' });
+
+      // Dubai section (blue "Dubai" text)
+      doc.setTextColor(30, 64, 175); // Blue
+      doc.text('Dubai', centerX + 5, contactY);
+      doc.setTextColor(100, 100, 100);
+      doc.text('P.O. Box 89381 | Tel: 04 2596772', centerX + 15, contactY);
+
+      // Report Title
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(34, 139, 34);
+      doc.text('Purchase Comparison Report', pageWidth / 2, 40, { align: 'center' });
+
+      // Project info
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(60);
+      doc.text(`Project: ${projectName}`, margin, 50);
+      doc.text(`Generated: ${new Date().toLocaleString('en-GB')}`, margin, 56);
+
+      // Summary Box (top right, below title)
+      doc.setFillColor(240, 253, 244);
+      doc.rect(pageWidth - 95, 46, 81, 22, 'F');
+      doc.setFontSize(8);
+      doc.setTextColor(60);
+      doc.text(`Total Planned: AED ${totalPlanned.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, pageWidth - 92, 52);
+      doc.text(`Total Actual: AED ${totalActual.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, pageWidth - 92, 58);
+      doc.setTextColor(totalBalance >= 0 ? 34 : 220, totalBalance >= 0 ? 139 : 53, totalBalance >= 0 ? 34 : 69);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Balance: AED ${totalBalance.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, pageWidth - 92, 64);
+      doc.setFont('helvetica', 'normal');
+
+      let yPos = 72;
+
+      // ============ Each Item Section ============
+      groupedByItem.forEach((group) => {
+        // Estimate height needed for this section
+        const plannedRowCount = group.plannedMaterials.length;
+        const actualMaterials = group.actualMaterials.filter((m: any) => {
+          const purchases = m.purchases || [];
+          return purchases.some((p: any) => ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status));
+        });
+        let actualRowCount = 0;
+        actualMaterials.forEach((m: any) => {
+          const purchases = m.purchases || [];
+          actualRowCount += purchases.filter((p: any) => ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)).length;
+        });
+        const maxRows = Math.max(plannedRowCount, actualRowCount, 1);
+        const estimatedHeight = 35 + (maxRows * 6) + 20;
 
         // Check if we need a new page
-        if (yPos > 180) {
+        if (yPos + estimatedHeight > pageHeight - 15) {
           doc.addPage();
           yPos = 15;
         }
 
-        // Item header
-        doc.setFontSize(11);
-        doc.setTextColor(0);
-        doc.setFont(undefined, 'bold');
-        doc.text(`${group.item_name}`, 14, yPos);
-        doc.setFont(undefined, 'normal');
-        doc.setFontSize(9);
-        doc.setTextColor(100);
-        doc.text(`Total: AED ${group.totals.actual_amount.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 200, yPos);
-        yPos += 5;
+        const balance = group.totals.planned_amount - group.totals.actual_amount;
 
-        const materialRows: any[] = [];
+        // Item Header with gray background
+        doc.setFillColor(243, 244, 246);
+        doc.rect(margin, yPos, pageWidth - (margin * 2), 8, 'F');
+        doc.setFontSize(11);
+        doc.setTextColor(30);
+        doc.setFont('helvetica', 'bold');
+        doc.text(group.item_name.toUpperCase(), margin + 3, yPos + 5.5);
+        doc.setFont('helvetica', 'normal');
+        yPos += 12;
+
+        // === Section Headers ===
+        // Left: Planned Budget
+        doc.setFontSize(10);
+        doc.setTextColor(59, 130, 246);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Planned Budget', margin, yPos);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.setTextColor(120);
+        doc.text('Original estimate', margin, yPos + 4);
+
+        // Right: Actual Spending
+        doc.setFontSize(10);
+        doc.setTextColor(34, 139, 34);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Actual Spending', midPoint + 5, yPos);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.setTextColor(120);
+        doc.text('Real costs incurred', midPoint + 5, yPos + 4);
+
+        yPos += 8;
+
+        // Draw vertical divider line
+        doc.setDrawColor(220, 220, 220);
+        doc.setLineWidth(0.3);
+        const dividerStartY = yPos;
+
+        // === LEFT TABLE: Planned Materials ===
+        const plannedRows: any[] = group.plannedMaterials.map((material: any) => [
+          material.material_name,
+          `[${material.sub_item_name || '-'}]`,
+          (material.planned_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2 })
+        ]);
+
+        const tableStartY = yPos;
+        let leftTableEndY = tableStartY;
+
+        if (plannedRows.length > 0) {
+          autoTable(doc, {
+            startY: tableStartY,
+            head: [['Material', 'Sub Item', 'Amount']],
+            body: plannedRows,
+            theme: 'plain',
+            headStyles: {
+              fillColor: [245, 247, 250],
+              textColor: [59, 130, 246],
+              fontSize: 7,
+              fontStyle: 'bold',
+              cellPadding: 2
+            },
+            bodyStyles: {
+              fontSize: 7,
+              textColor: [50, 50, 50],
+              cellPadding: 2
+            },
+            columnStyles: {
+              0: { cellWidth: leftColWidth * 0.45, halign: 'left' },
+              1: { cellWidth: leftColWidth * 0.32, halign: 'left', textColor: [140, 140, 140], fontStyle: 'italic' },
+              2: { cellWidth: leftColWidth * 0.23, halign: 'right' }
+            },
+            margin: { left: margin, right: midPoint + 5 },
+            tableWidth: leftColWidth
+          });
+          leftTableEndY = (doc as any).lastAutoTable.finalY;
+        }
+
+        // === RIGHT TABLE: Actual Materials ===
+        const actualRows: any[] = [];
         actualMaterials.forEach((material: any) => {
           const purchases = material.purchases || [];
           purchases.forEach((p: any) => {
             if (['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)) {
               const total = (p.amount || 0) + (p.vat_amount || 0);
-              materialRows.push([
+              actualRows.push([
                 material.material_name,
-                material.sub_item_name || '-',
+                `[${material.sub_item_name || '-'}]`,
                 p.cr_id ? `PO #${p.cr_id}` : '-',
-                (p.amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-                (p.vat_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-                total.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-                p.is_new_material ? 'NEW' : '-'
+                total.toLocaleString('en-AE', { minimumFractionDigits: 2 })
               ]);
             }
           });
         });
 
-        if (materialRows.length > 0) {
-          autoTable(doc, {
-            startY: yPos,
-            head: [['Material', 'Sub Item', 'PO ID', 'Amount', 'VAT', 'Total', 'Type']],
-            body: materialRows,
-            theme: 'striped',
-            headStyles: {
-              fillColor: [100, 100, 100],
-              textColor: 255,
-              fontSize: 8,
-              fontStyle: 'bold',
-              halign: 'center'
-            },
-            bodyStyles: { fontSize: 8 },
-            columnStyles: {
-              0: { cellWidth: 60, halign: 'left' },
-              1: { cellWidth: 45, halign: 'left' },
-              2: { cellWidth: 20, halign: 'center' },
-              3: { cellWidth: 25, halign: 'right' },
-              4: { cellWidth: 20, halign: 'right' },
-              5: { cellWidth: 25, halign: 'right' },
-              6: { cellWidth: 15, halign: 'center' }
-            },
-            margin: { left: 14, right: 14 }
-          });
+        let rightTableEndY = tableStartY;
 
-          yPos = (doc as any).lastAutoTable.finalY + 10;
+        if (actualRows.length > 0) {
+          autoTable(doc, {
+            startY: tableStartY,
+            head: [['Material', 'Sub Item', 'PO', 'Amount']],
+            body: actualRows,
+            theme: 'plain',
+            headStyles: {
+              fillColor: [245, 250, 247],
+              textColor: [34, 139, 34],
+              fontSize: 7,
+              fontStyle: 'bold',
+              cellPadding: 2
+            },
+            bodyStyles: {
+              fontSize: 7,
+              textColor: [50, 50, 50],
+              cellPadding: 2
+            },
+            columnStyles: {
+              0: { cellWidth: rightColWidth * 0.35, halign: 'left' },
+              1: { cellWidth: rightColWidth * 0.25, halign: 'left', textColor: [140, 140, 140], fontStyle: 'italic' },
+              2: { cellWidth: rightColWidth * 0.18, halign: 'center', textColor: [234, 88, 12] },
+              3: { cellWidth: rightColWidth * 0.22, halign: 'right' }
+            },
+            margin: { left: midPoint + 5, right: margin },
+            tableWidth: rightColWidth
+          });
+          rightTableEndY = (doc as any).lastAutoTable.finalY;
+        } else {
+          // No purchases message
+          doc.setFontSize(8);
+          doc.setTextColor(160);
+          doc.text('No purchases yet', midPoint + 5 + rightColWidth / 2 - 15, tableStartY + 12);
+          rightTableEndY = tableStartY + 20;
         }
+
+        // Draw vertical divider
+        const dividerEndY = Math.max(leftTableEndY, rightTableEndY);
+        doc.line(midPoint, dividerStartY - 8, midPoint, dividerEndY);
+
+        yPos = dividerEndY + 4;
+
+        // === Summary Row ===
+        const boxWidth = (pageWidth - (margin * 2) - 14) / 3;
+        const boxHeight = 14;
+
+        // Total Planned Box (Blue)
+        doc.setFillColor(239, 246, 255);
+        doc.rect(margin, yPos, boxWidth, boxHeight, 'F');
+        doc.setFontSize(7);
+        doc.setTextColor(100);
+        doc.text('Total Planned', margin + 3, yPos + 5);
+        doc.setFontSize(11);
+        doc.setTextColor(59, 130, 246);
+        doc.setFont('helvetica', 'bold');
+        doc.text(group.totals.planned_amount.toLocaleString('en-AE', { minimumFractionDigits: 2 }), margin + 3, yPos + 11);
+        doc.setFont('helvetica', 'normal');
+
+        // Total Actual Box (Green)
+        doc.setFillColor(240, 253, 244);
+        doc.rect(margin + boxWidth + 7, yPos, boxWidth, boxHeight, 'F');
+        doc.setFontSize(7);
+        doc.setTextColor(100);
+        doc.text('Total Actual (incl. VAT)', margin + boxWidth + 10, yPos + 5);
+        doc.setFontSize(11);
+        doc.setTextColor(34, 139, 34);
+        doc.setFont('helvetica', 'bold');
+        doc.text(group.totals.actual_amount.toLocaleString('en-AE', { minimumFractionDigits: 2 }), margin + boxWidth + 10, yPos + 11);
+        doc.setFont('helvetica', 'normal');
+
+        // Balance Box
+        doc.setFillColor(balance >= 0 ? 249 : 254, balance >= 0 ? 250 : 242, balance >= 0 ? 251 : 242);
+        doc.rect(margin + (boxWidth + 7) * 2, yPos, boxWidth, boxHeight, 'F');
+        doc.setFontSize(7);
+        doc.setTextColor(100);
+        doc.text('Balance (remaining)', margin + (boxWidth + 7) * 2 + 3, yPos + 5);
+        doc.setFontSize(11);
+        doc.setTextColor(balance >= 0 ? 30 : 220, balance >= 0 ? 30 : 53, balance >= 0 ? 30 : 69);
+        doc.setFont('helvetica', 'bold');
+        doc.text(balance.toLocaleString('en-AE', { minimumFractionDigits: 2 }), margin + (boxWidth + 7) * 2 + 3, yPos + 11);
+        doc.setFont('helvetica', 'normal');
+
+        yPos += boxHeight + 8;
       });
 
       // Footer on all pages
@@ -607,8 +752,8 @@ export default function PurchaseComparison() {
         doc.setTextColor(150);
         doc.text(
           `Page ${i} of ${pageCount} | MeterSquare - Purchase Comparison Report`,
-          doc.internal.pageSize.getWidth() / 2,
-          doc.internal.pageSize.getHeight() - 8,
+          pageWidth / 2,
+          pageHeight - 8,
           { align: 'center' }
         );
       }
