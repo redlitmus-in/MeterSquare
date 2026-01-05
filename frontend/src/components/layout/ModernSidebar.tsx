@@ -437,29 +437,29 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         iconSolid: CubeSolid,
         color: 'text-purple-600'
       },
-      {
-        name: 'Labour Management',
-        href: buildPath('/labour/approvals'),
-        icon: ClipboardDocumentListIcon,
-        iconSolid: ClipboardDocumentListSolid,
-        color: 'text-teal-600',
-        children: [
-          {
-            name: 'Requisition Approvals',
-            href: buildPath('/labour/approvals'),
-            icon: DocumentCheckIcon,
-            iconSolid: DocumentCheckSolid,
-            color: 'text-green-500'
-          },
-          {
-            name: 'Attendance Lock',
-            href: buildPath('/labour/attendance-lock'),
-            icon: ClockIcon,
-            iconSolid: ClockSolid,
-            color: 'text-blue-500'
-          }
-        ]
-      }
+      // {
+      //   name: 'Labour Management',
+      //   href: buildPath('/labour/approvals'),
+      //   icon: ClipboardDocumentListIcon,
+      //   iconSolid: ClipboardDocumentListSolid,
+      //   color: 'text-teal-600',
+      //   children: [
+      //     {
+      //       name: 'Requisition Approvals',
+      //       href: buildPath('/labour/approvals'),
+      //       icon: DocumentCheckIcon,
+      //       iconSolid: DocumentCheckSolid,
+      //       color: 'text-green-500'
+      //     },
+      //     {
+      //       name: 'Attendance Lock',
+      //       href: buildPath('/labour/attendance-lock'),
+      //       icon: ClockIcon,
+      //       iconSolid: ClockSolid,
+      //       color: 'text-blue-500'
+      //     }
+      //   ]
+      // }
     ];
 
     // Estimator specific navigation items
@@ -510,36 +510,36 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         iconSolid: ShoppingSolid,
         color: 'text-orange-600'
       },
-      {
-        name: 'Labour Management',
-        href: buildPath('/labour/requisitions'),
-        icon: ClipboardDocumentListIcon,
-        iconSolid: ClipboardDocumentListSolid,
-        color: 'text-purple-600',
-        children: [
-          {
-            name: 'Labour Requisition',
-            href: buildPath('/labour/requisitions'),
-            icon: DocumentPlusIcon,
-            iconSolid: DocumentPlusSolid,
-            color: 'text-purple-500'
-          },
-          {
-            name: 'Arrival Confirmation',
-            href: buildPath('/labour/arrivals'),
-            icon: CheckCircleIcon,
-            iconSolid: CheckCircleIcon,
-            color: 'text-green-500'
-          },
-          {
-            name: 'Attendance Logs',
-            href: buildPath('/labour/attendance'),
-            icon: ClockIcon,
-            iconSolid: ClockSolid,
-            color: 'text-blue-500'
-          }
-        ]
-      }
+      // {
+      //   name: 'Labour Management',
+      //   href: buildPath('/labour/requisitions'),
+      //   icon: ClipboardDocumentListIcon,
+      //   iconSolid: ClipboardDocumentListSolid,
+      //   color: 'text-purple-600',
+      //   children: [
+      //     {
+      //       name: 'Labour Requisition',
+      //       href: buildPath('/labour/requisitions'),
+      //       icon: DocumentPlusIcon,
+      //       iconSolid: DocumentPlusSolid,
+      //       color: 'text-purple-500'
+      //     },
+      //     {
+      //       name: 'Arrival Confirmation',
+      //       href: buildPath('/labour/arrivals'),
+      //       icon: CheckCircleIcon,
+      //       iconSolid: CheckCircleIcon,
+      //       color: 'text-green-500'
+      //     },
+      //     {
+      //       name: 'Attendance Logs',
+      //       href: buildPath('/labour/attendance'),
+      //       icon: ClockIcon,
+      //       iconSolid: ClockSolid,
+      //       color: 'text-blue-500'
+      //     }
+      //   ]
+      // }
     ];
 
     // Buyer specific navigation items
@@ -678,29 +678,29 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         iconSolid: DocumentTextSolid,
         color: 'text-indigo-600'
       },
-      {
-        name: 'Labour Management',
-        href: buildPath('/labour/registry'),
-        icon: UserPlusIcon,
-        iconSolid: UserPlusSolid,
-        color: 'text-purple-600',
-        children: [
-          {
-            name: 'Labour Registry',
-            href: buildPath('/labour/registry'),
-            icon: UserPlusIcon,
-            iconSolid: UserPlusSolid,
-            color: 'text-purple-500'
-          },
-          {
-            name: 'Assign Workers',
-            href: buildPath('/labour/assignments'),
-            icon: CalendarDaysIcon,
-            iconSolid: CalendarDaysSolid,
-            color: 'text-blue-500'
-          }
-        ]
-      }
+      // {
+      //   name: 'Labour Management',
+      //   href: buildPath('/labour/registry'),
+      //   icon: UserPlusIcon,
+      //   iconSolid: UserPlusSolid,
+      //   color: 'text-purple-600',
+      //   children: [
+      //     {
+      //       name: 'Labour Registry',
+      //       href: buildPath('/labour/registry'),
+      //       icon: UserPlusIcon,
+      //       iconSolid: UserPlusSolid,
+      //       color: 'text-purple-500'
+      //     },
+      //     {
+      //       name: 'Assign Workers',
+      //       href: buildPath('/labour/assignments'),
+      //       icon: CalendarDaysIcon,
+      //       iconSolid: CalendarDaysSolid,
+      //       color: 'text-blue-500'
+      //     }
+      //   ]
+      // }
     ];
 
     // Admin specific navigation items - User Management and Signature Upload
