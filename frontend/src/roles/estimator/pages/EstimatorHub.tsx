@@ -327,7 +327,7 @@ const EstimatorHub: React.FC = () => {
   const [hasSavedDraft, setHasSavedDraft] = useState(false);
   const [draftData, setDraftData] = useState<any>(null);
   const [totalProjects, setTotalProjects] = useState(0);
-  const itemsPerPage = 20; // ✅ PERFORMANCE: 20 items per page
+  const itemsPerPage = 10; // ✅ 10 items per page for better pagination
   const [boqCurrentPage, setBoqCurrentPage] = useState(1); // Pagination for BOQ tabs
   const [showSendEmailModal, setShowSendEmailModal] = useState(false);
   const [boqToEmail, setBoqToEmail] = useState<BOQ | null>(null);
@@ -418,13 +418,41 @@ const EstimatorHub: React.FC = () => {
 
   // ✅ PERFORMANCE: Memoized tab counts to prevent expensive recalculations on every render
   const tabCounts = useMemo(() => {
-    const pendingProjectsCount = projects.filter(p => {
+    // Count projects from paginated list that have no BOQ or only draft BOQs
+    const projectsFromList = projects.filter(p => {
       const projectBoqs = boqs.filter(boq => boq.project?.project_id == p.project_id);
       return projectBoqs.length === 0 || projectBoqs.every(boq => {
         const status = boq.status?.toLowerCase() || '';
         return !status || status === 'draft';
       });
-    }).length;
+    });
+
+    // Also count unique projects from draft BOQs that aren't in the paginated list
+    const existingProjectIds = new Set(projectsFromList.map(p => p.project_id));
+    const draftBoqs = boqs.filter(boq => {
+      const status = boq.status?.toLowerCase() || '';
+      return !status || status === 'draft';
+    });
+
+    let additionalProjectCount = 0;
+    const countedProjectIds = new Set<number>();
+    draftBoqs.forEach(boq => {
+      const projectId = boq.project?.project_id;
+      if (projectId && !existingProjectIds.has(projectId) && !countedProjectIds.has(projectId)) {
+        // Check if ALL BOQs for this project are draft
+        const allProjectBoqs = boqs.filter(b => b.project?.project_id == projectId);
+        const allDraft = allProjectBoqs.every(b => {
+          const s = b.status?.toLowerCase() || '';
+          return !s || s === 'draft';
+        });
+        if (allDraft) {
+          additionalProjectCount++;
+          countedProjectIds.add(projectId);
+        }
+      }
+    });
+
+    const pendingProjectsCount = projectsFromList.length + additionalProjectCount;
 
     const sentCount = boqs.filter(b => {
       const status = b.status?.toLowerCase();
@@ -524,16 +552,52 @@ const EstimatorHub: React.FC = () => {
   useEffect(() => {
     // Inline filter logic to avoid stale closure issues
     if (activeTab === 'projects') {
-      let filteredProj = [...projects];
+      // ✅ FIX: Include projects from BOQs that have Draft status, even if not in paginated projects list
+      // This ensures projects with Draft BOQs show up in Pending tab regardless of pagination
 
-      // ✅ Apply "pending projects" filter FIRST (projects with no BOQ or only draft BOQ)
-      // This is now done HERE instead of at render time - like other tabs do
-      filteredProj = filteredProj.filter(project => {
+      // Step 1: Get projects from paginated list that have no BOQ or only draft BOQs
+      let filteredProj = projects.filter(project => {
         const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
         return projectBoqs.length === 0 || projectBoqs.every(boq => {
           const status = boq.status?.toLowerCase() || '';
           return !status || status === 'draft';
         });
+      });
+
+      // Step 2: Also include projects from BOQs with draft status that aren't in the paginated list
+      const existingProjectIds = new Set(filteredProj.map(p => p.project_id));
+      const draftBoqs = boqs.filter(boq => {
+        const status = boq.status?.toLowerCase() || '';
+        return !status || status === 'draft';
+      });
+
+      // Create project objects from draft BOQs that aren't already in the list
+      draftBoqs.forEach(boq => {
+        const projectId = boq.project?.project_id;
+        if (projectId && !existingProjectIds.has(projectId)) {
+          // Check if ALL BOQs for this project are draft (not just this one)
+          const allProjectBoqs = boqs.filter(b => b.project?.project_id == projectId);
+          const allDraft = allProjectBoqs.every(b => {
+            const s = b.status?.toLowerCase() || '';
+            return !s || s === 'draft';
+          });
+
+          if (allDraft) {
+            // Create a project object from BOQ data
+            filteredProj.push({
+              project_id: projectId,
+              project_name: boq.project?.name || boq.project_name || 'Unknown Project',
+              client: boq.project?.client || boq.client || '',
+              location: boq.project?.location || boq.location || '',
+              project_code: boq.project_code || '',
+              work_type: boq.work_type || '',
+              created_at: boq.created_at,
+              // Mark as derived from BOQ (not from projects API)
+              _derived_from_boq: true
+            });
+            existingProjectIds.add(projectId);
+          }
+        }
       });
 
       // Then apply search filter (includes ID and project code search)
@@ -551,6 +615,13 @@ const EstimatorHub: React.FC = () => {
             project.project_id?.toString().includes(searchTerm.trim());
         });
       }
+
+      // Sort by created_at descending (newest first)
+      filteredProj.sort((a, b) => {
+        const dateA = new Date(a.created_at || 0).getTime();
+        const dateB = new Date(b.created_at || 0).getTime();
+        return dateB - dateA;
+      });
 
       setFilteredProjects(filteredProj);
     } else {
@@ -2869,16 +2940,19 @@ const EstimatorHub: React.FC = () => {
                 <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending Projects</h2>
 
                 {(() => {
-                  // Pagination logic - backend returns paginated data
-                  const totalPages = Math.ceil(totalProjects / itemsPerPage);
+                  // Pagination logic - use filteredProjects for client-side pagination
+                  const totalPages = Math.ceil(filteredProjects.length / itemsPerPage);
                   const startIndex = (currentPage - 1) * itemsPerPage;
+                  const endIndex = startIndex + itemsPerPage;
+                  // ✅ FIX: Slice filteredProjects for pagination
+                  const paginatedProjects = filteredProjects.slice(startIndex, endIndex);
 
                   return (
                     <>
                       {viewMode === 'cards' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                  {/* ✅ filteredProjects is now pre-filtered in useEffect - no need for render-time filter */}
-                  {filteredProjects.map((project, index) => {
+                  {/* ✅ Use paginatedProjects for proper pagination */}
+                  {paginatedProjects.map((project, index) => {
                     // Count BOQs for this project
                     const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
                     const boqCount = projectBoqs.length;
@@ -3124,7 +3198,7 @@ const EstimatorHub: React.FC = () => {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredProjects.length === 0 ? (
+                        {paginatedProjects.length === 0 ? (
                           <TableRow>
                             <TableCell colSpan={8} className="text-center py-12 text-gray-500">
                               <div className="flex flex-col items-center">
@@ -3134,8 +3208,8 @@ const EstimatorHub: React.FC = () => {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          /* ✅ filteredProjects is now pre-filtered in useEffect - no need for render-time filter */
-                          filteredProjects.map((project) => {
+                          /* ✅ Use paginatedProjects for proper pagination */
+                          paginatedProjects.map((project) => {
                             const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
                             const boqCount = projectBoqs.length;
                             const hasSentBoq = projectBoqs.some(boq =>
@@ -3295,53 +3369,43 @@ const EstimatorHub: React.FC = () => {
                 )}
 
                 {/* Pagination - Use filteredProjects.length for current tab count */}
-                {(() => {
-                  const tabTotalItems = filteredProjects.length;
-                  const tabTotalPages = Math.ceil(tabTotalItems / itemsPerPage) || 1;
-                  const tabStartIndex = (currentPage - 1) * itemsPerPage;
-                  const tabHasNext = currentPage < tabTotalPages;
-                  const tabHasPrev = currentPage > 1;
-
-                  return (
-                    <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
-                      <div className="text-sm text-gray-600 font-medium">
-                        Showing {tabTotalItems > 0 ? tabStartIndex + 1 : 0} to {Math.min(tabStartIndex + itemsPerPage, tabTotalItems)} of {tabTotalItems} projects
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                          disabled={!tabHasPrev}
-                          className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                          style={{ color: 'rgb(36, 61, 138)' }}
-                        >
-                          Previous
-                        </button>
-                        {Array.from({ length: tabTotalPages }, (_, i) => i + 1).map(page => (
-                          <button
-                            key={page}
-                            onClick={() => setCurrentPage(page)}
-                            className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                              currentPage === page
-                                ? 'border-[rgb(36,61,138)] bg-blue-50'
-                                : 'border-gray-300 hover:bg-gray-50'
-                            }`}
-                            style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
-                          >
-                            {page}
-                          </button>
-                        ))}
-                        <button
-                          onClick={() => setCurrentPage(prev => Math.min(tabTotalPages, prev + 1))}
-                          disabled={!tabHasNext}
-                          className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                          style={{ color: 'rgb(36, 61, 138)' }}
-                        >
-                          Next
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })()}
+                <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                  <div className="text-sm text-gray-600 font-medium">
+                    Showing {filteredProjects.length > 0 ? startIndex + 1 : 0} to {Math.min(endIndex, filteredProjects.length)} of {filteredProjects.length} projects
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage <= 1}
+                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      style={{ color: 'rgb(36, 61, 138)' }}
+                    >
+                      Previous
+                    </button>
+                    {Array.from({ length: totalPages || 1 }, (_, i) => i + 1).map(page => (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                          currentPage === page
+                            ? 'border-[rgb(36,61,138)] bg-blue-50'
+                            : 'border-gray-300 hover:bg-gray-50'
+                        }`}
+                        style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages || 1, prev + 1))}
+                      disabled={currentPage >= totalPages}
+                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      style={{ color: 'rgb(36, 61, 138)' }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
                     </>
                   );
                 })()}
