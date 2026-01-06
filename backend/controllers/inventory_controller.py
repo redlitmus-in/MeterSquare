@@ -256,6 +256,7 @@ def enrich_project_details(project, include_mep=True):
         'project_name': project.project_name,
         'project_code': project.project_code,
         'location': project.location,
+        'area': project.area,
         'project_managers': get_project_managers(project),
         'site_supervisor': get_site_supervisor(project),  # First SE for backward compatibility
         'site_supervisors': get_site_supervisors(project)  # All SEs - NEW
@@ -1207,13 +1208,7 @@ def send_internal_material_request(request_id):
 
         # Get project details for response
         project = Project.query.get(internal_req.project_id)
-        project_details = None
-        if project:
-            project_details = {
-                'project_name': project.project_name,
-                'project_code': project.project_code,
-                'location': project.location
-            }
+        project_details = enrich_project_details(project) if project else None
 
         return jsonify({
             'message': 'Internal material request sent for approval successfully',
@@ -2127,7 +2122,7 @@ def get_all_material_returns():
         # Order by latest first - PERFORMANCE: Limit to 200 records max
         returns = query.order_by(MaterialReturn.created_at.desc()).limit(200).all()
 
-        # Enrich with project details
+        # Enrich with project and material details
         result = []
         for ret in returns:
             ret_data = ret.to_dict()
@@ -2139,8 +2134,26 @@ def get_all_material_returns():
                     'project_id': project.project_id,
                     'project_name': project.project_name,
                     'project_code': project.project_code,
-                    'location': project.location
+                    'location': project.location,
+                    'area': project.area
                 }
+
+            # Get material details including brand
+            material = InventoryMaterial.query.get(ret.inventory_material_id)
+            if material:
+                ret_data['material_details'] = {
+                    'material_code': material.material_code,
+                    'material_name': material.material_name,
+                    'brand': material.brand,
+                    'unit': material.unit,
+                    'current_stock': material.current_stock
+                }
+
+            # Get notes from Return Delivery Note if available and notes is empty
+            if not ret_data.get('notes') and ret.return_delivery_note_id:
+                rdn = ReturnDeliveryNote.query.get(ret.return_delivery_note_id)
+                if rdn and rdn.notes:
+                    ret_data['notes'] = rdn.notes
 
             result.append(ret_data)
 
@@ -2237,14 +2250,16 @@ def get_pending_disposal_returns():
                     ret_data['project_details'] = {
                         'project_id': project.project_id,
                         'project_name': project.project_name,
-                        'project_code': project.project_code
+                        'project_code': project.project_code,
+                        'area': project.area
                     }
             else:
                 # Catalog disposal (not from a project)
                 ret_data['project_details'] = {
                     'project_id': 0,
                     'project_name': 'Materials Catalog',
-                    'project_code': 'CATALOG'
+                    'project_code': 'CATALOG',
+                    'area': None
                 }
 
             # Get material details
@@ -2927,7 +2942,8 @@ def get_all_delivery_notes():
                     'project_id': project.project_id,
                     'project_name': project.project_name,
                     'project_code': project.project_code,
-                    'location': project.location
+                    'location': project.location,
+                    'area': project.area
                 }
             result.append(note_data)
 
@@ -3618,13 +3634,14 @@ def get_delivery_notes_for_se():
         notes = query.order_by(MaterialDeliveryNote.created_at.desc()).limit(200).all()
 
         # Enrich with project details
-        project_map = {p.project_id: {'project_name': p.project_name, 'project_code': p.project_code} for p in assigned_projects}
+        project_map = {p.project_id: {'project_name': p.project_name, 'project_code': p.project_code, 'area': p.area} for p in assigned_projects}
 
         result = []
         for note in notes:
             note_dict = note.to_dict()
             note_dict['project_name'] = project_map.get(note.project_id, {}).get('project_name', f'Project #{note.project_id}')
             note_dict['project_code'] = project_map.get(note.project_id, {}).get('project_code', '')
+            note_dict['area'] = project_map.get(note.project_id, {}).get('area', '')
             result.append(note_dict)
 
         return jsonify({
@@ -3966,7 +3983,8 @@ def get_all_return_delivery_notes():
                     'project_id': project.project_id,
                     'project_name': project.project_name,
                     'project_code': project.project_code,
-                    'location': project.location
+                    'location': project.location,
+                    'area': project.area
                 }
             result.append(rdn_data)
 
@@ -3996,7 +4014,8 @@ def get_return_delivery_note_by_id(return_note_id):
                 'project_id': project.project_id,
                 'project_name': project.project_name,
                 'project_code': project.project_code,
-                'location': project.location
+                'location': project.location,
+                'area': project.area
             }
 
         return jsonify({'return_delivery_note': rdn_data}), 200
@@ -4120,8 +4139,7 @@ def add_item_to_return_delivery_note(return_note_id):
             original_delivery_note_item_id=data.get('original_delivery_note_item_id'),
             quantity=data['quantity'],
             condition=data['condition'],
-            return_reason=data.get('return_reason'),
-            notes=data.get('notes')
+            return_reason=data.get('return_reason')
         )
 
         db.session.add(new_item)
@@ -4405,6 +4423,7 @@ def process_return_delivery_item(return_note_id, item_id):
             return jsonify({'error': 'Material not found'}), 404
 
         # Create MaterialReturn record
+        # Use notes from the Return Delivery Note (parent RDN)
         material_return = MaterialReturn(
             delivery_note_item_id=item.original_delivery_note_item_id,
             return_delivery_note_id=rdn.return_note_id,
@@ -4415,7 +4434,7 @@ def process_return_delivery_item(return_note_id, item_id):
             add_to_stock=False,  # Will be set when approved
             return_reason=item.return_reason,
             reference_number=rdn.return_note_number,
-            notes=item.notes,
+            notes=rdn.notes,
             disposal_status='pending_approval',  # PM needs to approve/process
             created_by=rdn.created_by
         )

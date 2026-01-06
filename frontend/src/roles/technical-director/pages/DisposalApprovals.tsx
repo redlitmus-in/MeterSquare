@@ -553,7 +553,7 @@ const DisposalApprovals: React.FC = () => {
                     <p className="text-sm font-medium text-red-700 mb-2">Justification / Notes</p>
                     <div className="bg-white rounded-lg p-4 border border-red-200">
                       <p className="text-sm text-gray-900 whitespace-pre-wrap">
-                        {selectedDisposal.notes || 'No additional notes provided'}
+                        {selectedDisposal.notes || selectedDisposal.return_reason || 'No additional notes provided'}
                       </p>
                     </div>
                   </div>

@@ -1164,8 +1164,12 @@ const StockOutPage: React.FC = () => {
                         </div>
                         <div className="text-xs text-blue-600">
                           Code: {selectedRequestForDN.project_details.project_code}
-                          {selectedRequestForDN.project_details.location && ` • ${selectedRequestForDN.project_details.location}`}
                         </div>
+                        {selectedRequestForDN.project_details.area && (
+                          <div className="text-xs text-blue-600">
+                            Area: {selectedRequestForDN.project_details.area}
+                          </div>
+                        )}
                       </div>
                       <div className="flex-1">
                         <label className="block text-xs font-medium text-blue-700 mb-1">
@@ -1182,7 +1186,7 @@ const StockOutPage: React.FC = () => {
                           </div>
                         ) : (
                           <div className="text-sm text-orange-600 font-medium">
-                            ⚠️ No Site Engineers assigned
+                            No Site Engineers assigned
                           </div>
                         )}
                       </div>
@@ -1352,23 +1356,13 @@ const StockOutPage: React.FC = () => {
                             </span>
                           </div>
                         ) : (
-                          <select
-                            value={item.inventory_material_id}
-                            onChange={(e) => handleDnItemChange(index, 'inventory_material_id', parseInt(e.target.value))}
-                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                            aria-label={`Material for item ${index + 1}`}
-                          >
-                            <option value={0}>Select Material</option>
-                            {materials.map((mat) => (
-                              <option key={mat.inventory_material_id} value={mat.inventory_material_id}>
-                                {mat.material_name} - Stock: {mat.current_stock} {mat.unit}
-                              </option>
-                            ))}
-                          </select>
+                          <div className="w-full px-2 py-1 text-sm border border-gray-300 rounded bg-white">
+                            {materials.find(mat => mat.inventory_material_id === item.inventory_material_id)?.material_name || 'No material selected'} - Stock: {materials.find(mat => mat.inventory_material_id === item.inventory_material_id)?.current_stock || 0} {materials.find(mat => mat.inventory_material_id === item.inventory_material_id)?.unit || ''}
+                          </div>
                         )}
                       </div>
                       <div className="col-span-2">
-                        <div className="px-2 py-1 text-sm text-gray-900 font-medium">
+                        <div className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center bg-white">
                           {item.quantity}
                         </div>
                       </div>

@@ -439,7 +439,6 @@ class ReturnDeliveryNoteItem(db.Model):
     quantity = db.Column(db.Float, nullable=False)
     condition = db.Column(db.String(20), nullable=False)  # Good, Damaged, Defective
     return_reason = db.Column(db.Text, nullable=True)
-    notes = db.Column(db.Text, nullable=True)
 
     # Acceptance tracking
     quantity_accepted = db.Column(db.Float, nullable=True)
@@ -463,7 +462,6 @@ class ReturnDeliveryNoteItem(db.Model):
             'quantity': self.quantity,
             'condition': self.condition,
             'return_reason': self.return_reason,
-            'notes': self.notes,
             'quantity_accepted': self.quantity_accepted,
             'acceptance_status': self.acceptance_status,
             'inventory_transaction_id': self.inventory_transaction_id,

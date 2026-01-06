@@ -87,6 +87,7 @@ export interface InternalMaterialRequest {
     project_name: string;
     project_code: string;
     location?: string;
+    area?: string;
     site_supervisor?: {  // First/primary site supervisor (for backward compatibility)
       user_id: number;
       full_name: string;
