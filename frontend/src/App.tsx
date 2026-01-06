@@ -108,6 +108,16 @@ const AdminSettings = lazy(() => import('@/pages/admin/Settings'));
 const AdminSignatureUpload = lazy(() => import('@/pages/admin/SignatureUpload'));
 const AdminMyProjects = lazy(() => import('@/pages/admin/AdminMyProjects'));
 const AdminSEProjects = lazy(() => import('@/pages/admin/AdminSEProjects'));
+
+// Labour Management Pages
+const LabourRegistry = lazy(() => import('@/pages/labour/LabourRegistry'));
+const LabourRequisition = lazy(() => import('@/pages/labour/LabourRequisition'));
+const RequisitionApprovals = lazy(() => import('@/pages/labour/RequisitionApprovals'));
+const WorkerAssignments = lazy(() => import('@/pages/labour/WorkerAssignments'));
+const ArrivalConfirmation = lazy(() => import('@/pages/labour/ArrivalConfirmation'));
+const AttendanceLogs = lazy(() => import('@/pages/labour/AttendanceLogs'));
+const AttendanceLock = lazy(() => import('@/pages/labour/AttendanceLock'));
+const PayrollProcessing = lazy(() => import('@/pages/labour/PayrollProcessing'));
 // Support Pages (for dev team - not client admin)
 const AdminSupportManagement = lazy(() => import('@/pages/support/SupportManagement'));
 const PublicSupportPage = lazy(() => import('@/pages/support/PublicSupportPage'));
@@ -1025,6 +1035,54 @@ function App() {
               <SiteEngineerRoute>
                 <MaterialReceipts />
               </SiteEngineerRoute>
+            } />
+
+            {/* Labour Management Routes - Site Engineer (Steps 2, 5, 6) */}
+            <Route path="labour/requisitions" element={
+              <SiteEngineerRoute>
+                <LabourRequisition />
+              </SiteEngineerRoute>
+            } />
+            <Route path="labour/arrivals" element={
+              <SiteEngineerRoute>
+                <ArrivalConfirmation />
+              </SiteEngineerRoute>
+            } />
+            <Route path="labour/attendance" element={
+              <SiteEngineerRoute>
+                <AttendanceLogs />
+              </SiteEngineerRoute>
+            } />
+
+            {/* Labour Management Routes - Project Manager (Steps 3, 7) */}
+            <Route path="labour/approvals" element={
+              <ProjectManagerRoute>
+                <RequisitionApprovals />
+              </ProjectManagerRoute>
+            } />
+            <Route path="labour/attendance-lock" element={
+              <ProjectManagerRoute>
+                <AttendanceLock />
+              </ProjectManagerRoute>
+            } />
+
+            {/* Labour Management Routes - Production Manager (Steps 1, 4) */}
+            <Route path="labour/registry" element={
+              <ProductionManagerRoute>
+                <LabourRegistry />
+              </ProductionManagerRoute>
+            } />
+            <Route path="labour/assignments" element={
+              <ProductionManagerRoute>
+                <WorkerAssignments />
+              </ProductionManagerRoute>
+            } />
+
+            {/* Labour Management Routes - Admin/HR (Step 8) */}
+            <Route path="labour/payroll" element={
+              <AdminRoute>
+                <PayrollProcessing />
+              </AdminRoute>
             } />
 
             {/* Buyer materials, purchase-orders, and vendor routes moved to general routes above (lines 826-832) */}

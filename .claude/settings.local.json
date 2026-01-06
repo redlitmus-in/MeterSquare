@@ -134,7 +134,18 @@
       "Bash(DATABASE_URL=\"postgresql://postgres.wgddnoiakkoskbbkbygw:Rameshdev$08@aws-0-ap-south-1.pooler.supabase.com:6543/postgres\" python3:*)",
       "Bash(DATABASE_URL=\"postgresql://postgres.wgddnoiakkoskbbkbygw:Rameshdev$08@aws-0-ap-south-1.pooler.supabase.com:6543/postgres\" python3 -c \"\nimport psycopg2\nfrom psycopg2.extras import RealDictCursor\n\nconn = psycopg2.connect\\(''postgresql://postgres.wgddnoiakkoskbbkbygw:Rameshdev$08@aws-0-ap-south-1.pooler.supabase.com:6543/postgres''\\)\ncursor = conn.cursor\\(cursor_factory=RealDictCursor\\)\n\nprint\\(''=== DEV DATABASE - Checking POChildren with routed_to_store but no IMR ===''\\)\nprint\\(\\)\n\n# Find POChildren that are routed_to_store but have no IMR\ncursor.execute\\(''''''\n    SELECT pc.id, pc.status, pc.parent_cr_id, pc.materials_count\n    FROM po_child pc\n    WHERE pc.status = ''routed_to_store''\n    AND pc.is_deleted = false\n    AND NOT EXISTS \\(\n        SELECT 1 FROM internal_inventory_material_requests imr \n        WHERE imr.po_child_id = pc.id\n    \\)\n''''''\\)\nstuck = cursor.fetchall\\(\\)\n\nif stuck:\n    print\\(f''Found {len\\(stuck\\)} stuck POChildren \\(routed_to_store but no IMR\\):''\\)\n    for row in stuck:\n        print\\(f''  - POChild {row[\"\"id\"\"]}: status={row[\"\"status\"\"]}, CR={row[\"\"parent_cr_id\"\"]}''\\)\n    \n    # Reset them\n    ids = [row[''id''] for row in stuck]\n    cursor.execute\\(''''''\n        UPDATE po_child \n        SET status = ''vendor_approved''\n        WHERE id = ANY\\(%s\\)\n    '''''', \\(ids,\\)\\)\n    conn.commit\\(\\)\n    print\\(\\)\n    print\\(f''Reset {len\\(stuck\\)} POChildren back to vendor_approved''\\)\nelse:\n    print\\(''No stuck POChildren found in DEV database''\\)\n\ncursor.close\\(\\)\nconn.close\\(\\)\n\")",
       "Bash(DATABASE_URL=\"postgresql://postgres.wgddnoiakkoskbbkbygw:Rameshdev$08@aws-0-ap-south-1.pooler.supabase.com:6543/postgres\" python3 -c \"\nimport psycopg2\nfrom psycopg2.extras import RealDictCursor\n\nconn = psycopg2.connect\\(''postgresql://postgres.wgddnoiakkoskbbkbygw:Rameshdev$08@aws-0-ap-south-1.pooler.supabase.com:6543/postgres''\\)\ncursor = conn.cursor\\(cursor_factory=RealDictCursor\\)\n\n# Check BOQ table columns\ncursor.execute\\(''''''\n    SELECT column_name\n    FROM information_schema.columns\n    WHERE table_name = ''boq''\n    ORDER BY ordinal_position\n''''''\\)\ncolumns = cursor.fetchall\\(\\)\nprint\\(''BOQ Table Columns:''\\)\nfor col in columns:\n    print\\(f''  {col[\"\"column_name\"\"]}''\\)\n\ncursor.close\\(\\)\nconn.close\\(\\)\n\")",
-      "Bash(source backend/venv/bin/activate)"
+      "Bash(source backend/venv/bin/activate)",
+      "Bash(python migrations/create_labour_management_tables.py:*)",
+      "Bash(PGPASSWORD='Meterkol$2025' psql -h aws-1-ap-south-1.pooler.supabase.com -U postgres.cbzdvghmrpsolryzdpxi -d postgres -p 6543 -c \"\n-- Check all workers\nSELECT worker_id, worker_code, full_name, hourly_rate, status FROM workers WHERE is_deleted = false ORDER BY worker_id;\n\")",
+      "Bash(python investigate_missing_boqs.py:*)",
+      "Bash(python check_chck5_labour.py:*)",
+      "Bash(python consolidate_labour_roles.py:*)",
+      "Bash(chmod:*)",
+      "Bash(rm:*)",
+      "Bash(git add:*)",
+      "Bash(DEV_DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" DATABASE_URL=\"$DEV_DATABASE_URL\" python check_worker_skills.py)",
+      "Bash(DEV_DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" DATABASE_URL=\"$DEV_DATABASE_URL\" python check_assignments.py)",
+      "Bash(DEV_DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" DATABASE_URL=\"$DEV_DATABASE_URL\" python fix_assignments_now.py)"
     ],
     "deny": [],
     "ask": []

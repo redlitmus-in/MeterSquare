@@ -21,6 +21,7 @@ from routes.asset_routes import asset_routes
 from routes.asset_dn_routes import asset_dn_routes
 from routes.asset_disposal_routes import asset_disposal_routes
 from routes.support_routes import support_routes
+from routes.labour_routes import labour_routes
 
 # Import and register the routes from the route blueprints
 
@@ -48,3 +49,4 @@ def initialize_routes(app):
     app.register_blueprint(asset_dn_routes)
     app.register_blueprint(asset_disposal_routes)
     app.register_blueprint(support_routes)
+    app.register_blueprint(labour_routes)

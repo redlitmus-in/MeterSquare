@@ -514,12 +514,13 @@ const ProjectsPage: React.FC = () => {
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Project Name</Label>
+                <Label htmlFor="name">Project Name *</Label>
                 <Input
                   id="name"
                   placeholder="Enter project name"
                   value={newProject.name}
                   onChange={(e) => setNewProject({...newProject, name: e.target.value})}
+                  autoComplete="off"
                 />
               </div>
               <div className="space-y-2">
