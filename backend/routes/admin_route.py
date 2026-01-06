@@ -151,11 +151,4 @@ def get_site_engineers_route():
     """Get all site engineers with project counts"""
     return get_all_site_engineers()
 
-# ============================================
-# LEGACY ROUTES (for backward compatibility)
-# ============================================
 
-@admin_routes.route('/all_ss', methods=['GET'])
-def get_all_sitesupervisor_route():
-    """Legacy route - Get all site engineers"""
-    return get_all_sitesupervisor()

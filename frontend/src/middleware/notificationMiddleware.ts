@@ -55,6 +55,26 @@ export interface PRNotificationData {
   amount?: number;
 }
 
+// Global set to track processed notification IDs across all notification systems
+// This prevents duplicate notifications when both realtimeNotificationHub and notificationMiddleware
+// receive the same notification
+const globalProcessedNotificationIds = new Set<string>();
+
+// Export for use by other notification systems
+export function isNotificationAlreadyProcessed(notificationId: string): boolean {
+  return globalProcessedNotificationIds.has(notificationId);
+}
+
+export function markNotificationAsProcessed(notificationId: string): void {
+  globalProcessedNotificationIds.add(notificationId);
+  // Clean up old IDs (keep last 100)
+  if (globalProcessedNotificationIds.size > 100) {
+    const ids = Array.from(globalProcessedNotificationIds);
+    globalProcessedNotificationIds.clear();
+    ids.slice(-50).forEach(id => globalProcessedNotificationIds.add(id));
+  }
+}
+
 class NotificationMiddleware {
   private static instance: NotificationMiddleware;
   private lastNotificationTime: number = 0;
@@ -336,6 +356,16 @@ class NotificationMiddleware {
   }
 
   private async dispatchNotification(notification: NotificationData): Promise<void> {
+    // Check global deduplication first - prevents duplicate popups when both
+    // realtimeNotificationHub and notificationMiddleware receive the same notification
+    if (isNotificationAlreadyProcessed(notification.id)) {
+      if (import.meta.env.DEV) {
+        console.log('[NotificationMiddleware] Skipping duplicate notification:', notification.id);
+      }
+      return;
+    }
+    markNotificationAsProcessed(notification.id);
+
     const userData = getSecureUserData();
     const currentUserId = userData?.id || userData?.userId;
 
@@ -362,15 +392,37 @@ class NotificationMiddleware {
     } else {
       // Receiver gets notification experience:
       // 1. Add to panel (store)
-      // 2. In-app notification popup (different style from action toasts)
-      // 3. Desktop notification
+      // 2. Based on page visibility: BOTH notifications or just in-app
 
       // Add to store (shows in notification panel + badge)
       const store = useNotificationStore.getState();
       store.addNotification(notification);
 
-      // NOTE: Toast popup is handled by realtimeNotificationHub, not here
-      // This prevents duplicate toasts
+      // Check if page is visible or hidden/minimized
+      const isPageHidden = document.hidden || document.visibilityState === 'hidden';
+
+      if (import.meta.env.DEV) {
+        console.log('[NotificationMiddleware] Page visibility:', { isPageHidden, hidden: document.hidden, visibilityState: document.visibilityState });
+      }
+
+      if (isPageHidden) {
+        // Page is HIDDEN/MINIMIZED: Show BOTH desktop AND in-app notification
+        // Desktop notification alerts the user, in-app notification is ready when they return
+        if (import.meta.env.DEV) {
+          console.log('[NotificationMiddleware] Page hidden - showing BOTH desktop and in-app notification');
+        }
+        const hasPermission = await this.hasNotificationPermission();
+        if (hasPermission) {
+          await this.showBrowserNotification(notification);
+        }
+        this.showIncomingNotificationPopup(notification);
+      } else {
+        // Page is VISIBLE: Show in-app notification popup only (no desktop)
+        if (import.meta.env.DEV) {
+          console.log('[NotificationMiddleware] Page visible - showing ONLY in-app notification');
+        }
+        this.showIncomingNotificationPopup(notification);
+      }
 
       // Send to background service for persistence
       await this.sendToBackgroundService(notification);

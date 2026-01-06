@@ -6,6 +6,7 @@ from models.preliminary_master import BOQInternalRevision
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload  # ✅ PERFORMANCE: Eager loading for N+1 fix
+from sqlalchemy import or_, and_, func
 from sqlalchemy import func, and_  # For aggregations and conditions
 from datetime import datetime  # For datetime.min in sorting
 from utils.boq_email_service import BOQEmailService
@@ -74,258 +75,151 @@ def calculate_boq_financial_data(boq, boq_details):
         'labour_count': boq_details.total_labour if boq_details.total_labour else 0
     }
 
-def get_all_td_boqs():
-    try:
-        # Get current user role
-        current_user = g.get('user', {})
-        user_role = current_user.get('role', '').lower()
+def calculate_boq_financial_data(boq, boq_details):
+    """
+    Helper function to calculate financial data from BOQ details
+    Returns a dict with financial fields needed by frontend
+    """
+    total_material_cost = 0
+    total_labour_cost = 0
+    total_selling_price = 0
+    overhead_percentage = 0
+    profit_margin = 0
 
-        # Get query parameters
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 10, type=int), 100)
+    log.info(f"🔍 [Financial Calc] BOQ {boq.boq_id if boq else 'Unknown'}: Starting calculation")
+    log.info(f"🔍 [Financial Calc] Has boq_details: {boq_details is not None}, Has boq_details.boq_details: {boq_details.boq_details is not None if boq_details else False}")
 
-        # Build query - Admin sees ALL BOQs, TD sees specific statuses
-        # ✅ PERFORMANCE FIX: Eager load history and details to prevent N+1 queries
-        if user_role == 'admin':
-            # Admin sees all BOQs
-            query = db.session.query(BOQ).options(
-                selectinload(BOQ.history),
-                selectinload(BOQ.details)
-            ).filter(
-                BOQ.is_deleted == False,
-                BOQ.email_sent == True
-            ).order_by(BOQ.created_at.desc())
-        else:
-            # TD should see: Pending_TD_Approval, Pending_Revision, approved, rejected, sent_for_review, new_purchase_create
-            # TD should NOT see: Pending_PM_Approval (those are for PM only)
-            # TD should NOT see: Internal_Revision_Pending (estimator still editing, not sent to TD yet)
-            # Use db.func.lower() for case-insensitive comparison
-            query = db.session.query(BOQ).options(
-                selectinload(BOQ.history),
-                selectinload(BOQ.details)
-            ).filter(
-                BOQ.is_deleted == False,
-                BOQ.email_sent == True,
-                db.func.lower(BOQ.status) != 'pending_pm_approval',  # Exclude BOQs pending PM approval
-                db.func.lower(BOQ.status) != 'internal_revision_pending'  # Exclude BOQs still being edited by estimator
-            ).order_by(BOQ.created_at.desc())
-        # Paginate
-        paginated = query.paginate(page=page, per_page=per_page, error_out=False)
-        # Build response with BOQ details and history
-        boqs_list = []
-        for boq in paginated.items:
-            # ✅ PERFORMANCE: Use pre-loaded history and details (no queries!)
-            history = sorted(
-                [h for h in boq.history if h],
-                key=lambda h: h.action_date if h.action_date else datetime.min,
-                reverse=True
-            )
-            # Get BOQ details from pre-loaded relationship
-            boq_details = next((bd for bd in boq.details if not bd.is_deleted), None)
-            display_status = boq.status
-            if boq.status in ['new_purchase_create', 'sent_for_review']:
-                display_status = 'approved'
+    if boq_details and boq_details.boq_details and "items" in boq_details.boq_details:
+        items = boq_details.boq_details["items"]
+        log.info(f"🔍 [Financial Calc] BOQ {boq.boq_id if boq else 'Unknown'}: Processing {len(items)} items")
+        for item in items:
+            item_materials_cost = 0
+            item_labour_cost = 0
+            item_client_amount = 0  # CLIENT SELLING PRICE
 
-            # Serialize history data
-            history_list = []
-            for h in history:
-                history_list.append({
-                    "boq_history_id": h.boq_history_id,
-                    "boq_status": h.boq_status
-                   })
-            # Calculate costs from BOQ details - handle both old and new formats
-            total_material_cost = 0
-            total_labour_cost = 0
-            total_selling_price = 0
-            overhead_percentage = 0
-            profit_margin = 0
+            # Check if item has sub_items (new format)
+            if "sub_items" in item and item.get("sub_items"):
+                log.debug(f"🔍 [Item Format] Item '{item.get('item_name', 'Unknown')}' has {len(item.get('sub_items', []))} sub_items")
+                # NEW FORMAT: Client amount comes from sub_item quantity × rate
+                for sub_item in item.get("sub_items", []):
+                    # Calculate CLIENT AMOUNT (what client pays) = quantity × rate
+                    sub_quantity = sub_item.get("quantity", 0)
+                    sub_rate = sub_item.get("rate", 0)
+                    sub_client_amount = sub_quantity * sub_rate
+                    item_client_amount += sub_client_amount
 
-            if boq_details and boq_details.boq_details and "items" in boq_details.boq_details:
-                items = boq_details.boq_details["items"]
-                log.info(f"🔍 BOQ {boq.boq_id} ({boq.boq_name}): Processing {len(items)} items for cost calculation")
-                for item in items:
-                    item_materials_cost = 0
-                    item_labour_cost = 0
-                    item_client_amount = 0  # CLIENT SELLING PRICE
+                    # Sum up materials cost from sub_item (for internal tracking)
+                    materials = sub_item.get("materials", [])
+                    for mat in materials:
+                        mat_cost = mat.get("total_price", 0)
+                        total_material_cost += mat_cost
+                        item_materials_cost += mat_cost
+                    # Sum up labour cost from sub_item (for internal tracking)
+                    # Check both "labour" and "labor" spellings
+                    labour = sub_item.get("labour", sub_item.get("labor", []))
+                    for lab in labour:
+                        # Try multiple field names for labour cost (total_amount is the actual field used)
+                        lab_cost = lab.get("total_amount", 0) or lab.get("total_cost", 0) or lab.get("totalCost", 0) or lab.get("total_price", 0) or lab.get("amount", 0)
+                        log.debug(f"🔍 [Labour] Sub-item labour: {lab}, calculated_cost: {lab_cost}")
+                        total_labour_cost += lab_cost
+                        item_labour_cost += lab_cost
+            else:
+                # OLD FORMAT: materials/labour are at item level
+                log.debug(f"🔍 [Item Format] Item '{item.get('item_name', 'Unknown')}' using OLD FORMAT")
+                materials = item.get("materials", [])
+                log.debug(f"🔍 [Old Format] Materials count: {len(materials)}")
+                for mat in materials:
+                    mat_cost = mat.get("total_price", 0)
+                    total_material_cost += mat_cost
+                    item_materials_cost += mat_cost
+                # Check both "labour" and "labor" spellings
+                labour = item.get("labour", item.get("labor", []))
+                log.debug(f"🔍 [Old Format] Labour count: {len(labour)}, Labour data: {labour}")
+                for lab in labour:
+                    # Try multiple field names for labour cost (total_amount is the actual field used)
+                    lab_cost = lab.get("total_amount", 0) or lab.get("total_cost", 0) or lab.get("totalCost", 0) or lab.get("total_price", 0) or lab.get("amount", 0)
+                    log.debug(f"🔍 [Old Format Labour] Entry: {lab}, calculated_cost: {lab_cost}")
+                    total_labour_cost += lab_cost
+                    item_labour_cost += lab_cost
 
-                    # Check if item has sub_items (new format)
-                    if "sub_items" in item and item.get("sub_items"):
-                        # NEW FORMAT: Client amount comes from sub_item quantity × rate
-                        for sub_item in item.get("sub_items", []):
-                            # Calculate CLIENT AMOUNT (what client pays) = quantity × rate
-                            sub_quantity = sub_item.get("quantity", 0)
-                            sub_rate = sub_item.get("rate", 0)
-                            sub_client_amount = sub_quantity * sub_rate
-                            item_client_amount += sub_client_amount
+            # Determine item selling price (client amount)
+            item_selling_price = 0
 
-                            # Sum up materials cost from sub_item (for internal tracking)
-                            materials = sub_item.get("materials", [])
-                            for mat in materials:
-                                mat_cost = mat.get("total_price", 0)
-                                total_material_cost += mat_cost
-                                item_materials_cost += mat_cost
-                            # Sum up labour cost from sub_item (for internal tracking)
-                            labour = sub_item.get("labour", [])
-                            if labour:
-                                log.debug(f"  Sub-item has {len(labour)} labour entries")
-                            for lab in labour:
-                                lab_cost = lab.get("total_cost") or (lab.get("hours", 0) * lab.get("rate_per_hour", 0))
-                                if lab_cost > 0:
-                                    log.debug(f"    Labour cost: AED {lab_cost}")
-                                total_labour_cost += lab_cost
-                                item_labour_cost += lab_cost
-                    else:
-                        # OLD FORMAT: materials/labour are at item level
-                        materials = item.get("materials", [])
-                        for mat in materials:
-                            mat_cost = mat.get("total_price", 0)
-                            total_material_cost += mat_cost
-                            item_materials_cost += mat_cost
-                        labour = item.get("labour", [])
-                        if labour:
-                            log.debug(f"  Item has {len(labour)} labour entries (old format)")
-                        for lab in labour:
-                            lab_cost = lab.get("total_cost") or (lab.get("hours", 0) * lab.get("rate_per_hour", 0))
-                            if lab_cost > 0:
-                                log.debug(f"    Labour cost: AED {lab_cost}")
-                            total_labour_cost += lab_cost
-                            item_labour_cost += lab_cost
+            # For NEW FORMAT with sub_items, use calculated client amount
+            if item_client_amount > 0:
+                item_selling_price = item_client_amount
+            else:
+                # For OLD FORMAT or if no sub_items, try to get from item fields
+                item_selling_price = item.get("selling_price", 0) or item.get("estimatedSellingPrice", 0)
 
-                    # Determine item selling price (client amount)
-                    item_selling_price = 0
+                # If still no selling price, calculate from base cost + markup
+                if not item_selling_price or item_selling_price == 0:
+                    item_base_cost = item_materials_cost + item_labour_cost
+                    item_overhead = item.get("overhead_amount", 0)
+                    item_profit = item.get("profit_margin_amount", 0)
+                    item_misc = item.get("miscellaneous_amount", 0)
 
-                    # For NEW FORMAT with sub_items, use calculated client amount
-                    if item_client_amount > 0:
-                        item_selling_price = item_client_amount
-                    else:
-                        # For OLD FORMAT or if no sub_items, try to get from item fields
-                        item_selling_price = item.get("selling_price", 0) or item.get("estimatedSellingPrice", 0)
+                    # If amounts are not present, calculate from percentages
+                    if item_overhead == 0 and item.get("overhead_percentage", 0) > 0:
+                        item_overhead = item_base_cost * (item.get("overhead_percentage", 0) / 100)
+                    if item_profit == 0 and item.get("profit_margin_percentage", 0) > 0:
+                        item_profit = item_base_cost * (item.get("profit_margin_percentage", 0) / 100)
+                    if item_misc == 0 and item.get("miscellaneous_percentage", 0) > 0:
+                        item_misc = item_base_cost * (item.get("miscellaneous_percentage", 0) / 100)
 
-                        # If still no selling price, calculate from base cost + markup
-                        if not item_selling_price or item_selling_price == 0:
-                            item_base_cost = item_materials_cost + item_labour_cost
-                            item_overhead = item.get("overhead_amount", 0)
-                            item_profit = item.get("profit_margin_amount", 0)
-                            item_misc = item.get("miscellaneous_amount", 0)
+                    item_selling_price = item_base_cost + item_overhead + item_profit + item_misc
 
-                            # If amounts are not present, calculate from percentages
-                            if item_overhead == 0 and item.get("overhead_percentage", 0) > 0:
-                                item_overhead = item_base_cost * (item.get("overhead_percentage", 0) / 100)
-                            if item_profit == 0 and item.get("profit_margin_percentage", 0) > 0:
-                                item_profit = item_base_cost * (item.get("profit_margin_percentage", 0) / 100)
-                            if item_misc == 0 and item.get("miscellaneous_percentage", 0) > 0:
-                                item_misc = item_base_cost * (item.get("miscellaneous_percentage", 0) / 100)
+            total_selling_price += item_selling_price
 
-                            item_selling_price = item_base_cost + item_overhead + item_profit + item_misc
+            # Get overhead and profit percentages (use first item's values)
+            if overhead_percentage == 0:
+                overhead_percentage = item.get("overhead_percentage", 0)
+            if profit_margin == 0:
+                profit_margin = item.get("profit_margin", 0) or item.get("profit_margin_percentage", 0)
 
-                    total_selling_price += item_selling_price
+    # Use calculated selling price if available, otherwise fall back to database value
+    items_subtotal = total_selling_price if total_selling_price > 0 else (float(boq_details.total_cost) if boq_details and boq_details.total_cost else 0.0)
 
-                    # Enhanced logging for labor cost debugging
-                    log.info(f"  Item '{item.get('item_name', 'Unknown')}': materials={item_materials_cost}, labour={item_labour_cost}, selling_price={item_selling_price}")
+    # Get preliminaries amount from BOQ details JSON
+    preliminaries_amount = 0
+    if boq_details and boq_details.boq_details:
+        preliminaries = boq_details.boq_details.get("preliminaries", {})
+        if preliminaries and "cost_details" in preliminaries:
+            preliminaries_amount = float(preliminaries.get("cost_details", {}).get("amount", 0) or 0)
 
-                    # Get overhead and profit percentages (use first item's values)
-                    if overhead_percentage == 0:
-                        overhead_percentage = item.get("overhead_percentage", 0)
-                    if profit_margin == 0:
-                        profit_margin = item.get("profit_margin", 0) or item.get("profit_margin_percentage", 0)
+    # Calculate subtotal (items + preliminaries) BEFORE discount
+    subtotal_before_discount = items_subtotal + preliminaries_amount
 
-            # Use calculated selling price if available, otherwise fall back to database value
-            items_subtotal = total_selling_price if total_selling_price > 0 else (float(boq_details.total_cost) if boq_details and boq_details.total_cost else 0.0)
+    # Apply discount if present in BOQ details
+    discount_percentage = 0
+    discount_amount = 0
+    if boq_details and boq_details.boq_details:
+        discount_percentage = boq_details.boq_details.get("discount_percentage", 0) or 0
+        discount_amount = boq_details.boq_details.get("discount_amount", 0) or 0
 
-            # Get preliminaries amount from BOQ details JSON
-            preliminaries_amount = 0
-            if boq_details and boq_details.boq_details:
-                preliminaries = boq_details.boq_details.get("preliminaries", {})
-                if preliminaries and "cost_details" in preliminaries:
-                    preliminaries_amount = float(preliminaries.get("cost_details", {}).get("amount", 0) or 0)
+        # Calculate discount amount if only percentage is provided
+        # Discount is applied on subtotal (items + preliminaries)
+        if discount_amount == 0 and discount_percentage > 0 and subtotal_before_discount > 0:
+            discount_amount = subtotal_before_discount * (discount_percentage / 100)
 
-            # Calculate subtotal (items + preliminaries) BEFORE discount
-            subtotal_before_discount = items_subtotal + preliminaries_amount
+    # Calculate GRAND TOTAL (Excluding VAT) = Subtotal - Discount
+    final_total_cost = subtotal_before_discount - discount_amount
 
-            # Apply discount if present in BOQ details
-            discount_percentage = 0
-            discount_amount = 0
-            if boq_details and boq_details.boq_details:
-                discount_percentage = boq_details.boq_details.get("discount_percentage", 0) or 0
-                discount_amount = boq_details.boq_details.get("discount_amount", 0) or 0
+    log.info(f"💰 [Financial Calc] BOQ {boq.boq_id if boq else 'Unknown'}: Materials={total_material_cost}, Labour={total_labour_cost}, Total={final_total_cost}")
 
-                # Calculate discount amount if only percentage is provided
-                # Discount is applied on subtotal (items + preliminaries)
-                if discount_amount == 0 and discount_percentage > 0 and subtotal_before_discount > 0:
-                    discount_amount = subtotal_before_discount * (discount_percentage / 100)
-
-            # Calculate GRAND TOTAL (Excluding VAT) = Subtotal - Discount
-            final_total_cost = subtotal_before_discount - discount_amount
-
-            log.info(f"BOQ {boq.boq_id}: Items={items_subtotal}, Preliminaries={preliminaries_amount}, Subtotal={subtotal_before_discount}, Discount={discount_amount}, Grand Total={final_total_cost}")
-            log.info(f"💰 BOQ {boq.boq_id} COST SUMMARY: Material={total_material_cost}, Labour={total_labour_cost}, Total={final_total_cost}")
-
-            boq_data = {
-                "boq_id": boq.boq_id,
-                "project_id": boq.project_id,
-                "boq_name": boq.boq_name,
-                "project_name": boq.project.project_name if boq.project else None,
-                "project_code": boq.project.project_code if boq.project else None,
-                "client": boq.project.client if boq.project else None,
-                "location": boq.project.location if boq.project else None,
-                "area": boq.project.area if boq.project else None,
-                "floor_name": boq.project.floor_name if boq.project else None,
-                "status": display_status,  # Use 'status' to match frontend expectations
-                "boq_status": display_status,
-                "client_rejection_reason": boq.client_rejection_reason,  # Include rejection/cancellation reason
-                "project_status" : boq.project.status if boq.project else None,
-                "email_sent": boq.email_sent,
-                "user_id": boq.project.user_id if boq.project else None,  # PM assignment indicator
-                "revision_number": boq.revision_number if hasattr(boq, 'revision_number') else 0,  # Revision tracking
-                "items_count": boq_details.total_items if boq_details else 0,
-                "material_count": boq_details.total_materials if boq_details else 0,
-                "labour_count": boq_details.total_labour if boq_details else 0,
-                "total_cost": final_total_cost,
-                "selling_price": final_total_cost,
-                "total_material_cost": total_material_cost,
-                "total_labour_cost": total_labour_cost,
-                "overhead_percentage": overhead_percentage,
-                "profit_margin": profit_margin,
-                "discount_percentage": discount_percentage,
-                "discount_amount": discount_amount,
-                "created_at": boq.created_at.isoformat() if boq.created_at else None,
-                "created_by": boq.created_by,
-                "last_modified_at": boq.last_modified_at.isoformat() if boq.last_modified_at else None,
-                "last_modified_by": boq.last_modified_by
-            }
-
-            # Note: Old preliminary system removed - now using preliminaries_master + boq_preliminaries tables
-            # Preliminary data is fetched through the new system in boq_controller.py
-            # This section is kept for backward compatibility but does nothing
-            try:
-                pass  # Preliminaries now handled by new system
-            except Exception as prelim_error:
-                log.warning(f"⚠️ Failed to fetch preliminaries for BOQ {boq.boq_id}: {str(prelim_error)}")
-
-            # 🔍 DEBUG: Log the final values being sent to frontend
-            log.info(f"📤 [TD API Response] BOQ {boq.boq_id} ({boq.boq_name}) - Sending to frontend: total_cost={final_total_cost}, selling_price={final_total_cost}, discount_percentage={discount_percentage}%, discount_amount={discount_amount}")
-
-            boqs_list.append(boq_data)
-
-        return jsonify({
-            "boqs": boqs_list,
-            "pagination": {
-                "page": page,
-                "per_page": per_page,
-                "total": paginated.total,
-                "pages": paginated.pages,
-                "has_prev": paginated.has_prev,
-                "has_next": paginated.has_next
-            }
-        }), 200
-
-    except Exception as e:
-        import traceback
-        log.error(f"Error fetching BOQs: {str(e)}")
-        return jsonify({
-            "error": f"Failed to fetch BOQs: {str(e)}",
-            "error_type": type(e).__name__
-        }), 500
+    return {
+        "items_count": boq_details.total_items if boq_details else 0,
+        "material_count": boq_details.total_materials if boq_details else 0,
+        "labour_count": boq_details.total_labour if boq_details else 0,
+        "total_cost": final_total_cost,
+        "selling_price": final_total_cost,
+        "total_material_cost": total_material_cost,
+        "total_labour_cost": total_labour_cost,
+        "overhead_percentage": overhead_percentage,
+        "profit_margin": profit_margin,
+        "discount_percentage": discount_percentage,
+        "discount_amount": discount_amount,
+    }
 
 def td_mail_send():
     """
@@ -407,42 +301,33 @@ def td_mail_send():
  
         # Initialize email service
         # boq_email_service = BOQEmailService()
- 
-        # Find Estimator from project.estimator_id (most reliable and simple)
-        # The project table has estimator_id which directly links to the estimator user
+
+        # Find Estimator (sender of original BOQ)
+        estimator_role = Role.query.filter(
+            Role.role.in_(['estimator', 'Estimator']),
+            Role.is_deleted == False
+        ).first()
+
         estimator = None
- 
-        if project.estimator_id:
+        if estimator_role:
             estimator = User.query.filter_by(
-                user_id=project.estimator_id,
+                role_id=estimator_role.role_id,
                 is_active=True,
                 is_deleted=False
+            ).filter(
+                db.or_(
+                    User.full_name == boq.created_by,
+                    User.email == boq.created_by
+                )
             ).first()
-            if estimator:
-                log.info(f"Found estimator from project.estimator_id: {estimator.full_name} (ID: {estimator.user_id})")
- 
-        # Fallback: Try to find by boq.created_by name if project.estimator_id not set
-        if not estimator:
-            estimator_role = Role.query.filter(
-                Role.role.in_(['estimator', 'Estimator']),
-                Role.is_deleted == False
-            ).first()
- 
-            if estimator_role:
-                # Try exact match on full_name (case-insensitive)
+
+            if not estimator:
                 estimator = User.query.filter_by(
                     role_id=estimator_role.role_id,
                     is_active=True,
                     is_deleted=False
-                ).filter(
-                    db.func.lower(User.full_name) == db.func.lower(boq.created_by)
                 ).first()
- 
-                if estimator:
-                    log.info(f"Found estimator by name match: {estimator.full_name} (ID: {estimator.user_id})")
-                else:
-                    log.warning(f"Could not find estimator for BOQ {boq_id}, project.estimator_id: {project.estimator_id}, created_by: {boq.created_by}")
- 
+
         estimator_email = estimator.email if estimator and estimator.email else boq.created_by
         estimator_name = estimator.full_name if estimator else boq.created_by
  
@@ -617,10 +502,21 @@ def td_mail_send():
  
         # Send notification about TD's decision
         try:
-            # Get estimator user_id from the estimator object we found earlier
-            # (already retrieved from project.estimator_id - most reliable)
-            estimator_user_id = estimator.user_id if estimator else None
- 
+            # Get estimator user_id for notification from BOQHistory actions
+            # This ensures we notify the CORRECT estimator who sent the BOQ to TD
+            estimator_user_id = None
+
+            # Find the latest "sent_to_td" action to get the estimator's user_id
+            if current_actions:
+                for action in reversed(current_actions):  # Check from most recent
+                    if action.get('type') == 'sent_to_td' and action.get('decided_by_user_id'):
+                        estimator_user_id = action.get('decided_by_user_id')
+                        break
+
+            # Fallback: Try to get from estimator object (old logic for backwards compatibility)
+            if not estimator_user_id and estimator and hasattr(estimator, 'user_id'):
+                estimator_user_id = estimator.user_id
+
             if estimator_user_id:
                 log.info(f"Sending notification to estimator user_id {estimator_user_id} ({estimator_name})")
                 # Check if this BOQ has internal revisions - send specific notification
@@ -1389,6 +1285,1101 @@ def get_td_purchase_order_by_id(cr_id):
             "error_type": type(e).__name__
         }), 500
 
+def get_td_pending_boq():
+    """Get TD pending BOQs - OPTIMIZED FOR SPEED (No N+1 queries)"""
+    try:
+        from sqlalchemy import func
+
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)
+
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+        user_id = current_user.get('user_id')
+        user_role = current_user.get('role', '').lower() if current_user else ''
+
+        # OPTIMIZED: Join BOQDetails to eliminate N+1 queries
+        query = (
+            db.session.query(
+                BOQ,
+                Project.project_name,
+                Project.project_code,
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.user_id.label('project_user_id'),
+                User.full_name.label('last_pm_name'),
+                BOQDetails
+            )
+            .join(Project, BOQ.project_id == Project.project_id)
+            .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
+            .outerjoin(BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False))
+            .filter(
+                BOQ.is_deleted == False,
+                Project.is_deleted == False,
+                BOQ.status.in_(['Pending_TD_Approval', 'Pending'])
+            )
+        )
+
+        # Apply role filter early
+        if user_role == 'projectmanager' or user_role == 'project_manager':
+            query = query.filter(BOQ.last_pm_user_id == user_id)
+
+        query = query.order_by(BOQ.created_at.desc())
+
+        # OPTIMIZED: Use func.count() instead of .count()
+        if page is not None:
+            total_count = query.with_entities(func.count()).scalar()
+            if total_count == 0:
+                return jsonify({"message": "PM Approval BOQs retrieved successfully", "count": 0, "data": [], "pagination": {"page": page, "page_size": page_size, "total_count": 0, "total_pages": 0, "has_next": False, "has_prev": False}}), 200
+            offset = (page - 1) * page_size
+            rows = query.offset(offset).limit(page_size).all()
+        else:
+            rows = query.all()
+            total_count = len(rows)
+            if total_count == 0:
+                return jsonify({"message": "PM Approval BOQs retrieved successfully", "count": 0, "data": []}), 200
+
+        # OPTIMIZED: Build response without N+1 queries (all data already loaded)
+        pm_approval_boqs = []
+        for row in rows:
+            boq_obj = row.BOQ
+            boq_details = row.BOQDetails
+
+            # Calculate financial data using already-loaded objects
+            financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
+
+            boq_entry = {
+                "boq_id": boq_obj.boq_id,
+                "boq_name": boq_obj.boq_name,
+                "project_id": boq_obj.project_id,
+                "project_name": row.project_name,
+                "project_code": row.project_code,
+                "client": row.client,
+                "location": row.location,
+                "floor": row.floor_name,
+                "hours": row.working_hours,
+                "status": boq_obj.status,
+                "client_status": boq_obj.client_status,
+                "revision_number": boq_obj.revision_number or 0,
+                "email_sent": boq_obj.email_sent,
+                "user_id": row.project_user_id,
+                "created_at": boq_obj.created_at.isoformat() if boq_obj.created_at else None,
+                "created_by": boq_obj.created_by,
+                "client_rejection_reason": boq_obj.client_rejection_reason,
+                "last_pm_user_id": boq_obj.last_pm_user_id,
+                "last_pm_name": row.last_pm_name,
+                **financial_data
+            }
+            pm_approval_boqs.append(boq_entry)
+
+        # Build response
+        response = {
+            "message": "PM Approval BOQs retrieved successfully",
+            "count": len(pm_approval_boqs),
+            "data": pm_approval_boqs
+        }
+
+        if page is not None:
+            total_pages = (total_count + page_size - 1) // page_size
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error retrieving PM Approval BOQs: {str(e)}")
+        return jsonify({
+            'error': 'Failed to retrieve PM Approval BOQs',
+            'details': str(e)
+        }), 500   
+
+def get_client_boq():
+    """Get projects assigned to the current PM based on Project.user_id (JSONB array)"""
+    try:
+        # PERFORMANCE: Optional pagination support (backward compatible)
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)  # Cap at 100 items per page
+
+        # Get current logged-in user
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+        user_id = current_user.get('user_id')
+        user_role = current_user.get('role', '').lower() if current_user else ''
+
+        # OPTIMIZED: Join BOQDetails to eliminate N+1 queries
+        query = (
+            db.session.query(
+                BOQ,
+                Project.project_name,
+                Project.project_code,
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.user_id,
+                User.full_name.label('last_pm_name'),
+                BOQDetails
+            )
+            .join(Project, BOQ.project_id == Project.project_id)
+            .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
+            .outerjoin(BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False))
+            .filter(BOQ.is_deleted == False, Project.is_deleted == False)
+            .filter(BOQ.status.in_(['Client_Confirmed', 'client_confirmed', 'Client_Rejected', 'client_rejected']))
+            .order_by(BOQ.created_at.desc())
+        )
+
+        # Filter by BOQ.last_pm_user_id (the PM this BOQ was sent to)
+        # Admin sees all BOQs with Pending_PM_Approval status
+        if user_role == 'admin':
+            pass  # No additional filter for admin - sees all
+        elif user_role in ['projectmanager', 'project_manager']:
+            # PM sees only BOQs assigned to them via last_pm_user_id
+            query = query.filter(BOQ.last_pm_user_id == user_id)
+
+        # OPTIMIZED: Use func.count() for better performance
+        if page is not None:
+            total_count = query.with_entities(func.count()).scalar()
+            if total_count == 0:
+                return jsonify({
+                    "message": "No client BOQs found",
+                    "count": 0,
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_count": 0,
+                        "total_pages": 0,
+                        "has_next": False,
+                        "has_prev": False
+                    }
+                }), 200
+            offset = (page - 1) * page_size
+            rows = query.offset(offset).limit(page_size).all()
+        else:
+            rows = query.all()
+            if not rows:
+                return jsonify({"message": "No client BOQs found", "count": 0, "data": []}), 200
+            total_count = len(rows)
+
+        # Build response with financial data
+        pm_approval_boqs = []
+        for row in rows:
+            # Use already-loaded BOQ and BOQDetails from JOIN (no additional queries)
+            boq_obj = row.BOQ
+            boq_details = row.BOQDetails
+
+            # Calculate financial data
+            financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
+
+            boq_entry = {
+                "boq_id": boq_obj.boq_id,
+                "boq_name": boq_obj.boq_name,
+                "project_id": boq_obj.project_id,
+                "project_name": row.project_name,
+                "project_code": row.project_code,
+                "client": row.client,
+                "location": row.location,
+                "floor": row.floor_name,
+                "hours": row.working_hours,
+                "status": boq_obj.status,
+                "client_status": boq_obj.client_status,
+                "revision_number": boq_obj.revision_number or 0,
+                "email_sent": boq_obj.email_sent,
+                "user_id": row.user_id,
+                "created_at": boq_obj.created_at.isoformat() if boq_obj.created_at else None,
+                "created_by": boq_obj.created_by,
+                "client_rejection_reason": boq_obj.client_rejection_reason,
+                "last_pm_user_id": boq_obj.last_pm_user_id,
+                "last_pm_name": row.last_pm_name,
+                # Add financial data
+                **financial_data
+            }
+            pm_approval_boqs.append(boq_entry)
+
+        # Build response
+        response = {
+            "message": "PM Approval BOQs retrieved successfully",
+            "count": len(pm_approval_boqs),
+            "data": pm_approval_boqs
+        }
+
+        if page is not None:
+            total_pages = (total_count + page_size - 1) // page_size
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error retrieving PM Approval BOQs: {str(e)}")
+        return jsonify({
+            'error': 'Failed to retrieve PM Approval BOQs',
+            'details': str(e)
+        }), 500
+
+def get_td_assign_boq():
+    """Get BOQs for projects where TD assigned PM based on Project.user_id (JSONB array)"""
+    try:
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)
+
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+        user_id = current_user.get('user_id')
+        user_role = current_user.get('role', '').lower() if current_user else ''
+
+        # OPTIMIZED: Join BOQDetails to eliminate N+1 queries
+        query = (
+            db.session.query(
+                BOQ,
+                Project.project_name,
+                Project.project_code,
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.user_id,
+                User.full_name.label('last_pm_name'),
+                BOQDetails
+            )
+            .join(Project, BOQ.project_id == Project.project_id)
+            .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
+            .outerjoin(BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False))
+            .filter(BOQ.is_deleted == False, Project.is_deleted == False)
+            # Only show projects where user_id is not null and not empty
+            .filter(Project.user_id != None, Project.user_id != '[]', Project.user_id != 'null')
+            .order_by(BOQ.created_at.desc())
+        )
+
+        # OPTIMIZED: Use func.count() for better performance
+        if page is not None:
+            total_count = query.with_entities(func.count()).scalar()
+            if total_count == 0:
+                return jsonify({
+                    "message": "No TD assigned BOQs found",
+                    "count": 0,
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_count": 0,
+                        "total_pages": 0,
+                        "has_next": False,
+                        "has_prev": False
+                    }
+                }), 200
+            offset = (page - 1) * page_size
+            rows = query.offset(offset).limit(page_size).all()
+        else:
+            rows = query.all()
+            if not rows:
+                return jsonify({"message": "No TD assigned BOQs found", "count": 0, "data": []}), 200
+            total_count = len(rows)
+
+        # Build response with financial data
+        td_assign_boqs = []
+        for row in rows:
+            # Use already-loaded BOQ and BOQDetails from JOIN (no additional queries)
+            boq_obj = row.BOQ
+            boq_details = row.BOQDetails
+
+            # Calculate financial data
+            financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
+
+            boq_entry = {
+                "boq_id": boq_obj.boq_id,
+                "boq_name": boq_obj.boq_name,
+                "project_id": boq_obj.project_id,
+                "project_name": row.project_name,
+                "project_code": row.project_code,
+                "client": row.client,
+                "location": row.location,
+                "floor": row.floor_name,
+                "hours": row.working_hours,
+                "status": boq_obj.status,
+                "client_status": boq_obj.client_status,
+                "revision_number": boq_obj.revision_number or 0,
+                "email_sent": boq_obj.email_sent,
+                "user_id": row.user_id,
+                "created_at": boq_obj.created_at.isoformat() if boq_obj.created_at else None,
+                "created_by": boq_obj.created_by,
+                "client_rejection_reason": boq_obj.client_rejection_reason,
+                "last_pm_user_id": boq_obj.last_pm_user_id,
+                "last_pm_name": row.last_pm_name,
+                # Add financial data
+                **financial_data
+            }
+            td_assign_boqs.append(boq_entry)
+
+        response = {
+            "message": "TD assigned BOQs retrieved successfully",
+            "count": len(td_assign_boqs),
+            "data": td_assign_boqs
+        }
+
+        if page is not None:
+            total_pages = (total_count + page_size - 1) // page_size
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error retrieving TD assigned BOQs: {str(e)}")
+        return jsonify({
+            'error': 'Failed to retrieve TD assigned BOQs',
+            'details': str(e)
+        }), 500
+
+def td_approved_boq():
+    """Get TD approved BOQs - BOQs with Approved status"""
+    try:
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)
+
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+        user_id = current_user.get('user_id')
+        user_role = current_user.get('role', '').lower() if current_user else ''
+
+        # OPTIMIZED: Join BOQDetails and User to eliminate N+1 queries
+        query = (
+            db.session.query(
+                BOQ,
+                Project.project_name,
+                Project.project_code,
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.user_id,
+                User.full_name.label('last_pm_name'),
+                BOQDetails
+            )
+            .join(Project, BOQ.project_id == Project.project_id)
+            .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
+            .outerjoin(BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False))
+            .filter(
+                BOQ.is_deleted == False,
+                Project.is_deleted == False,
+                BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'Sent_for_Confirmation']),
+                # Only show projects where user_id is null or empty (not assigned to PM yet)
+                or_(
+                    Project.user_id == None,
+                    Project.user_id == '[]',
+                    Project.user_id == 'null'
+                )
+            )
+            .order_by(BOQ.created_at.desc())
+        )
+
+        # OPTIMIZED: Use func.count() for better performance
+        if page is not None:
+            total_count = query.with_entities(func.count()).scalar()
+            if total_count == 0:
+                return jsonify({
+                    "message": "No TD approved BOQs found",
+                    "count": 0,
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_count": 0,
+                        "total_pages": 0,
+                        "has_next": False,
+                        "has_prev": False
+                    }
+                }), 200
+            offset = (page - 1) * page_size
+            rows = query.offset(offset).limit(page_size).all()
+        else:
+            rows = query.all()
+            if not rows:
+                return jsonify({"message": "No TD approved BOQs found", "count": 0, "data": []}), 200
+            total_count = len(rows)
+
+        # Build response with financial data
+        td_approved_boqs = []
+        for row in rows:
+            # Use already-loaded BOQ and BOQDetails from JOIN (no additional queries)
+            boq_obj = row.BOQ
+            boq_details = row.BOQDetails
+
+            # Calculate financial data
+            financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
+
+            boq_entry = {
+                "boq_id": boq_obj.boq_id,
+                "boq_name": boq_obj.boq_name,
+                "project_id": boq_obj.project_id,
+                "project_name": row.project_name,
+                "project_code": row.project_code,
+                "client": row.client,
+                "location": row.location,
+                "floor": row.floor_name,
+                "hours": row.working_hours,
+                "status": boq_obj.status,
+                "client_status": boq_obj.client_status,
+                "revision_number": boq_obj.revision_number or 0,
+                "email_sent": boq_obj.email_sent,
+                "user_id": row.user_id,
+                "created_at": boq_obj.created_at.isoformat() if boq_obj.created_at else None,
+                "created_by": boq_obj.created_by,
+                "client_rejection_reason": boq_obj.client_rejection_reason,
+                "last_pm_user_id": boq_obj.last_pm_user_id,
+                "last_pm_name": row.last_pm_name,
+                # Add financial data
+                **financial_data
+            }
+            td_approved_boqs.append(boq_entry)
+
+        response = {
+            "message": "TD Approved BOQs retrieved successfully",
+            "count": len(td_approved_boqs),
+            "data": td_approved_boqs
+        }
+
+        if page is not None:
+            total_pages = (total_count + page_size - 1) // page_size
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error retrieving TD approved BOQs: {str(e)}")
+        return jsonify({
+            'error': 'Failed to retrieve TD approved BOQs',
+            'details': str(e)
+        }), 500
+
+def get_td_revisions_boq():
+    """Get BOQs with revisions (revision_number > 0)"""
+    try:
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)
+
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+
+        # OPTIMIZED: Join BOQDetails to eliminate N+1 queries
+        query = (
+            db.session.query(
+                BOQ,
+                Project.project_name,
+                Project.project_code,
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.user_id,
+                User.full_name.label('last_pm_name'),
+                BOQDetails
+            )
+            .join(Project, BOQ.project_id == Project.project_id)
+            .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
+            .outerjoin(BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False))
+            .filter(BOQ.is_deleted == False, Project.is_deleted == False)
+            .filter(BOQ.revision_number > 0)
+            .order_by(BOQ.created_at.desc())
+        )
+
+        # OPTIMIZED: Use func.count() for better performance
+        if page is not None:
+            total_count = query.with_entities(func.count()).scalar()
+            if total_count == 0:
+                return jsonify({
+                    "message": "No revision BOQs found",
+                    "count": 0,
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_count": 0,
+                        "total_pages": 0,
+                        "has_next": False,
+                        "has_prev": False
+                    }
+                }), 200
+            offset = (page - 1) * page_size
+            rows = query.offset(offset).limit(page_size).all()
+        else:
+            rows = query.all()
+            if not rows:
+                return jsonify({"message": "No revision BOQs found", "count": 0, "data": []}), 200
+            total_count = len(rows)
+
+        # Build response with financial data
+        revision_boqs = []
+        for row in rows:
+            # Use already-loaded BOQ and BOQDetails from JOIN (no additional queries)
+            boq_obj = row.BOQ
+            boq_details = row.BOQDetails
+
+            # Calculate financial data
+            financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
+
+            boq_entry = {
+                "boq_id": boq_obj.boq_id,
+                "boq_name": boq_obj.boq_name,
+                "project_id": boq_obj.project_id,
+                "project_name": row.project_name,
+                "project_code": row.project_code,
+                "client": row.client,
+                "location": row.location,
+                "floor": row.floor_name,
+                "hours": row.working_hours,
+                "status": boq_obj.status,
+                "client_status": boq_obj.client_status,
+                "revision_number": boq_obj.revision_number or 0,
+                "email_sent": boq_obj.email_sent,
+                "user_id": row.user_id,
+                "created_at": boq_obj.created_at.isoformat() if boq_obj.created_at else None,
+                "created_by": boq_obj.created_by,
+                "client_rejection_reason": boq_obj.client_rejection_reason,
+                "last_pm_user_id": boq_obj.last_pm_user_id,
+                "last_pm_name": row.last_pm_name,
+                # Add financial data
+                **financial_data
+            }
+            revision_boqs.append(boq_entry)
+
+        response = {
+            "message": "TD Revisions BOQs retrieved successfully",
+            "count": len(revision_boqs),
+            "data": revision_boqs
+        }
+
+        if page is not None:
+            total_pages = (total_count + page_size - 1) // page_size
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error retrieving TD revisions BOQs: {str(e)}")
+        return jsonify({
+            'error': 'Failed to retrieve TD revisions BOQs',
+            'details': str(e)
+        }), 500
+
+def get_td_completed_boq():
+    """Get BOQs with completed status"""
+    try:
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)
+
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+
+        # OPTIMIZED: Join BOQDetails to eliminate N+1 queries
+        query = (
+            db.session.query(
+                BOQ,
+                Project.project_name,
+                Project.project_code,
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.user_id,
+                User.full_name.label('last_pm_name'),
+                BOQDetails
+            )
+            .join(Project, BOQ.project_id == Project.project_id)
+            .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
+            .outerjoin(BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False))
+            .filter(BOQ.is_deleted == False, Project.is_deleted == False)
+            .filter(BOQ.status.in_(['Completed', 'completed']))
+            .order_by(BOQ.created_at.desc())
+        )
+
+        # OPTIMIZED: Use func.count() for better performance
+        if page is not None:
+            total_count = query.with_entities(func.count()).scalar()
+            if total_count == 0:
+                return jsonify({
+                    "message": "No completed BOQs found",
+                    "count": 0,
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_count": 0,
+                        "total_pages": 0,
+                        "has_next": False,
+                        "has_prev": False
+                    }
+                }), 200
+            offset = (page - 1) * page_size
+            rows = query.offset(offset).limit(page_size).all()
+        else:
+            rows = query.all()
+            if not rows:
+                return jsonify({"message": "No completed BOQs found", "count": 0, "data": []}), 200
+            total_count = len(rows)
+
+        # Build response with financial data
+        completed_boqs = []
+        for row in rows:
+            # Use already-loaded BOQ and BOQDetails from JOIN (no additional queries)
+            boq_obj = row.BOQ
+            boq_details = row.BOQDetails
+
+            # Calculate financial data
+            financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
+
+            boq_entry = {
+                "boq_id": boq_obj.boq_id,
+                "boq_name": boq_obj.boq_name,
+                "project_id": boq_obj.project_id,
+                "project_name": row.project_name,
+                "project_code": row.project_code,
+                "client": row.client,
+                "location": row.location,
+                "floor": row.floor_name,
+                "hours": row.working_hours,
+                "status": boq_obj.status,
+                "client_status": boq_obj.client_status,
+                "revision_number": boq_obj.revision_number or 0,
+                "email_sent": boq_obj.email_sent,
+                "user_id": row.user_id,
+                "created_at": boq_obj.created_at.isoformat() if boq_obj.created_at else None,
+                "created_by": boq_obj.created_by,
+                "client_rejection_reason": boq_obj.client_rejection_reason,
+                "last_pm_user_id": boq_obj.last_pm_user_id,
+                "last_pm_name": row.last_pm_name,
+                # Add financial data
+                **financial_data
+            }
+            completed_boqs.append(boq_entry)
+
+        response = {
+            "message": "TD Completed BOQs retrieved successfully",
+            "count": len(completed_boqs),
+            "data": completed_boqs
+        }
+
+        if page is not None:
+            total_pages = (total_count + page_size - 1) // page_size
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error retrieving TD completed BOQs: {str(e)}")
+        return jsonify({
+            'error': 'Failed to retrieve TD completed BOQs',
+            'details': str(e)
+        }), 500
+
+def get_td_rejected_boq():
+    """Get BOQs with rejected status (rejected by TD)"""
+    try:
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)
+
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+
+        # OPTIMIZED: Join BOQDetails to eliminate N+1 queries
+        query = (
+            db.session.query(
+                BOQ,
+                Project.project_name,
+                Project.project_code,
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.user_id,
+                User.full_name.label('last_pm_name'),
+                BOQDetails
+            )
+            .join(Project, BOQ.project_id == Project.project_id)
+            .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
+            .outerjoin(BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False))
+            .filter(BOQ.is_deleted == False, Project.is_deleted == False)
+            .filter(BOQ.status.in_(['Rejected', 'rejected']))
+            .order_by(BOQ.created_at.desc())
+        )
+
+        # OPTIMIZED: Use func.count() for better performance
+        if page is not None:
+            total_count = query.with_entities(func.count()).scalar()
+            if total_count == 0:
+                return jsonify({
+                    "message": "No rejected BOQs found",
+                    "count": 0,
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_count": 0,
+                        "total_pages": 0,
+                        "has_next": False,
+                        "has_prev": False
+                    }
+                }), 200
+            offset = (page - 1) * page_size
+            rows = query.offset(offset).limit(page_size).all()
+        else:
+            rows = query.all()
+            if not rows:
+                return jsonify({"message": "No rejected BOQs found", "count": 0, "data": []}), 200
+            total_count = len(rows)
+
+        # Build response with financial data
+        rejected_boqs = []
+        for row in rows:
+            # Use already-loaded BOQ and BOQDetails from JOIN (no additional queries)
+            boq_obj = row.BOQ
+            boq_details = row.BOQDetails
+
+            # Calculate financial data
+            financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
+
+            boq_entry = {
+                "boq_id": boq_obj.boq_id,
+                "boq_name": boq_obj.boq_name,
+                "project_id": boq_obj.project_id,
+                "project_name": row.project_name,
+                "project_code": row.project_code,
+                "client": row.client,
+                "location": row.location,
+                "floor": row.floor_name,
+                "hours": row.working_hours,
+                "status": boq_obj.status,
+                "client_status": boq_obj.client_status,
+                "revision_number": boq_obj.revision_number or 0,
+                "email_sent": boq_obj.email_sent,
+                "user_id": row.user_id,
+                "created_at": boq_obj.created_at.isoformat() if boq_obj.created_at else None,
+                "created_by": boq_obj.created_by,
+                "client_rejection_reason": boq_obj.client_rejection_reason,
+                "last_pm_user_id": boq_obj.last_pm_user_id,
+                "last_pm_name": row.last_pm_name,
+                # Add financial data
+                **financial_data
+            }
+            rejected_boqs.append(boq_entry)
+
+        response = {
+            "message": "TD Rejected BOQs retrieved successfully",
+            "count": len(rejected_boqs),
+            "data": rejected_boqs
+        }
+
+        if page is not None:
+            total_pages = (total_count + page_size - 1) // page_size
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error retrieving TD rejected BOQs: {str(e)}")
+        return jsonify({
+            'error': 'Failed to retrieve TD rejected BOQs',
+            'details': str(e)
+        }), 500
+
+def get_td_tab_counts():
+    """Get counts for all TD tabs"""
+    try:
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+
+        # OPTIMIZED: Use func.count() for better performance (2-3x faster)
+
+        # Count for Pending tab (Pending_TD_Approval and Pending statuses)
+        pending_count = db.session.query(BOQ).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Pending_TD_Approval', 'Pending'])
+        ).with_entities(func.count()).scalar()
+
+        # Count for Approved tab (Approved, Revision_Approved, Sent_for_Confirmation AND not assigned to PM)
+        approved_count = db.session.query(BOQ).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'Sent_for_Confirmation']),
+            or_(
+                Project.user_id == None,
+                Project.user_id == '[]',
+                Project.user_id == 'null'
+            )
+        ).with_entities(func.count()).scalar()
+
+        # Count for Client Response tab (Client_Confirmed or Client_Rejected)
+        client_response_count = db.session.query(BOQ).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Client_Confirmed', 'client_confirmed', 'Client_Rejected', 'client_rejected'])
+        ).with_entities(func.count()).scalar()
+
+        # Count for Revisions tab (revision_number > 0)
+        revisions_count = db.session.query(BOQ).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.revision_number > 0
+        ).with_entities(func.count()).scalar()
+
+        # Count for Assigned tab (projects where user_id is not null/empty)
+        assigned_count = db.session.query(BOQ).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            Project.user_id != None,
+            Project.user_id != '[]',
+            Project.user_id != 'null'
+        ).with_entities(func.count()).scalar()
+
+        # Count for Completed tab
+        completed_count = db.session.query(BOQ).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Completed', 'completed'])
+        ).with_entities(func.count()).scalar()
+
+        # Count for Rejected by TD tab
+        rejected_count = db.session.query(BOQ).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Rejected', 'rejected'])
+        ).with_entities(func.count()).scalar()
+
+        # Count for Cancelled tab
+        cancelled_count = db.session.query(BOQ).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Client_Cancelled', 'Cancelled', 'cancelled'])
+        ).with_entities(func.count()).scalar()
+
+        return jsonify({
+            "success": True,
+            "counts": {
+                "pending": pending_count,
+                "approved": approved_count,
+                "sent": client_response_count,
+                "revisions": revisions_count,
+                "assigned": assigned_count,
+                "completed": completed_count,
+                "rejected": rejected_count,
+                "cancelled": cancelled_count
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error getting TD tab counts: {str(e)}")
+        return jsonify({
+            'error': 'Failed to get tab counts',
+            'details': str(e)
+        }), 500
+
+def get_td_cancelled_boq():
+    """Get BOQs with cancelled status"""
+    try:
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        page_size = min(page_size, 100)
+
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+
+        # OPTIMIZED: Join BOQDetails to eliminate N+1 queries
+        query = (
+            db.session.query(
+                BOQ,
+                Project.project_name,
+                Project.project_code,
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.user_id,
+                User.full_name.label('last_pm_name'),
+                BOQDetails
+            )
+            .join(Project, BOQ.project_id == Project.project_id)
+            .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
+            .outerjoin(BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False))
+            .filter(BOQ.is_deleted == False, Project.is_deleted == False)
+            .filter(BOQ.status.in_(['Client_Cancelled']))
+            .order_by(BOQ.created_at.desc())
+        )
+
+        # OPTIMIZED: Use func.count() for better performance
+        if page is not None:
+            total_count = query.with_entities(func.count()).scalar()
+            if total_count == 0:
+                return jsonify({
+                    "message": "No cancelled BOQs found",
+                    "count": 0,
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_count": 0,
+                        "total_pages": 0,
+                        "has_next": False,
+                        "has_prev": False
+                    }
+                }), 200
+            offset = (page - 1) * page_size
+            rows = query.offset(offset).limit(page_size).all()
+        else:
+            rows = query.all()
+            if not rows:
+                return jsonify({"message": "No cancelled BOQs found", "count": 0, "data": []}), 200
+            total_count = len(rows)
+
+        # Build response with financial data
+        cancelled_boqs = []
+        for row in rows:
+            # Use already-loaded BOQ and BOQDetails from JOIN (no additional queries)
+            boq_obj = row.BOQ
+            boq_details = row.BOQDetails
+
+            # Calculate financial data
+            financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
+
+            boq_entry = {
+                "boq_id": boq_obj.boq_id,
+                "boq_name": boq_obj.boq_name,
+                "project_id": boq_obj.project_id,
+                "project_name": row.project_name,
+                "project_code": row.project_code,
+                "client": row.client,
+                "location": row.location,
+                "floor": row.floor_name,
+                "hours": row.working_hours,
+                "status": boq_obj.status,
+                "client_status": boq_obj.client_status,
+                "revision_number": boq_obj.revision_number or 0,
+                "email_sent": boq_obj.email_sent,
+                "user_id": row.user_id,
+                "created_at": boq_obj.created_at.isoformat() if boq_obj.created_at else None,
+                "created_by": boq_obj.created_by,
+                "client_rejection_reason": boq_obj.client_rejection_reason,
+                "last_pm_user_id": boq_obj.last_pm_user_id,
+                "last_pm_name": row.last_pm_name,
+                # Add financial data
+                **financial_data
+            }
+            cancelled_boqs.append(boq_entry)
+
+        response = {
+            "message": "TD Cancelled BOQs retrieved successfully",
+            "count": len(cancelled_boqs),
+            "data": cancelled_boqs
+        }
+
+        if page is not None:
+            total_pages = (total_count + page_size - 1) // page_size
+            response["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error retrieving TD cancelled BOQs: {str(e)}")
+        return jsonify({
+            'error': 'Failed to retrieve TD cancelled BOQs',
+            'details': str(e)
+        }), 500
+        
 def get_td_production_management_boqs():
     """
     Get ALL BOQs for TD Production Management view (including completed)
@@ -1400,11 +2391,11 @@ def get_td_production_management_boqs():
         page = request.args.get('page', type=int)
         page_size = request.args.get('page_size', default=20, type=int)
         page_size = min(page_size, 100)
- 
+
         current_user = getattr(g, 'user', None)
         if not current_user:
             return jsonify({'error': 'Authentication required'}), 401
- 
+
         # OPTIMIZED: Join BOQDetails and User to eliminate N+1 queries
         query = (
             db.session.query(
@@ -1433,7 +2424,7 @@ def get_td_production_management_boqs():
             )
             .order_by(BOQ.created_at.desc())
         )
- 
+
         # OPTIMIZED: Use func.count() for better performance
         if page is not None:
             total_count = query.with_entities(func.count()).scalar()
@@ -1458,17 +2449,17 @@ def get_td_production_management_boqs():
             if not rows:
                 return jsonify({"message": "No BOQs found for production management", "count": 0, "data": []}), 200
             total_count = len(rows)
- 
+
         # Build response with financial data
         production_boqs = []
         for row in rows:
             # Use already-loaded BOQ and BOQDetails from JOIN (no additional queries)
             boq_obj = row.BOQ
             boq_details = row.BOQDetails
- 
+
             # Calculate financial data
             financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
- 
+
             boq_entry = {
                 "boq_id": boq_obj.boq_id,
                 "boq_name": boq_obj.boq_name,
@@ -1499,13 +2490,13 @@ def get_td_production_management_boqs():
                 **financial_data
             }
             production_boqs.append(boq_entry)
- 
+
         response = {
             "message": "TD Production Management BOQs retrieved successfully",
             "count": len(production_boqs),
             "data": production_boqs
         }
- 
+
         if page is not None:
             total_pages = (total_count + page_size - 1) // page_size
             response["pagination"] = {
@@ -1516,9 +2507,9 @@ def get_td_production_management_boqs():
                 "has_next": page < total_pages,
                 "has_prev": page > 1
             }
- 
+
         return jsonify(response), 200
- 
+
     except Exception as e:
         db.session.rollback()
         log.error(f"Error retrieving TD production management BOQs: {str(e)}")
@@ -1526,5 +2517,3 @@ def get_td_production_management_boqs():
             'error': 'Failed to retrieve TD production management BOQs',
             'details': str(e)
         }), 500
- 
- 

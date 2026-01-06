@@ -61,7 +61,8 @@ if (typeof window !== 'undefined') {
 }
 
 // API Configuration
-export const API_BASE_URL = envConfig.api.baseUrl;
+export const API_BASE_URL = envConfig.api.baseUrl; // Main API (port 5000)
+export const AUTH_API_BASE_URL = import.meta.env.VITE_AUTH_API_URL || 'http://127.0.0.1:5001'; // Auth API (port 5001)
 
 // Supabase Configuration with optimized Realtime settings from constants
 export const supabase = createClient(envConfig.supabase.url, envConfig.supabase.anonKey, {
@@ -89,6 +90,15 @@ export const supabase = createClient(envConfig.supabase.url, envConfig.supabase.
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: API_TIMEOUTS.STANDARD, // 60 seconds from constants
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// ✅ NEW: Separate client for authentication endpoints (port 5001)
+export const authApiClient = axios.create({
+  baseURL: AUTH_API_BASE_URL,
+  timeout: API_TIMEOUTS.STANDARD,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -491,6 +501,43 @@ longRunningApiClient.interceptors.response.use(
       console.error('Long-running API Error:', error.message);
     }
     // ✅ FIXED: Use consecutive count and debounced handler
+    if (error.response?.status === 401) {
+      if (!isAuthEndpoint(error.config?.url)) {
+        await handleUnauthorized(error.config?.url);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+// ✅ Auth API Client Interceptors (for port 5001)
+authApiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('access_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    config.headers['X-Request-ID'] = crypto.randomUUID();
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+authApiClient.interceptors.response.use(
+  (response) => {
+    resetConsecutive401Count();
+    if (isLoggingOut) {
+      successfulRequestReceived = true;
+    }
+    return response;
+  },
+  async (error) => {
+    if (import.meta.env.DEV) {
+      console.error('Auth API Error:', error.message);
+    }
     if (error.response?.status === 401) {
       if (!isAuthEndpoint(error.config?.url)) {
         await handleUnauthorized(error.config?.url);

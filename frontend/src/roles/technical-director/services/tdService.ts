@@ -398,6 +398,214 @@ class TDService {
     }
   }
 
+  // Tab-specific API endpoints
+  async getPendingBOQs(page?: number, pageSize: number = 100): Promise<{ success: boolean; data?: any[]; count?: number; message?: string }> {
+    try {
+      const params: any = { page_size: pageSize };
+      if (page) params.page = page;
+
+      const response = await apiClient.get('/td_pending_boq', { params });
+      return {
+        success: true,
+        data: response.data.data || [],
+        count: response.data.count || 0
+      };
+    } catch (error: any) {
+      console.error('Get Pending BOQs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load pending BOQs'
+      };
+    }
+  }
+
+  async getApprovedBOQs(page?: number, pageSize: number = 100): Promise<{ success: boolean; data?: any[]; count?: number; message?: string }> {
+    try {
+      const params: any = { page_size: pageSize };
+      if (page) params.page = page;
+
+      const response = await apiClient.get('/td_approved_boq', { params });
+      return {
+        success: true,
+        data: response.data.data || [],
+        count: response.data.count || 0
+      };
+    } catch (error: any) {
+      console.error('Get Approved BOQs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load approved BOQs'
+      };
+    }
+  }
+
+  async getClientResponseBOQs(page?: number, pageSize: number = 100): Promise<{ success: boolean; data?: any[]; count?: number; message?: string }> {
+    try {
+      const params: any = { page_size: pageSize };
+      if (page) params.page = page;
+
+      const response = await apiClient.get('/td_client_boq', { params });
+      return {
+        success: true,
+        data: response.data.data || [],
+        count: response.data.count || 0
+      };
+    } catch (error: any) {
+      console.error('Get Client Response BOQs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load client response BOQs'
+      };
+    }
+  }
+
+  async getRevisionsBOQs(page?: number, pageSize: number = 100): Promise<{ success: boolean; data?: any[]; count?: number; message?: string }> {
+    try {
+      const params: any = { page_size: pageSize };
+      if (page) params.page = page;
+
+      const response = await apiClient.get('/td_revisions_boq', { params });
+      return {
+        success: true,
+        data: response.data.data || [],
+        count: response.data.count || 0
+      };
+    } catch (error: any) {
+      console.error('Get Revisions BOQs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load revisions BOQs'
+      };
+    }
+  }
+
+  async getAssignedBOQs(page?: number, pageSize: number = 100): Promise<{ success: boolean; data?: any[]; count?: number; message?: string }> {
+    try {
+      const params: any = { page_size: pageSize };
+      if (page) params.page = page;
+
+      const response = await apiClient.get('/td_assign_boq', { params });
+      return {
+        success: true,
+        data: response.data.data || [],
+        count: response.data.count || 0
+      };
+    } catch (error: any) {
+      console.error('Get Assigned BOQs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load assigned BOQs'
+      };
+    }
+  }
+
+  async getCompletedBOQs(page?: number, pageSize: number = 100): Promise<{ success: boolean; data?: any[]; count?: number; message?: string }> {
+    try {
+      const params: any = { page_size: pageSize };
+      if (page) params.page = page;
+
+      const response = await apiClient.get('/td_completed_boq', { params });
+      return {
+        success: true,
+        data: response.data.data || [],
+        count: response.data.count || 0
+      };
+    } catch (error: any) {
+      console.error('Get Completed BOQs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load completed BOQs'
+      };
+    }
+  }
+
+  async getRejectedBOQs(page?: number, pageSize: number = 100): Promise<{ success: boolean; data?: any[]; count?: number; message?: string }> {
+    try {
+      const params: any = { page_size: pageSize };
+      if (page) params.page = page;
+
+      const response = await apiClient.get('/td_rejected_boq', { params });
+      return {
+        success: true,
+        data: response.data.data || [],
+        count: response.data.count || 0
+      };
+    } catch (error: any) {
+      console.error('Get Rejected BOQs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load rejected BOQs'
+      };
+    }
+  }
+
+  async getCancelledBOQs(page?: number, pageSize: number = 100): Promise<{ success: boolean; data?: any[]; count?: number; message?: string }> {
+    try {
+      const params: any = { page_size: pageSize };
+      if (page) params.page = page;
+
+      const response = await apiClient.get('/td_cancelled_boq', { params });
+      return {
+        success: true,
+        data: response.data.data || [],
+        count: response.data.count || 0
+      };
+    } catch (error: any) {
+      console.error('Get Cancelled BOQs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load cancelled BOQs'
+      };
+    }
+  }
+
+  async getTabCounts(): Promise<{
+    success: boolean;
+    counts?: {
+      pending: number;
+      approved: number;
+      sent: number;
+      revisions: number;
+      assigned: number;
+      completed: number;
+      rejected: number;
+      cancelled: number;
+    };
+    message?: string
+  }> {
+    try {
+      const response = await apiClient.get('/td_tab_counts');
+      return {
+        success: true,
+        counts: response.data.counts || {}
+      };
+    } catch (error: any) {
+      console.error('Get Tab Counts error:', error.response?.data || error.message);
+      return {
+        success: false,
+        counts: {
+          pending: 0,
+          approved: 0,
+          sent: 0,
+          revisions: 0,
+          assigned: 0,
+          completed: 0,
+          rejected: 0,
+          cancelled: 0
+        },
+        message: error.response?.data?.error || 'Failed to load tab counts'
+      };
+    }
+  }
+
   // Get Revision Tabs (Dynamic)
   async getRevisionTabs(): Promise<{
     success: boolean;

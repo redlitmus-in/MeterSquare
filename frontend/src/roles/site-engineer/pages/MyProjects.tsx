@@ -15,6 +15,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
+import { useAdminViewStore } from '@/store/adminViewStore';
 import { siteEngineerService } from '../services/siteEngineerService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
@@ -103,6 +104,9 @@ interface Project {
     items_count: number;
     assigned_items: any[];
   }>;
+  // Admin view fields - shows which SE is assigned when admin views as SE role
+  assigned_se_id?: number;
+  assigned_se_name?: string;
 }
 
 // Request Completion Modal Content Component
@@ -286,6 +290,13 @@ const RequestCompletionModalContent: React.FC<{
 
 const MyProjects: React.FC = () => {
   const { user } = useAuthStore();
+  const { viewingAsRole } = useAdminViewStore();
+
+  // Check if admin is viewing as SE role
+  const isAdminViewingAsSE = user?.role?.toLowerCase() === 'admin' &&
+    viewingAsRole &&
+    (viewingAsRole.toLowerCase() === 'siteengineer' || viewingAsRole.toLowerCase() === 'sitesupervisor');
+
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [filterStatus, setFilterStatus] = useState<'ongoing' | 'completed'>('ongoing');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -306,25 +317,68 @@ const MyProjects: React.FC = () => {
   const [showAssignBuyerModal, setShowAssignBuyerModal] = useState(false);
   const [projectToAssign, setProjectToAssign] = useState<Project | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [tabCounts, setTabCounts] = useState({ ongoing: 0, completed: 0 });
+  const [currentTabData, setCurrentTabData] = useState<Project[]>([]);
   // ✅ PERFORMANCE: Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
-  // Real-time auto-sync for projects
+  // Fetch projects based on active tab - triggers when filterStatus changes
   const { data: projectsData, isLoading: loading, refetch } = useProjectsAutoSync(
     async () => {
-      const response = await siteEngineerService.getMyProjects();
-      const projectsList = response.projects || [];
+      // Fetch data based on active tab
+      const response = filterStatus === 'ongoing'
+        ? await siteEngineerService.getOngoingProjects()
+        : await siteEngineerService.getCompletedProjects();
 
-      if (projectsList.length === 0) {
-        showInfo('No projects assigned yet');
-      }
+      const projectsList = response.data || [];
 
-      return projectsList;
-    }
+      // Transform backend response to match frontend expectations
+      const transformedProjects = projectsList.map((project: any) => ({
+        ...project,
+        boq_ids: project.boq_id ? [project.boq_id] : [],
+        status: project.project_status || project.status
+      }));
+
+      // Update current tab data
+      setCurrentTabData(transformedProjects);
+
+      // Update tab count for current tab
+      setTabCounts(prev => ({
+        ...prev,
+        [filterStatus]: transformedProjects.length
+      }));
+
+      return transformedProjects;
+    },
+    true
   );
 
-  const projects = useMemo(() => projectsData || [], [projectsData]);
+  // Refetch data when tab changes
+  useEffect(() => {
+    refetch();
+  }, [filterStatus]);
+
+  // Fetch counts for both tabs on initial load
+  useEffect(() => {
+    const fetchCounts = async () => {
+      try {
+        const [ongoingRes, completedRes] = await Promise.all([
+          siteEngineerService.getOngoingProjects(),
+          siteEngineerService.getCompletedProjects()
+        ]);
+        setTabCounts({
+          ongoing: (ongoingRes.data || []).length,
+          completed: (completedRes.data || []).length
+        });
+      } catch (error) {
+        console.error('Error fetching tab counts:', error);
+      }
+    };
+    fetchCounts();
+  }, []);
+
+  const projects = useMemo(() => currentTabData, [currentTabData]);
 
   const handleViewProject = async (project: Project) => {
     try {
@@ -456,33 +510,20 @@ const MyProjects: React.FC = () => {
     setProjectDetails(null);
   };
 
-  const filteredProjects = projects.filter(project => {
-    const statusLower = project.status?.toLowerCase();
-    let statusMatch = false;
-
-    if (filterStatus === 'ongoing') {
-      statusMatch = statusLower === 'in_progress' ||
-                   statusLower === 'active' ||
-                   statusLower === 'assigned' ||
-                   statusLower === 'pending' ||
-                   statusLower === 'items_assigned';
-    }
-    if (filterStatus === 'completed') {
-      statusMatch = statusLower === 'completed';
+  // Search filter only (status filtering is done by backend APIs)
+  const filteredProjects = useMemo(() => {
+    if (searchQuery.trim() === '') {
+      return projects;
     }
 
-    // Search filter
-    if (searchQuery.trim() !== '') {
-      const query = searchQuery.toLowerCase();
-      const searchMatch = project.project_name?.toLowerCase().includes(query) ||
-                         project.client?.toLowerCase().includes(query) ||
-                         project.location?.toLowerCase().includes(query) ||
-                         project.description?.toLowerCase().includes(query);
-      return statusMatch && searchMatch;
-    }
-
-    return statusMatch;
-  });
+    const query = searchQuery.toLowerCase();
+    return projects.filter(project =>
+      project.project_name?.toLowerCase().includes(query) ||
+      project.client?.toLowerCase().includes(query) ||
+      project.location?.toLowerCase().includes(query) ||
+      project.description?.toLowerCase().includes(query)
+    );
+  }, [projects, searchQuery]);
 
   // ✅ PERFORMANCE: Reset page when filter or search changes
   useEffect(() => {
@@ -562,8 +603,6 @@ const MyProjects: React.FC = () => {
       </div>
     );
   }
-
-  const tabCounts = getTabCounts();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
@@ -735,6 +774,13 @@ const MyProjects: React.FC = () => {
                         {project.priority || 'medium'}
                       </span>
                       {getStatusBadge(project.status)}
+                      {/* Show assigned SE name when admin is viewing as SE role */}
+                      {isAdminViewingAsSE && project.assigned_se_name && (
+                        <span className="px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium whitespace-nowrap bg-purple-100 text-purple-800 border border-purple-300">
+                          <UserGroupIcon className="w-3 h-3 inline-block mr-1" />
+                          {project.assigned_se_name}
+                        </span>
+                      )}
                     </div>
                     {/* Row 3: Info */}
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs sm:text-sm text-gray-600">
@@ -822,11 +868,20 @@ const MyProjects: React.FC = () => {
         isOpen={showDetailsModal}
         onClose={handleCloseModal}
         boq={selectedProject ? {
-          boq_id: selectedProject.boq_id,
+          boq_id: selectedProject.boq_id || selectedProject.boq_ids?.[0],
           boq_name: selectedProject.boq_name,
           project_name: selectedProject.project_name
         } : null}
-        assignedItems={selectedProject?.boqs_with_items?.find(b => b.boq_id === selectedProject.boq_id)?.assigned_items || []}
+        assignedItems={
+          // Get assigned items from boqs_with_items using boq_id or first boq_ids
+          selectedProject?.boqs_with_items?.find(
+            b => b.boq_id === (selectedProject.boq_id || selectedProject.boq_ids?.[0])
+          )?.assigned_items ||
+          // Fallback: get first BOQ's assigned items if available
+          selectedProject?.boqs_with_items?.[0]?.assigned_items ||
+          []
+        }
+        currentUserId={user?.user_id}
       />
 
       {/* OLD Details Modal - REMOVED - Replaced with BOQDetailsModal */}

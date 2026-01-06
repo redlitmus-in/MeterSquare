@@ -3,6 +3,7 @@ import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
 import { motion } from 'framer-motion';
 import { projectManagerService } from '../services/projectManagerService';
+import { mepService } from '../services/mepService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
@@ -25,64 +26,52 @@ const ProjectManagerHub: React.FC = () => {
         throw new Error('User not authenticated');
       }
 
-      const boqsData = await projectManagerService.getMyBOQs();
-
-      // Calculate material purchase stats from BOQs
-      const boqs = boqsData.boqs || [];
-      const materialPurchaseStats = {
-        total_items: boqs.reduce((sum, b) => sum + (b.total_items || 0), 0),
-        items_assigned: boqs.reduce((sum, b) => sum + (b.items_assigned_by_me || 0), 0),
-        items_pending: boqs.reduce((sum, b) => sum + (b.items_pending_assignment || 0), 0),
-        total_cost: boqs.reduce((sum, b) => sum + (b.boq_details?.total_cost || 0), 0)
-      };
+      // ROLE-AWARE: Fetch dashboard statistics from MEP or PM API based on user role
+      const stats = isMEP
+        ? await mepService.getDashboardStats()
+        : await projectManagerService.getDashboardStats();
 
       return {
-        boqs,
-        materialPurchaseStats
+        stats: stats.stats,
+        boq_status: stats.boq_status,
+        items_breakdown: stats.items_breakdown,
+        recent_activities: stats.recent_activities || [],
+        projects: stats.projects || [],
+        // Legacy format for backward compatibility
+        materialPurchaseStats: {
+          total_items: stats.stats.total_boq_items,
+          items_assigned: stats.stats.items_assigned,
+          items_pending: stats.stats.pending_assignment,
+          total_cost: stats.stats.total_project_value
+        }
       };
     }
   );
 
-  const boqs = useMemo(() => dashboardData?.boqs || [], [dashboardData]);
+  // Use dashboard stats directly from the API
+  const stats = dashboardData?.stats || {
+    total_boq_items: 0,
+    items_assigned: 0,
+    pending_assignment: 0,
+    total_project_value: 0
+  };
 
-  // Derive unique projects from BOQs data
-  const projects = useMemo(() => {
-    if (!boqs || boqs.length === 0) return [];
+  const boqStatus = dashboardData?.boq_status || {
+    approved: 0,
+    pending: 0,
+    rejected: 0,
+    completed: 0
+  };
 
-    // Group BOQs by project_id to get unique projects
-    const projectMap = new Map();
-    boqs.forEach(boq => {
-      if (boq.project_id && !projectMap.has(boq.project_id)) {
-        projectMap.set(boq.project_id, {
-          project_id: boq.project_id,
-          project_name: boq.project_name || 'Unknown Project',
-          project_code: boq.project_code,
-          progress: 0
-        });
-      }
-    });
+  const itemsBreakdown = dashboardData?.items_breakdown || {
+    materials: 0,
+    labour: 0
+  };
 
-    // Calculate progress for each project based on item assignments
-    projectMap.forEach((project, projectId) => {
-      const projectBoqs = boqs.filter(b => b.project_id === projectId);
+  const recentActivities = dashboardData?.recent_activities || [];
 
-      // Calculate total items and assigned items across all BOQs for this project
-      let totalItems = 0;
-      let assignedItems = 0;
-
-      projectBoqs.forEach(boq => {
-        totalItems += boq.total_items || 0;
-        assignedItems += boq.items_assigned_by_me || 0;
-      });
-
-      // Progress = percentage of items assigned to Site Engineers
-      project.progress = totalItems > 0
-        ? Math.round((assignedItems / totalItems) * 100)
-        : 0;
-    });
-
-    return Array.from(projectMap.values());
-  }, [boqs]);
+  // Projects data from dashboard API
+  const projects = dashboardData?.projects || [];
 
   useEffect(() => {
     // Set Highcharts global options for consistent theming
@@ -96,17 +85,8 @@ const ProjectManagerHub: React.FC = () => {
     });
   }, []);
 
-  // BOQ Status Overview Chart - Dynamic data from API
-  // Backend returns 'boq_status' not 'status'
-  const statusCounts = {
-    approved: boqs.filter(b => (b.boq_status || b.status) === 'approved').length,
-    pending: boqs.filter(b => {
-      const status = (b.boq_status || b.status);
-      return status === 'pending' || status === 'draft' || status === 'items_assigned';
-    }).length,
-    rejected: boqs.filter(b => (b.boq_status || b.status) === 'rejected').length,
-    completed: boqs.filter(b => (b.boq_status || b.status) === 'completed').length
-  };
+  // BOQ Status Overview Chart - Use data directly from API
+  const statusCounts = boqStatus;
 
   const hasStatusData = statusCounts.approved > 0 || statusCounts.pending > 0 || statusCounts.rejected > 0 || statusCounts.completed > 0;
 
@@ -186,22 +166,13 @@ const ProjectManagerHub: React.FC = () => {
     credits: { enabled: false }
   };
 
-  // Project Activity Chart - Calculate from BOQ data
-  const totalBudget = boqs.reduce((sum, b) => sum + (b.boq_details?.total_cost || 0), 0);
+  // Project Activity Chart - Use data from dashboard stats
+  const totalBudget = stats.total_project_value;
 
-  // Calculate activity stats - Include all active statuses
-  // Backend returns 'boq_status' not 'status'
-  const activeBoqs = boqs.filter(b => {
-    const status = b.boq_status || b.status;
-    return status === 'approved' ||
-      status === 'pending' ||
-      status === 'draft' ||
-      status === 'items_assigned' ||
-      status === 'in_progress' ||
-      status === 'active';
-  }).length;
-  const completedBoqs = boqs.filter(b => (b.boq_status || b.status) === 'completed').length;
-  const rejectedBoqs = boqs.filter(b => (b.boq_status || b.status) === 'rejected').length;
+  // Calculate activity stats from dashboard status counts
+  const activeBoqs = statusCounts.approved + statusCounts.pending;
+  const completedBoqs = statusCounts.completed;
+  const rejectedBoqs = statusCounts.rejected;
   const hasActivityData = activeBoqs > 0 || completedBoqs > 0 || rejectedBoqs > 0;
 
   const budgetUtilizationOptions = {
@@ -260,9 +231,9 @@ const ProjectManagerHub: React.FC = () => {
     credits: { enabled: false }
   };
 
-  // BOQ Items Breakdown Chart
-  const totalMaterials = boqs.reduce((sum, b) => sum + (b.boq_details?.total_materials || 0), 0);
-  const totalLabour = boqs.reduce((sum, b) => sum + (b.boq_details?.total_labour || 0), 0);
+  // BOQ Items Breakdown Chart - Use data from dashboard API
+  const totalMaterials = itemsBreakdown.materials;
+  const totalLabour = itemsBreakdown.labour;
 
   const boqTrendOptions = {
     chart: {
@@ -577,38 +548,33 @@ const ProjectManagerHub: React.FC = () => {
         >
           <h2 className="text-lg font-bold text-gray-900 mb-4">Recent BOQ Activities</h2>
           <div className="space-y-3">
-            {boqs.length === 0 ? (
+            {recentActivities.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-gray-500">No recent activities</p>
               </div>
             ) : (
-              boqs.slice(0, 5).map((boq, index) => (
-                <div key={boq.boq_id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+              recentActivities.map((activity, index) => (
+                <div key={activity.boq_id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
                   <div className="flex items-center gap-3">
                     <div className={`w-2 h-2 rounded-full ${
-                      boq.status === 'approved' ? 'bg-green-500' :
-                      boq.status === 'rejected' ? 'bg-red-500' :
-                      boq.status === 'pending' ? 'bg-yellow-500' : 'bg-blue-500'
+                      activity.status?.toLowerCase().includes('approved') ? 'bg-green-500' :
+                      activity.status?.toLowerCase().includes('rejected') ? 'bg-red-500' :
+                      activity.status?.toLowerCase().includes('pending') ? 'bg-yellow-500' : 'bg-blue-500'
                     }`} />
                     <div>
-                      <p className="text-sm font-medium text-gray-900">{boq.boq_name}</p>
+                      <p className="text-sm font-medium text-gray-900">{activity.boq_name}</p>
                       <div className="flex items-center gap-2">
-                        <p className="text-xs text-gray-500">{boq.project_name || 'Unknown Project'}</p>
-                        {boq.project_code && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-700 border border-gray-300">
-                            {boq.project_code}
-                          </span>
-                        )}
+                        <p className="text-xs text-gray-500">{activity.project_name || 'Unknown Project'}</p>
                       </div>
                     </div>
                   </div>
                   <div className="text-right">
                     <span className={`text-xs px-2 py-1 rounded-full ${
-                      boq.status === 'approved' ? 'bg-green-100 text-green-700' :
-                      boq.status === 'rejected' ? 'bg-red-100 text-red-700' :
-                      boq.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
+                      activity.status?.toLowerCase().includes('approved') ? 'bg-green-100 text-green-700' :
+                      activity.status?.toLowerCase().includes('rejected') ? 'bg-red-100 text-red-700' :
+                      activity.status?.toLowerCase().includes('pending') ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
                     }`}>
-                      {boq.status}
+                      {activity.status}
                     </span>
                   </div>
                 </div>

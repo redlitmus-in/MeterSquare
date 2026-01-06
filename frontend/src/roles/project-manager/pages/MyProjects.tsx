@@ -19,6 +19,7 @@ import { Squares2X2Icon, ListBulletIcon } from '@heroicons/react/24/solid';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
 import { projectManagerService } from '../services/projectManagerService';
+import { mepService } from '../services/mepService';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
@@ -29,7 +30,7 @@ import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
 import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
-import { useProjectsAutoSync } from '@/hooks/useAutoSync';
+import { useAutoSync } from '@/hooks/useAutoSync';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 import DayExtensionRequestModal from '../components/DayExtensionRequestModal';
 import AssignItemToSEModal from '@/components/modals/AssignItemToSEModal';
@@ -106,10 +107,10 @@ interface Project {
   hasPendingDayExtension?: boolean;
   pendingDayExtensionCount?: number;
   hasApprovedExtension?: boolean;
-  // Item assignment tracking
-  items_assigned_by_me?: number;
-  items_pending_assignment?: number;
-  total_items?: number;
+  // Item assignment tracking (from backend API response)
+  total_boq_items?: number; // Total items in BOQ
+  total_items_assigned?: number; // Items assigned to Site Engineers
+  items_assigned?: string; // Formatted string "assigned/total" e.g. "1/2"
 }
 
 interface SiteEngineer {
@@ -163,72 +164,143 @@ const MyProjects: React.FC = () => {
   const [selectedItemsInfo, setSelectedItemsInfo] = useState<Array<{ item_code: string; description: string }>>([]);
   const [itemAssignmentRefreshTrigger, setItemAssignmentRefreshTrigger] = useState(0);
 
+  // Tab filter state - must be declared before useProjectsAutoSync
+  const [filterStatus, setFilterStatus] = useState<'for_approval' | 'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('for_approval');
+  const [tabCounts, setTabCounts] = useState({
+    for_approval: 0,
+    pending: 0,
+    assigned: 0,
+    approved: 0,
+    rejected: 0,
+    completed: 0
+  });
+
   // Pause auto-refresh when any modal is open to prevent flickering during editing
   const isAnyModalOpen = showEditBOQModal || showAssignModal || showCreateBOQModal || showItemAssignmentModal;
 
-  // Real-time auto-sync for projects - disabled when editing
-  const { data: projectsData, isLoading: loading, refetch } = useProjectsAutoSync(
-    async () => {
-      const boqsResponse = await projectManagerService.getMyBOQs();
-      const boqsList = boqsResponse.boqs || [];
+  // Real-time auto-sync for projects - Use specific APIs for each tab
+  const { data: projectsData, isLoading: loading, refetch } = useAutoSync({
+    queryKey: ['pm-my-projects', filterStatus],
+    fetchFn: async () => {
+      let response: any;
+      let dataList: any[] = [];
 
-      // Map projects with data from backend response
-      const enrichedProjects = boqsList.map((boq: any) => {
-        const siteSupervisorId = boq.project_details?.site_supervisor_id;
-        const hasSiteSupervisor = siteSupervisorId !== null &&
-                                  siteSupervisorId !== undefined &&
-                                  siteSupervisorId !== 0;
+      // ROLE-AWARE: Use MEP service for MEP role, PM service for PM role
+      const isMEP = userRole.toLowerCase() === 'mep';
+
+      // Call specific API based on active tab
+      switch (filterStatus) {
+        case 'for_approval':
+          response = isMEP
+            ? await mepService.getMEPApprovalBOQs()
+            : await projectManagerService.getPMApprovalBOQs();
+          break;
+        case 'pending':
+          response = isMEP
+            ? await mepService.getMEPPendingBOQs()
+            : await projectManagerService.getPMPendingBOQs();
+          break;
+        case 'assigned':
+          response = isMEP
+            ? await mepService.getMEPAssignedProjects()
+            : await projectManagerService.getPMAssignedProjects();
+          break;
+        case 'approved':
+          response = isMEP
+            ? await mepService.getMEPApprovedBOQs()
+            : await projectManagerService.getPMApprovedBOQs();
+          break;
+        case 'rejected':
+          response = isMEP
+            ? await mepService.getMEPRejectedBOQs()
+            : await projectManagerService.getPMRejectedBOQs();
+          break;
+        case 'completed':
+          response = isMEP
+            ? await mepService.getMEPCompletedProjects()
+            : await projectManagerService.getPMCompletedProjects();
+          break;
+        default:
+          response = isMEP
+            ? await mepService.getMEPApprovalBOQs()
+            : await projectManagerService.getPMApprovalBOQs();
+      }
+
+      dataList = response.data || [];
+
+      // Fetch counts from all tabs in parallel
+      const [forApprovalRes, pendingRes, assignedRes, approvedRes, rejectedRes, completedRes] = await Promise.all([
+        isMEP ? mepService.getMEPApprovalBOQs() : projectManagerService.getPMApprovalBOQs(),
+        isMEP ? mepService.getMEPPendingBOQs() : projectManagerService.getPMPendingBOQs(),
+        isMEP ? mepService.getMEPAssignedProjects() : projectManagerService.getPMAssignedProjects(),
+        isMEP ? mepService.getMEPApprovedBOQs() : projectManagerService.getPMApprovedBOQs(),
+        isMEP ? mepService.getMEPRejectedBOQs() : projectManagerService.getPMRejectedBOQs(),
+        isMEP ? mepService.getMEPCompletedProjects() : projectManagerService.getPMCompletedProjects(),
+      ]);
+
+      // Update tab counts from API responses
+      setTabCounts({
+        for_approval: (forApprovalRes.data || []).length,
+        pending: (pendingRes.data || []).length,
+        assigned: (assignedRes.data || []).length,
+        approved: (approvedRes.data || []).length,
+        rejected: (rejectedRes.data || []).length,
+        completed: (completedRes.data || []).length,
+      });
+
+      // Map ALL projects with unified data structure
+      const enrichedProjects = dataList.map((item: any) => {
+        const siteSupervisorId = item.site_supervisor_id || item.project_details?.site_supervisor_id;
 
         return {
-          project_id: boq.project_details?.project_id || boq.project_id,
-          project_name: boq.project_details?.project_name || boq.project_name,
-          project_code: boq.project_details?.project_code || boq.project_code,
-          client: boq.project_details?.client,
-          location: boq.project_details?.location,
-          area: boq.project_details?.working_hours,
-          start_date: boq.project_details?.start_date,
-          end_date: boq.project_details?.end_date,
-          duration_days: boq.project_details?.duration_days,
-          status: boq.project_details?.project_status || 'active',
-          description: boq.project_details?.description,
+          project_id: item.project_id,
+          project_name: item.project_name,
+          project_code: item.project_code,
+          client: item.client,
+          location: item.location,
+          area: item.floor || item.area || item.working_hours,
+          start_date: item.start_date,
+          end_date: item.end_date,
+          duration_days: item.duration_days,
+          status: item.project_status || item.status,
+          description: item.description,
           site_supervisor_id: siteSupervisorId,
-          site_supervisor_name: boq.project_details?.site_supervisor_name || null,
-          completion_requested: boq.project_details?.completion_requested === true,
-          total_se_assignments: boq.project_details?.total_se_assignments || 0,
-          confirmed_completions: boq.project_details?.confirmed_completions || 0,
-          user_id: boq.project_details?.user_id || null,
-          boq_id: boq.boq_id,
-          boq_name: boq.boq_name,
-          boq_status: boq.boq_status,
+          site_supervisor_name: item.site_supervisor_name || null,
+          completion_requested: item.completion_requested === true,
+          total_se_assignments: item.total_se_assignments || 0,
+          confirmed_completions: item.confirmed_completions || 0,
+          user_id: item.user_id || null,
+          boq_id: item.boq_id,
+          boq_name: item.boq_name,
+          boq_status: item.boq_status,
           boq_details: undefined,
-          created_at: boq.created_at,
-          priority: boq.priority || 'medium',
-          // Item assignment tracking
-          items_assigned_by_me: boq.items_assigned_by_me || 0,
-          items_pending_assignment: boq.items_pending_assignment || 0,
-          total_items: boq.total_items || 0,
-          // Day extension status
-          hasPendingDayExtension: boq.has_pending_day_extension || false,
-          pendingDayExtensionCount: boq.pending_day_extension_count || 0,
-          hasApprovedExtension: boq.has_approved_extension || false
+          created_at: item.created_at,
+          priority: item.priority || 'medium',
+          total_boq_items: item.total_boq_items || 0,
+          total_items_assigned: item.total_items_assigned || 0,
+          items_assigned: item.items_assigned || '0/0',
+          hasPendingDayExtension: item.has_pending_day_extension || item.hasPendingDayExtension || false,
+          pendingDayExtensionCount: item.pending_day_extension_count || item.pendingDayExtensionCount || 0,
+          hasApprovedExtension: item.has_approved_extension || item.hasApprovedExtension || false,
+          last_pm_user_id: item.last_pm_user_id
         };
       });
 
-      if (enrichedProjects.length === 0) {
-        showInfo('No projects assigned yet');
-      }
-
       return enrichedProjects;
     },
-    !isAnyModalOpen // Disable auto-refresh when modal is open
-  );
+    realtimeTables: ['boqs', 'projects', 'project_assignments'],
+    staleTime: 30000, // 30 seconds
+    enabled: !isAnyModalOpen // Disable auto-refresh when modal is open
+  });
 
-  const projects = useMemo(() => projectsData || [], [projectsData]);
+  const allProjects = useMemo(() => projectsData || [], [projectsData]);
+
+  // No client-side filtering needed - each tab fetches its own filtered data from backend
+  const projects = useMemo(() => allProjects, [allProjects]);
 
   // Other state variables
   const [availableSEs, setAvailableSEs] = useState<SiteEngineer[]>([]);
   const [loadingSEs, setLoadingSEs] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<'for_approval' | 'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('for_approval');
   const [selectedSE, setSelectedSE] = useState<SiteEngineer | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [seSearchQuery, setSeSearchQuery] = useState('');
@@ -644,12 +716,9 @@ const MyProjects: React.FC = () => {
     showSuccess('Items assigned successfully');
   };
 
+  // Backend now handles tab filtering, so we only need to filter by search query
   const filteredProjects = projects.filter(project => {
-    const hasSiteSupervisor = project.site_supervisor_id !== null &&
-                              project.site_supervisor_id !== undefined &&
-                              project.site_supervisor_id !== 0;
-
-    // Apply search filter
+    // Apply search filter only
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       const matchesSearch =
@@ -658,47 +727,11 @@ const MyProjects: React.FC = () => {
         project.location?.toLowerCase().includes(query) ||
         project.boq_name?.toLowerCase().includes(query);
 
-      if (!matchesSearch) return false;
+      return matchesSearch;
     }
 
-    if (filterStatus === 'for_approval') {
-      const status = project.boq_status?.toLowerCase() || '';
-      // For Approval tab: BOQs sent by Estimator to PM for approval
-      return status === 'pending_pm_approval';
-    }
-    if (filterStatus === 'pending') {
-      const status = project.boq_status?.toLowerCase() || '';
-      const hasItemsAssigned = (project.items_assigned_by_me || 0) > 0;
-      // Pending tab: Projects assigned by TD, waiting for SE assignment by THIS PM
-      // Show if THIS PM hasn't assigned items yet (even if other PMs have)
-      return (!hasSiteSupervisor && !hasItemsAssigned && project.status?.toLowerCase() !== 'completed') &&
-             (status === 'approved' || status === 'pm_approved' || status === 'client_confirmed' || status === 'items_assigned') &&
-             project.user_id !== null;
-    }
-    if (filterStatus === 'assigned') {
-      const hasItemsAssigned = (project.items_assigned_by_me || 0) > 0;
-      // Show in Assigned tab if THIS PM has assigned items:
-      // 1. Traditional: Project has site supervisor assigned by THIS PM, OR
-      // 2. Item-level: THIS PM has assigned items to SEs
-      return (hasSiteSupervisor || hasItemsAssigned) && project.status?.toLowerCase() !== 'completed';
-    }
-    if (filterStatus === 'completed') {
-      return project.status?.toLowerCase() === 'completed';
-    }
-    if (filterStatus === 'approved') {
-      const status = project.boq_status?.toLowerCase() || '';
-      // Show BOQs that THIS PM has approved
-      // Stay here until TD assigns PM to the project (user_id is null)
-      // Once TD assigns PM (user_id is set), it moves to Pending tab
-      // Include revision statuses too
-      const pmOnlyApprovedStatuses = ['pm_approved', 'pending_td_approval', 'approved', 'sent_for_confirmation', 'client_confirmed', 'pending_revision', 'under_revision', 'revision_approved'];
-      return pmOnlyApprovedStatuses.includes(status) && project.user_id === null && !hasSiteSupervisor && project.status?.toLowerCase() !== 'completed';
-    }
-    if (filterStatus === 'rejected') {
-      const status = project.boq_status?.toLowerCase() || '';
-      return status === 'rejected' || status === 'pm_rejected';
-    }
-    return false;
+    // If no search query, return all projects (backend already filtered by tab)
+    return true;
   });
 
   // ✅ PERFORMANCE: Reset page when filter or search changes
@@ -713,36 +746,7 @@ const MyProjects: React.FC = () => {
     return filteredProjects.slice(startIndex, startIndex + itemsPerPage);
   }, [filteredProjects, currentPage, itemsPerPage]);
 
-  const getTabCounts = () => ({
-    for_approval: projects.filter(p => {
-      const status = p.boq_status?.toLowerCase() || '';
-      return status === 'pending_pm_approval';
-    }).length,
-    pending: projects.filter(p => {
-      const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
-      const hasItemsAssigned = (p.items_assigned_by_me || 0) > 0;
-      const status = p.boq_status?.toLowerCase() || '';
-      return (!hasSS && !hasItemsAssigned && p.status?.toLowerCase() !== 'completed') &&
-             (status === 'approved' || status === 'pm_approved' || status === 'client_confirmed' || status === 'items_assigned') &&
-             p.user_id !== null;
-    }).length,
-    assigned: projects.filter(p => {
-      const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
-      const hasItemsAssigned = (p.items_assigned_by_me || 0) > 0;
-      return (hasSS || hasItemsAssigned) && p.status?.toLowerCase() !== 'completed';
-    }).length,
-    completed: projects.filter(p => p.status?.toLowerCase() === 'completed').length,
-    approved: projects.filter(p => {
-      const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
-      const status = p.boq_status?.toLowerCase() || '';
-      const pmOnlyApprovedStatuses = ['pm_approved', 'pending_td_approval', 'approved', 'sent_for_confirmation', 'client_confirmed', 'pending_revision', 'under_revision', 'revision_approved'];
-      return pmOnlyApprovedStatuses.includes(status) && p.user_id === null && !hasSS && p.status?.toLowerCase() !== 'completed';
-    }).length,
-    rejected: projects.filter(p => {
-      const status = p.boq_status?.toLowerCase() || '';
-      return status === 'rejected' || status === 'pm_rejected';
-    }).length
-  });
+  // Tab counts are now managed via state and updated by API responses
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A';
@@ -758,20 +762,36 @@ const MyProjects: React.FC = () => {
     }
   };
 
+  const getStatusBadge = (project: Project) => {
+    // Check if items have been assigned to site engineers
+    if (project.total_items_assigned && project.total_items_assigned > 0) {
+      return {
+        text: 'items_assigned',
+        color: 'bg-blue-100 text-blue-700'
+      };
+    }
+
+    // Check if there are items pending assignment
+    // Items pending = total_boq_items - total_items_assigned
+    const itemsPending = (project.total_boq_items || 0) - (project.total_items_assigned || 0);
+    if (itemsPending > 0) {
+      return {
+        text: 'pending_assignment',
+        color: 'bg-orange-100 text-orange-700'
+      };
+    }
+
+    // Default to showing BOQ status (for top badge)
+    return {
+      text: project.boq_status,
+      color: 'bg-blue-100 text-blue-700'
+    };
+  };
+
   const filteredSEs = availableSEs.filter(se =>
     se.sitesupervisor_name.toLowerCase().includes(seSearchQuery.toLowerCase()) ||
     se.email.toLowerCase().includes(seSearchQuery.toLowerCase())
   );
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 flex items-center justify-center">
-        <ModernLoadingSpinners variant="pulse-wave" />
-      </div>
-    );
-  }
-
-  const tabCounts = getTabCounts();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
@@ -916,7 +936,11 @@ const MyProjects: React.FC = () => {
           </div>
 
           {/* Projects List */}
-          {paginatedProjects.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <ModernLoadingSpinners variant="pulse-wave" />
+            </div>
+          ) : paginatedProjects.length === 0 ? (
             <div className="bg-gray-50 rounded-xl border border-gray-200 p-12 text-center">
               <BuildingOfficeIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 text-lg">No projects in this category</p>
@@ -934,7 +958,7 @@ const MyProjects: React.FC = () => {
                 {/* Floating Day Extension Request Indicator - Show only in 'assigned' tab */}
                 {filterStatus === 'assigned' &&
                  (project.site_supervisor_id ||
-                  (project.items_assigned_by_me && project.items_assigned_by_me > 0)) && (() => {
+                  (project.total_items_assigned && project.total_items_assigned > 0)) && (() => {
                   const hasRequests = project.hasPendingDayExtension;
                   const requestCount = project.pendingDayExtensionCount || 0;
 
@@ -994,9 +1018,9 @@ const MyProjects: React.FC = () => {
                         <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPriorityColor(project.priority)}`}>
                           {project.priority} priority
                         </span>
-                        <span className="px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700 flex items-center gap-1">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadge(project).color} flex items-center gap-1`}>
                           <ClockIcon className="w-3 h-3" />
-                          {project.boq_status || 'pending'}
+                          {getStatusBadge(project).text}
                         </span>
                       </div>
                       <div className="flex items-center gap-4 text-sm text-gray-600">
@@ -1077,9 +1101,8 @@ const MyProjects: React.FC = () => {
                         <EyeIcon className="w-5 h-5" />
                       </button>
 
-                      {/* Show assign button when there are items pending assignment (works in both Pending and Assigned tabs) */}
-                      {!project.site_supervisor_id &&
-                       (project.items_pending_assignment || 0) > 0 &&
+                      {/* Show assign button for projects with approved BOQ (works in both Pending and Assigned tabs) */}
+                      {project.boq_id &&
                        project.user_id !== null &&
                        (project.boq_status?.toLowerCase() === 'approved' ||
                         project.boq_status?.toLowerCase() === 'pm_approved' ||
@@ -1100,7 +1123,7 @@ const MyProjects: React.FC = () => {
                       )}
                       {/* Show completion confirmation tracking */}
                       {(project.site_supervisor_id ||
-                        (project.items_assigned_by_me && project.items_assigned_by_me > 0)) &&
+                        (project.total_items_assigned && project.total_items_assigned > 0)) &&
                        project.status?.toLowerCase() !== 'completed' && (
                         <div className="flex items-center gap-2">
                           {/* Confirmation counter badge - always show count */}
@@ -1144,7 +1167,7 @@ const MyProjects: React.FC = () => {
                     </div>
                     <div className="bg-green-50 border border-green-200 rounded-lg p-3">
                       <p className="text-xs text-green-700 mb-1">Status</p>
-                      <p className="text-lg font-bold text-green-900 capitalize">{project.status || 'Active'}</p>
+                      <p className="text-lg font-bold text-green-900 capitalize">{project.status}</p>
                     </div>
                     <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
                       <p className="text-xs text-purple-700 mb-1">Start Date</p>
@@ -1168,7 +1191,7 @@ const MyProjects: React.FC = () => {
                       <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
                         <p className="text-xs text-indigo-700 mb-1">Items Assigned</p>
                         <p className="text-lg font-bold text-indigo-900">
-                          {((project.total_items || 0) - (project.items_pending_assignment || 0))}/{project.total_items || 0}
+                          {project.items_assigned || `${project.total_items_assigned || 0}/${project.total_boq_items || 0}`}
                         </p>
                       </div>
                     )}
@@ -1236,7 +1259,7 @@ const MyProjects: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700 flex items-center gap-1 w-fit">
                           <ClockIcon className="w-3 h-3" />
-                          {project.boq_status || 'pending'}
+                          {project.boq_status}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">

@@ -294,7 +294,7 @@ def client_revision_td_mail_send():
 
        # Initialize email service
         boq_email_service = BOQEmailService()
- 
+
         # Find Estimator from project.estimator_id
         estimator = None
         if project.estimator_id:
@@ -303,14 +303,14 @@ def client_revision_td_mail_send():
                 is_active=True,
                 is_deleted=False
             ).first()
- 
+
         # Fallback: try to find by created_by if estimator_id not set
         if not estimator:
             estimator_role = Role.query.filter(
                 Role.role.in_(['estimator', 'Estimator']),
                 Role.is_deleted == False
             ).first()
- 
+
             if estimator_role:
                 estimator = User.query.filter_by(
                     role_id=estimator_role.role_id,

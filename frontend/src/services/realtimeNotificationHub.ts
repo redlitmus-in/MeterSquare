@@ -8,6 +8,8 @@ import { supabase } from '@/api/config';
 import { getSecureUserData } from '@/utils/notificationSecurity';
 import { useNotificationStore } from '@/store/notificationStore';
 import { toast } from 'sonner';
+import { isNotificationAlreadyProcessed, markNotificationAsProcessed } from '@/middleware/notificationMiddleware';
+// NOTE: notificationPollingService imported lazily to avoid circular dependency
 import { navigateTo } from '@/utils/navigationService';
 
 // NOTE: We use toast for INCOMING notifications but with DIFFERENT styling
@@ -56,9 +58,27 @@ class RealtimeNotificationHub {
   private initialize() {
     this.updateCredentials();
     this.setupSocketConnection();
-    // Supabase realtime disabled - Socket.IO is working and handles everything
-    // this.setupSupabaseRealtime();
+    // Enable Supabase realtime as backup when Socket.IO is unreliable
+    this.setupSupabaseRealtime();
     this.setupAuthListener();
+    this.setupPeriodicHealthCheck();
+  }
+
+  /**
+   * Periodic health check to ensure Socket.IO connection and room membership is maintained
+   * This helps recover from silent disconnections
+   */
+  private setupPeriodicHealthCheck() {
+    // Re-join rooms every 30 seconds to ensure we stay connected
+    setInterval(() => {
+      if (this.socket && this.isConnected && this.userId) {
+        console.log('[RealtimeNotificationHub] 🔄 Periodic room re-join for reliability');
+        this.joinRooms();
+      } else if (!this.isConnected && this.authToken) {
+        console.log('[RealtimeNotificationHub] ⚠️ Health check: Socket disconnected, reconnecting...');
+        this.setupSocketConnection();
+      }
+    }, 30000); // Every 30 seconds
   }
 
   /**
@@ -68,6 +88,7 @@ class RealtimeNotificationHub {
     if (!this.userId) return;
 
     try {
+      console.log('[RealtimeNotificationHub] Setting up Supabase Realtime for user:', this.userId);
       this.supabaseChannel = supabase
         .channel('notifications-channel')
         .on(
@@ -79,6 +100,7 @@ class RealtimeNotificationHub {
             filter: `user_id=eq.${this.userId}`
           },
           (payload) => {
+            console.log('[RealtimeNotificationHub] 📨 Supabase Realtime received notification:', payload.new);
             const notification = payload.new;
             // Convert DB format to our format
             const realtimeNotif: RealtimeNotification = {
@@ -89,6 +111,8 @@ class RealtimeNotificationHub {
               priority: notification.priority || 'medium',
               timestamp: notification.created_at,
               userId: notification.user_id,
+              targetUserId: notification.user_id, // Add targetUserId to match Socket.IO format
+              targetRole: notification.target_role, // Add targetRole from DB
               senderId: notification.sender_id,
               senderName: notification.sender_name,
               metadata: notification.metadata
@@ -96,9 +120,11 @@ class RealtimeNotificationHub {
             this.handleIncomingNotification(realtimeNotif);
           }
         )
-        .subscribe();
-    } catch {
-      // Silent fail
+        .subscribe((status) => {
+          console.log('[RealtimeNotificationHub] Supabase Realtime subscription status:', status);
+        });
+    } catch (err) {
+      console.error('[RealtimeNotificationHub] Supabase Realtime setup error:', err);
     }
   }
 
@@ -124,20 +150,41 @@ class RealtimeNotificationHub {
       this.socket.on('connect', () => {
         this.isConnected = true;
         this.reconnectAttempts = 0;
+        // ALWAYS log connection for debugging
+        console.log('[RealtimeNotificationHub] ✅ Socket.IO connected:', {
+          socketId: this.socket?.id,
+          userId: this.userId,
+          userRole: this.userRole
+        });
         this.joinRooms();
         // Fetch any missed notifications when connecting
         this.fetchMissedNotifications();
       });
 
-      this.socket.on('disconnect', () => {
+      this.socket.on('disconnect', (reason: string) => {
         this.isConnected = false;
+        // ALWAYS log disconnection for debugging
+        console.log('[RealtimeNotificationHub] ❌ Socket.IO disconnected:', { reason });
+        // Start polling fallback when Socket.IO disconnects
+        this.startPollingFallback();
       });
 
       this.socket.on('connect_error', () => {
         this.reconnectAttempts++;
+        // Start polling fallback when Socket.IO fails to connect
+        this.startPollingFallback();
       });
 
       this.socket.on('notification', (notification: RealtimeNotification) => {
+        // ALWAYS log notification receipt for debugging
+        console.log('[RealtimeNotificationHub] 📨 Socket.IO received notification:', {
+          id: notification.id,
+          title: notification.title,
+          userId: notification.userId,
+          targetUserId: notification.targetUserId,
+          targetRole: notification.targetRole,
+          type: notification.type
+        });
         this.handleIncomingNotification(notification);
       });
 
@@ -147,8 +194,33 @@ class RealtimeNotificationHub {
       this.socket.on('pr:reapproved', (data) => this.handlePRNotification('reapproved', data));
       this.socket.on('pr:forwarded', (data) => this.handlePRNotification('forwarded', data));
 
+      // Listen for room join confirmation
+      this.socket.on('room_joined', (data) => {
+        if (import.meta.env.DEV) {
+          console.log('[RealtimeNotificationHub] ✅ Room joined:', data);
+        }
+      });
+
+      // Listen for connected event from server
+      this.socket.on('connected', (data) => {
+        if (import.meta.env.DEV) {
+          console.log('[RealtimeNotificationHub] 🎉 Server confirmed connection:', data);
+        }
+      });
+
+      // Start polling fallback if Socket.IO doesn't connect within 5 seconds
+      setTimeout(() => {
+        if (!this.isConnected) {
+          if (import.meta.env.DEV) {
+            console.log('[RealtimeNotificationHub] Socket.IO connection timeout, starting polling fallback');
+          }
+          this.startPollingFallback();
+        }
+      }, 5000);
+
     } catch (error) {
-      // Silent fail
+      // Silent fail - start polling as fallback
+      this.startPollingFallback();
     }
   }
 
@@ -159,11 +231,30 @@ class RealtimeNotificationHub {
     if (!this.socket || !this.isConnected) return;
 
     if (this.userId) {
+      // ALWAYS log room joining for debugging
+      console.log(`[RealtimeNotificationHub] 🚪 Joining user room: user_${this.userId}`);
       this.socket.emit('join:user', this.userId);
     }
 
     if (this.userRole) {
+      // ALWAYS log room joining for debugging
+      console.log(`[RealtimeNotificationHub] 🚪 Joining role room: role_${this.userRole}`);
       this.socket.emit('join:role', this.userRole);
+    }
+  }
+
+  /**
+   * Start polling fallback when Socket.IO is not connected
+   */
+  private startPollingFallback() {
+    if (!this.isConnected) {
+      if (import.meta.env.DEV) {
+        console.log('[RealtimeNotificationHub] Socket.IO not connected, starting polling fallback');
+      }
+      // Lazy import to avoid circular dependency
+      import('./notificationPollingService').then(({ notificationPollingService }) => {
+        notificationPollingService.startPolling();
+      });
     }
   }
 
@@ -186,18 +277,46 @@ class RealtimeNotificationHub {
 
     const userData = getSecureUserData();
     const currentUserId = userData?.id || userData?.userId;
-    const targetUserId = notification.targetUserId || notification.userId;
+    // Backend sends 'userId' (camelCase), but also check for various formats
+    const targetUserId = notification.targetUserId || notification.userId || (notification as any).user_id;
 
-    // Check if notification is for current user
-    if (targetUserId && String(targetUserId) !== String(currentUserId)) {
+    if (import.meta.env.DEV) {
+      console.log('[RealtimeNotificationHub] User check:', {
+        targetUserId,
+        currentUserId,
+        notificationUserId: notification.userId,
+        notificationTargetUserId: notification.targetUserId,
+        rawNotification: notification,
+        match: targetUserId ? String(targetUserId) === String(currentUserId) : 'no target'
+      });
+    }
+
+    // Check if notification is for current user - ONLY filter if target is specified AND doesn't match
+    // If no targetUserId, let it through (role-based or broadcast notification)
+    if (targetUserId && currentUserId && String(targetUserId) !== String(currentUserId)) {
+      if (import.meta.env.DEV) {
+        console.log('[RealtimeNotificationHub] ❌ Skipping - user mismatch');
+      }
       return;
     }
 
-    // Check if notification is for current role
-    if (notification.targetRole && this.userRole) {
+    // If notification has a specific targetUserId that matches current user, SKIP role check
+    // The backend already determined this notification is for this specific user
+    const userIdMatched = targetUserId && currentUserId && String(targetUserId) === String(currentUserId);
+
+    // Check if notification is for current role - ONLY if no specific user was targeted
+    // If the notification was sent to a specific user (like estimator from TD), skip role check
+    if (!userIdMatched && notification.targetRole && this.userRole) {
       const normalizeRole = (role: string) => role.toLowerCase().replace(/[\s\-_]/g, '');
       const targetRole = normalizeRole(notification.targetRole);
       const currentRole = normalizeRole(this.userRole);
+
+      if (import.meta.env.DEV) {
+        console.log('[RealtimeNotificationHub] Role check (no specific user target):', {
+          targetRole,
+          currentRole
+        });
+      }
 
       // Also check common role mappings
       const roleMatches = targetRole === currentRole ||
@@ -210,7 +329,14 @@ class RealtimeNotificationHub {
         targetRole === 'client' || targetRole === 'all';  // Allow client and all roles
 
       if (!roleMatches) {
+        if (import.meta.env.DEV) {
+          console.log('[RealtimeNotificationHub] ❌ Skipping - role mismatch');
+        }
         return;
+      }
+    } else if (userIdMatched) {
+      if (import.meta.env.DEV) {
+        console.log('[RealtimeNotificationHub] ✅ Skipping role check - notification sent to specific user');
       }
     }
 
@@ -228,6 +354,9 @@ class RealtimeNotificationHub {
       senderName: notification.senderName,
       category: (notification as any).category || 'system'
     };
+
+    // ALWAYS log when notification passes all checks
+    console.log('[RealtimeNotificationHub] ✅ Passed all checks, showing notification:', notification.title);
 
     // Add to notification store (shows in notification panel + badge count)
     useNotificationStore.getState().addNotification(notificationData);
@@ -402,12 +531,15 @@ class RealtimeNotificationHub {
       const currentToken = localStorage.getItem('access_token');
       if (currentToken && !this.authToken) {
         // User just logged in
+        console.log('[RealtimeNotificationHub] 🔑 User logged in, initializing connections...');
         this.updateCredentials();
         if (this.userId) {
           this.setupSocketConnection();
+          this.setupSupabaseRealtime();
         }
       } else if (!currentToken && this.authToken) {
         // User just logged out
+        console.log('[RealtimeNotificationHub] 🚪 User logged out, disconnecting...');
         this.disconnect();
         this.authToken = null;
         this.userId = null;
@@ -424,6 +556,13 @@ class RealtimeNotificationHub {
         this.userId = String(user.user_id || user.id || user.userId || '');
         // Check multiple possible role fields
         this.userRole = user.role || user.role_name || null;
+        // ALWAYS log credentials for debugging notification delivery
+        console.log('[RealtimeNotificationHub] 👤 Credentials updated:', {
+          userId: this.userId,
+          userRole: this.userRole,
+          hasToken: !!this.authToken,
+          rawUser: user
+        });
       } catch {
         this.userId = null;
         this.userRole = null;
@@ -450,9 +589,25 @@ class RealtimeNotificationHub {
   }
 
   reconnect() {
+    console.log('[RealtimeNotificationHub] 🔄 Reconnecting...');
     this.updateCredentials();
     this.disconnect();
     this.setupSocketConnection();
+    this.setupSupabaseRealtime();
+  }
+
+  /**
+   * Force re-join rooms - call this if notifications aren't being received
+   */
+  forceRejoinRooms() {
+    console.log('[RealtimeNotificationHub] 🔄 Force re-joining rooms...');
+    this.updateCredentials();
+    if (this.socket && this.isConnected) {
+      this.joinRooms();
+    } else {
+      console.log('[RealtimeNotificationHub] Socket not connected, reconnecting...');
+      this.reconnect();
+    }
   }
 
   disconnect() {
@@ -562,8 +717,17 @@ class RealtimeNotificationHub {
           // Show popup and desktop notification ONLY for recent AND truly new notifications
           // Skip if notification already existed in store (prevents spam on page reload)
           if (isRecent && !alreadyExists) {
-            this.showIncomingNotificationPopup(notification);
-            this.showDesktopNotification(notification);
+            // Check if page is visible or hidden/minimized
+            const isPageHidden = document.hidden || document.visibilityState === 'hidden';
+
+            if (isPageHidden) {
+              // Page is HIDDEN/MINIMIZED: Show BOTH desktop AND in-app notification
+              this.showDesktopNotification(notification);
+              this.showIncomingNotificationPopup(notification);
+            } else {
+              // Page is VISIBLE: Show in-app notification popup only
+              this.showIncomingNotificationPopup(notification);
+            }
           }
         }
       }

@@ -13,10 +13,10 @@ class NotificationPollingService {
   private static instance: NotificationPollingService;
   private pollingInterval: NodeJS.Timeout | null = null;
   private isPolling = false;
-  private pollIntervalMs = 30000; // Poll every 30 seconds (optimized from 10s)
+  private pollIntervalMs = 10000; // Poll every 10 seconds when Socket.IO is disconnected
   private lastFetchTime: number = 0;
   private backoffMultiplier = 1; // Exponential backoff if no new notifications
-  private maxBackoffMultiplier = 4; // Max 2 minutes (30s * 4 = 120s)
+  private maxBackoffMultiplier = 6; // Max 1 minute (10s * 6 = 60s)
   private processedNotificationIds: Set<string> = new Set(); // Track processed IDs
   private maxProcessedIds = 500; // Limit to prevent memory leaks
 
@@ -42,7 +42,7 @@ class NotificationPollingService {
     }
 
     if (import.meta.env.DEV) {
-      console.log('[Polling] Starting notification polling (every 30s when Socket.IO disconnected)');
+      console.log('[Polling] Starting notification polling (every 10s when Socket.IO disconnected)');
     }
     this.isPolling = true;
 
@@ -152,7 +152,7 @@ class NotificationPollingService {
 
         if (newNotifications.length > 0) {
 
-          // Add each new notification to the store
+          // Add each new notification to the store AND show popup
           const store = useNotificationStore.getState();
           for (const notif of newNotifications) {
             // Mark as processed BEFORE adding to store
@@ -165,7 +165,7 @@ class NotificationPollingService {
               idsToRemove.forEach(id => this.processedNotificationIds.delete(id));
             }
 
-            store.addNotification({
+            const notificationData = {
               id: notif.id,
               type: notif.type || 'info',
               title: notif.title,
@@ -177,7 +177,33 @@ class NotificationPollingService {
               actionUrl: notif.actionUrl,
               actionLabel: notif.actionLabel,
               senderName: notif.senderName
-            });
+            };
+
+            store.addNotification(notificationData);
+
+            // Show popup based on page visibility
+            // This ensures notifications appear even when Socket.IO/Supabase Realtime fail
+            const isPageHidden = document.hidden || document.visibilityState === 'hidden';
+
+            if (import.meta.env.DEV) {
+              console.log('[Polling] Page visibility:', { isPageHidden, title: notificationData.title });
+            }
+
+            if (isPageHidden) {
+              // Page HIDDEN/MINIMIZED: Show BOTH desktop AND in-app notification
+              // Desktop notification alerts the user, in-app notification is ready when they return
+              if (import.meta.env.DEV) {
+                console.log('[Polling] Page hidden - showing BOTH desktop and in-app notification');
+              }
+              this.showDesktopNotification(notificationData);
+              this.showInAppNotification(notificationData);
+            } else {
+              // Page VISIBLE: Show in-app toast only (no desktop)
+              if (import.meta.env.DEV) {
+                console.log('[Polling] Page visible - showing ONLY in-app notification');
+              }
+              this.showInAppNotification(notificationData);
+            }
           }
 
           // Reset backoff multiplier since we found new notifications
@@ -225,6 +251,95 @@ class NotificationPollingService {
     if (this.isPolling) {
       this.stopPolling();
       this.startPolling();
+    }
+  }
+
+  /**
+   * Show in-app toast notification
+   */
+  private showInAppNotification(notification: any) {
+    if (import.meta.env.DEV) {
+      console.log('[Polling] 🔔 Showing in-app toast for:', notification.title);
+    }
+    try {
+      // Dynamic import to avoid circular dependencies
+      import('sonner').then(({ toast }) => {
+        const getIcon = () => {
+          switch (notification.type) {
+            case 'approval':
+            case 'success':
+              return '✅';
+            case 'rejection':
+            case 'error':
+              return '❌';
+            case 'warning':
+            case 'alert':
+              return '⚠️';
+            default:
+              return '🔔';
+          }
+        };
+
+        toast.message(notification.title, {
+          description: notification.message,
+          icon: getIcon(),
+          duration: 5000,
+          action: notification.actionUrl ? {
+            label: notification.actionLabel || 'View',
+            onClick: () => {
+              window.location.href = notification.actionUrl;
+            }
+          } : undefined
+        });
+
+        if (import.meta.env.DEV) {
+          console.log('[Polling] ✅ In-app toast shown successfully');
+        }
+      });
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error('[Polling] ❌ Failed to show in-app notification:', error);
+      }
+    }
+  }
+
+  /**
+   * Show desktop notification
+   */
+  private showDesktopNotification(notification: any) {
+    if (import.meta.env.DEV) {
+      console.log('[Polling] 🖥️ Attempting desktop notification for:', notification.title);
+      console.log('[Polling] Desktop notification permission:', Notification.permission);
+    }
+    try {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        const desktopNotif = new Notification(notification.title, {
+          body: notification.message,
+          icon: '/favicon.ico',
+          tag: notification.id, // Prevent duplicate desktop notifications
+          requireInteraction: notification.priority === 'urgent'
+        });
+
+        if (import.meta.env.DEV) {
+          console.log('[Polling] ✅ Desktop notification created successfully');
+        }
+
+        desktopNotif.onclick = () => {
+          window.focus();
+          if (notification.actionUrl) {
+            window.location.href = notification.actionUrl;
+          }
+          desktopNotif.close();
+        };
+      } else {
+        if (import.meta.env.DEV) {
+          console.log('[Polling] ❌ Desktop notification not available or permission denied');
+        }
+      }
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error('[Polling] Failed to show desktop notification:', error);
+      }
     }
   }
 }

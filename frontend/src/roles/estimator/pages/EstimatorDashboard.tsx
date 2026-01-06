@@ -14,22 +14,17 @@ import {
   Users,
   Calendar
 } from 'lucide-react';
-import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { showSuccess, showError } from '@/utils/toastHelper';
 import { estimatorService } from '../services/estimatorService';
-import { BOQ, BOQDashboardMetrics } from '../types';
+import { BOQDashboardMetrics } from '../types';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
-import BOQDetailsModal from '../components/BOQDetailsModal';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import { format } from 'date-fns';
 
 const EstimatorDashboard: React.FC = () => {
   // State management
   const [isCreatingBoq, setIsCreatingBoq] = useState(false);
   const [metrics, setMetrics] = useState<BOQDashboardMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [recentBoqs, setRecentBoqs] = useState<BOQ[]>([]);
-  const [selectedBoq, setSelectedBoq] = useState<BOQ | null>(null);
-  const [showBoqDetails, setShowBoqDetails] = useState(false);
 
   // Load data on mount
   useEffect(() => {
@@ -39,7 +34,7 @@ const EstimatorDashboard: React.FC = () => {
   const loadDashboardData = async () => {
     setIsLoading(true);
     try {
-      await Promise.all([loadMetrics(), loadRecentBoqs()]);
+      await loadMetrics();
     } catch (error) {
       showError('Failed to load dashboard data');
     } finally {
@@ -58,56 +53,11 @@ const EstimatorDashboard: React.FC = () => {
     }
   };
 
-  const loadRecentBoqs = async () => {
-    try {
-      const result = await estimatorService.getAllBOQs();
-      if (result.success) {
-        const mapped = result.data.map((boq: any) => {
-          // Calculate correct grand total: items + preliminaries - discount
-          const itemsTotal = boq.total_cost || boq.selling_price || 0;
-          const preliminaryAmount = boq.preliminaries?.cost_details?.amount || 0;
-          const discountAmount = boq.discount_amount || 0;
-          const grandTotal = (itemsTotal + preliminaryAmount) - discountAmount;
-
-          return {
-            ...boq,
-            boq_id: boq.boq_id,
-            title: boq.boq_name || boq.title || 'Unnamed BOQ',
-            project: {
-              project_id: boq.project_id,
-              name: boq.project_name || 'Unknown Project',
-              client: boq.client || 'Unknown Client',
-              location: boq.location || 'Unknown Location'
-            },
-            summary: {
-              grandTotal: grandTotal // Now includes preliminaries and discount
-            },
-            total_cost: grandTotal, // Update total_cost to match grand total
-            status: boq.status || 'draft',
-            created_at: boq.created_at
-          };
-        });
-        setRecentBoqs(mapped.slice(0, 6)); // Get latest 6
-      }
-    } catch (error) {
-      console.error('Failed to load BOQs:', error);
-    }
-  };
 
   const handleBOQCreated = () => {
     showSuccess('BOQ created successfully!');
     setIsCreatingBoq(false);
     loadDashboardData();
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'approved': return 'bg-green-100 text-green-700 border-green-200';
-      case 'pending': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'rejected': return 'bg-red-100 text-red-700 border-red-200';
-      case 'draft': return 'bg-gray-100 text-gray-700 border-gray-200';
-      default: return 'bg-blue-100 text-blue-700 border-blue-200';
-    }
   };
 
   // Chart configurations - Exact same as TD
@@ -575,20 +525,6 @@ const EstimatorDashboard: React.FC = () => {
         onClose={() => setIsCreatingBoq(false)}
         onSubmit={handleBOQCreated}
         hideTemplate={true}
-      />
-
-      {/* BOQ Details Modal */}
-      <BOQDetailsModal
-        isOpen={showBoqDetails}
-        onClose={() => {
-          setShowBoqDetails(false);
-          setSelectedBoq(null);
-        }}
-        boq={selectedBoq}
-        onEdit={() => {}}
-        onDownload={() => {
-          showInfo('BOQ download feature will be implemented soon');
-        }}
       />
     </div>
   );

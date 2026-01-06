@@ -75,7 +75,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPriority, setSelectedPriority] = useState<string>('all');
-  const [toastNotifications, setToastNotifications] = useState<NotificationData[]>([]);
+  // NOTE: toastNotifications state removed - toast is now handled by realtimeNotificationHub.ts
 
   // Delay rendering to prevent flash during page load
   const [isReady, setIsReady] = useState(false);
@@ -90,7 +90,8 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   // Refs for click outside detection
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const toastTimeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  // Ref for toast timeout management
+  const toastTimeoutRefs = useRef<Map<string | number, NodeJS.Timeout>>(new Map());
 
   // Handle click outside with proper cleanup
   useEffect(() => {
@@ -274,16 +275,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     return formatRelativeTime(date);
   }, []);
 
-  // Remove individual toast with cleanup
-  const removeToast = useCallback((notificationId: string) => {
-    setToastNotifications(prev => prev.filter(n => n.id !== notificationId));
-
-    const timeout = toastTimeoutRefs.current.get(notificationId);
-    if (timeout) {
-      clearTimeout(timeout);
-      toastTimeoutRefs.current.delete(notificationId);
-    }
-  }, []);
+  // NOTE: removeToast callback removed - toast is now handled by realtimeNotificationHub.ts
 
   // Enhanced notification action handler with smart redirects
   const handleNotificationAction = useCallback((notification: NotificationData) => {
@@ -842,102 +834,9 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Enhanced Toast Notifications with PR Support - Mobile friendly */}
-      <div className={cn(
-        "fixed z-[10000] space-y-2 pointer-events-none",
-        "top-4 right-2 sm:right-4 left-2 sm:left-auto"
-      )}>
-        <AnimatePresence>
-          {toastNotifications.map((notification, index) => (
-            <motion.div
-              key={notification.id}
-              initial={{
-                opacity: 0,
-                x: 100,
-                scale: 0.9
-              }}
-              animate={{
-                opacity: 1,
-                x: 0,
-                scale: 1
-              }}
-              exit={{
-                opacity: 0,
-                x: 100,
-                scale: 0.9
-              }}
-              transition={{
-                type: "spring",
-                damping: 20,
-                stiffness: 300
-              }}
-              style={{
-                zIndex: 10000 - index
-              }}
-              className={cn(
-                "bg-white rounded-lg shadow-2xl border p-3 sm:p-4 w-full sm:w-80 pointer-events-auto ml-auto",
-                notification.priority === 'urgent' && "border-red-500 border-2 animate-pulse",
-                notification.category === 'approval' && "border-l-4 border-amber-500"
-              )}
-            >
-              <div className="flex items-start gap-2 sm:gap-3">
-                <div className={cn(
-                  "p-1.5 sm:p-2 rounded-lg flex-shrink-0",
-                  getNotificationColor(notification.type)
-                )}>
-                  <span className="[&>svg]:w-4 [&>svg]:h-4 sm:[&>svg]:w-5 sm:[&>svg]:h-5">
-                    {getNotificationIcon(notification.type)}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-medium text-xs sm:text-sm text-gray-900 line-clamp-2">
-                    {notification.title}
-                  </h4>
-                  <p className="text-[10px] sm:text-xs text-gray-600 mt-0.5 sm:mt-1 line-clamp-2">
-                    {notification.message}
-                  </p>
-                  {notification.category === 'approval' && notification.metadata && (
-                    <div className="mt-1.5 sm:mt-2 flex flex-wrap items-center gap-1 sm:gap-2">
-                      {notification.metadata.project && (
-                        <Badge variant="outline" className="text-[9px] sm:text-[10px] px-1 sm:px-1.5">
-                          <FileText className="w-2.5 sm:w-3 h-2.5 sm:h-3 mr-0.5 sm:mr-1" />
-                          <span className="truncate max-w-[80px] sm:max-w-none">{notification.metadata.project}</span>
-                        </Badge>
-                      )}
-                      {notification.metadata.amount && (
-                        <Badge variant="outline" className="text-[9px] sm:text-[10px] px-1 sm:px-1.5">
-                          AED {notification.metadata.amount.toLocaleString()}
-                        </Badge>
-                      )}
-                    </div>
-                  )}
-                  {notification.actionRequired && (
-                    <Button
-                      size="sm"
-                      className="h-5 sm:h-6 px-1.5 sm:px-2 text-[10px] sm:text-[11px] mt-1.5 sm:mt-2 bg-red-500 hover:bg-red-600 text-white"
-                      onClick={() => {
-                        handleNotificationAction(notification);
-                        removeToast(notification.id);
-                      }}
-                    >
-                      View PR
-                      <ChevronRight className="w-2.5 sm:w-3 h-2.5 sm:h-3 ml-0.5" />
-                    </Button>
-                  )}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeToast(notification.id)}
-                  className="h-5 w-5 sm:h-6 sm:w-6 p-0 hover:bg-gray-100 flex-shrink-0"
-                >
-                  <X className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
-                </Button>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+      {/* NOTE: Toast notifications section removed - now handled by realtimeNotificationHub.ts
+          This prevents duplicate toast popups. The sonner toast from realtimeNotificationHub
+          is sufficient for showing incoming notifications. */}
     </>
   );
 };

@@ -701,6 +701,29 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       //     }
       //   ]
       // }
+      // {
+      //   name: 'Labour Management',
+      //   href: buildPath('/labour/registry'),
+      //   icon: UserPlusIcon,
+      //   iconSolid: UserPlusSolid,
+      //   color: 'text-purple-600',
+      //   children: [
+      //     {
+      //       name: 'Labour Registry',
+      //       href: buildPath('/labour/registry'),
+      //       icon: UserPlusIcon,
+      //       iconSolid: UserPlusSolid,
+      //       color: 'text-purple-500'
+      //     },
+      //     {
+      //       name: 'Assign Workers',
+      //       href: buildPath('/labour/assignments'),
+      //       icon: CalendarDaysIcon,
+      //       iconSolid: CalendarDaysSolid,
+      //       color: 'text-blue-500'
+      //     }
+      //   ]
+      // }
     ];
 
     // Admin specific navigation items - User Management and Signature Upload

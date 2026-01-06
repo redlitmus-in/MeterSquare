@@ -13,12 +13,24 @@ from config.logging import get_logger
 
 log = get_logger()
 
-# Initialize Socket.IO
+# Initialize Socket.IO with explicit CORS origins for development
+# Must match the origins allowed by Flask CORS
+SOCKET_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:5173",
+    "https://msq.kol.tel",
+    "http://msq.kol.tel"
+]
+
 socketio = SocketIO(
-    cors_allowed_origins="*",
+    cors_allowed_origins=SOCKET_CORS_ORIGINS,
     async_mode='threading',
     logger=True,
-    engineio_logger=False,
+    engineio_logger=True,  # Enable engine.io logging to debug connection issues
     ping_timeout=60,
     ping_interval=25
 )
@@ -177,9 +189,24 @@ def handle_ping():
 def handle_join_user(user_id):
     """Handle join:user event from frontend"""
     try:
+        sid = request.sid
         room = f'user_{user_id}'
         join_room(room)
-        log.debug(f"User {user_id} manually joined room: {room}")
+
+        # Update tracking if connection exists
+        if sid in active_connections:
+            if room not in active_connections[sid]['rooms']:
+                active_connections[sid]['rooms'].append(room)
+        else:
+            # Create new tracking entry for this connection
+            active_connections[sid] = {
+                'user_id': user_id,
+                'role': 'unknown',
+                'username': f'user_{user_id}',
+                'rooms': [room]
+            }
+
+        log.info(f"[Socket.IO] User {user_id} joined room: {room} [SID: {sid}]")
         emit('room_joined', {'room': room, 'type': 'user'})
     except Exception as e:
         log.error(f"Error joining user room: {e}")
@@ -209,12 +236,26 @@ def send_notification_to_user(user_id, notification_data):
     """
     room = f'user_{user_id}'
 
-    # Check if anyone is in the room
+    # Check if anyone is in the room (from our tracking)
     active_users = [conn for conn in active_connections.values() if room in conn.get('rooms', [])]
 
-    log.debug(f"Emitting notification to user {user_id} - Room: {room}, Title: {notification_data.get('title', 'N/A')}, Active connections: {len(active_users)}")
+    # Log with INFO level for better visibility
+    log.info(f"[Socket.IO] Emitting 'notification' to room '{room}' - Title: {notification_data.get('title', 'N/A')}, Tracked connections: {len(active_users)}, Total active: {len(active_connections)}")
 
+    # Log detailed connection info for debugging
+    if len(active_connections) > 0:
+        all_rooms = set()
+        for sid, conn in active_connections.items():
+            all_rooms.update(conn.get('rooms', []))
+            if room in conn.get('rooms', []):
+                log.info(f"[Socket.IO] Target user {user_id} found in connection SID: {sid}, rooms: {conn.get('rooms', [])}")
+        log.info(f"[Socket.IO] All active rooms: {all_rooms}")
+    else:
+        log.warning(f"[Socket.IO] No active connections tracked! User {user_id} may still receive via direct room join.")
+
+    # Always emit - even if we don't track the user, they might be in the room via join:user
     socketio.emit('notification', notification_data, room=room)
+
     return len(active_users) > 0
 
 

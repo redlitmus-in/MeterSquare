@@ -19,29 +19,174 @@ import {
 
 class EstimatorService {
   // BOQ CRUD Operations
-  async getAllBOQs(filter?: BOQFilter): Promise<{ success: boolean; data: any[]; count: number }> {
+
+  // REMOVED: getAllBOQs() - Use specific status endpoints instead (getPendingBOQs, getApprovedBOQs, etc.)
+  // async getAllBOQs(filter?: BOQFilter): Promise<{ success: boolean; data: any[]; count: number }> {
+  //   try {
+  //     const response = await apiClient.get<BOQListResponse>('/all_boq', { params: filter });
+  //
+  //     if (response.data && response.data.data) {
+  //       return {
+  //         success: true,
+  //         data: response.data.data,
+  //         count: response.data.count
+  //       };
+  //     }
+  //
+  //     return {
+  //       success: true,
+  //       data: [],
+  //       count: 0
+  //     };
+  //   } catch (error: any) {
+  //     console.error('Error fetching BOQs:', error.response?.data || error.message);
+  //     return {
+  //       success: false,
+  //       data: [],
+  //       count: 0
+  //     };
+  //   }
+  // }
+
+  // Get BOQs by status - specific API endpoints
+  async getPendingBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get<BOQListResponse>('/all_boq', { params: filter });
-
-      if (response.data && response.data.data) {
-        return {
-          success: true,
-          data: response.data.data,
-          count: response.data.count
-        };
-      }
-
+      const response = await apiClient.get('/pending_boq');
       return {
         success: true,
-        data: [],
-        count: 0
+        data: response.data?.data || response.data || [],
+        count: response.data?.count || 0
       };
     } catch (error: any) {
-      console.error('Error fetching BOQs:', error.response?.data || error.message);
+      console.error('Error fetching pending BOQs:', error.response?.data || error.message);
+      return { success: false, data: [], count: 0 };
+    }
+  }
+
+  async getApprovedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+    try {
+      const response = await apiClient.get('/approved_boq');
+      return {
+        success: true,
+        data: response.data?.data || response.data || [],
+        count: response.data?.count || 0
+      };
+    } catch (error: any) {
+      console.error('Error fetching approved BOQs:', error.response?.data || error.message);
+      return { success: false, data: [], count: 0 };
+    }
+  }
+
+  async getRejectedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+    try {
+      const response = await apiClient.get('/rejected_boq');
+      return {
+        success: true,
+        data: response.data?.data || response.data || [],
+        count: response.data?.count || 0
+      };
+    } catch (error: any) {
+      console.error('Error fetching rejected BOQs:', error.response?.data || error.message);
+      return { success: false, data: [], count: 0 };
+    }
+  }
+
+  async getCompletedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+    try {
+      const response = await apiClient.get('/completed_boq');
+      return {
+        success: true,
+        data: response.data?.data || response.data || [],
+        count: response.data?.count || 0
+      };
+    } catch (error: any) {
+      console.error('Error fetching completed BOQs:', error.response?.data || error.message);
+      return { success: false, data: [], count: 0 };
+    }
+  }
+
+  async getCancelledBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+    try {
+      const response = await apiClient.get('/cancelled_boq');
+      return {
+        success: true,
+        data: response.data?.data || response.data || [],
+        count: response.data?.count || 0
+      };
+    } catch (error: any) {
+      console.error('Error fetching cancelled BOQs:', error.response?.data || error.message);
+      return { success: false, data: [], count: 0 };
+    }
+  }
+
+  async getSentBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+    try {
+      const response = await apiClient.get('/all_send_boq');
+      return {
+        success: true,
+        data: response.data?.data || response.data || [],
+        count: response.data?.count || 0
+      };
+    } catch (error: any) {
+      console.error('Error fetching sent BOQs:', error.response?.data || error.message);
+      return { success: false, data: [], count: 0 };
+    }
+  }
+
+  async getRevisionsBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+    try {
+      const response = await apiClient.get('/revisions_boq');
+      return {
+        success: true,
+        data: response.data?.data || response.data || [],
+        count: response.data?.count || 0
+      };
+    } catch (error: any) {
+      console.error('Error fetching revision BOQs:', error.response?.data || error.message);
+      return { success: false, data: [], count: 0 };
+    }
+  }
+
+  // Lightweight API to get only tab counts (single SQL query - much faster)
+  async getTabCounts(): Promise<{
+    success: boolean;
+    counts: {
+      pending: number;
+      sent: number;
+      approved: number;
+      rejected: number;
+      completed: number;
+      cancelled: number;
+      revisions: number;
+    };
+  }> {
+    try {
+      const response = await apiClient.get('/estimator_tab_counts');
+      return {
+        success: true,
+        counts: response.data?.counts || {
+          pending: 0,
+          sent: 0,
+          approved: 0,
+          rejected: 0,
+          completed: 0,
+          cancelled: 0,
+          revisions: 0
+        }
+      };
+    } catch (error: any) {
+      console.error('Error fetching tab counts:', error.response?.data || error.message);
       return {
         success: false,
-        data: [],
-        count: 0
+        counts: {
+          pending: 0,
+          sent: 0,
+          approved: 0,
+          rejected: 0,
+          completed: 0,
+          cancelled: 0,
+          revisions: 0
+        }
       };
     }
   }
@@ -698,143 +843,15 @@ class EstimatorService {
           };
         }
       } catch (apiError) {
-        console.log('Backend dashboard API not available, falling back to client-side calculation');
-      }
-
-      // Fallback: Fetch all BOQs and calculate metrics client-side
-      const boqsResult = await this.getAllBOQs();
-
-      if (!boqsResult.success || !boqsResult.data) {
+        console.error('Backend dashboard API not available:', apiError);
         return {
           success: false
         };
       }
 
-      const allBOQs = boqsResult.data;
-
-      // Calculate status-based counts
-      const totalBOQs = allBOQs.length;
-      const pendingBOQs = allBOQs.filter(boq =>
-        boq.status === 'Draft' || boq.status === 'pending' || boq.status === 'In_Review'
-      ).length;
-      const approvedBOQs = allBOQs.filter(boq =>
-        boq.status === 'Approved' || boq.status === 'approved' ||
-        boq.status === 'items_assigned' || boq.status === 'Items_Assigned'
-      ).length;
-      const rejectedBOQs = allBOQs.filter(boq =>
-        boq.status === 'Rejected' || boq.status === 'rejected'
-      ).length;
-      const sentForConfirmation = allBOQs.filter(boq =>
-        boq.status === 'Sent_for_Confirmation' || boq.status === 'sent_for_confirmation'
-      ).length;
-
-      // Calculate total project value
-      const totalProjectValue = allBOQs.reduce((sum, boq) => {
-        const value = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
-        return sum + value;
-      }, 0);
-
-      // Group BOQs by month for trend analysis
-      const monthlyData: { [key: string]: { count: number; value: number } } = {};
-      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const currentDate = new Date();
-      const currentYear = currentDate.getFullYear();
-
-      // Initialize last 6 months
-      for (let i = 5; i >= 0; i--) {
-        const date = new Date(currentYear, currentDate.getMonth() - i, 1);
-        const monthKey = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
-        monthlyData[monthKey] = { count: 0, value: 0 };
-      }
-
-      // Fill in actual data
-      allBOQs.forEach(boq => {
-        if (boq.created_at) {
-          const date = new Date(boq.created_at);
-          const monthKey = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
-
-          if (monthlyData[monthKey]) {
-            monthlyData[monthKey].count++;
-            monthlyData[monthKey].value += boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
-          }
-        }
-      });
-
-      const monthlyTrend = Object.keys(monthlyData).map(month => ({
-        month: month.split(' ')[0], // Just the month name for display
-        count: monthlyData[month].count,
-        value: monthlyData[month].value
-      }));
-
-      // Get top projects by value
-      const topProjects = allBOQs
-        .filter(boq => boq.project_name)
-        .sort((a, b) => {
-          const aValue = a.total_cost || a.selling_price || a.estimatedSellingPrice || 0;
-          const bValue = b.total_cost || b.selling_price || b.estimatedSellingPrice || 0;
-          return bValue - aValue;
-        })
-        .slice(0, 5)
-        .map(boq => ({
-          id: boq.boq_id,
-          name: boq.project_name || `BOQ #${boq.boq_id}`,
-          value: boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0,
-          status: boq.status,
-          client: boq.client || 'Unknown Client'
-        }));
-
-      // Calculate average approval time (in days)
-      const approvedBOQsWithTime = allBOQs.filter(boq =>
-        (boq.status === 'Approved' || boq.status === 'approved') &&
-        boq.created_at && boq.last_modified_at
-      );
-
-      let averageApprovalTime = 0;
-      if (approvedBOQsWithTime.length > 0) {
-        const totalTime = approvedBOQsWithTime.reduce((sum, boq) => {
-          const created = new Date(boq.created_at).getTime();
-          const modified = new Date(boq.last_modified_at).getTime();
-          const days = (modified - created) / (1000 * 60 * 60 * 24);
-          return sum + days;
-        }, 0);
-        averageApprovalTime = totalTime / approvedBOQsWithTime.length;
-      }
-
-      // Get recent activities
-      const recentActivities = allBOQs
-        .filter(boq => boq.created_at || boq.last_modified_at)
-        .sort((a, b) => {
-          const aTime = new Date(a.last_modified_at || a.created_at).getTime();
-          const bTime = new Date(b.last_modified_at || b.created_at).getTime();
-          return bTime - aTime;
-        })
-        .slice(0, 10)
-        .map(boq => {
-          const isNew = !boq.last_modified_at || boq.created_at === boq.last_modified_at;
-          return {
-            id: boq.boq_id,
-            type: isNew ? 'created' : 'updated',
-            description: `${boq.boq_name || `BOQ #${boq.boq_id}`} ${isNew ? 'created' : 'updated'}`,
-            timestamp: boq.last_modified_at || boq.created_at,
-            project: boq.project_name || 'Unknown Project',
-            status: boq.status
-          };
-        });
-
+      // No fallback - backend API is required
       return {
-        success: true,
-        data: {
-          totalBOQs,
-          pendingBOQs,
-          approvedBOQs,
-          rejectedBOQs,
-          sentForConfirmation,
-          totalProjectValue,
-          averageApprovalTime: Math.round(averageApprovalTime * 10) / 10, // Round to 1 decimal
-          monthlyTrend,
-          topProjects,
-          recentActivities
-        }
+        success: false
       };
     } catch (error: any) {
       console.error('Error calculating dashboard metrics:', error);

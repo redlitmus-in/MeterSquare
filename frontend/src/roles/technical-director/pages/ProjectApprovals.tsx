@@ -297,6 +297,27 @@ const ProjectApprovals: React.FC = () => {
   const [loadingRevisionTabs, setLoadingRevisionTabs] = useState(false);
   const [loadingRevisionProjects, setLoadingRevisionProjects] = useState(false);
 
+  // Tab counts from backend
+  const [backendTabCounts, setBackendTabCounts] = useState<{
+    pending: number;
+    approved: number;
+    sent: number;
+    revisions: number;
+    assigned: number;
+    completed: number;
+    rejected: number;
+    cancelled: number;
+  }>({
+    pending: 0,
+    approved: 0,
+    sent: 0,
+    revisions: 0,
+    assigned: 0,
+    completed: 0,
+    rejected: 0,
+    cancelled: 0
+  });
+
   // Ref to track previous BOQs data for comparison
   const prevBOQsRef = useRef<string>('');
 
@@ -309,10 +330,23 @@ const ProjectApprovals: React.FC = () => {
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
 
+  // Load tab counts from backend
+  const loadTabCounts = async () => {
+    try {
+      const response = await tdService.getTabCounts();
+      if (response.success && response.counts) {
+        setBackendTabCounts(response.counts);
+      }
+    } catch (error) {
+      console.error('Error loading tab counts:', error);
+    }
+  };
+
   // Load BOQs on mount - real-time subscriptions handle updates
   useEffect(() => {
-    loadBOQs(); // Initial load with spinner
+    loadTabCounts(); // Load all tab counts
     loadPMs(); // Load PMs for assigned tab
+    // loadBOQs will be called by the filterStatus useEffect
 
     // NO POLLING! Real-time subscriptions in realtimeSubscriptions.ts
     // automatically invalidate queries when BOQ status changes.
@@ -327,6 +361,7 @@ const ProjectApprovals: React.FC = () => {
     // Reload base data
     loadBOQs(false); // Silent reload without loading spinner
     loadPMs(); // Also reload PMs
+    loadTabCounts(); // Also reload tab counts
 
     // Reload tab-specific data based on active tab
     if (filterStatus === 'revisions') {
@@ -383,6 +418,12 @@ const ProjectApprovals: React.FC = () => {
     if (filterStatus === 'revisions') {
       loadRevisionTabs();
     }
+  }, [filterStatus]);
+
+  // Reload BOQs when tab changes (filterStatus changes)
+  useEffect(() => {
+    // This will reload BOQs using the tab-specific API
+    loadBOQs(true);
   }, [filterStatus]);
 
   // Reload projects when revision tab changes
@@ -469,12 +510,45 @@ const ProjectApprovals: React.FC = () => {
     }
   }, [boqs, searchParams]);
 
-  const loadBOQs = async (showLoadingSpinner = true) => {
+  const loadBOQs = async (showLoadingSpinner = true, tabFilter?: string) => {
     if (showLoadingSpinner) {
       setLoading(true);
     }
     try {
-      const response = await tdService.getAllTDBOQs();
+      // Use the appropriate API based on the active tab
+      const activeTab = tabFilter || filterStatus;
+      let response;
+
+      switch (activeTab) {
+        case 'pending':
+          response = await tdService.getPendingBOQs();
+          break;
+        case 'approved':
+          response = await tdService.getApprovedBOQs();
+          break;
+        case 'sent':
+          response = await tdService.getClientResponseBOQs();
+          break;
+        case 'revisions':
+          response = await tdService.getRevisionsBOQs();
+          break;
+        case 'assigned':
+          response = await tdService.getAssignedBOQs();
+          break;
+        case 'completed':
+          response = await tdService.getCompletedBOQs();
+          break;
+        case 'rejected':
+          response = await tdService.getRejectedBOQs();
+          break;
+        case 'cancelled':
+          response = await tdService.getCancelledBOQs();
+          break;
+        default:
+          // Fallback to get all BOQs for backward compatibility
+          response = await tdService.getAllTDBOQs();
+      }
+
       if (response.success && response.data) {
         // Only update state if data actually changed (prevents unnecessary re-renders)
         const newDataString = JSON.stringify(response.data);
@@ -482,6 +556,8 @@ const ProjectApprovals: React.FC = () => {
           prevBOQsRef.current = newDataString;
           setBOQs(response.data);
         }
+        // Refresh tab counts after loading BOQs
+        loadTabCounts();
       } else {
         console.error('Failed to load BOQs:', response.message);
         // Only show error toast on initial load, not during auto-refresh
@@ -1173,91 +1249,55 @@ const ProjectApprovals: React.FC = () => {
     });
   }, [estimations]);
 
-  // ✅ Reset page when filter or search changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filterStatus, searchTerm, selectedRevisionNumber]);
+  const filteredEstimations = useMemo(() => sortedEstimations.filter(est => {
+    if (filterStatus === 'pending') {
+      // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
+      return est.status === 'pending' && !est.pmAssigned;
+    } else if (filterStatus === 'revisions') {
+      // Revisions: Show ALL BOQs with revision_number != 0
+      const hasRevisions = (est as any).revision_number != null && (est as any).revision_number !== 0;
 
-  const filteredEstimations = useMemo(() => {
-    let filtered = sortedEstimations.filter(est => {
-      if (filterStatus === 'pending') {
-        // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
-        return est.status === 'pending' && !est.pmAssigned;
-      } else if (filterStatus === 'revisions') {
-        // Revisions: Show ALL BOQs with revision_number != 0
-        const hasRevisions = (est as any).revision_number != null && (est as any).revision_number !== 0;
+      // Must have revision_number not equal to 0
+      if (!hasRevisions) return false;
 
-        // Must have revision_number not equal to 0
-        if (!hasRevisions) return false;
-
-        // Filter by revision number if specific revision is selected
-        if (selectedRevisionNumber !== 'all') {
-          const revisionNumber = (est as any).revision_number || 0;
-          return revisionNumber === selectedRevisionNumber;
-        }
-
-        return true;
-      } else if (filterStatus === 'approved') {
-        // Approved: TD approved internally, includes "approved", "revision_approved", and "sent_for_confirmation" (waiting for client)
-        return (est.status === 'approved' || est.status === 'revision_approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned;
-      } else if (filterStatus === 'sent') {
-        // Client Response: Shows both approved (client_confirmed) and rejected (client_rejected) by client
-        return (est.status === 'client_confirmed' || est.status === 'client_rejected') && !est.pmAssigned;
-      } else if (filterStatus === 'assigned') {
-        // Assigned: PM has been assigned (can be after client confirms)
-        return est.pmAssigned === true && est.status !== 'rejected' && est.status !== 'completed' && est.status !== 'cancelled';
-      } else if (filterStatus === 'completed') {
-        // Completed: Project is completed
-        return est.status === 'completed';
-      } else if (filterStatus === 'rejected') {
-        // Rejected: TD rejected the BOQ
-        return est.status === 'rejected';
-      } else if (filterStatus === 'cancelled') {
-        // Cancelled: Client doesn't want to proceed with business
-        return est.status === 'cancelled';
+      // Filter by revision number if specific revision is selected
+      if (selectedRevisionNumber !== 'all') {
+        const revisionNumber = (est as any).revision_number || 0;
+        return revisionNumber === selectedRevisionNumber;
       }
-      return false;
-    });
 
-    // ✅ Apply search filter
-    if (searchTerm.trim()) {
-      const searchLower = searchTerm.toLowerCase().trim();
-      filtered = filtered.filter(est => {
-        // Search by ID (B-123, 123), project code (MSQ26), project name, client, or location
-        const idString = `b-${est.id}`;
-        return est.projectName?.toLowerCase().includes(searchLower) ||
-          est.clientName?.toLowerCase().includes(searchLower) ||
-          est.location?.toLowerCase().includes(searchLower) ||
-          est.projectCode?.toLowerCase().includes(searchLower) ||
-          idString.includes(searchLower) ||
-          est.id?.toString().includes(searchTerm.trim());
-      });
+      return true;
+    } else if (filterStatus === 'approved') {
+      // Approved: TD approved internally, includes "approved", "revision_approved", and "sent_for_confirmation" (waiting for client)
+      return (est.status === 'approved' || est.status === 'revision_approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned;
+    } else if (filterStatus === 'sent') {
+      // Client Response: Shows both approved (client_confirmed) and rejected (client_rejected) by client
+      return (est.status === 'client_confirmed' || est.status === 'client_rejected') && !est.pmAssigned;
+    } else if (filterStatus === 'assigned') {
+      // Assigned: PM has been assigned (can be after client confirms)
+      return est.pmAssigned === true && est.status !== 'rejected' && est.status !== 'completed' && est.status !== 'cancelled';
+    } else if (filterStatus === 'completed') {
+      // Completed: Project is completed
+      return est.status === 'completed';
+    } else if (filterStatus === 'rejected') {
+      // Rejected: TD rejected the BOQ
+      return est.status === 'rejected';
+    } else if (filterStatus === 'cancelled') {
+      // Cancelled: Client doesn't want to proceed with business
+      return est.status === 'cancelled';
     }
+    return false;
+  }), [sortedEstimations, filterStatus, selectedRevisionNumber]);
 
-    return filtered;
-  }, [sortedEstimations, filterStatus, selectedRevisionNumber, searchTerm]);
-
-  // ✅ Paginated results
+  // Pagination calculation
+  const totalPages = Math.ceil(filteredEstimations.length / ITEMS_PER_PAGE);
   const paginatedEstimations = useMemo(() => {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredEstimations.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  }, [filteredEstimations, currentPage, ITEMS_PER_PAGE]);
+  }, [filteredEstimations, currentPage]);
 
-  const totalPages = Math.ceil(filteredEstimations.length / ITEMS_PER_PAGE);
-
-  // Calculate counts for each tab
-  const tabCounts = useMemo(() => {
-    return {
-      pending: sortedEstimations.filter(est => est.status === 'pending' && !est.pmAssigned).length,
-      approved: sortedEstimations.filter(est => (est.status === 'approved' || est.status === 'revision_approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned).length,
-      sent: sortedEstimations.filter(est => (est.status === 'client_confirmed' || est.status === 'client_rejected') && !est.pmAssigned).length,
-      revisions: sortedEstimations.filter(est => (est as any).revision_number != null && (est as any).revision_number !== 0).length,
-      assigned: sortedEstimations.filter(est => est.pmAssigned === true && est.status !== 'rejected' && est.status !== 'completed' && est.status !== 'cancelled').length,
-      completed: sortedEstimations.filter(est => est.status === 'completed').length,
-      rejected: sortedEstimations.filter(est => est.status === 'rejected').length,
-      cancelled: sortedEstimations.filter(est => est.status === 'cancelled').length,
-    };
-  }, [sortedEstimations]);
+  // Use backend tab counts directly
+  const tabCounts = backendTabCounts;
 
   const handleApproval = async (id: number, approved: boolean, notes?: string) => {
     console.log('========== HANDLE APPROVAL DEBUG ==========');
@@ -1609,14 +1649,6 @@ const ProjectApprovals: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <ModernLoadingSpinners variant="pulse-wave" />
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {!showFullScreenBOQ && !showComparisonModal && (
@@ -1731,6 +1763,13 @@ const ProjectApprovals: React.FC = () => {
           )}
         </div>
 
+        {/* Loading State - Keep tabs visible */}
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <ModernLoadingSpinners variant="pulse-wave" />
+          </div>
+        ) : (
+          <>
         {/* TD Revision Comparison Page - Show only for revisions tab */}
         {filterStatus === 'revisions' ? (
           <TDRevisionComparisonPage
@@ -2433,6 +2472,8 @@ const ProjectApprovals: React.FC = () => {
               </button>
             </div>
           </div>
+        )}
+        </>
         )}
         </div>
 

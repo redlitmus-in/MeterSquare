@@ -90,7 +90,7 @@ const ProjectCreationForm: React.FC<{
     start_date: initialData?.start_date || '',
     duration_days: initialData?.duration_days || '',
     end_date: initialData?.end_date || '',
-    status: initialData?.status || 'active'
+    status: initialData?.status || 'draft'
   });
 
   // Calculate end date whenever start date or duration changes
@@ -327,7 +327,18 @@ const EstimatorHub: React.FC = () => {
   const [hasSavedDraft, setHasSavedDraft] = useState(false);
   const [draftData, setDraftData] = useState<any>(null);
   const [totalProjects, setTotalProjects] = useState(0);
-  const itemsPerPage = 10; // ✅ 10 items per page for better pagination
+
+  // Tab counts state - fetched from APIs
+  const [tabCountsState, setTabCountsState] = useState({
+    pending: 0,
+    sent: 0,
+    approved: 0,
+    revisions: 0,
+    rejected: 0,
+    completed: 0,
+    cancelled: 0
+  });
+  const itemsPerPage = 20; // ✅ PERFORMANCE: 20 items per page
   const [boqCurrentPage, setBoqCurrentPage] = useState(1); // Pagination for BOQ tabs
   const [showSendEmailModal, setShowSendEmailModal] = useState(false);
   const [boqToEmail, setBoqToEmail] = useState<BOQ | null>(null);
@@ -416,77 +427,30 @@ const EstimatorHub: React.FC = () => {
     setBoqCurrentPage(page);
   }, []);
 
-  // ✅ PERFORMANCE: Memoized tab counts to prevent expensive recalculations on every render
-  const tabCounts = useMemo(() => {
-    // Count projects from paginated list that have no BOQ or only draft BOQs
-    const projectsFromList = projects.filter(p => {
-      const projectBoqs = boqs.filter(boq => boq.project?.project_id == p.project_id);
-      return projectBoqs.length === 0 || projectBoqs.every(boq => {
-        const status = boq.status?.toLowerCase() || '';
-        return !status || status === 'draft';
-      });
-    });
+  // Use state-based tab counts (fetched from APIs)
+  const tabCounts = tabCountsState;
 
-    // Also count unique projects from draft BOQs that aren't in the paginated list
-    const existingProjectIds = new Set(projectsFromList.map(p => p.project_id));
-    const draftBoqs = boqs.filter(boq => {
-      const status = boq.status?.toLowerCase() || '';
-      return !status || status === 'draft';
-    });
+  // Function to fetch all tab counts from single lightweight API
+  const fetchAllTabCounts = useCallback(async () => {
+    try {
+      // Use the new lightweight tab counts API (single SQL query)
+      const response = await estimatorService.getTabCounts();
 
-    let additionalProjectCount = 0;
-    const countedProjectIds = new Set<number>();
-    draftBoqs.forEach(boq => {
-      const projectId = boq.project?.project_id;
-      if (projectId && !existingProjectIds.has(projectId) && !countedProjectIds.has(projectId)) {
-        // Check if ALL BOQs for this project are draft
-        const allProjectBoqs = boqs.filter(b => b.project?.project_id == projectId);
-        const allDraft = allProjectBoqs.every(b => {
-          const s = b.status?.toLowerCase() || '';
-          return !s || s === 'draft';
+      if (response.success) {
+        setTabCountsState({
+          pending: response.counts.pending,
+          sent: response.counts.sent,
+          approved: response.counts.approved,
+          revisions: response.counts.revisions,
+          rejected: response.counts.rejected,
+          completed: response.counts.completed,
+          cancelled: response.counts.cancelled
         });
-        if (allDraft) {
-          additionalProjectCount++;
-          countedProjectIds.add(projectId);
-        }
       }
-    });
-
-    const pendingProjectsCount = projectsFromList.length + additionalProjectCount;
-
-    const sentCount = boqs.filter(b => {
-      const status = b.status?.toLowerCase();
-      return status === 'pending' || status === 'pending_pm_approval';
-    }).length;
-
-    const approvedCount = boqs.filter(b => {
-      const s = b.status?.toLowerCase();
-      return s === 'pm_approved' || s === 'pending_td_approval' || s === 'approved' || s === 'revision_approved' || s === 'sent_for_confirmation' || s === 'client_confirmed' || s === 'items_assigned';
-    }).length;
-
-    const revisionsCount = boqs.filter(b => {
-      const s = b.status?.toLowerCase();
-      return s === 'under_revision' || s === 'pending_revision';
-    }).length;
-
-    const rejectedCount = boqs.filter(b => {
-      const s = b.status?.toLowerCase();
-      return s === 'rejected' || s === 'client_rejected' || s === 'pm_rejected';
-    }).length;
-
-    const completedCount = boqs.filter(b => b.status?.toLowerCase() === 'completed').length;
-    const cancelledCount = boqs.filter(b => b.status?.toLowerCase() === 'client_cancelled').length;
-
-    return {
-      pending: pendingProjectsCount,
-      sent: sentCount,
-      approved: approvedCount,
-      revisions: revisionsCount,
-      rejected: rejectedCount,
-      completed: completedCount,
-      cancelled: cancelledCount
-    };
-  }, [boqs, projects]);
+    } catch (error) {
+      console.error('Error fetching tab counts:', error);
+    }
+  }, []);
 
   const handleShowProjectDialog = useCallback(() => {
     setShowProjectDialog(true);
@@ -509,36 +473,105 @@ const EstimatorHub: React.FC = () => {
   }, [showFullScreenBOQ, fullScreenBoqMode, editingBoq, selectedBoqForDetails, selectedProjectForBOQ]);
 
   useEffect(() => {
-    const abortController = new AbortController();
+    // Initial load - fetch tab counts on mount (now uses lightweight API)
+    fetchAllTabCounts();
+    setInitialLoadComplete(true);
+  }, [fetchAllTabCounts]);
 
-    const fetchData = async () => {
-      try {
-        await loadProjects(currentPage);
-        await loadBOQs();
-      } catch (error: any) {
-        if (error.name !== 'AbortError') {
-          console.error('Error fetching data:', error);
-        }
-      } finally {
-        setInitialLoadComplete(true);
-      }
-    };
-
-    fetchData();
-
-    return () => {
-      abortController.abort();
-    };
-  }, [currentPage]);
-
-  // ✅ RELOAD BOQs and Projects when real-time update is received (e.g., TD approves BOQ)
+  // ✅ RELOAD data when real-time update is received (e.g., TD approves BOQ)
   useEffect(() => {
     // Skip initial mount (timestamp is set on mount)
     if (boqUpdateTimestamp === 0) return;
 
-    // Silent reload both BOQs and projects without loading spinner
-    loadBOQs(false);
-    loadProjects(currentPage);
+    // Reload tab-specific data (NO all_project API call)
+    const reloadTabData = async () => {
+      try {
+        let response;
+        switch (activeTab) {
+          case 'projects':
+            // Pending tab - reload projects without BOQ
+            response = await estimatorService.getPendingBOQs();
+            if (response && response.success && response.data) {
+              setProjects(response.data);
+              setFilteredProjects(response.data);
+              setTotalProjects(response.count || response.data.length);
+            }
+            // Also refresh tab counts
+            fetchAllTabCounts();
+            return; // Exit early
+          case 'sent':
+            response = await estimatorService.getSentBOQs();
+            break;
+          case 'approved':
+            response = await estimatorService.getApprovedBOQs();
+            break;
+          case 'rejected':
+            response = await estimatorService.getRejectedBOQs();
+            break;
+          case 'completed':
+            response = await estimatorService.getCompletedBOQs();
+            break;
+          case 'cancelled':
+            response = await estimatorService.getCancelledBOQs();
+            break;
+          case 'revisions':
+            // Revisions tab has its own special handling
+            // Let the existing revision logic in the useEffect below handle it
+            fetchAllTabCounts();
+            return;
+          default:
+            response = await estimatorService.getPendingBOQs();
+        }
+
+        // Also refresh tab counts when data changes
+        fetchAllTabCounts();
+
+        if (response && response.success && response.data) {
+          const mappedBOQs = response.data.map((boq: any) => {
+            const baseTotalCost = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
+            const preliminaryAmount = boq.preliminaries?.cost_details?.amount || 0;
+            const discountAmount = boq.discount_amount || 0;
+            const finalTotalCost = (baseTotalCost + preliminaryAmount) - discountAmount;
+
+            return {
+              ...boq,
+              boq_id: boq.boq_id,
+              title: boq.boq_name || boq.title || 'Unnamed BOQ',
+              project: {
+                project_id: boq.project_id,
+                name: boq.project_name || 'Unknown Project',
+                client: boq.client || 'Unknown Client',
+                location: boq.location || 'Unknown Location'
+              },
+              summary: { grandTotal: finalTotalCost },
+              total_cost: finalTotalCost,
+              selling_price: finalTotalCost,
+              estimatedSellingPrice: finalTotalCost,
+              status: boq.status || 'draft',
+              revision_number: boq.revision_number || 0,
+              client_rejection_reason: boq.client_rejection_reason,
+              notes: boq.notes,
+              created_at: boq.created_at,
+              email_sent: boq.email_sent || false,
+              pm_assigned: boq.pm_assigned || false
+            };
+          });
+
+          const sortedBOQs = mappedBOQs.sort((a: any, b: any) => {
+            const dateA = new Date(a.created_at || 0).getTime();
+            const dateB = new Date(b.created_at || 0).getTime();
+            return dateB - dateA;
+          });
+
+          setBOQs(sortedBOQs);
+          setFilteredBOQs(sortedBOQs);
+        }
+      } catch (error) {
+        console.error('Error reloading data:', error);
+      }
+    };
+
+    reloadTabData();
 
     // If user is on revisions tab, also reload revision-specific data
     if (activeTab === 'revisions') {
@@ -550,57 +583,13 @@ const EstimatorHub: React.FC = () => {
   }, [boqUpdateTimestamp, activeTab, selectedRevisionTab, currentPage]); // Reload whenever timestamp, tab, revision tab, or page changes
 
   useEffect(() => {
-    // Inline filter logic to avoid stale closure issues
+    // Filter logic based on search term
     if (activeTab === 'projects') {
-      // ✅ FIX: Include projects from BOQs that have Draft status, even if not in paginated projects list
-      // This ensures projects with Draft BOQs show up in Pending tab regardless of pagination
+      // For pending tab, projects are already filtered by API (pending_boq returns projects without BOQ)
+      // Only apply search filter here - DO NOT re-filter by BOQ status (API already handles this)
+      let filteredProj = [...projects];
 
-      // Step 1: Get projects from paginated list that have no BOQ or only draft BOQs
-      let filteredProj = projects.filter(project => {
-        const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
-        return projectBoqs.length === 0 || projectBoqs.every(boq => {
-          const status = boq.status?.toLowerCase() || '';
-          return !status || status === 'draft';
-        });
-      });
-
-      // Step 2: Also include projects from BOQs with draft status that aren't in the paginated list
-      const existingProjectIds = new Set(filteredProj.map(p => p.project_id));
-      const draftBoqs = boqs.filter(boq => {
-        const status = boq.status?.toLowerCase() || '';
-        return !status || status === 'draft';
-      });
-
-      // Create project objects from draft BOQs that aren't already in the list
-      draftBoqs.forEach(boq => {
-        const projectId = boq.project?.project_id;
-        if (projectId && !existingProjectIds.has(projectId)) {
-          // Check if ALL BOQs for this project are draft (not just this one)
-          const allProjectBoqs = boqs.filter(b => b.project?.project_id == projectId);
-          const allDraft = allProjectBoqs.every(b => {
-            const s = b.status?.toLowerCase() || '';
-            return !s || s === 'draft';
-          });
-
-          if (allDraft) {
-            // Create a project object from BOQ data
-            filteredProj.push({
-              project_id: projectId,
-              project_name: boq.project?.name || boq.project_name || 'Unknown Project',
-              client: boq.project?.client || boq.client || '',
-              location: boq.project?.location || boq.location || '',
-              project_code: boq.project_code || '',
-              work_type: boq.work_type || '',
-              created_at: boq.created_at,
-              // Mark as derived from BOQ (not from projects API)
-              _derived_from_boq: true
-            });
-            existingProjectIds.add(projectId);
-          }
-        }
-      });
-
-      // Then apply search filter (includes ID and project code search)
+      // Apply search filter only
       if (searchTerm) {
         const searchLower = searchTerm.toLowerCase().trim();
         filteredProj = filteredProj.filter(project => {
@@ -625,15 +614,182 @@ const EstimatorHub: React.FC = () => {
 
       setFilteredProjects(filteredProj);
     } else {
-      // For other tabs, call applyFilters for BOQ filtering
-      applyFilters();
+      // For other tabs, apply search filter to BOQs
+      let filtered = [...boqs];
+
+      if (searchTerm) {
+        const searchLower = searchTerm.toLowerCase().trim();
+        filtered = filtered.filter(boq => {
+          // Search in mapped fields
+          const titleMatch = boq.title?.toLowerCase().includes(searchLower);
+          const projectNameMatch = boq.project?.name?.toLowerCase().includes(searchLower);
+          const projectClientMatch = boq.project?.client?.toLowerCase().includes(searchLower);
+          const projectLocationMatch = boq.project?.location?.toLowerCase().includes(searchLower);
+
+          // Search in raw API fields (spread from ...boq)
+          const boqNameMatch = boq.boq_name?.toLowerCase().includes(searchLower);
+          const rawProjectNameMatch = boq.project_name?.toLowerCase().includes(searchLower);
+          const rawClientMatch = boq.client?.toLowerCase().includes(searchLower);
+          const projectCodeMatch = boq.project_code?.toLowerCase().includes(searchLower);
+          const locationMatch = boq.location?.toLowerCase().includes(searchLower);
+
+          // Search by BOQ ID (B-123 or just 123)
+          const boqIdString = `b-${boq.boq_id}`;
+          const boqIdMatch = boqIdString.includes(searchLower) ||
+                            boq.boq_id?.toString().includes(searchTerm.trim());
+
+          return titleMatch || projectNameMatch || projectClientMatch || projectLocationMatch ||
+                 boqNameMatch || rawProjectNameMatch || rawClientMatch || projectCodeMatch ||
+                 locationMatch || boqIdMatch;
+        });
+      }
+
+      setFilteredBOQs(filtered);
     }
   }, [boqs, projects, searchTerm, activeTab]);
 
-  // Reset BOQ pagination when tab changes
+  // Reset BOQ pagination when tab changes and reload data for all tabs
+  // Each tab triggers ONLY its specific API (NO all_project API, NO all_boq API)
   useEffect(() => {
     setBoqCurrentPage(1);
     setCurrentPage(1); // Also reset project pagination
+
+    // Load data based on active tab - call specific API for each tab
+    const loadTabSpecificData = async () => {
+      try {
+        let response;
+
+        switch (activeTab) {
+          case 'projects':
+            // Pending tab - use pending_boq API (returns projects AND their BOQs if any)
+            response = await estimatorService.getPendingBOQs();
+            // For pending tab, update projects state directly
+            if (response && response.success && response.data) {
+              setProjects(response.data);
+              setFilteredProjects(response.data);
+              setTotalProjects(response.count || response.data.length);
+
+              // Also update boqs state with any BOQ data from the response for card display
+              // Filter to only include items that have boq_id (actual BOQs, not just projects)
+              const mappedBOQs = response.data
+                .filter((item: any) => item.boq_id) // Only include items with boq_id
+                .map((boq: any) => {
+                  const baseTotalCost = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
+                  const preliminaryAmount = boq.preliminaries?.cost_details?.amount || 0;
+                  const discountAmount = boq.discount_amount || 0;
+                  const finalTotalCost = (baseTotalCost + preliminaryAmount) - discountAmount;
+
+                  return {
+                    ...boq,
+                    boq_id: boq.boq_id,
+                    title: boq.boq_name || boq.title || 'Unnamed BOQ',
+                    project: {
+                      project_id: boq.project_id,
+                      name: boq.project_name || 'Unknown Project',
+                      client: boq.client || 'Unknown Client',
+                      location: boq.location || 'Unknown Location'
+                    },
+                    summary: { grandTotal: finalTotalCost },
+                    total_cost: finalTotalCost,
+                    selling_price: finalTotalCost,
+                    estimatedSellingPrice: finalTotalCost,
+                    status: boq.status || 'draft',
+                    revision_number: boq.revision_number || 0,
+                    client_rejection_reason: boq.client_rejection_reason,
+                    notes: boq.notes,
+                    created_at: boq.created_at,
+                    email_sent: boq.email_sent || false,
+                    pm_assigned: boq.pm_assigned || false
+                  };
+                });
+              setBOQs(mappedBOQs);
+              setFilteredBOQs(mappedBOQs);
+            }
+            return; // Exit early
+          case 'sent':
+            // Send BOQ tab - use all_send_boq API
+            response = await estimatorService.getSentBOQs();
+            break;
+          case 'approved':
+            // Approved tab - use approved_boq API
+            response = await estimatorService.getApprovedBOQs();
+            break;
+          case 'rejected':
+            // Rejected tab - use rejected_boq API
+            response = await estimatorService.getRejectedBOQs();
+            break;
+          case 'completed':
+            // Completed tab - use completed_boq API
+            response = await estimatorService.getCompletedBOQs();
+            break;
+          case 'cancelled':
+            // Cancelled tab - use cancelled_boq API
+            response = await estimatorService.getCancelledBOQs();
+            break;
+          case 'revisions':
+            // Revisions tab needs BOQs with revision_number > 0 for RevisionComparisonPage
+            // Also load revision tabs for the sub-tabs display
+            loadRevisionTabs();
+            // Use the revisions_boq API to get BOQs with revisions
+            response = await estimatorService.getRevisionsBOQs();
+            break;
+          default:
+            // Default - use pending API for projects tab
+            response = await estimatorService.getPendingBOQs();
+            break;
+        }
+
+        // Update BOQs state with the response data (for non-projects tabs)
+        if (response && response.success && response.data) {
+          const mappedBOQs = response.data.map((boq: any) => {
+            const baseTotalCost = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
+            const preliminaryAmount = boq.preliminaries?.cost_details?.amount || 0;
+            const discountAmount = boq.discount_amount || 0;
+            const finalTotalCost = (baseTotalCost + preliminaryAmount) - discountAmount;
+
+            return {
+              ...boq,
+              boq_id: boq.boq_id,
+              title: boq.boq_name || boq.title || 'Unnamed BOQ',
+              project: {
+                project_id: boq.project_id,
+                name: boq.project_name || 'Unknown Project',
+                client: boq.client || 'Unknown Client',
+                location: boq.location || 'Unknown Location'
+              },
+              summary: {
+                grandTotal: finalTotalCost
+              },
+              total_cost: finalTotalCost,
+              selling_price: finalTotalCost,
+              estimatedSellingPrice: finalTotalCost,
+              status: boq.status || 'draft',
+              revision_number: boq.revision_number || 0,
+              client_rejection_reason: boq.client_rejection_reason,
+              notes: boq.notes,
+              created_at: boq.created_at,
+              email_sent: boq.email_sent || false,
+              pm_assigned: boq.pm_assigned || false
+            };
+          });
+
+          // Sort by created_at - most recent first
+          const sortedBOQs = mappedBOQs.sort((a: any, b: any) => {
+            const dateA = new Date(a.created_at || 0).getTime();
+            const dateB = new Date(b.created_at || 0).getTime();
+            return dateB - dateA;
+          });
+
+          setBOQs(sortedBOQs);
+          setFilteredBOQs(sortedBOQs);
+        }
+
+      } catch (error) {
+        console.error('Error loading tab-specific data:', error);
+      }
+    };
+
+    loadTabSpecificData();
   }, [activeTab]);
 
   // Sync activeTab with URL when URL changes (e.g., from notification click)
@@ -687,7 +843,84 @@ const EstimatorHub: React.FC = () => {
       if (showLoadingSpinner) {
         setLoading(true);
       }
-      const response = await estimatorService.getAllBOQs();
+
+      // Get data based on current active tab (NO all_boq API)
+      let response;
+      switch (activeTab) {
+        case 'projects':
+          response = await estimatorService.getPendingBOQs();
+          // For pending tab, update projects state
+          if (response && response.success && response.data) {
+            setProjects(response.data);
+            setFilteredProjects(response.data);
+            setTotalProjects(response.count || response.data.length);
+
+            // Also update boqs state with the BOQ data from response for card display
+            // Filter to only include items that have boq_id (actual BOQs, not just projects)
+            const mappedBOQs = response.data
+              .filter((item: any) => item.boq_id) // Only include items with boq_id
+              .map((boq: any) => {
+                const baseTotalCost = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
+                const preliminaryAmount = boq.preliminaries?.cost_details?.amount || 0;
+                const discountAmount = boq.discount_amount || 0;
+                const finalTotalCost = (baseTotalCost + preliminaryAmount) - discountAmount;
+
+                return {
+                  ...boq,
+                  boq_id: boq.boq_id,
+                  title: boq.boq_name || boq.title || 'Unnamed BOQ',
+                  project: {
+                    project_id: boq.project_id,
+                    name: boq.project_name || 'Unknown Project',
+                    client: boq.client || 'Unknown Client',
+                    location: boq.location || 'Unknown Location'
+                  },
+                  summary: { grandTotal: finalTotalCost },
+                  total_cost: finalTotalCost,
+                  selling_price: finalTotalCost,
+                  estimatedSellingPrice: finalTotalCost,
+                  status: boq.status || 'draft',
+                  revision_number: boq.revision_number || 0,
+                  client_rejection_reason: boq.client_rejection_reason,
+                  notes: boq.notes,
+                  created_at: boq.created_at,
+                  email_sent: boq.email_sent || false,
+                  pm_assigned: boq.pm_assigned || false
+                };
+              });
+            setBOQs(mappedBOQs);
+            setFilteredBOQs(mappedBOQs);
+          }
+          // Refresh tab counts
+          fetchAllTabCounts();
+          return;
+        case 'sent':
+          response = await estimatorService.getSentBOQs();
+          break;
+        case 'approved':
+          response = await estimatorService.getApprovedBOQs();
+          break;
+        case 'rejected':
+          response = await estimatorService.getRejectedBOQs();
+          break;
+        case 'completed':
+          response = await estimatorService.getCompletedBOQs();
+          break;
+        case 'cancelled':
+          response = await estimatorService.getCancelledBOQs();
+          break;
+        case 'revisions':
+          // Revisions tab has its own special handling
+          loadRevisionTabs();
+          fetchAllTabCounts();
+          return;
+        default:
+          response = await estimatorService.getPendingBOQs();
+      }
+
+      // Refresh tab counts after any action
+      fetchAllTabCounts();
+
       if (response.success && response.data) {
         // Map the backend BOQ data to include proper project structure
         const mappedBOQs = response.data.map((boq: any) => {
@@ -733,9 +966,11 @@ const EstimatorHub: React.FC = () => {
         });
 
         setBOQs(sortedBOQs);
+        setFilteredBOQs(sortedBOQs);
         // Note: filteredBOQs is handled by useEffect when boqs change
       } else {
         setBOQs([]);
+        setFilteredBOQs([]);
       }
     } catch (error: any) {
       console.error('Error loading BOQs:', error);
@@ -743,6 +978,7 @@ const EstimatorHub: React.FC = () => {
         showError('Failed to load BOQs');
       }
       setBOQs([]);
+      setFilteredBOQs([]);
     } finally {
       if (showLoadingSpinner) {
         setLoading(false);
@@ -752,12 +988,15 @@ const EstimatorHub: React.FC = () => {
 
   const loadProjects = async (page: number = 1) => {
     try {
-      const response = await estimatorService.getProjectsPaginated(page, 10);
+      // Use pending_boq API which returns projects without BOQ (NO all_project API)
+      const response = await estimatorService.getPendingBOQs();
       if (response.success) {
-        setProjects(response.projects);
-        setTotalProjects(response.total);
-        // Note: filteredProjects is handled by useEffect when projects/boqs change
+        setProjects(response.data || []);
+        setFilteredProjects(response.data || []);
+        setTotalProjects(response.count || response.data?.length || 0);
       }
+      // Also refresh tab counts
+      fetchAllTabCounts();
     } catch (error) {
       console.error('Error loading projects:', error);
     }
@@ -932,10 +1171,11 @@ const EstimatorHub: React.FC = () => {
 
       // Filter by tab status based on workflow - USE STATUS ONLY
       if (activeTab === 'projects') {
-        // Pending: Draft BOQs not sent to TD/PM yet (no status or status = draft) OR client_rejected (needs revision)
+        // Pending: Draft BOQs not sent to TD/PM yet (no status or status = draft)
+        // Note: client_rejected goes to Rejected tab
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase() || '';
-          return !status || status === 'draft' || status === 'client_rejected' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'approved' && status !== 'revision_approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled');
+          return !status || status === 'draft';
         });
       } else if (activeTab === 'sent') {
         // Send BOQ: Sent to TD or PM, waiting for approval
@@ -972,7 +1212,7 @@ const EstimatorHub: React.FC = () => {
         // Once sent to TD, status becomes Pending_Revision and moves out of this tab
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
-          return status === 'rejected' || status === 'client_rejected' || status === 'pm_rejected' ||
+          return status === 'rejected' || status === 'td_rejected' || status === 'client_rejected' || status === 'pm_rejected' ||
                  status === 'internal_revision_pending';
         });
       } else if (activeTab === 'completed') {
@@ -991,14 +1231,27 @@ const EstimatorHub: React.FC = () => {
       if (searchTerm) {
         const searchLower = searchTerm.toLowerCase().trim();
         filtered = filtered.filter(boq => {
-          // ✅ Search by ID (B-123, 123), project code (MSQ26), title, project name, or client
-          const boqIdString = `b-${boq.id}`;
-          return boq.title?.toLowerCase().includes(searchLower) ||
-            boq.project.name.toLowerCase().includes(searchLower) ||
-            boq.project.client.toLowerCase().includes(searchLower) ||
-            boq.project_code?.toLowerCase().includes(searchLower) ||
-            boqIdString.includes(searchLower) ||
-            boq.id?.toString().includes(searchTerm.trim());
+          // Search in mapped fields
+          const titleMatch = boq.title?.toLowerCase().includes(searchLower);
+          const projectNameMatch = boq.project?.name?.toLowerCase().includes(searchLower);
+          const projectClientMatch = boq.project?.client?.toLowerCase().includes(searchLower);
+          const projectLocationMatch = boq.project?.location?.toLowerCase().includes(searchLower);
+
+          // Search in raw API fields (spread from ...boq)
+          const boqNameMatch = boq.boq_name?.toLowerCase().includes(searchLower);
+          const rawProjectNameMatch = boq.project_name?.toLowerCase().includes(searchLower);
+          const rawClientMatch = boq.client?.toLowerCase().includes(searchLower);
+          const projectCodeMatch = boq.project_code?.toLowerCase().includes(searchLower);
+          const locationMatch = boq.location?.toLowerCase().includes(searchLower);
+
+          // Search by BOQ ID (B-123 or just 123)
+          const boqIdString = `b-${boq.boq_id}`;
+          const boqIdMatch = boqIdString.includes(searchLower) ||
+                            boq.boq_id?.toString().includes(searchTerm.trim());
+
+          return titleMatch || projectNameMatch || projectClientMatch || projectLocationMatch ||
+                 boqNameMatch || rawProjectNameMatch || rawClientMatch || projectCodeMatch ||
+                 locationMatch || boqIdMatch;
         });
       }
 
@@ -3254,8 +3507,8 @@ const EstimatorHub: React.FC = () => {
                                   </div>
                                 </TableCell>
                                 <TableCell className="py-5 px-6">
-                                  <Badge className={`${project.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'} px-3 py-1 rounded-full font-medium text-xs`}>
-                                    {project.status || 'active'}
+                                  <Badge className={`${project.status === 'draft' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'} px-3 py-1 rounded-full font-medium text-xs`}>
+                                    {project.status || 'draft'}
                                   </Badge>
                                 </TableCell>
                                 <TableCell className="py-5 px-6">

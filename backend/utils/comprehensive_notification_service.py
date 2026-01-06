@@ -16,14 +16,7 @@ from config.db import db
 from datetime import datetime, timedelta
 
 # ✅ NEW: Import dynamic route mapping utilities
-from utils.role_route_mapper import (
-    get_boq_approval_url,
-    get_boq_view_url,
-    get_td_approval_url,
-    get_change_request_url,
-    get_project_url,
-    build_notification_action_url
-)
+from utils.role_route_mapper import *
 
 log = get_logger()
 
@@ -185,6 +178,8 @@ class ComprehensiveNotificationService:
         ✅ FIXED: Dynamic URL based on recipient's actual role
         """
         try:
+            log.info(f"[notify_boq_sent_to_td] START - BOQ {boq_id}, TD {td_user_id}, Estimator {estimator_name}")
+
             # Check for duplicate notification (within 5 minutes)
             if check_duplicate_notification(td_user_id, 'BOQ', 'boq_id', boq_id, minutes=5):
                 log.info(f"[notify_boq_sent_to_td] Skipping duplicate notification for TD {td_user_id}, BOQ {boq_id}")
@@ -192,6 +187,7 @@ class ComprehensiveNotificationService:
 
             # ✅ Generate dynamic URL based on recipient's role
             action_url = get_td_approval_url(td_user_id, boq_id, tab='pending')
+            log.info(f"[notify_boq_sent_to_td] Action URL: {action_url}")
 
             notification = NotificationManager.create_notification(
                 user_id=td_user_id,
@@ -208,9 +204,16 @@ class ComprehensiveNotificationService:
                 sender_name=estimator_name,
                 target_role='technical_director'
             )
+            log.info(f"[notify_boq_sent_to_td] Notification created in DB with ID: {notification.id}")
 
-            send_notification_to_user(td_user_id, notification.to_dict())
-            log.info(f"[notify_boq_sent_to_td] Notification sent to TD {td_user_id} for BOQ {boq_id}")
+            # Send via Socket.IO - send to BOTH user room AND role room for reliability
+            notification_data = notification.to_dict()
+            delivered = send_notification_to_user(td_user_id, notification_data)
+            log.info(f"[notify_boq_sent_to_td] Socket.IO delivery to TD {td_user_id}: {'SUCCESS (active user)' if delivered else 'NO ACTIVE USER'}")
+
+            # ALWAYS send to role room as backup (TD might be in role room but not user room)
+            log.info(f"[notify_boq_sent_to_td] Also sending to technicalDirector role room for reliability")
+            send_notification_to_role('technicalDirector', notification_data)
         except Exception as e:
             log.error(f"[notify_boq_sent_to_td] ERROR: {e}")
             import traceback

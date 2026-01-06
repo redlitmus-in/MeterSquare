@@ -57,19 +57,31 @@ def get_all_internal_revision():
                 db.func.lower(BOQ.status) != 'internal_revision_pending'
             )
             log.info(f"Technical Director {user_id} - showing all internal revision BOQs (excluding Internal_Revision_Pending)")
-        elif user_role == 'estimator' or user_role == 'admin':
-            # For Estimator and Admin: Show ALL BOQs with internal revisions INCLUDING Internal_Revision_Pending
-            # Estimators need to see their pending revisions to continue editing
-            # Admin can view as any role and needs to see all data
+        elif user_role == 'admin':
+            # Admin: Show ALL BOQs with internal revisions (all estimators)
             boqs_query = BOQ.query.filter(
                 BOQ.is_deleted == False,
                 db.or_(
                     BOQ.has_internal_revisions == True,
                     BOQ.boq_id.in_(boq_ids)
                 )
-                # NOTE: No status exclusion for estimators/admin - they see all internal revisions
             )
-            log.info(f"{user_role.capitalize()} {user_id} - showing all internal revision BOQs (including Internal_Revision_Pending)")
+            log.info(f"Admin {user_id} - showing ALL internal revision BOQs (all estimators)")
+        elif user_role == 'estimator':
+            # Estimator: Only show BOQs where the project's estimator_id matches current user
+            # Join with Project table to filter by estimator_id
+            boqs_query = BOQ.query.join(
+                Project, BOQ.project_id == Project.project_id
+            ).filter(
+                BOQ.is_deleted == False,
+                Project.is_deleted == False,
+                Project.estimator_id == user_id,  # Filter by estimator_id
+                db.or_(
+                    BOQ.has_internal_revisions == True,
+                    BOQ.boq_id.in_(boq_ids)
+                )
+            )
+            log.info(f"Estimator {user_id} - showing internal revision BOQs for projects assigned to this estimator")
         else:
             # For other roles: Show all BOQs with internal revisions
             # EXCLUDE Internal_Revision_Pending (still editing, not sent to TD yet)
@@ -82,15 +94,6 @@ def get_all_internal_revision():
                 # Exclude Internal_Revision_Pending for other users
                 db.func.lower(BOQ.status) != 'internal_revision_pending'
             )
-
-        # Filter based on user role
-        # NOTE: For internal revisions, estimators see ALL BOQs (same as TD)
-        # This allows collaboration and visibility across all internal revision work
-        if user_role == 'estimator':
-            # Estimators see all internal revisions (no additional filter)
-            log.info(f"Estimator {user_id} - showing ALL internal revision BOQs (no project filter)")
-        elif user_role != 'technical_director':
-            # For other roles (not estimator, not TD), show all
             log.info(f"User role '{user_role}' - showing all internal revision BOQs")
 
         boqs = boqs_query.all()
@@ -887,20 +890,10 @@ def update_internal_revision_boq(boq_id):
 
         db.session.commit()
 
-        # Send notification to TD about internal revision
-        try:
-            from utils.comprehensive_notification_service import ComprehensiveNotificationService
-            project = boq.project
-            ComprehensiveNotificationService.notify_internal_revision_created(
-                boq_id=boq_id,
-                project_name=project.project_name if project else boq.boq_name,
-                revision_number=new_internal_rev,
-                actor_id=user_id,
-                actor_name=user_name,
-                actor_role=user_role
-            )
-        except Exception as notif_error:
-            log.error(f"Failed to send internal revision notification: {notif_error}")
+        # NOTE: Auto-notification removed to prevent duplicate notifications
+        # TD will be notified ONLY when estimator clicks "Send to TD" button
+        # which calls send_boq_email() -> notify_boq_sent_to_td()
+        # Previous code was sending notification here AND on "Send to TD" causing duplicates
 
         # Return success response
         return jsonify({

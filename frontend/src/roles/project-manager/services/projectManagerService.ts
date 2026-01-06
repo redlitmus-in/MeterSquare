@@ -48,18 +48,147 @@ export interface ProjectManager {
   created_at?: string;
 }
 
+// Dashboard Stats Interface
+export interface PMDashboardStats {
+  success: boolean;
+  stats: {
+    total_boq_items: number;
+    items_assigned: number;
+    pending_assignment: number;
+    total_project_value: number;
+  };
+  boq_status: {
+    approved: number;
+    pending: number;
+    rejected: number;
+    completed: number;
+  };
+  items_breakdown: {
+    materials: number;
+    labour: number;
+  };
+  recent_activities: Array<{
+    boq_id: number;
+    boq_name: string;
+    project_name: string;
+    status: string;
+    last_modified: string;
+  }>;
+  projects?: Array<{
+    project_id: number;
+    project_name: string;
+    status: string;
+    progress: number;
+  }>;
+}
+
 // API Functions
 export const projectManagerService = {
-  // Get all BOQs for the current PM's assigned projects
-  async getMyBOQs(page: number = 1, perPage: number = 10): Promise<{ boqs: BOQItem[]; pagination: any }> {
+  // Get PM Dashboard Statistics
+  async getDashboardStats(): Promise<PMDashboardStats> {
     try {
-      // Always use the same PM endpoint - backend will handle admin access
-      const response = await apiClient.get('/pm_boq', {
-        params: { page, per_page: perPage }
-      });
+      const response = await apiClient.get('/pm_dashboard');
       return response.data;
     } catch (error) {
-      console.error('Error fetching PM BOQs:', error);
+      console.error('Error fetching PM dashboard stats:', error);
+      throw error;
+    }
+  },
+
+  // Get BOQs pending PM approval (For Approval tab)
+  async getPMApprovalBOQs(page?: number, pageSize?: number): Promise<any> {
+    try {
+      const params: any = {};
+      if (page) params.page = page;
+      if (pageSize) params.page_size = pageSize;
+      const response = await apiClient.get('/pm_approval_boq', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching PM approval BOQs:', error);
+      throw error;
+    }
+  },
+
+  // Get pending BOQs (Pending tab)
+  async getPMPendingBOQs(page?: number, pageSize?: number): Promise<any> {
+    try {
+      const params: any = {};
+      if (page) params.page = page;
+      if (pageSize) params.page_size = pageSize;
+      const response = await apiClient.get('/pm_pending_boq', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching PM pending BOQs:', error);
+      throw error;
+    }
+  },
+
+  // Get assigned projects (Assigned tab)
+  async getPMAssignedProjects(page?: number, pageSize?: number): Promise<any> {
+    try {
+      const params: any = {};
+      if (page) params.page = page;
+      if (pageSize) params.page_size = pageSize;
+      const response = await apiClient.get('/pm_assign_project', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching PM assigned projects:', error);
+      throw error;
+    }
+  },
+
+  // Get approved BOQs (Approved tab)
+  async getPMApprovedBOQs(page?: number, pageSize?: number): Promise<any> {
+    try {
+      const params: any = {};
+      if (page) params.page = page;
+      if (pageSize) params.page_size = pageSize;
+      const response = await apiClient.get('/pm_approve_boq', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching PM approved BOQs:', error);
+      throw error;
+    }
+  },
+
+  // Get rejected BOQs (Rejected tab)
+  async getPMRejectedBOQs(page?: number, pageSize?: number): Promise<any> {
+    try {
+      const params: any = {};
+      if (page) params.page = page;
+      if (pageSize) params.page_size = pageSize;
+      const response = await apiClient.get('/pm_rejected_boq', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching PM rejected BOQs:', error);
+      throw error;
+    }
+  },
+
+  // Get completed projects (Completed tab)
+  async getPMCompletedProjects(page?: number, pageSize?: number): Promise<any> {
+    try {
+      const params: any = {};
+      if (page) params.page = page;
+      if (pageSize) params.page_size = pageSize;
+      const response = await apiClient.get('/pm_completed_project', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching PM completed projects:', error);
+      throw error;
+    }
+  },
+
+  // Get ALL BOQs for Production Management (All tabs - filtered on frontend)
+  async getPMProductionManagementBOQs(page?: number, pageSize?: number): Promise<any> {
+    try {
+      const params: any = {};
+      if (page) params.page = page;
+      if (pageSize) params.page_size = pageSize;
+      const response = await apiClient.get('/pm_production_management', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching PM production management BOQs:', error);
       throw error;
     }
   },

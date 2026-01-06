@@ -1549,8 +1549,10 @@ def get_buyer_pending_purchases():
                 from models.lpo_customization import LPOCustomization
                 lpo_customization = LPOCustomization.query.filter_by(cr_id=cr.cr_id, po_child_id=None).first()
                 if lpo_customization and lpo_customization.vat_percent is not None:
-                    pending_purchases[-1]["vat_percent"] = float(lpo_customization.vat_percent)
-                    pending_purchases[-1]["vat_amount"] = float(lpo_customization.vat_amount) if lpo_customization.vat_amount else (cr_total * float(lpo_customization.vat_percent) / 100)
+                    vat_percent = float(lpo_customization.vat_percent)
+                    pending_purchases[-1]["vat_percent"] = vat_percent
+                    # Always recalculate VAT based on current subtotal (stored vat_amount may be stale)
+                    pending_purchases[-1]["vat_amount"] = cr_total * vat_percent / 100
             except Exception:
                 pass  # Keep defaults
 
@@ -1849,8 +1851,10 @@ def get_buyer_completed_purchases():
                 from models.lpo_customization import LPOCustomization
                 lpo_customization = LPOCustomization.query.filter_by(cr_id=cr.cr_id, po_child_id=None).first()
                 if lpo_customization and lpo_customization.vat_percent is not None:
-                    completed_purchases[-1]["vat_percent"] = float(lpo_customization.vat_percent)
-                    completed_purchases[-1]["vat_amount"] = float(lpo_customization.vat_amount) if lpo_customization.vat_amount else (cr_total * float(lpo_customization.vat_percent) / 100)
+                    vat_percent = float(lpo_customization.vat_percent)
+                    completed_purchases[-1]["vat_percent"] = vat_percent
+                    # Always recalculate VAT based on current subtotal (stored vat_amount may be stale)
+                    completed_purchases[-1]["vat_amount"] = cr_total * vat_percent / 100
             except Exception:
                 pass  # Keep defaults
 
@@ -1911,7 +1915,8 @@ def get_buyer_completed_purchases():
                     lpo_customization = LPOCustomization.query.filter_by(cr_id=parent_cr.cr_id, po_child_id=None).first()
                 if lpo_customization and lpo_customization.vat_percent is not None:
                     vat_percent = float(lpo_customization.vat_percent)
-                    vat_amount = float(lpo_customization.vat_amount) if lpo_customization.vat_amount else (po_child_total * vat_percent / 100)
+                    # Always recalculate VAT based on current subtotal (stored vat_amount may be stale)
+                    vat_amount = po_child_total * vat_percent / 100
             except Exception:
                 pass  # Keep defaults
 
@@ -2682,8 +2687,10 @@ def get_purchase_by_id(cr_id):
             # Check for PO child specific customization first, then CR-level
             lpo_customization = LPOCustomization.query.filter_by(cr_id=cr_id, po_child_id=None).first()
             if lpo_customization and lpo_customization.vat_percent is not None:
-                purchase["vat_percent"] = float(lpo_customization.vat_percent)
-                purchase["vat_amount"] = float(lpo_customization.vat_amount) if lpo_customization.vat_amount else (cr_total * float(lpo_customization.vat_percent) / 100)
+                vat_percent = float(lpo_customization.vat_percent)
+                purchase["vat_percent"] = vat_percent
+                # Always recalculate VAT based on current subtotal (stored vat_amount may be stale)
+                purchase["vat_amount"] = cr_total * vat_percent / 100
             else:
                 # Default 5% VAT for UAE
                 purchase["vat_percent"] = 5.0

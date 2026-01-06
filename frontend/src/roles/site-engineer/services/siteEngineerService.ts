@@ -50,5 +50,23 @@ export const siteEngineerService = {
   getMySiteAssets: async () => {
     const response = await apiClient.get('/assets/my-site-assets');
     return response.data;
+  },
+
+  // Get ongoing projects (status != completed)
+  getOngoingProjects: async (page?: number, pageSize?: number) => {
+    const params: any = {};
+    if (page) params.page = page;
+    if (pageSize) params.page_size = pageSize;
+    const response = await apiClient.get('/se_ongoing_projects', { params });
+    return response.data;
+  },
+
+  // Get completed projects (status = completed)
+  getCompletedProjects: async (page?: number, pageSize?: number) => {
+    const params: any = {};
+    if (page) params.page = page;
+    if (pageSize) params.page_size = pageSize;
+    const response = await apiClient.get('/se_completed_projects', { params });
+    return response.data;
   }
 };

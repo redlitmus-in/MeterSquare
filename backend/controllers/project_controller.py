@@ -110,7 +110,7 @@ def create_project():
             start_date=start_date,
             end_date=end_date,
             duration_days=duration_days,
-            status=data.get('status', 'active'),
+            status=data.get('status', 'draft'),
             completion_requested=False,
             user_id=None,  # PM will be assigned later by TD, not set on creation
             created_by=current_user.get('email'),
@@ -516,7 +516,7 @@ def get_assigned_projects():
         user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
 
         # ✅ Get admin viewing context
-        from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
+        from utils.admin_viewing_context import get_effective_user_context
         context = get_effective_user_context()
         effective_role = context.get('effective_role', user_role)
         is_admin_viewing = context.get('is_admin_viewing', False)

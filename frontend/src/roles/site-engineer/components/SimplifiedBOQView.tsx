@@ -20,6 +20,7 @@ interface SimplifiedBOQViewProps {
   onClose: () => void;
   boq: any; // BOQ data with at least boq_id
   assignedItems?: any[]; // SE's assigned items from pm_assign_ss
+  currentUserId?: number; // Current logged-in SE's user ID for filtering
 }
 
 const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
@@ -27,6 +28,7 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
   onClose,
   boq,
   assignedItems = [],
+  currentUserId,
 }) => {
   const [boqData, setBoqData] = useState<BOQGetResponse | null>(null);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
@@ -47,8 +49,17 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
         const expandedIds = assignedItems.slice(0, 2).map((_, index) => `item-${index}`);
         setExpandedItems(expandedIds);
       } else if (boq?.boq_id) {
-        // Fallback: Fetch full BOQ (for admin or other roles)
-        fetchBOQDetails();
+        // SE view with no assigned items - show empty state (don't fetch all items)
+        // This prevents showing all BOQ items when SE has no assignments
+        setBoqData({
+          boq_id: boq?.boq_id,
+          boq_name: boq?.boq_name,
+          status: 'approved',
+          project: boq?.project || { project_name: boq?.project_name },
+          items: [], // Empty - no items assigned to this SE
+          project_details: { project_name: boq?.project_name }
+        } as any);
+        setExpandedItems([]);
       }
     }
   }, [isOpen, boq?.boq_id, assignedItems]);
@@ -59,17 +70,63 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
     setIsLoading(true);
     try {
       const result = await estimatorService.getBOQById(boq.boq_id);
-      if (result.success && result.data) {
-        setBoqData(result.data);
+      console.log('BOQ API Response:', result);
+
+      // Handle both wrapped {success, data} and direct response formats
+      const responseData = result.data || result;
+
+      if (responseData && responseData.boq_id) {
+        // Process the BOQ data to get items in the correct format
+        let processedItems = [];
+
+        // Try to get items from different possible locations in the response
+        if (responseData.items && Array.isArray(responseData.items)) {
+          processedItems = responseData.items;
+        } else if (responseData.existing_purchase?.items && Array.isArray(responseData.existing_purchase.items)) {
+          processedItems = responseData.existing_purchase.items;
+        } else if (responseData.new_purchase?.items && Array.isArray(responseData.new_purchase.items)) {
+          processedItems = responseData.new_purchase.items;
+        } else if (responseData.boq_details?.items && Array.isArray(responseData.boq_details.items)) {
+          processedItems = responseData.boq_details.items;
+        }
+
+        // If we have both existing and new purchase items, combine them
+        if (responseData.existing_purchase?.items && responseData.new_purchase?.items) {
+          processedItems = [
+            ...responseData.existing_purchase.items,
+            ...responseData.new_purchase.items
+          ];
+        }
+
+        // Filter items by current SE's user ID if provided
+        if (currentUserId && processedItems.length > 0) {
+          const userId = Number(currentUserId);
+          processedItems = processedItems.filter(
+            (item: any) => Number(item.assigned_to_se_user_id) === userId
+          );
+        }
+
+        console.log('Processed Items:', processedItems);
+        console.log('First item details:', processedItems[0]);
+
+        setBoqData({
+          boq_id: responseData.boq_id,
+          boq_name: responseData.boq_name,
+          status: responseData.status || 'approved',
+          items: processedItems,
+          existing_purchase: responseData.existing_purchase,
+          new_purchase: responseData.new_purchase,
+          project_details: responseData.project_details || responseData.project || {}
+        } as any);
 
         // Auto-expand first 2 items
-        const items = result.data.existing_purchase?.items || result.data.items || [];
-        const expandedIds = items.slice(0, 2).map((_, index) => `item-${index}`);
+        const expandedIds = processedItems.slice(0, 2).map((_, index) => `item-${index}`);
         setExpandedItems(expandedIds);
       } else {
-        showError(result.message || 'Failed to fetch BOQ details');
+        showError('Failed to fetch BOQ details - Invalid response format');
       }
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error loading BOQ details:', error);
       showError('Error loading BOQ details');
     } finally {
       setIsLoading(false);
@@ -191,9 +248,13 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                   {/* Items List */}
                   <div className="space-y-2 sm:space-y-4">
                     {items.length === 0 ? (
-                      <div className="text-center py-8 sm:py-12 bg-gray-50 rounded-lg">
-                        <Package className="w-10 sm:w-12 h-10 sm:h-12 text-gray-400 mx-auto mb-2 sm:mb-3" />
-                        <p className="text-gray-600 text-sm sm:text-base">No items found in this BOQ</p>
+                      <div className="text-center py-8 sm:py-12 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                        <Package className="w-10 sm:w-12 h-10 sm:h-12 text-blue-400 mx-auto mb-2 sm:mb-3" />
+                        <p className="text-gray-900 font-semibold text-sm sm:text-base mb-2">No Items Assigned Yet</p>
+                        <p className="text-gray-600 text-xs sm:text-sm max-w-md mx-auto px-4">
+                          The Project Manager needs to assign specific BOQ items to you before you can view them here.
+                          Please check back later or contact your PM.
+                        </p>
                       </div>
                     ) : (
                       items.map((item: any, index: number) => {
@@ -335,30 +396,52 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                     {/* Show basic item info if no sub-items (for assigned items from pm_assign_ss) */}
                                     {!item.sub_items || item.sub_items.length === 0 ? (
                                       <div className="bg-white rounded-lg p-4 border border-gray-200">
-                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                           <div>
-                                            <p className="text-xs text-gray-600 mb-1">Item Code</p>
-                                            <p className="font-semibold text-gray-900">{item.item_code || 'N/A'}</p>
+                                            <p className="text-xs text-gray-600 mb-1">Item Name</p>
+                                            <p className="font-semibold text-gray-900 text-sm">
+                                              {item.item_name || 'N/A'}
+                                            </p>
                                           </div>
                                           <div>
-                                            <p className="text-xs text-gray-600 mb-1">Quantity</p>
-                                            <p className="font-semibold text-gray-900">{item.quantity || 0}</p>
+                                            <p className="text-xs text-gray-600 mb-1">Item Total</p>
+                                            <p className="font-semibold text-gray-900 text-sm">
+                                              AED {Number(item.item_total || item.subtotal || 0).toLocaleString()}
+                                            </p>
                                           </div>
                                           <div>
-                                            <p className="text-xs text-gray-600 mb-1">Unit</p>
-                                            <p className="font-semibold text-gray-900">{item.unit || 'N/A'}</p>
+                                            <p className="text-xs text-gray-600 mb-1">Selling Price</p>
+                                            <p className="font-semibold text-green-600 text-sm">
+                                              AED {Number(item.selling_price || item.after_discount || 0).toLocaleString()}
+                                            </p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-gray-600 mb-1">Master Item ID</p>
+                                            <p className="font-semibold text-gray-900 text-sm">
+                                              {item.master_item_id || 'N/A'}
+                                            </p>
                                           </div>
                                         </div>
-                                        {item.description && (
-                                          <div className="mt-3 pt-3 border-t border-gray-200">
-                                            <p className="text-xs text-gray-600 mb-1">Description</p>
-                                            <p className="text-sm text-gray-900">{item.description}</p>
-                                          </div>
-                                        )}
                                         {item.assigned_by_pm_name && (
                                           <div className="mt-3 pt-3 border-t border-gray-200">
-                                            <p className="text-xs text-gray-600 mb-1">Assigned By</p>
+                                            <p className="text-xs text-gray-600 mb-1 flex items-center gap-2">
+                                              <span>Assigned By</span>
+                                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                                                {item.assigned_by_role || 'PM'}
+                                              </span>
+                                            </p>
                                             <p className="text-sm font-medium text-[#243d8a]">{item.assigned_by_pm_name}</p>
+                                            {item.assignment_date && (
+                                              <p className="text-xs text-gray-500 mt-1">
+                                                Assigned on: {new Date(item.assignment_date).toLocaleDateString()}
+                                              </p>
+                                            )}
+                                          </div>
+                                        )}
+                                        {item.assigned_to_se_name && (
+                                          <div className="mt-3 pt-3 border-t border-gray-200">
+                                            <p className="text-xs text-gray-600 mb-1">Assigned To</p>
+                                            <p className="text-sm font-medium text-[#243d8a]">{item.assigned_to_se_name}</p>
                                           </div>
                                         )}
                                       </div>
