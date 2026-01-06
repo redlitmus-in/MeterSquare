@@ -2730,3 +2730,403 @@ def get_se_completed_projects():
         db.session.rollback()
         log.error(f"Error retrieving SE completed projects: {str(e)}")
         return jsonify({'error': 'Failed to retrieve SE completed projects', 'details': str(e)}), 500
+
+def get_all_sitesupervisor_boqs():
+    """
+    Get all projects and assigned items for the Site Engineer.
+    NEW FLOW: Uses pm_assign_ss as the single source of truth for item assignments.
+    """
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
+
+        log.info(f"=== SE BOQ API called by user_id={user_id}, role={user_role} ===")
+
+        # Import PMAssignSS model for item-level assignments
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy.orm import joinedload
+
+        # Get effective user context (handles admin viewing as other roles)
+        context = get_effective_user_context()
+        effective_role = context.get('effective_role', user_role)
+        is_admin_viewing = context.get('is_admin_viewing', False)
+        effective_user_id = context.get('effective_user_id')  # Specific user ID when viewing as a user
+
+        # NEW FLOW: Query pm_assign_ss first to get all item assignments
+        if effective_role == 'admin' and not is_admin_viewing:
+            # Pure admin (not viewing as SE) - sees all assignments
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.is_deleted == False
+            ).all()
+            log.info(f"=== Admin viewing all assignments ===")
+        elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor'] and effective_user_id:
+            # Admin viewing as specific SE user - sees only that SE's assignments
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.assigned_to_se_id == effective_user_id,
+                PMAssignSS.is_deleted == False
+            ).all()
+            log.info(f"=== Admin viewing as SE user {effective_user_id} - filtering by that SE ===")
+        elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor']:
+            # Admin viewing as SE role (no specific user) - sees all SE assignments
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.is_deleted == False
+            ).all()
+            log.info(f"=== Admin viewing as SE role (all SEs) ===")
+        else:
+            # Regular SE sees only their assignments
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.assigned_to_se_id == user_id,
+                PMAssignSS.is_deleted == False
+            ).all()
+
+        log.info(f"=== Found {len(item_assignments)} item assignments for SE {effective_user_id if is_admin_viewing else user_id} ===")
+
+        # DEBUG: Log all SE assignments to help troubleshoot
+        if len(item_assignments) == 0:
+            all_assignments = PMAssignSS.query.filter(PMAssignSS.is_deleted == False).limit(20).all()
+            log.info(f"=== DEBUG: No assignments found for user_id={user_id}. Sample of all assignments: ===")
+            for a in all_assignments:
+                log.info(f"    Assignment {a.pm_assign_id}: project={a.project_id}, boq={a.boq_id}, assigned_to_se_id={a.assigned_to_se_id}, assigned_by_pm_id={a.assigned_by_pm_id}")
+
+        # Get unique project IDs from assignments
+        project_ids_from_assignments = list(set([a.project_id for a in item_assignments if a.project_id]))
+
+        # Also include projects where SE is assigned at project level
+        if effective_role == 'admin' and not is_admin_viewing:
+            # Pure admin - don't add project-level filter
+            all_project_ids = project_ids_from_assignments
+        elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor'] and effective_user_id:
+            # Admin viewing as specific SE user - include that SE's project-level assignments
+            projects_from_project_table = Project.query.filter(
+                Project.site_supervisor_id == effective_user_id,
+                Project.is_deleted == False
+            ).all()
+            project_ids_from_project_level = [p.project_id for p in projects_from_project_table]
+            all_project_ids = list(set(project_ids_from_assignments + project_ids_from_project_level))
+        elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor']:
+            # Admin viewing as SE role (no specific user) - show all SE projects
+            all_project_ids = project_ids_from_assignments
+        else:
+            # Regular SE - include their project-level assignments
+            projects_from_project_table = Project.query.filter(
+                Project.site_supervisor_id == user_id,
+                Project.is_deleted == False
+            ).all()
+            project_ids_from_project_level = [p.project_id for p in projects_from_project_table]
+            all_project_ids = list(set(project_ids_from_assignments + project_ids_from_project_level))
+
+        log.info(f"=== Total unique project IDs: {len(all_project_ids)} - {all_project_ids} ===")
+
+        # Fetch all projects in one query
+        if not all_project_ids:
+            return jsonify({
+                "message": "No projects assigned to this Site Engineer",
+                "projects": []
+            }), 200
+
+        # PERFORMANCE FIX: Use eager loading to prevent N+1 queries
+        from sqlalchemy.orm import selectinload
+
+        projects = Project.query.options(
+            selectinload(Project.boqs).selectinload(BOQ.details),  # Fixed: use 'details' not 'boq_details'
+            selectinload(Project.boqs).selectinload(BOQ.history)
+        ).filter(
+            Project.project_id.in_(all_project_ids),
+            Project.is_deleted == False
+        ).all()
+
+        # ✅ PERFORMANCE OPTIMIZATION: Batch load all related data before the loop
+        # Collect all BOQ IDs from all projects for batch queries
+        # FIX: Include BOQs with item assignments regardless of email_sent status
+        boq_ids_with_assignments = set([a.boq_id for a in item_assignments if a.boq_id])
+        all_boq_ids = []
+        all_project_ids = [p.project_id for p in projects]
+        for project in projects:
+            # Include BOQs that are either email_sent OR have item assignments to this SE
+            boqs = [boq for boq in project.boqs if not boq.is_deleted and (boq.email_sent or boq.boq_id in boq_ids_with_assignments)] if hasattr(project, 'boqs') and project.boqs else []
+            all_boq_ids.extend([boq.boq_id for boq in boqs])
+
+        # Batch load BOQ History (was: N queries per project, now: 1 query total)
+        all_boq_history = {}
+        if all_boq_ids:
+            history_records = BOQHistory.query.filter(
+                BOQHistory.boq_id.in_(all_boq_ids)
+            ).order_by(BOQHistory.action_date.desc()).all()
+            for h in history_records:
+                if h.boq_id not in all_boq_history:
+                    all_boq_history[h.boq_id] = h  # Keep only the most recent
+
+        # Batch load BOQ Material Assignments (was: 1 query per project, now: 1 query total)
+        from models.boq_material_assignment import BOQMaterialAssignment
+        all_material_assignments = {}
+        if all_boq_ids:
+            assignments = BOQMaterialAssignment.query.filter(
+                BOQMaterialAssignment.boq_id.in_(all_boq_ids),
+                BOQMaterialAssignment.is_deleted == False
+            ).all()
+            for a in assignments:
+                if a.boq_id not in all_material_assignments:
+                    all_material_assignments[a.boq_id] = a
+
+        # Batch load all PM Assign SS records (was: multiple queries per project, now: 1 query total)
+        all_pm_assign_ss = {}
+        all_pm_assign_ss_by_project = {}
+        if all_boq_ids:
+            pm_assigns = PMAssignSS.query.filter(
+                PMAssignSS.boq_id.in_(all_boq_ids),
+                PMAssignSS.is_deleted == False
+            ).all()
+            for pa in pm_assigns:
+                # Group by boq_id
+                if pa.boq_id not in all_pm_assign_ss:
+                    all_pm_assign_ss[pa.boq_id] = []
+                all_pm_assign_ss[pa.boq_id].append(pa)
+                # Group by project_id
+                if pa.project_id not in all_pm_assign_ss_by_project:
+                    all_pm_assign_ss_by_project[pa.project_id] = []
+                all_pm_assign_ss_by_project[pa.project_id].append(pa)
+
+        projects_list = []
+        for project in projects:
+            # Use pre-loaded relationship instead of querying
+            # FIX: Include BOQs that are either email_sent OR have item assignments to this SE
+            boqs = [boq for boq in project.boqs if not boq.is_deleted and (boq.email_sent or boq.boq_id in boq_ids_with_assignments)] if hasattr(project, 'boqs') and project.boqs else []
+
+            # Collect BOQ IDs for this project
+            boq_ids = [boq.boq_id for boq in boqs]
+
+            # Determine project status from BOQ history using pre-loaded data (NO QUERY)
+            project_status = project.status or 'assigned'
+
+            # Check if any BOQs exist and have history
+            if boqs:
+                for boq in boqs:
+                    history = all_boq_history.get(boq.boq_id)  # ✅ Uses pre-loaded dict instead of query
+
+                    if history and history.receiver_role == 'site_engineer':
+                        # Site engineer is the receiver - show as assigned/pending
+                        project_status = 'assigned'
+                        break
+
+            # Calculate end_date from start_date and duration_days
+            end_date = None
+            if project.start_date and project.duration_days:
+                from datetime import timedelta
+                end_date = (project.start_date + timedelta(days=project.duration_days)).isoformat()
+
+            # Check if BOQ has been assigned to a buyer using pre-loaded data (NO QUERY)
+            boq_assigned_to_buyer = False
+            assigned_buyer_name = None
+            if boq_ids:
+                for bid in boq_ids:
+                    assignment = all_material_assignments.get(bid)  # ✅ Uses pre-loaded dict
+                    if assignment:
+                        boq_assigned_to_buyer = True
+                        assigned_buyer_name = assignment.assigned_to_buyer_name
+                        break
+
+            # Calculate item assignment counts and collect assigned items details
+            items_assigned_to_me = 0
+            total_items = 0
+            items_by_pm = {}
+            assigned_items_details = []
+            boqs_with_items = []
+
+            # FIX: Define target_se_id at project loop level for consistency
+            # Use effective_user_id when admin is viewing as SE, otherwise use user_id
+            target_se_id = effective_user_id if is_admin_viewing and effective_user_id else user_id
+
+            if boq_ids:
+                # Get ALL assignments for these BOQs from pre-loaded data (NO QUERY)
+                boq_assignments_list = []
+                for bid in boq_ids:
+                    boq_assignments_list.extend(all_pm_assign_ss.get(bid, []))
+
+                for boq_id in boq_ids:
+                    boq = next((b for b in boqs if b.boq_id == boq_id), None)
+                    # Use pre-loaded relationship instead of querying (relationship name is 'details')
+                    boq_details = boq.details[0] if boq and hasattr(boq, 'details') and boq.details and len(boq.details) > 0 else None
+                    if boq_details and not boq_details.is_deleted and boq_details.boq_details:
+                        items = boq_details.boq_details.get('items', [])
+                        total_items += len(items)
+
+                        # Get assignments from pre-loaded data (NO QUERY)
+                        assignments = [pa for pa in all_pm_assign_ss.get(boq_id, [])
+                                      if pa.assigned_to_se_id == target_se_id]  # Filter from pre-loaded data
+
+                        # Collect items assigned to this SE for this BOQ
+                        boq_assigned_items = []
+
+                        # Get all assigned item indices for this SE from pm_assign_ss
+                        # Build a map of index -> assignment for PM info lookup
+                        assigned_indices = set()
+                        index_to_assignment = {}
+                        for assignment in assignments:
+                            if assignment.item_indices:
+                                for idx in assignment.item_indices:
+                                    assigned_indices.add(idx)
+                                    index_to_assignment[idx] = assignment
+
+                        # Pre-load PM names for assignments
+                        pm_ids = set(a.assigned_by_pm_id for a in assignments if a.assigned_by_pm_id)
+                        pm_names_map = {}
+                        if pm_ids:
+                            pm_users = User.query.filter(User.user_id.in_(pm_ids)).all()
+                            pm_names_map = {u.user_id: u.full_name for u in pm_users}
+
+                        # Process assigned items
+                        for idx in assigned_indices:
+                            if idx < len(items):
+                                item = items[idx]
+                                items_assigned_to_me += 1
+
+                                # Get PM info from the assignment record, not the item
+                                assignment_for_idx = index_to_assignment.get(idx)
+                                pm_user_id = assignment_for_idx.assigned_by_pm_id if assignment_for_idx else None
+                                pm_name = pm_names_map.get(pm_user_id, 'Unknown') if pm_user_id else 'Unknown'
+                                assignment_date = assignment_for_idx.assignment_date if assignment_for_idx else None
+                                assignment_status = assignment_for_idx.assignment_status if assignment_for_idx else 'assigned'
+
+                                # Group by PM
+                                if pm_name not in items_by_pm:
+                                    items_by_pm[pm_name] = {
+                                        "pm_name": pm_name,
+                                        "pm_user_id": pm_user_id,
+                                        "items_count": 0
+                                    }
+                                items_by_pm[pm_name]["items_count"] += 1
+
+                                # Add item details with full structure (excluding prices)
+                                # Deep copy the item to avoid modifying the original
+                                item_detail = copy.deepcopy(item)
+
+                                # Remove price-related fields from main item
+                                price_fields = ['rate', 'amount', 'unitRate', 'totalAmount', 'selling_price',
+                                              'base_price', 'profit', 'overhead', 'gst', 'total_cost']
+                                for field in price_fields:
+                                    item_detail.pop(field, None)
+
+                                # Remove price fields from sub_items if they exist
+                                if 'sub_items' in item_detail and isinstance(item_detail['sub_items'], list):
+                                    for sub_item in item_detail['sub_items']:
+                                        if isinstance(sub_item, dict):
+                                            for field in price_fields:
+                                                sub_item.pop(field, None)
+
+                                            # Remove price fields from materials in sub_items
+                                            if 'materials' in sub_item and isinstance(sub_item['materials'], list):
+                                                for material in sub_item['materials']:
+                                                    if isinstance(material, dict):
+                                                        for field in price_fields + ['unit_price', 'total_price']:
+                                                            material.pop(field, None)
+
+                                            # Remove price fields from labour in sub_items
+                                            if 'labour' in sub_item and isinstance(sub_item['labour'], list):
+                                                for labour in sub_item['labour']:
+                                                    if isinstance(labour, dict):
+                                                        for field in price_fields + ['wage_per_day', 'total_wage']:
+                                                            labour.pop(field, None)
+
+                                # Add assignment metadata from pm_assign_ss record
+                                item_detail["item_index"] = idx
+                                item_detail["assigned_by_pm_name"] = pm_name
+                                item_detail["assigned_by_pm_user_id"] = pm_user_id
+                                item_detail["assigned_to_se_name"] = current_user.get('full_name', 'Site Engineer')
+                                item_detail["assigned_to_se_user_id"] = target_se_id
+                                item_detail["assigned_by_role"] = 'projectManager'
+                                item_detail["assignment_date"] = assignment_date.isoformat() if assignment_date else None
+                                item_detail["assignment_status"] = assignment_status or 'assigned'
+
+                                assigned_items_details.append(item_detail)
+                                boq_assigned_items.append(item_detail)
+
+                        # Add BOQ with its assigned items if any items are assigned
+                        if boq_assigned_items:
+                            boqs_with_items.append({
+                                "boq_id": boq_id,
+                                "boq_name": boq.boq_name if boq else f"BOQ-{boq_id}",
+                                "items_count": len(boq_assigned_items),
+                                "assigned_items": boq_assigned_items
+                            })
+
+            # Convert items_by_pm dict to list
+            items_by_pm_list = list(items_by_pm.values())
+
+            # Build areas structure for ExtraMaterialForm compatibility
+            # Using floor_name as area (same structure as /api/projects/assigned-to-me)
+            area_info = {
+                "area_id": 1,  # Placeholder
+                "area_name": project.floor_name or "Main Area",
+                "boqs": []
+            }
+
+            # Add all BOQs to the area's boqs array using pre-loaded data (NO QUERY)
+            for boq_id in boq_ids:
+                boq = next((b for b in boqs if b.boq_id == boq_id), None)  # ✅ Uses pre-loaded list
+                if boq:
+                    area_info["boqs"].append({
+                        "boq_id": boq.boq_id,
+                        "boq_name": boq.boq_name or f"BOQ-{boq.boq_id}",
+                        "items": []  # Items will be populated by ExtraMaterialForm if needed
+                    })
+
+            # Check if all SE's work has been PM-confirmed using pre-loaded data (NO QUERY)
+            # Filter from pre-loaded data instead of querying
+            # FIX: Use target_se_id for consistency with admin-viewing-as-SE feature
+            project_assignments = all_pm_assign_ss_by_project.get(project.project_id, [])
+            se_assignments = [a for a in project_assignments
+                            if a.assigned_to_se_id == target_se_id and a.se_completion_requested]
+
+            # SE's work is confirmed if ALL their requested assignments are PM-confirmed
+            all_my_work_confirmed = all(a.pm_confirmed_completion for a in se_assignments) if se_assignments else False
+
+            # Check if THIS SE has requested completion using pre-loaded data (NO QUERY)
+            # Filter from pre-loaded data instead of querying
+            my_se_assignments = [a for a in project_assignments if a.assigned_to_se_id == target_se_id]
+            my_completion_requested = any(a.se_completion_requested for a in my_se_assignments)
+
+            projects_list.append({
+                "project_id": project.project_id,
+                "project_name": project.project_name,
+                "project_code": project.project_code if hasattr(project, 'project_code') else None,
+                "client": project.client,
+                "location": project.location,
+                "start_date": project.start_date.isoformat() if project.start_date else None,
+                "end_date": end_date,
+                "duration_days": project.duration_days,
+                "status": project_status,
+                "description": project.description,
+                "created_at": project.created_at.isoformat() if project.created_at else None,
+                "priority": getattr(project, 'priority', 'medium'),
+                "boq_ids": boq_ids,  # List of BOQ IDs for reference
+                "completion_requested": project.completion_requested if project.completion_requested is not None else False,
+                "my_completion_requested": my_completion_requested,  # SE-specific: did THIS SE request completion?
+                "my_work_confirmed": all_my_work_confirmed,  # SE-specific confirmation status
+                "boq_assigned_to_buyer": boq_assigned_to_buyer,
+                "assigned_buyer_name": assigned_buyer_name,
+                # Item assignment counts
+                "items_assigned_to_me": items_assigned_to_me,
+                "total_items": total_items,
+                "items_by_pm": items_by_pm_list,
+                # Detailed item information
+                "assigned_items_details": assigned_items_details,  # All assigned items with full details
+                "boqs_with_items": boqs_with_items,  # BOQs grouped with their assigned items
+                # Areas structure for ExtraMaterialForm compatibility
+                "areas": [area_info]
+            })
+
+        return jsonify({
+            "success": True,
+            "projects": projects_list,
+            "total": len(projects_list)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        log.error(f"Error fetching site engineer projects: {str(e)}")
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to fetch projects: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500

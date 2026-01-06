@@ -93,3 +93,13 @@ def get_se_completed_projects_route():
     if access_check:
         return access_check
     return get_se_completed_projects()
+
+#Role base view a site supervisor boq
+@sitesupervisor_routes.route('/sitesupervisor_boq', methods=['GET'])
+@jwt_required
+def get_all_sitesupervisor_boqs_route():
+    """Site Supervisor or Admin views assigned projects"""
+    access_check = check_ss_or_admin_access()
+    if access_check:
+        return access_check
+    return get_all_sitesupervisor_boqs()
