@@ -2528,7 +2528,7 @@ def get_pm_completed_project():
         user_id = current_user.get('user_id')
         user_role = current_user.get('role', '').lower() if current_user else ''
 
-        # OPTIMIZED: Select specific columns, combined filters
+        # OPTIMIZED: Select specific columns, combined filters - Include BOQ info for details view
         query = (
             db.session.query(
                 Project.project_id,
@@ -2550,8 +2550,12 @@ def get_pm_completed_project():
                 Project.total_se_assignments,
                 Project.confirmed_completions,
                 Project.created_at,
-                Project.created_by
+                Project.created_by,
+                BOQ.boq_id,
+                BOQ.boq_name,
+                BOQ.status.label('boq_status')
             )
+            .outerjoin(BOQ, (Project.project_id == BOQ.project_id) & (BOQ.is_deleted == False))
             .filter(Project.is_deleted == False, Project.status.in_(['completed', 'Completed']))
         )
 
@@ -2582,7 +2586,7 @@ def get_pm_completed_project():
             if total_count == 0:
                 return jsonify({"message": "PM completed projects retrieved successfully", "count": 0, "data": []}), 200
 
-        # OPTIMIZED: Direct mapping with specific columns
+        # OPTIMIZED: Direct mapping with specific columns - Include BOQ info for details view
         projects = [
             {
                 "project_id": row.project_id,
@@ -2598,7 +2602,9 @@ def get_pm_completed_project():
                 "start_date": row.start_date.isoformat() if row.start_date else None,
                 "end_date": row.end_date.isoformat() if row.end_date else None,
                 "duration_days": row.duration_days,
-                "boq_status": row.project_status,
+                "boq_id": row.boq_id,
+                "boq_name": row.boq_name,
+                "boq_status": row.boq_status or row.project_status,
                 "description": row.description,
                 "user_id": row.user_id,
                 "completion_requested": row.completion_requested,

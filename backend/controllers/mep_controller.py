@@ -795,9 +795,34 @@ def get_mep_completed_project():
         user_id = current_user.get('user_id')
         user_role = current_user.get('role', '').lower() if current_user else ''
 
-        # Query completed projects assigned to current PM
+        # Query completed projects assigned to current MEP - Include BOQ info for details view
         query = (
-            db.session.query(Project)
+            db.session.query(
+                Project.project_id,
+                Project.project_code,
+                Project.project_name,
+                Project.status.label('project_status'),
+                Project.client,
+                Project.location,
+                Project.floor_name,
+                Project.working_hours,
+                Project.area,
+                Project.work_type,
+                Project.start_date,
+                Project.end_date,
+                Project.duration_days,
+                Project.description,
+                Project.user_id,
+                Project.completion_requested,
+                Project.total_se_assignments,
+                Project.confirmed_completions,
+                Project.created_at,
+                Project.created_by,
+                BOQ.boq_id,
+                BOQ.boq_name,
+                BOQ.status.label('boq_status')
+            )
+            .outerjoin(BOQ, (Project.project_id == BOQ.project_id) & (BOQ.is_deleted == False))
             .filter(Project.is_deleted == False)
             .filter(Project.status.in_(['completed', 'Completed']))
             .order_by(Project.created_at.desc())
@@ -822,13 +847,13 @@ def get_mep_completed_project():
             rows = query.all()
             total_count = len(rows)
 
-        # Map results
+        # Map results - Include BOQ info for details view
         projects = [
             {
                 "project_id": row.project_id,
                 "project_code": row.project_code,
                 "project_name": row.project_name,
-                "project_status": row.project.status,
+                "project_status": row.project_status,
                 "client": row.client,
                 "location": row.location,
                 "floor_name": row.floor_name,
@@ -838,7 +863,9 @@ def get_mep_completed_project():
                 "start_date": row.start_date.isoformat() if row.start_date else None,
                 "end_date": row.end_date.isoformat() if row.end_date else None,
                 "duration_days": row.duration_days,
-                "boq_status": row.status,
+                "boq_id": row.boq_id,
+                "boq_name": row.boq_name,
+                "boq_status": row.boq_status or row.project_status,
                 "description": row.description,
                 "user_id": row.user_id,
                 "completion_requested": row.completion_requested,
