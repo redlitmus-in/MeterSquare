@@ -741,18 +741,14 @@ const MyProjects: React.FC = () => {
                           </div>
                         )}
                         {project.my_completion_requested && !project.my_work_confirmed && project.status?.toLowerCase() !== 'completed' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setProjectToRequest(project);
-                              setShowRequestModal(true);
-                            }}
-                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-[#243d8a] hover:bg-[#1e3270] text-white rounded-md transition-colors flex items-center gap-1 text-[10px] sm:text-xs font-medium shadow-sm whitespace-nowrap"
-                            title="Re-send completion request"
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-amber-100 border border-amber-400 rounded-md flex items-center gap-1"
+                            title="Completion request sent - awaiting PM confirmation"
                           >
-                            <CheckCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />
-                            <span className="hidden sm:inline">Request</span> Completion
-                          </button>
+                            <ClockIcon className="w-3 sm:w-4 h-3 sm:h-4 text-amber-600 flex-shrink-0" />
+                            <span className="text-[10px] sm:text-xs font-medium text-amber-800">Pending Approval</span>
+                          </div>
                         )}
                         {project.my_work_confirmed && project.status?.toLowerCase() !== 'completed' && (
                           <div onClick={(e) => e.stopPropagation()} className="px-2 sm:px-3 py-1 sm:py-1.5 bg-green-100 border border-green-400 rounded-md flex items-center gap-1">

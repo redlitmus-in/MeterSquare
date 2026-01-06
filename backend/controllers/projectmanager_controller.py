@@ -1955,7 +1955,23 @@ def get_pm_assign_project():
                         (PMAssignSS.se_completion_requested == True, func.coalesce(func.cardinality(PMAssignSS.item_indices), 0)),
                         else_=0
                     )
-                ).label('completion_requested_items_count')
+                ).label('completion_requested_items_count'),
+                # Count unique PM-SE assignment pairs (for total_se_assignments)
+                func.count(func.distinct(func.concat(PMAssignSS.assigned_by_pm_id, '-', PMAssignSS.assigned_to_se_id))).label('total_se_assignments'),
+                # Count confirmed PM-SE pairs (for confirmed_completions)
+                func.count(func.distinct(
+                    case(
+                        (PMAssignSS.pm_confirmed_completion == True, func.concat(PMAssignSS.assigned_by_pm_id, '-', PMAssignSS.assigned_to_se_id)),
+                        else_=None
+                    )
+                )).label('confirmed_completions'),
+                # Count SE completion requested pairs (pending confirmations)
+                func.count(func.distinct(
+                    case(
+                        (PMAssignSS.se_completion_requested == True, func.concat(PMAssignSS.assigned_by_pm_id, '-', PMAssignSS.assigned_to_se_id)),
+                        else_=None
+                    )
+                )).label('pending_se_requests')
             )
             .filter(PMAssignSS.is_deleted == False)
             .group_by(PMAssignSS.boq_id)
@@ -1997,7 +2013,11 @@ def get_pm_assign_project():
                 func.coalesce(boq_items_count_subquery.c.total_items, 0).label('total_boq_items'),
                 func.coalesce(assignment_counts.c.total_items_assigned, 0).label('total_items_assigned'),
                 func.coalesce(assignment_counts.c.confirmed_items_count, 0).label('confirmed_items_count'),
-                func.coalesce(assignment_counts.c.completion_requested_items_count, 0).label('completion_requested_items_count')
+                func.coalesce(assignment_counts.c.completion_requested_items_count, 0).label('completion_requested_items_count'),
+                func.coalesce(assignment_counts.c.total_se_assignments, 0).label('total_se_assignments'),
+                func.coalesce(assignment_counts.c.confirmed_completions, 0).label('confirmed_completions'),
+                func.coalesce(assignment_counts.c.pending_se_requests, 0).label('pending_se_requests'),
+                Project.completion_requested
             )
             .join(BOQ, Project.project_id == BOQ.project_id)
             .join(PMAssignSS, BOQ.boq_id == PMAssignSS.boq_id)
@@ -2021,10 +2041,12 @@ def get_pm_assign_project():
             Project.location, Project.floor_name, Project.working_hours, Project.area,
             Project.work_type, Project.start_date, Project.end_date, Project.duration_days,
             Project.description, Project.user_id, Project.created_at, Project.created_by,
-            Project.status,
+            Project.status, Project.completion_requested,
             BOQ.boq_id, BOQ.status, BOQ.boq_name,
             boq_items_count_subquery.c.total_items, assignment_counts.c.total_items_assigned,
-            assignment_counts.c.confirmed_items_count, assignment_counts.c.completion_requested_items_count
+            assignment_counts.c.confirmed_items_count, assignment_counts.c.completion_requested_items_count,
+            assignment_counts.c.total_se_assignments, assignment_counts.c.confirmed_completions,
+            assignment_counts.c.pending_se_requests
         ).order_by(Project.created_at.desc())
 
         # OPTIMIZED: Use func.count() instead of .count()
@@ -2077,7 +2099,13 @@ def get_pm_assign_project():
                 "confirmed_items_count": int(row.confirmed_items_count) if row.confirmed_items_count else 0,
                 "completion_requested_items_count": int(row.completion_requested_items_count) if row.completion_requested_items_count else 0,
                 "items_assigned": f"{int(row.total_items_assigned) if row.total_items_assigned else 0}/{int(row.total_boq_items) if row.total_boq_items else 0}",
-                "confirmations": f"{int(row.confirmed_items_count) if row.confirmed_items_count else 0}/{int(row.total_items_assigned) if row.total_items_assigned else 0}"
+                # SE-level assignment and confirmation tracking
+                "total_se_assignments": int(row.total_se_assignments) if row.total_se_assignments else 0,
+                "confirmed_completions": int(row.confirmed_completions) if row.confirmed_completions else 0,
+                "pending_se_requests": int(row.pending_se_requests) if row.pending_se_requests else 0,
+                "completion_requested": row.completion_requested or False,
+                # Use SE-level confirmations for the display (confirmed_completions / total_se_assignments)
+                "confirmations": f"{int(row.confirmed_completions) if row.confirmed_completions else 0}/{int(row.total_se_assignments) if row.total_se_assignments else 0}"
             }
             for row in rows
         ]
