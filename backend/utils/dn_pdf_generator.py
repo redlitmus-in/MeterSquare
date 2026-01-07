@@ -242,7 +242,6 @@ class DNPDFGenerator:
             Paragraph('<b>#</b>', self.styles['DNLabel']),
             Paragraph('<b>Material Description</b>', self.styles['DNLabel']),
             Paragraph('<b>Quantity</b>', self.styles['DNLabel']),
-            Paragraph('<b>Notes</b>', self.styles['DNLabel']),
         ]
         items_table_data = [items_header]
 
@@ -260,17 +259,14 @@ class DNPDFGenerator:
             else:
                 qty_str = f"{qty} {unit}"
 
-            notes = item.get('notes', '') or '-'
-
             items_table_data.append([
                 Paragraph(str(idx), self.styles['DNNormal']),
                 Paragraph(self._escape_html(desc), self.styles['DNNormal']),
                 Paragraph(qty_str, self.styles['DNNormal']),
-                Paragraph(self._escape_html(notes), self.styles['DNNormal']),
             ])
 
         # Items table styling
-        items_col_widths = [12*mm, 90*mm, 35*mm, 33*mm]
+        items_col_widths = [12*mm, 120*mm, 38*mm]
         items_table = Table(items_table_data, colWidths=items_col_widths)
         items_table.setStyle(TableStyle([
             # Header row

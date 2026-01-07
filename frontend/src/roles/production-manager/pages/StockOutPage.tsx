@@ -191,13 +191,21 @@ const StockOutPage: React.FC = () => {
 
   const handleApproveRequest = async (requestId: number) => {
     try {
-      await inventoryService.approveInternalRequest(requestId);
-      // Update local state smoothly instead of full page reload
+      const response = await inventoryService.approveInternalRequest(requestId);
+      // Update local state with response data including material_details
       setAllRequests(prev => prev.map(req =>
         req.request_id === requestId
-          ? { ...req, status: 'APPROVED' as const }
+          ? {
+              ...req,
+              status: 'APPROVED' as const,
+              // Update material_details from response if available
+              material_details: (response as any).material_details || req.material_details
+            }
           : req
       ));
+      // Also refresh materials list to get updated stock values
+      const materialsData = await inventoryService.getAllInventoryItems();
+      setMaterials(materialsData);
       showSuccess('Request approved successfully');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to approve request';
@@ -878,9 +886,20 @@ const StockOutPage: React.FC = () => {
                             → {req.final_destination_site || 'Site'}
                           </span>
                         ) : (
-                          <span className={`font-medium ${(req.material_details?.current_stock || 0) >= (req.quantity || 0) ? 'text-green-600' : 'text-red-600'}`}>
-                            {req.material_details?.current_stock || 0} {req.material_details?.unit || ''}
-                          </span>
+                          (() => {
+                            // Get stock from material_details or lookup from materials array
+                            const subItemName = req.brand || req.material_name;
+                            const inventoryMatch = materials.find(
+                              inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
+                            );
+                            const stockValue = req.material_details?.updated_stock ?? inventoryMatch?.current_stock ?? 0;
+                            const unitValue = req.material_details?.unit || inventoryMatch?.unit || '';
+                            return (
+                              <span className={`font-medium ${stockValue >= (req.quantity || 0) ? 'text-green-600' : 'text-red-600'}`}>
+                                {stockValue} {unitValue}
+                              </span>
+                            );
+                          })()
                         )}
                       </td>
                       <td className="px-4 py-4">

@@ -1222,7 +1222,10 @@ def send_internal_material_request(request_id):
 
 
 def get_sent_internal_requests():
-    """Get all sent internal material requests (request_send=True) with project and material details"""
+    """Get all sent internal material requests (request_send=True) with project and material details
+
+    OPTIMIZED: Uses batch loading to avoid N+1 query problem
+    """
     try:
         # Get query parameters
         project_id = request.args.get('project_id')
@@ -1236,36 +1239,151 @@ def get_sent_internal_requests():
         # Order by latest first - PERFORMANCE: Limit to 200 records max
         requests = query.order_by(InternalMaterialRequest.created_at.desc()).limit(200).all()
 
-        # Enrich with project and material details
+        if not requests:
+            return jsonify({'requests': [], 'total': 0}), 200
+
+        # OPTIMIZATION: Batch load all related data upfront to avoid N+1 queries
+        # Collect unique IDs
+        project_ids = set(req.project_id for req in requests if req.project_id)
+        material_ids = set(req.inventory_material_id for req in requests if req.inventory_material_id)
+        buyer_ids = set(req.request_buyer_id for req in requests if req.request_buyer_id)
+
+        # Batch load projects (single query)
+        projects_map = {}
+        if project_ids:
+            projects = Project.query.filter(Project.project_id.in_(project_ids)).all()
+            projects_map = {p.project_id: p for p in projects}
+
+        # Batch load materials (single query)
+        materials_map = {}
+        if material_ids:
+            materials = InventoryMaterial.query.filter(
+                InventoryMaterial.inventory_material_id.in_(material_ids)
+            ).all()
+            materials_map = {m.inventory_material_id: m for m in materials}
+
+        # Batch load users (single query)
+        users_map = {}
+        if buyer_ids:
+            users = User.query.filter(User.user_id.in_(buyer_ids)).all()
+            users_map = {u.user_id: u for u in users}
+
+        # Pre-compute project details with site supervisors
+        # Batch load site supervisor assignments for all projects
+        from models.pm_assign_ss import PMAssignSS
+
+        # Get all PMAssignSS records for these projects
+        ss_assignments = []
+        if project_ids:
+            ss_assignments = PMAssignSS.query.filter(PMAssignSS.project_id.in_(project_ids)).all()
+
+        # Collect all site supervisor user IDs
+        ss_user_ids = set()
+        for project in projects_map.values():
+            if project.site_supervisor_id:
+                ss_user_ids.add(project.site_supervisor_id)
+        for assign in ss_assignments:
+            if assign.assigned_to_se_id:
+                ss_user_ids.add(assign.assigned_to_se_id)
+            if assign.ss_ids:
+                for sid in assign.ss_ids:
+                    if sid:
+                        ss_user_ids.add(sid)
+
+        # Batch load all site supervisor users
+        ss_users_map = {}
+        if ss_user_ids:
+            ss_users = User.query.filter(User.user_id.in_(ss_user_ids)).all()
+            ss_users_map = {u.user_id: u for u in ss_users}
+
+        # Build site supervisors list per project
+        project_ss_map = {}
+        for pid, project in projects_map.items():
+            supervisors = []
+            seen_ids = set()
+
+            # Check direct site_supervisor_id
+            if project.site_supervisor_id and project.site_supervisor_id in ss_users_map:
+                user = ss_users_map[project.site_supervisor_id]
+                supervisors.append({
+                    'user_id': user.user_id,
+                    'full_name': user.full_name,
+                    'email': user.email,
+                    'phone': user.phone
+                })
+                seen_ids.add(user.user_id)
+
+            # Check PMAssignSS records
+            for assign in ss_assignments:
+                if assign.project_id == pid:
+                    # From ss_ids array
+                    if assign.ss_ids:
+                        for sid in assign.ss_ids:
+                            if sid and sid not in seen_ids and sid in ss_users_map:
+                                user = ss_users_map[sid]
+                                supervisors.append({
+                                    'user_id': user.user_id,
+                                    'full_name': user.full_name,
+                                    'email': user.email,
+                                    'phone': user.phone
+                                })
+                                seen_ids.add(sid)
+                    # From assigned_to_se_id
+                    if assign.assigned_to_se_id and assign.assigned_to_se_id not in seen_ids:
+                        if assign.assigned_to_se_id in ss_users_map:
+                            user = ss_users_map[assign.assigned_to_se_id]
+                            supervisors.append({
+                                'user_id': user.user_id,
+                                'full_name': user.full_name,
+                                'email': user.email,
+                                'phone': user.phone
+                            })
+                            seen_ids.add(assign.assigned_to_se_id)
+
+            project_ss_map[pid] = supervisors
+
+        # Build project details cache
+        project_details_cache = {}
+        for pid, project in projects_map.items():
+            site_supervisors = project_ss_map.get(pid, [])
+            project_details_cache[pid] = {
+                'project_id': project.project_id,
+                'project_name': project.project_name,
+                'project_code': project.project_code,
+                'location': project.location,
+                'area': project.area,
+                'site_supervisor': site_supervisors[0] if site_supervisors else None,
+                'site_supervisors': site_supervisors
+            }
+
+        # Build result using cached data
         result = []
         for req in requests:
             req_data = req.to_dict()
 
-            # Get project details
-            project = Project.query.get(req.project_id)
-            if project:
-                req_data['project_details'] = enrich_project_details(project)
+            # Add project details from cache
+            if req.project_id and req.project_id in project_details_cache:
+                req_data['project_details'] = project_details_cache[req.project_id]
 
-            # Get material details if allocated
-            if req.inventory_material_id:
-                material = InventoryMaterial.query.get(req.inventory_material_id)
-                if material:
-                    req_data['material_details'] = {
-                        'material_code': material.material_code,
-                        'current_stock': material.current_stock,
-                        'unit': material.unit,
-                        'unit_price': material.unit_price
-                    }
+            # Add material details from cache
+            if req.inventory_material_id and req.inventory_material_id in materials_map:
+                material = materials_map[req.inventory_material_id]
+                req_data['material_details'] = {
+                    'material_code': material.material_code,
+                    'material_name': material.material_name,
+                    'current_stock': material.current_stock,
+                    'unit': material.unit,
+                    'unit_price': material.unit_price
+                }
 
-            # Get requester details
-            if req.request_buyer_id:
-                requester = User.query.get(req.request_buyer_id)
-                if requester:
-                    req_data['requester_details'] = {
-                        'user_id': requester.user_id,
-                        'full_name': requester.full_name,
-                        'email': requester.email
-                    }
+            # Add requester details from cache
+            if req.request_buyer_id and req.request_buyer_id in users_map:
+                requester = users_map[req.request_buyer_id]
+                req_data['requester_details'] = {
+                    'user_id': requester.user_id,
+                    'full_name': requester.full_name,
+                    'email': requester.email
+                }
 
             result.append(req_data)
 
@@ -3329,7 +3447,7 @@ def remove_delivery_note_item(delivery_note_id, item_id):
 
 
 def issue_delivery_note(delivery_note_id):
-    """Issue a delivery note - deducts stock and marks as ISSUED"""
+    """Issue a delivery note - marks as ISSUED (stock already deducted when items were added)"""
     try:
         note = MaterialDeliveryNote.query.get(delivery_note_id)
 
@@ -3344,60 +3462,8 @@ def issue_delivery_note(delivery_note_id):
 
         current_user = g.user.get('email', 'system')
 
-        # Check stock availability for all items
+        # Update internal request status to DISPATCHED
         for item in note.items:
-            material = InventoryMaterial.query.get(item.inventory_material_id)
-            if not material:
-                return jsonify({'error': f'Material with ID {item.inventory_material_id} not found'}), 404
-
-            # Check appropriate stock based on use_backup flag
-            if item.use_backup:
-                available_backup = material.backup_stock or 0
-                if available_backup < item.quantity:
-                    return jsonify({
-                        'error': f'Insufficient backup stock for {material.material_name}. Available: {available_backup} {material.unit}, Required: {item.quantity}'
-                    }), 400
-            else:
-                if material.current_stock < item.quantity:
-                    return jsonify({
-                        'error': f'Insufficient stock for {material.material_name}. Available: {material.current_stock} {material.unit}, Required: {item.quantity}'
-                    }), 400
-
-        # Deduct stock and create transactions
-        for item in note.items:
-            material = InventoryMaterial.query.get(item.inventory_material_id)
-
-            total_amount = item.quantity * material.unit_price
-            transaction_notes = f'Material delivery - {note.delivery_note_number}'
-            if item.use_backup:
-                transaction_notes += ' (from backup stock)'
-
-            new_transaction = InventoryTransaction(
-                inventory_material_id=item.inventory_material_id,
-                transaction_type='WITHDRAWAL',
-                quantity=item.quantity,
-                unit_price=material.unit_price,
-                total_amount=total_amount,
-                reference_number=note.delivery_note_number,
-                project_id=note.project_id,
-                notes=transaction_notes,
-                created_by=current_user
-            )
-            db.session.add(new_transaction)
-
-            # Deduct from appropriate stock
-            if item.use_backup:
-                material.backup_stock = (material.backup_stock or 0) - item.quantity
-            else:
-                material.current_stock -= item.quantity
-
-            material.last_modified_at = datetime.utcnow()
-            material.last_modified_by = current_user
-
-            db.session.flush()
-            item.inventory_transaction_id = new_transaction.inventory_transaction_id
-            item.unit_price = material.unit_price
-
             if item.internal_request_id:
                 internal_req = InternalMaterialRequest.query.get(item.internal_request_id)
                 if internal_req:
@@ -3413,7 +3479,7 @@ def issue_delivery_note(delivery_note_id):
         db.session.commit()
 
         return jsonify({
-            'message': 'Delivery note issued successfully. Stock has been deducted.',
+            'message': 'Delivery note issued successfully.',
             'delivery_note': note.to_dict()
         }), 200
 

@@ -111,7 +111,11 @@ export interface InternalMaterialRequest {
   };
   material_details?: {
     material_code: string;
+    material_name: string;
     current_stock: number;
+    previous_stock: number;
+    updated_stock: number;
+    deducted_quantity: number;
     unit: string;
     unit_price: number;
   };
