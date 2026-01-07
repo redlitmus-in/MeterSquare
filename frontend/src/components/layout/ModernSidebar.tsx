@@ -438,7 +438,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-purple-600'
       },
       {
-        name: 'Labour Management',
+        name: 'Labour',
         href: buildPath('/labour/approvals'),
         icon: ClipboardDocumentListIcon,
         iconSolid: ClipboardDocumentListSolid,
@@ -511,7 +511,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-orange-600'
       },
       {
-        name: 'Labour Management',
+        name: 'Labour',
         href: buildPath('/labour/requisitions'),
         icon: ClipboardDocumentListIcon,
         iconSolid: ClipboardDocumentListSolid,
@@ -672,7 +672,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         ]
       },
       {
-        name: 'Labour Management',
+        name: 'Labour',
         href: buildPath('/labour/registry'),
         icon: UserPlusIcon,
         iconSolid: UserPlusSolid,
