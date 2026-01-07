@@ -1082,8 +1082,7 @@ const MaterialReceipts: React.FC = () => {
                                           <thead>
                                             <tr className="text-left text-gray-500 border-b">
                                               <th className="pb-2 font-medium">Material</th>
-                                              <th className="pb-2 font-medium text-right">Qty Ordered</th>
-                                              <th className="pb-2 font-medium text-right">Qty Received</th>
+                                              <th className="pb-2 font-medium text-right">Quantity</th>
                                             </tr>
                                           </thead>
                                           <tbody className="divide-y divide-gray-200">
@@ -1092,9 +1091,6 @@ const MaterialReceipts: React.FC = () => {
                                                 <td className="py-2 text-gray-900">{item.material_name}</td>
                                                 <td className="py-2 text-right text-gray-600">
                                                   {item.quantity} {item.unit}
-                                                </td>
-                                                <td className="py-2 text-right font-medium text-gray-900">
-                                                  {item.quantity_received || item.quantity} {item.unit}
                                                 </td>
                                               </tr>
                                             ))}
@@ -1196,7 +1192,7 @@ const MaterialReceipts: React.FC = () => {
                                 <p className="text-sm text-gray-500">
                                   {note.items.length} item(s) • Delivery Date: {new Date(note.delivery_date).toLocaleDateString()}
                                 </p>
-                                {note.dispatched_at && (
+                                {note.dispatched_at && (note.status === 'IN_TRANSIT' || note.status === 'DISPATCHED' || note.status === 'DELIVERED') && (
                                   <p className="text-xs text-blue-600 mt-0.5">
                                     <span className="font-medium">Dispatched:</span> {new Date(note.dispatched_at).toLocaleString()} by {note.dispatched_by}
                                   </p>
@@ -1290,7 +1286,6 @@ const MaterialReceipts: React.FC = () => {
                                       <tr className="text-left text-gray-500 border-b">
                                         <th className="px-3 py-2 font-medium">Material</th>
                                         <th className="px-3 py-2 font-medium text-right">Quantity</th>
-                                        <th className="px-3 py-2 font-medium text-right">Received</th>
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
@@ -1299,15 +1294,6 @@ const MaterialReceipts: React.FC = () => {
                                           <td className="px-3 py-2 font-medium text-gray-900">{item.material_name}</td>
                                           <td className="px-3 py-2 text-right text-gray-600">
                                             {item.quantity} {item.unit}
-                                          </td>
-                                          <td className="px-3 py-2 text-right">
-                                            {item.quantity_received !== undefined ? (
-                                              <span className={item.quantity_received >= item.quantity ? 'text-green-600' : 'text-orange-600'}>
-                                                {item.quantity_received} {item.unit}
-                                              </span>
-                                            ) : (
-                                              <span className="text-gray-400">-</span>
-                                            )}
                                           </td>
                                         </tr>
                                       ))}

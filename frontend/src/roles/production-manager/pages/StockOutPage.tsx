@@ -1046,7 +1046,7 @@ const StockOutPage: React.FC = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Vehicle</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date / Time</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
               </thead>
@@ -1101,7 +1101,43 @@ const StockOutPage: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-500">
-                          {new Date(dn.delivery_date || '').toLocaleDateString()}
+                          {dn.status === 'IN_TRANSIT' || dn.status === 'DELIVERED' ? (
+                            dn.dispatched_at ? (
+                              (() => {
+                                const date = new Date(dn.dispatched_at);
+                                if (isNaN(date.getTime())) {
+                                  return <span className="text-gray-400">Invalid date</span>;
+                                }
+                                return (
+                                  <div>
+                                    <div className="font-medium text-gray-900">
+                                      {date.toLocaleDateString('en-GB', {
+                                        day: '2-digit',
+                                        month: '2-digit',
+                                        year: 'numeric'
+                                      })}
+                                    </div>
+                                    <div className="text-xs text-purple-600">
+                                      {date.toLocaleTimeString('en-GB', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        hour12: true
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })()
+                            ) : (
+                              <span className="text-gray-400">Not dispatched</span>
+                            )
+                          ) : (
+                            (() => {
+                              const date = new Date(dn.delivery_date || '');
+                              return isNaN(date.getTime())
+                                ? <span className="text-gray-400">-</span>
+                                : date.toLocaleDateString('en-GB');
+                            })()
+                          )}
                         </td>
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-1">

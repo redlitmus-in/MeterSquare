@@ -111,6 +111,11 @@ const ReceiveReturns: React.FC = () => {
   const openConfirmModal = (rdn: ReturnDeliveryNote) => {
     setSelectedRDN(rdn);
 
+    // If RDN is already received, mark receipt as confirmed
+    if (['RECEIVED', 'PARTIAL'].includes(rdn.status)) {
+      setReceiptConfirmed(true);
+    }
+
     // Initialize actions for each item based on condition
     const initialActions = new Map<number, ItemAction>();
     rdn.items.forEach((item) => {
@@ -118,11 +123,14 @@ const ReceiveReturns: React.FC = () => {
         ? RETURN_ACTIONS.ADD_TO_STOCK
         : RETURN_ACTIONS.SEND_FOR_REPAIR;
 
+      // Mark already processed items
+      const isProcessed = !!item.material_return_id;
+
       initialActions.set(item.return_item_id, {
         return_item_id: item.return_item_id,
         action: defaultAction,
         notes: '',
-        processed: false,
+        processed: isProcessed,
         processing: false
       });
     });
@@ -289,19 +297,30 @@ const ReceiveReturns: React.FC = () => {
 
   // Filter RDNs by tab
   const filteredRDNs = returnDeliveryNotes.filter((rdn) => {
+    // Check if all items are processed
+    const allItemsProcessed = rdn.items.every(item => item.material_return_id);
+
     if (activeTab === 'pending') {
-      return rdn.status === 'IN_TRANSIT';
+      // Show RDNs that are in transit OR have unprocessed items
+      return rdn.status === 'IN_TRANSIT' || (['RECEIVED', 'PARTIAL'].includes(rdn.status) && !allItemsProcessed);
     } else if (activeTab === 'received') {
-      return ['RECEIVED', 'PARTIAL'].includes(rdn.status);
+      // Show only RDNs where all items are processed
+      return ['RECEIVED', 'PARTIAL', 'APPROVED'].includes(rdn.status) && allItemsProcessed;
     }
     return true;
   });
 
   const getTabCount = (tab: TabType): number => {
     if (tab === 'pending') {
-      return returnDeliveryNotes.filter((r) => r.status === 'IN_TRANSIT').length;
+      return returnDeliveryNotes.filter((r) => {
+        const allItemsProcessed = r.items.every(item => item.material_return_id);
+        return r.status === 'IN_TRANSIT' || (['RECEIVED', 'PARTIAL'].includes(r.status) && !allItemsProcessed);
+      }).length;
     } else if (tab === 'received') {
-      return returnDeliveryNotes.filter((r) => ['RECEIVED', 'PARTIAL'].includes(r.status)).length;
+      return returnDeliveryNotes.filter((r) => {
+        const allItemsProcessed = r.items.every(item => item.material_return_id);
+        return ['RECEIVED', 'PARTIAL', 'APPROVED'].includes(r.status) && allItemsProcessed;
+      }).length;
     }
     return returnDeliveryNotes.length;
   };
@@ -430,6 +449,15 @@ const ReceiveReturns: React.FC = () => {
                             Confirm Receipt
                           </button>
                         )}
+                        {['RECEIVED', 'PARTIAL'].includes(rdn.status) &&
+                         rdn.items.some(item => !item.material_return_id) && (
+                          <button
+                            onClick={() => openConfirmModal(rdn)}
+                            className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors font-medium"
+                          >
+                            Process Items
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -532,7 +560,11 @@ const ReceiveReturns: React.FC = () => {
                                 <td className="py-2 text-gray-600 text-xs">{item.return_reason || '-'}</td>
                                 {['RECEIVED', 'PARTIAL'].includes(rdn.status) && (
                                   <td className="py-2 text-center">
-                                    <span className="text-xs text-green-600 font-medium">Processed</span>
+                                    {item.material_return_id ? (
+                                      <span className="text-xs text-green-600 font-medium">Processed</span>
+                                    ) : (
+                                      <span className="text-xs text-orange-600 font-medium">Pending</span>
+                                    )}
                                   </td>
                                 )}
                               </tr>
@@ -576,7 +608,9 @@ const ReceiveReturns: React.FC = () => {
               <div className="sticky top-0 bg-white border-b border-gray-200 p-6 z-10">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">Confirm & Process Return Delivery</h3>
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {receiptConfirmed ? 'Process Return Items' : 'Confirm & Process Return Delivery'}
+                    </h3>
                     <p className="text-sm text-gray-500 mt-1">
                       {selectedRDN.return_note_number} • {selectedRDN.project_name}
                     </p>
@@ -592,7 +626,9 @@ const ReceiveReturns: React.FC = () => {
 
               <div className="p-6 space-y-4">
                 <p className="text-sm text-gray-600">
-                  Review each item and decide the action. Good condition items are automatically set to "Add to Stock".
+                  {receiptConfirmed
+                    ? 'Process the remaining items below. Already processed items are marked with a checkmark.'
+                    : 'Review each item and decide the action. Good condition items are automatically set to "Add to Stock".'}
                 </p>
 
                 {/* Items */}

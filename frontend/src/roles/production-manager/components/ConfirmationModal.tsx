@@ -43,12 +43,15 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirmation-title"
+      aria-describedby="confirmation-message"
     >
       <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
         <h3 id="confirmation-title" className="text-lg font-bold text-gray-900 mb-2">
           {title}
         </h3>
-        <p className="text-gray-600 mb-6">{message}</p>
+        <p id="confirmation-message" className="text-gray-600 mb-6 whitespace-pre-line leading-relaxed">
+          {message}
+        </p>
         <div className="flex justify-end gap-3">
           <button
             onClick={onCancel}
