@@ -145,7 +145,7 @@ const SiteAssets: React.FC = () => {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnADN, setReturnADN] = useState<GroupedADN | null>(null);
   const [returnItems, setReturnItems] = useState<DispatchedAsset[]>([]);
-  const [returnItemConditions, setReturnItemConditions] = useState<Record<number, { condition: string; damage_description: string }>>({});
+  const [returnItemConditions, setReturnItemConditions] = useState<Record<number, { condition: string; damage_description: string; quantity: number }>>({});
   const [returnNotes, setReturnNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -644,10 +644,10 @@ const SiteAssets: React.FC = () => {
       return;
     }
 
-    // Initialize conditions for each item
-    const conditions: Record<number, { condition: string; damage_description: string }> = {};
+    // Initialize conditions for each item with quantity
+    const conditions: Record<number, { condition: string; damage_description: string; quantity: number }> = {};
     selectedItems.forEach(item => {
-      conditions[item.adn_item_id] = { condition: 'good', damage_description: '' };
+      conditions[item.adn_item_id] = { condition: 'good', damage_description: '', quantity: item.quantity };
     });
 
     setReturnADN(adn);
@@ -659,8 +659,8 @@ const SiteAssets: React.FC = () => {
 
   // Open return modal for single item
   const openSingleReturnModal = (adn: GroupedADN, item: DispatchedAsset) => {
-    const conditions: Record<number, { condition: string; damage_description: string }> = {
-      [item.adn_item_id]: { condition: 'good', damage_description: '' }
+    const conditions: Record<number, { condition: string; damage_description: string; quantity: number }> = {
+      [item.adn_item_id]: { condition: 'good', damage_description: '', quantity: item.quantity }
     };
 
     setReturnADN(adn);
@@ -671,7 +671,7 @@ const SiteAssets: React.FC = () => {
   };
 
   // Update condition for a specific item
-  const updateItemCondition = (itemId: number, field: 'condition' | 'damage_description', value: string) => {
+  const updateItemCondition = (itemId: number, field: 'condition' | 'damage_description' | 'quantity', value: string | number) => {
     setReturnItemConditions(prev => ({
       ...prev,
       [itemId]: {
@@ -695,6 +695,17 @@ const SiteAssets: React.FC = () => {
       return;
     }
 
+    // Validate quantity
+    const invalidQuantityItems = returnItems.filter(item => {
+      const cond = returnItemConditions[item.adn_item_id];
+      return !cond.quantity || cond.quantity <= 0 || cond.quantity > item.quantity;
+    });
+
+    if (invalidQuantityItems.length > 0) {
+      showError(`Please enter valid return quantity (1 to available quantity)`);
+      return;
+    }
+
     try {
       setSubmitting(true);
 
@@ -710,7 +721,7 @@ const SiteAssets: React.FC = () => {
             category_id: item.category_id,
             asset_item_id: item.asset_item_id,
             original_adn_item_id: item.adn_item_id,
-            quantity: item.quantity,
+            quantity: cond.quantity,
             reported_condition: cond.condition,
             damage_description: cond.condition !== 'good' ? cond.damage_description : undefined,
             notes: returnNotes
@@ -1614,7 +1625,7 @@ const SiteAssets: React.FC = () => {
                   </label>
                   <div className="space-y-3 max-h-[300px] overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
                     {returnItems.map((item) => {
-                      const cond = returnItemConditions[item.adn_item_id] || { condition: 'good', damage_description: '' };
+                      const cond = returnItemConditions[item.adn_item_id] || { condition: 'good', damage_description: '', quantity: item.quantity };
                       return (
                         <div key={item.adn_item_id} className="bg-white rounded-lg p-3 border border-gray-200">
                           <div className="flex items-start gap-3">
@@ -1624,8 +1635,33 @@ const SiteAssets: React.FC = () => {
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-gray-900 text-sm">{item.category_name}</p>
                               <p className="text-xs text-gray-500">
-                                {item.quantity} unit(s) • {item.item_code || item.serial_number || item.category_code}
+                                Available: {item.quantity} unit(s) • {item.item_code || item.serial_number || item.category_code}
                               </p>
+
+                              {/* Quantity Input */}
+                              <div className="mt-2">
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Return Quantity</label>
+                                <div>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max={item.quantity}
+                                    value={cond.quantity}
+                                    onChange={(e) => updateItemCondition(item.adn_item_id, 'quantity', parseInt(e.target.value) || 1)}
+                                    className={`w-24 px-2 py-1 text-sm border rounded focus:ring-1 ${
+                                      cond.quantity <= 0 || cond.quantity > item.quantity
+                                        ? 'border-red-500 focus:ring-red-500 focus:border-red-500 bg-red-50'
+                                        : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'
+                                    }`}
+                                  />
+                                  <span className="ml-2 text-xs text-gray-500">of {item.quantity} available</span>
+                                  {(cond.quantity <= 0 || cond.quantity > item.quantity) && (
+                                    <p className="text-xs text-red-600 mt-1 font-medium">
+                                      {cond.quantity <= 0 ? '* Quantity must be at least 1' : `* Cannot exceed ${item.quantity} available`}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
 
                               {/* Condition Buttons */}
                               <div className="mt-2 flex flex-wrap gap-1">
@@ -1699,7 +1735,13 @@ const SiteAssets: React.FC = () => {
                   </button>
                   <button
                     onClick={handleBulkReturnRequest}
-                    disabled={submitting}
+                    disabled={
+                      submitting ||
+                      returnItems.some(item => {
+                        const cond = returnItemConditions[item.adn_item_id];
+                        return !cond || cond.quantity <= 0 || cond.quantity > item.quantity;
+                      })
+                    }
                     className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                   >
                     {submitting ? (
