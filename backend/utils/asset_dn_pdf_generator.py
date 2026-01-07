@@ -232,7 +232,6 @@ class AssetDNPDFGenerator:
             Paragraph('<b>Asset Description</b>', self.styles['ADNLabel']),
             Paragraph('<b>Quantity</b>', self.styles['ADNLabel']),
             Paragraph('<b>Condition</b>', self.styles['ADNLabel']),
-            Paragraph('<b>Notes</b>', self.styles['ADNLabel']),
         ]
         items_table_data = [items_header]
 
@@ -250,18 +249,16 @@ class AssetDNPDFGenerator:
             qty_str = str(int(qty) if isinstance(qty, float) and qty % 1 == 0 else qty)
 
             condition = item.get('condition_at_dispatch', item.get('condition', 'Good'))
-            notes = item.get('notes', '') or '-'
 
             items_table_data.append([
                 Paragraph(str(idx), self.styles['ADNNormal']),
                 Paragraph(self._escape_html(desc), self.styles['ADNNormal']),
                 Paragraph(qty_str, self.styles['ADNNormal']),
                 Paragraph(self._escape_html(condition).title(), self.styles['ADNNormal']),
-                Paragraph(self._escape_html(notes), self.styles['ADNNormal']),
             ])
 
         # Items table styling
-        items_col_widths = [12*mm, 70*mm, 25*mm, 30*mm, 33*mm]
+        items_col_widths = [12*mm, 85*mm, 28*mm, 45*mm]
         items_table = Table(items_table_data, colWidths=items_col_widths)
         items_table.setStyle(TableStyle([
             # Header row
