@@ -1705,12 +1705,19 @@ def get_payroll_summary():
 
         # Import Project model
         from models.project import Project
+        from models.labour_requisition import LabourRequisition
 
-        # Aggregate by project and worker
+        # Aggregate by project, requisition, and worker
         query = db.session.query(
             DailyAttendance.project_id,
             Project.project_name,
             Project.project_code,
+            DailyAttendance.requisition_id,
+            LabourRequisition.requisition_code,
+            LabourRequisition.work_description,
+            LabourRequisition.skill_required,
+            LabourRequisition.site_name,
+            LabourRequisition.workers_count,
             DailyAttendance.worker_id,
             Worker.worker_code,
             Worker.full_name,
@@ -1720,7 +1727,10 @@ def get_payroll_summary():
             func.sum(DailyAttendance.regular_hours).label('regular_hours'),
             func.sum(DailyAttendance.overtime_hours).label('overtime_hours'),
             func.sum(DailyAttendance.total_cost).label('total_cost')
-        ).join(Worker).join(Project).filter(
+        ).join(Worker).join(Project).outerjoin(
+            LabourRequisition,
+            DailyAttendance.requisition_id == LabourRequisition.requisition_id
+        ).filter(
             DailyAttendance.approval_status == 'locked',
             DailyAttendance.is_deleted == False,
             DailyAttendance.attendance_date >= start,
@@ -1735,13 +1745,19 @@ def get_payroll_summary():
             DailyAttendance.project_id,
             Project.project_name,
             Project.project_code,
+            DailyAttendance.requisition_id,
+            LabourRequisition.requisition_code,
+            LabourRequisition.work_description,
+            LabourRequisition.skill_required,
+            LabourRequisition.site_name,
+            LabourRequisition.workers_count,
             DailyAttendance.worker_id,
             Worker.worker_code,
             Worker.full_name,
             Worker.hourly_rate
-        ).order_by(Project.project_name, Worker.full_name).all()
+        ).order_by(Project.project_name, LabourRequisition.requisition_code, Worker.full_name).all()
 
-        # Group by project (nested structure)
+        # Group by project -> requisition -> workers (nested structure)
         projects_dict = {}
         flat_summary = []  # Keep flat list for backwards compatibility
 
@@ -1753,6 +1769,7 @@ def get_payroll_summary():
                 'worker_name': r.full_name,
                 'project_id': r.project_id,
                 'project_name': r.project_name,
+                'requisition_id': r.requisition_id,
                 'average_hourly_rate': float(r.hourly_rate) if r.hourly_rate else 0,
                 'total_days': r.days_worked,
                 'total_hours': round(float(r.total_hours or 0), 2),
@@ -1761,7 +1778,7 @@ def get_payroll_summary():
                 'total_cost': round(float(r.total_cost or 0), 2)
             })
 
-            # Build nested structure
+            # Build nested structure: Project -> Requisition -> Workers
             if r.project_id not in projects_dict:
                 projects_dict[r.project_id] = {
                     'project_id': r.project_id,
@@ -1773,11 +1790,31 @@ def get_payroll_summary():
                     'total_cost': 0,
                     'total_days': 0,
                     'worker_count': 0,
-                    'workers': []
+                    'requisitions': {}
                 }
 
             proj = projects_dict[r.project_id]
-            proj['workers'].append({
+
+            # Group by requisition within project
+            req_key = r.requisition_id if r.requisition_id else 'no_requisition'
+            if req_key not in proj['requisitions']:
+                proj['requisitions'][req_key] = {
+                    'requisition_id': r.requisition_id,
+                    'requisition_code': r.requisition_code if r.requisition_id else 'General Work',
+                    'work_description': r.work_description if r.requisition_id else 'No Requisition',
+                    'skill_required': r.skill_required if r.requisition_id else 'General',
+                    'site_name': r.site_name if r.requisition_id else None,
+                    'workers_count': r.workers_count if r.requisition_id else None,
+                    'total_hours': 0,
+                    'total_regular_hours': 0,
+                    'total_overtime_hours': 0,
+                    'total_cost': 0,
+                    'total_days': 0,
+                    'workers': []
+                }
+
+            req = proj['requisitions'][req_key]
+            req['workers'].append({
                 'worker_id': r.worker_id,
                 'worker_code': r.worker_code,
                 'worker_name': r.full_name,
@@ -1789,21 +1826,41 @@ def get_payroll_summary():
                 'total_cost': round(float(r.total_cost or 0), 2)
             })
 
+            # Update requisition totals
+            req['total_hours'] += float(r.total_hours or 0)
+            req['total_regular_hours'] += float(r.regular_hours or 0)
+            req['total_overtime_hours'] += float(r.overtime_hours or 0)
+            req['total_cost'] += float(r.total_cost or 0)
+            req['total_days'] += r.days_worked
+
             # Update project totals
             proj['total_hours'] += float(r.total_hours or 0)
             proj['total_regular_hours'] += float(r.regular_hours or 0)
             proj['total_overtime_hours'] += float(r.overtime_hours or 0)
             proj['total_cost'] += float(r.total_cost or 0)
             proj['total_days'] += r.days_worked
-            proj['worker_count'] = len(proj['workers'])
 
-        # Round project totals
+        # Round project and requisition totals, convert requisitions dict to list
         grouped_data = []
         for proj in projects_dict.values():
             proj['total_hours'] = round(proj['total_hours'], 2)
             proj['total_regular_hours'] = round(proj['total_regular_hours'], 2)
             proj['total_overtime_hours'] = round(proj['total_overtime_hours'], 2)
             proj['total_cost'] = round(proj['total_cost'], 2)
+
+            # Convert requisitions dict to list and round totals
+            requisitions_list = []
+            total_workers_in_project = 0
+            for req in proj['requisitions'].values():
+                req['total_hours'] = round(req['total_hours'], 2)
+                req['total_regular_hours'] = round(req['total_regular_hours'], 2)
+                req['total_overtime_hours'] = round(req['total_overtime_hours'], 2)
+                req['total_cost'] = round(req['total_cost'], 2)
+                total_workers_in_project += len(req['workers'])
+                requisitions_list.append(req)
+
+            proj['requisitions'] = requisitions_list
+            proj['worker_count'] = total_workers_in_project
             grouped_data.append(proj)
 
         grand_total = sum(p['total_cost'] for p in grouped_data)

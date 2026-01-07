@@ -672,13 +672,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         ]
       },
       {
-        name: 'Reports & Analytics',
-        href: buildPath('/m2-store/reports'),
-        icon: DocumentTextIcon,
-        iconSolid: DocumentTextSolid,
-        color: 'text-indigo-600'
-      },
-      {
         name: 'Labour Management',
         href: buildPath('/labour/registry'),
         icon: UserPlusIcon,

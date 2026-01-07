@@ -240,18 +240,37 @@ function addProjectSection(
     ]
   ];
 
-  project.workers.forEach((worker, idx) => {
-    tableData.push([
-      { content: (idx + 1).toString(), styles: { halign: 'center' } },
-      { content: `${worker.worker_name}\n${worker.worker_code}`, styles: { fontSize: 8 } },
-      { content: worker.total_days.toString(), styles: { halign: 'center' } },
-      { content: formatDuration(worker.total_regular_hours), styles: { halign: 'center' } },
-      { content: worker.total_overtime_hours > 0 ? formatDuration(worker.total_overtime_hours) : '-', styles: { halign: 'center' } },
-      { content: formatDuration(worker.total_hours), styles: { halign: 'center' } },
-      { content: worker.average_hourly_rate.toFixed(2), styles: { halign: 'right' } },
-      { content: formatCurrency(worker.total_cost), styles: { halign: 'right' } }
-    ]);
-  });
+  // NEW: Iterate through requisitions and their workers
+  let workerIndex = 0;
+  if (project.requisitions && project.requisitions.length > 0) {
+    project.requisitions.forEach((requisition) => {
+      // Add requisition header row
+      tableData.push([
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: `${requisition.requisition_code} - ${requisition.work_description}`, styles: { fillColor: [235, 240, 255], fontStyle: 'bold', fontSize: 8 } },
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: '', styles: { fillColor: [235, 240, 255] } }
+      ]);
+
+      requisition.workers.forEach((worker) => {
+        workerIndex++;
+        tableData.push([
+          { content: workerIndex.toString(), styles: { halign: 'center' } },
+          { content: `${worker.worker_name}\n${worker.worker_code}`, styles: { fontSize: 8 } },
+          { content: worker.total_days.toString(), styles: { halign: 'center' } },
+          { content: formatDuration(worker.total_regular_hours), styles: { halign: 'center' } },
+          { content: worker.total_overtime_hours > 0 ? formatDuration(worker.total_overtime_hours) : '-', styles: { halign: 'center' } },
+          { content: formatDuration(worker.total_hours), styles: { halign: 'center' } },
+          { content: worker.average_hourly_rate.toFixed(2), styles: { halign: 'right' } },
+          { content: formatCurrency(worker.total_cost), styles: { halign: 'right' } }
+        ]);
+      });
+    });
+  }
 
   // Subtotal row
   tableData.push([
@@ -484,18 +503,37 @@ export const exportProjectPayrollToPDF = async (
     ]
   ];
 
-  project.workers.forEach((worker, idx) => {
-    tableData.push([
-      { content: (idx + 1).toString(), styles: { halign: 'center' } },
-      { content: `${worker.worker_name}\n${worker.worker_code}`, styles: { fontSize: 8 } },
-      { content: worker.total_days.toString(), styles: { halign: 'center' } },
-      { content: formatDuration(worker.total_regular_hours), styles: { halign: 'center' } },
-      { content: worker.total_overtime_hours > 0 ? formatDuration(worker.total_overtime_hours) : '-', styles: { halign: 'center' } },
-      { content: formatDuration(worker.total_hours), styles: { halign: 'center' } },
-      { content: worker.average_hourly_rate.toFixed(2), styles: { halign: 'right' } },
-      { content: formatCurrency(worker.total_cost), styles: { halign: 'right' } }
-    ]);
-  });
+  // NEW: Iterate through requisitions and their workers
+  let workerIndex = 0;
+  if (project.requisitions && project.requisitions.length > 0) {
+    project.requisitions.forEach((requisition) => {
+      // Add requisition header row
+      tableData.push([
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: `${requisition.requisition_code} - ${requisition.work_description}`, styles: { fillColor: [235, 240, 255], fontStyle: 'bold', fontSize: 8 } },
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: '', styles: { fillColor: [235, 240, 255] } },
+        { content: '', styles: { fillColor: [235, 240, 255] } }
+      ]);
+
+      requisition.workers.forEach((worker) => {
+        workerIndex++;
+        tableData.push([
+          { content: workerIndex.toString(), styles: { halign: 'center' } },
+          { content: `${worker.worker_name}\n${worker.worker_code}`, styles: { fontSize: 8 } },
+          { content: worker.total_days.toString(), styles: { halign: 'center' } },
+          { content: formatDuration(worker.total_regular_hours), styles: { halign: 'center' } },
+          { content: worker.total_overtime_hours > 0 ? formatDuration(worker.total_overtime_hours) : '-', styles: { halign: 'center' } },
+          { content: formatDuration(worker.total_hours), styles: { halign: 'center' } },
+          { content: worker.average_hourly_rate.toFixed(2), styles: { halign: 'right' } },
+          { content: formatCurrency(worker.total_cost), styles: { halign: 'right' } }
+        ]);
+      });
+    });
+  }
 
   // Total row
   tableData.push([

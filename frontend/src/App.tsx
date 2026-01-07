@@ -89,7 +89,6 @@ const DispatchMaterials = lazy(() => import('@/roles/production-manager/pages/Di
 const MaterialsCatalogPage = lazy(() => import('@/roles/production-manager/pages/MaterialsCatalogPage'));
 const StockOutPage = lazy(() => import('@/roles/production-manager/pages/StockOutPage'));
 const StockInPage = lazy(() => import('@/roles/production-manager/pages/StockInPage'));
-const M2StoreReports = lazy(() => import('@/roles/production-manager/pages/M2StoreReports'));
 const ReturnableAssets = lazy(() => import('@/roles/production-manager/pages/ReturnableAssets'));
 const AssetStockIn = lazy(() => import('@/roles/production-manager/pages/AssetStockIn'));
 const AssetDispatch = lazy(() => import('@/roles/production-manager/pages/AssetDispatch'));
@@ -1145,11 +1144,6 @@ function App() {
             <Route path="m2-store/dispatch" element={
               <ProductionManagerRoute>
                 <DispatchMaterials />
-              </ProductionManagerRoute>
-            } />
-            <Route path="m2-store/reports" element={
-              <ProductionManagerRoute>
-                <M2StoreReports />
               </ProductionManagerRoute>
             } />
             {/* Returnable Assets - Old page (kept for compatibility) */}

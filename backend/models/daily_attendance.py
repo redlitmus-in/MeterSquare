@@ -87,7 +87,7 @@ class DailyAttendance(db.Model):
             # Subtract break time
             total_minutes -= (self.break_duration_minutes or 0)
 
-            self.total_hours = round(total_minutes / 60, 2)
+            self.total_hours = round(total_minutes / 60, 2) if total_minutes >= 0 else 0.0
 
             # Calculate regular and overtime (8 hours is regular)
             if self.total_hours > 8:
@@ -95,17 +95,20 @@ class DailyAttendance(db.Model):
                 self.overtime_hours = round(self.total_hours - 8, 2)
             else:
                 self.regular_hours = self.total_hours
-                self.overtime_hours = 0
+                self.overtime_hours = 0.0
 
-            # Calculate cost
-            regular_cost = self.regular_hours * self.hourly_rate
-            overtime_cost = self.overtime_hours * self.hourly_rate * self.overtime_rate_multiplier
+            # Calculate cost (with null safety)
+            hourly_rate = float(self.hourly_rate) if self.hourly_rate is not None else 0.0
+            overtime_multiplier = float(self.overtime_rate_multiplier) if self.overtime_rate_multiplier is not None else 1.5
+
+            regular_cost = (self.regular_hours or 0.0) * hourly_rate
+            overtime_cost = (self.overtime_hours or 0.0) * hourly_rate * overtime_multiplier
             self.total_cost = round(regular_cost + overtime_cost, 2)
         elif self.is_absent:
-            self.total_hours = 0
-            self.regular_hours = 0
-            self.overtime_hours = 0
-            self.total_cost = 0
+            self.total_hours = 0.0
+            self.regular_hours = 0.0
+            self.overtime_hours = 0.0
+            self.total_cost = 0.0
 
     def to_dict(self):
         """Serialize attendance to dictionary for JSON responses"""

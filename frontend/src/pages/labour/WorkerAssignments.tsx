@@ -162,11 +162,23 @@ const WorkerAssignments: React.FC = () => {
   };
 
   const toggleWorkerSelection = (workerId: number) => {
-    setSelectedWorkerIds(prev =>
-      prev.includes(workerId)
-        ? prev.filter(id => id !== workerId)
-        : [...prev, workerId]
-    );
+    setSelectedWorkerIds(prev => {
+      const isCurrentlySelected = prev.includes(workerId);
+
+      // If deselecting, always allow
+      if (isCurrentlySelected) {
+        return prev.filter(id => id !== workerId);
+      }
+
+      // If selecting, check if we've reached the limit
+      if (selectedRequisition && prev.length >= selectedRequisition.workers_count) {
+        showError(`Cannot select more than ${selectedRequisition.workers_count} workers for this requisition`);
+        return prev;
+      }
+
+      // Add to selection
+      return [...prev, workerId];
+    });
   };
 
   // Show confirmation modal before assigning
@@ -175,6 +187,13 @@ const WorkerAssignments: React.FC = () => {
       showError('Please select at least one worker');
       return;
     }
+
+    // Check if exact number of workers is selected
+    if (selectedWorkerIds.length !== selectedRequisition.workers_count) {
+      showError(`Please select exactly ${selectedRequisition.workers_count} workers (currently selected: ${selectedWorkerIds.length})`);
+      return;
+    }
+
     setShowConfirmModal(true);
   };
 
@@ -484,13 +503,14 @@ const WorkerAssignments: React.FC = () => {
                       {availableWorkers.map((worker) => {
                         const isAlreadyAssigned = worker.is_assigned || false;
                         const isSelected = selectedWorkerIds.includes(worker.worker_id);
-                        const canSelect = !isAlreadyAssigned;
+                        const limitReached = selectedRequisition && selectedWorkerIds.length >= selectedRequisition.workers_count && !isSelected;
+                        const canSelect = !isAlreadyAssigned && !limitReached;
 
                         return (
                           <div
                             key={worker.worker_id}
                             onClick={() => {
-                              if (!canSelect) {
+                              if (isAlreadyAssigned) {
                                 const availableDate = worker.assignment?.available_from
                                   ? ` Available from ${new Date(worker.assignment.available_from).toLocaleDateString()}`
                                   : '';
@@ -500,7 +520,7 @@ const WorkerAssignments: React.FC = () => {
                               }
                             }}
                             className={`p-3 rounded-lg border transition-colors ${
-                              isAlreadyAssigned
+                              isAlreadyAssigned || limitReached
                                 ? 'border-gray-300 bg-gray-50 cursor-not-allowed opacity-60'
                                 : isSelected
                                 ? 'border-purple-500 bg-purple-50 cursor-pointer'
@@ -657,8 +677,16 @@ const WorkerAssignments: React.FC = () => {
               {/* Footer */}
               <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-200">
                 <div className="text-sm text-gray-600">
-                  <p>
-                    Selected: <span className="font-medium">{selectedWorkerIds.length}</span> / {selectedRequisition.workers_count}
+                  <p className="flex items-center gap-2">
+                    Selected: <span className={`font-medium ${selectedWorkerIds.length === selectedRequisition.workers_count ? 'text-green-600' : selectedWorkerIds.length > selectedRequisition.workers_count ? 'text-red-600' : 'text-gray-900'}`}>
+                      {selectedWorkerIds.length}
+                    </span> / {selectedRequisition.workers_count}
+                    {selectedWorkerIds.length === selectedRequisition.workers_count && (
+                      <span className="text-xs text-green-600">✓ Ready</span>
+                    )}
+                    {selectedWorkerIds.length > selectedRequisition.workers_count && (
+                      <span className="text-xs text-red-600">Too many!</span>
+                    )}
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {availableWorkers.filter(w => !w.is_assigned).length} available of {availableWorkers.length} matching workers
@@ -673,8 +701,8 @@ const WorkerAssignments: React.FC = () => {
                   </button>
                   <button
                     onClick={handleShowConfirmation}
-                    disabled={selectedWorkerIds.length === 0 || assigning}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                    disabled={selectedWorkerIds.length === 0 || selectedWorkerIds.length !== selectedRequisition.workers_count || assigning}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Assign Selected
                   </button>

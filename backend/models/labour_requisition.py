@@ -64,7 +64,7 @@ class LabourRequisition(db.Model):
     # Relationships
     project = db.relationship('Project', backref='labour_requisitions', lazy='joined')
     requested_by = db.relationship('User', foreign_keys=[requested_by_user_id], lazy='joined')
-    arrivals = db.relationship('LabourArrival', backref='requisition', lazy='dynamic')
+    arrivals = db.relationship('LabourArrival', back_populates='requisition', lazy='dynamic')
     assignments = db.relationship('WorkerAssignment', backref='requisition', lazy='dynamic')
 
     def to_dict(self):

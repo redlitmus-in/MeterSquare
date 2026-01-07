@@ -103,7 +103,12 @@ const ArrivalConfirmation: React.FC = () => {
     const result = await labourService.confirmArrival(arrivalId, now);
     if (result.success) {
       showSuccess(`${workerName} marked as arrived at ${now}`);
-      fetchArrivals();
+      // Optimistic UI update - update state directly without refreshing
+      setArrivals(prev => prev.map(arrival =>
+        arrival.arrival_id === arrivalId
+          ? { ...arrival, arrival_status: 'confirmed', arrival_time: now }
+          : arrival
+      ));
     } else {
       showError(result.message || 'Failed to confirm arrival');
     }
@@ -115,7 +120,12 @@ const ArrivalConfirmation: React.FC = () => {
     const result = await labourService.markNoShow(arrivalId);
     if (result.success) {
       showSuccess(`${workerName} marked as no-show`);
-      fetchArrivals();
+      // Optimistic UI update - update state directly without refreshing
+      setArrivals(prev => prev.map(arrival =>
+        arrival.arrival_id === arrivalId
+          ? { ...arrival, arrival_status: 'no_show' }
+          : arrival
+      ));
     } else {
       showError(result.message || 'Failed to mark no-show');
     }
@@ -142,7 +152,12 @@ const ArrivalConfirmation: React.FC = () => {
     if (result.success) {
       setClockOutModal({ isOpen: false, arrivalId: null, workerName: '' });
       showSuccess(`${workerName} clocked out at ${now}`);
-      fetchArrivals();
+      // Optimistic UI update - update state directly without refreshing
+      setArrivals(prev => prev.map(arrival =>
+        arrival.arrival_id === arrivalId
+          ? { ...arrival, arrival_status: 'departed', departure_time: now }
+          : arrival
+      ));
     } else {
       showError(result.message || 'Failed to clock out');
       // Keep modal open on failure so user can retry
@@ -190,6 +205,19 @@ const ArrivalConfirmation: React.FC = () => {
       ? `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
       : (parts[0]?.[0] || 'W').toUpperCase();
   };
+
+  // Group arrivals by requisition for organized display
+  const groupedArrivals = arrivals.reduce((groups, arrival) => {
+    const reqId = arrival.requisition_id;
+    if (!groups[reqId]) {
+      groups[reqId] = {
+        requisition: arrival.requisition,
+        arrivals: []
+      };
+    }
+    groups[reqId].arrivals.push(arrival);
+    return groups;
+  }, {} as Record<number, { requisition: any; arrivals: LabourArrival[] }>);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -287,136 +315,207 @@ const ArrivalConfirmation: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {arrivals.map((arrival) => {
-            const workerName = arrival.worker?.full_name || arrival.worker_name || 'Unknown Worker';
-            const workerCode = arrival.worker?.worker_code || arrival.worker_code || '';
-            const isPending = arrival.arrival_status === 'assigned';
-
-            return (
-              <motion.div
-                key={arrival.arrival_id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`bg-white rounded-xl border-2 p-4 transition-all ${
-                  arrival.arrival_status === 'confirmed'
-                    ? 'border-green-200 bg-green-50/30'
-                    : arrival.arrival_status === 'no_show'
-                    ? 'border-red-200 bg-red-50/30'
-                    : 'border-gray-200 hover:border-green-300 hover:shadow-md'
-                }`}
-              >
-                {/* Worker Header */}
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    {/* Avatar */}
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold ${
-                      arrival.arrival_status === 'confirmed'
-                        ? 'bg-green-500'
-                        : arrival.arrival_status === 'no_show'
-                        ? 'bg-red-400'
-                        : 'bg-purple-500'
-                    }`}>
-                      {getInitials(workerName)}
-                    </div>
+        <div className="space-y-6">
+          {Object.entries(groupedArrivals).map(([reqId, group]) => (
+            <div key={reqId} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              {/* Requisition Header */}
+              {group.requisition && (
+                <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-b border-purple-200 px-4 py-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <div>
-                      <h3 className="font-semibold text-gray-900">{workerName}</h3>
-                      <p className="text-xs text-gray-500">{workerCode}</p>
+                      <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                        <span className="text-purple-600">{group.requisition.requisition_code}</span>
+                        <span className="text-gray-400">•</span>
+                        <span>{group.requisition.work_description}</span>
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        <span className="font-medium">{group.requisition.skill_required}</span>
+                        {group.requisition.site_name && (
+                          <>
+                            <span className="mx-2">•</span>
+                            <MapPinIcon className="w-4 h-4 inline text-gray-400" />
+                            <span className="ml-1">{group.requisition.site_name}</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                    <div className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full border border-purple-200">
+                      <strong>{group.arrivals.length}</strong> / {group.requisition.workers_count} Workers
                     </div>
                   </div>
-                  {getStatusBadge(arrival.arrival_status)}
                 </div>
+              )}
 
-                {/* Worker Details */}
-                <div className="space-y-2 text-sm mb-4">
-                  {arrival.worker?.phone && (
-                    <div className="flex items-center gap-2 text-gray-600">
-                      <PhoneIcon className="w-4 h-4 text-gray-400" />
-                      <span>{arrival.worker.phone}</span>
-                    </div>
-                  )}
+              {/* Workers Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Worker</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Phone</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Skills</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Rate</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Time</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {group.arrivals.map((arrival) => {
+                  const workerName = arrival.worker?.full_name || arrival.worker_name || 'Unknown Worker';
+                  const workerCode = arrival.worker?.worker_code || arrival.worker_code || '';
+                  const isPending = arrival.arrival_status === 'assigned';
 
-                  {/* Skills */}
-                  {arrival.worker?.skills && arrival.worker.skills.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {arrival.worker.skills.map((skill, idx) => (
-                        <span key={idx} className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
-                          {skill}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Rate */}
-                  {arrival.worker?.hourly_rate && (
-                    <p className="text-xs text-gray-500">
-                      Rate: AED {arrival.worker.hourly_rate}/hr
-                    </p>
-                  )}
-                </div>
-
-                {/* Time Info - for confirmed/departed workers */}
-                {arrival.arrival_time && (arrival.arrival_status === 'confirmed' || arrival.arrival_status === 'departed') && (
-                  <div className="mb-3 space-y-2">
-                    <div className="p-2 bg-green-100 rounded-lg text-sm text-green-800 flex items-center gap-2">
-                      <ClockIcon className="w-4 h-4" />
-                      In: <span className="font-semibold">{arrival.arrival_time}</span>
-                    </div>
-                    {arrival.departure_time && (
-                      <div className="p-2 bg-blue-100 rounded-lg text-sm text-blue-800 flex items-center gap-2">
-                        <ArrowRightOnRectangleIcon className="w-4 h-4" />
-                        Out: <span className="font-semibold">{arrival.departure_time}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Action Buttons - For pending (Arrived/No Show) */}
-                {isPending && (
-                  <div className="flex gap-2 pt-3 border-t border-gray-100">
-                    <button
-                      onClick={() => handleConfirm(arrival.arrival_id, workerName)}
-                      disabled={processing === arrival.arrival_id}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                  return (
+                    <motion.tr
+                      key={arrival.arrival_id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className={`transition-colors ${
+                        arrival.arrival_status === 'confirmed'
+                          ? 'bg-green-50/50'
+                          : arrival.arrival_status === 'no_show'
+                          ? 'bg-red-50/50'
+                          : arrival.arrival_status === 'departed'
+                          ? 'bg-blue-50/30'
+                          : 'hover:bg-gray-50'
+                      }`}
                     >
-                      {processing === arrival.arrival_id ? (
-                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                      ) : (
-                        <CheckCircleIcon className="w-5 h-5" />
-                      )}
-                      Arrived
-                    </button>
-                    <button
-                      onClick={() => handleNoShow(arrival.arrival_id, workerName)}
-                      disabled={processing === arrival.arrival_id}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 border-2 border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
-                    >
-                      <XCircleIcon className="w-5 h-5" />
-                      No Show
-                    </button>
-                  </div>
-                )}
+                      {/* Worker Column */}
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm ${
+                            arrival.arrival_status === 'confirmed'
+                              ? 'bg-green-500'
+                              : arrival.arrival_status === 'no_show'
+                              ? 'bg-red-400'
+                              : arrival.arrival_status === 'departed'
+                              ? 'bg-blue-500'
+                              : 'bg-purple-500'
+                          }`}>
+                            {getInitials(workerName)}
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900 text-sm">{workerName}</p>
+                            <p className="text-xs text-gray-500">{workerCode}</p>
+                          </div>
+                        </div>
+                      </td>
 
-                {/* Clock Out Button - For confirmed workers (currently working) */}
-                {arrival.arrival_status === 'confirmed' && (
-                  <div className="pt-3 border-t border-gray-100">
-                    <button
-                      onClick={() => handleDeparture(arrival.arrival_id, workerName)}
-                      disabled={processing === arrival.arrival_id}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                    >
-                      {processing === arrival.arrival_id ? (
-                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                      ) : (
-                        <ArrowRightOnRectangleIcon className="w-5 h-5" />
-                      )}
-                      Clock Out
-                    </button>
-                  </div>
-                )}
-              </motion.div>
-            );
-          })}
+                      {/* Phone Column */}
+                      <td className="px-4 py-4">
+                        {arrival.worker?.phone ? (
+                          <div className="flex items-center gap-2 text-sm text-gray-600">
+                            <PhoneIcon className="w-4 h-4 text-gray-400" />
+                            <span>{arrival.worker.phone}</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+
+                      {/* Skills Column */}
+                      <td className="px-4 py-4">
+                        {arrival.worker?.skills && arrival.worker.skills.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 max-w-xs">
+                            {arrival.worker.skills.map((skill, idx) => (
+                              <span key={idx} className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full whitespace-nowrap">
+                                {skill}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+
+                      {/* Rate Column */}
+                      <td className="px-4 py-4">
+                        {arrival.worker?.hourly_rate ? (
+                          <span className="text-sm text-gray-700">AED {arrival.worker.hourly_rate}/hr</span>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+
+                      {/* Status Column */}
+                      <td className="px-4 py-4">
+                        {getStatusBadge(arrival.arrival_status)}
+                      </td>
+
+                      {/* Time Column */}
+                      <td className="px-4 py-4">
+                        {arrival.arrival_time && (arrival.arrival_status === 'confirmed' || arrival.arrival_status === 'departed') ? (
+                          <div className="space-y-1 text-sm">
+                            <div className="flex items-center gap-1 text-green-700">
+                              <ClockIcon className="w-4 h-4" />
+                              <span className="font-medium">{arrival.arrival_time}</span>
+                            </div>
+                            {arrival.departure_time && (
+                              <div className="flex items-center gap-1 text-blue-700">
+                                <ArrowRightOnRectangleIcon className="w-4 h-4" />
+                                <span className="font-medium">{arrival.departure_time}</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+
+                      {/* Actions Column */}
+                      <td className="px-4 py-4">
+                        {isPending ? (
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleConfirm(arrival.arrival_id, workerName)}
+                              disabled={processing === arrival.arrival_id}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                              title="Mark as arrived"
+                            >
+                              {processing === arrival.arrival_id ? (
+                                <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                              ) : (
+                                <CheckCircleIcon className="w-4 h-4" />
+                              )}
+                              Arrived
+                            </button>
+                            <button
+                              onClick={() => handleNoShow(arrival.arrival_id, workerName)}
+                              disabled={processing === arrival.arrival_id}
+                              className="flex items-center gap-1 px-3 py-1.5 border border-red-300 text-red-600 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                              title="Mark as no show"
+                            >
+                              <XCircleIcon className="w-4 h-4" />
+                              No Show
+                            </button>
+                          </div>
+                        ) : arrival.arrival_status === 'confirmed' ? (
+                          <button
+                            onClick={() => handleDeparture(arrival.arrival_id, workerName)}
+                            disabled={processing === arrival.arrival_id}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                            title="Clock out worker"
+                          >
+                            {processing === arrival.arrival_id ? (
+                              <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                            ) : (
+                              <ArrowRightOnRectangleIcon className="w-4 h-4" />
+                            )}
+                            Clock Out
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+                    </motion.tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

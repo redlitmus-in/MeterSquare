@@ -42,6 +42,7 @@ class LabourArrival(db.Model):
     # Relationships
     project = db.relationship('Project', backref='labour_arrivals', lazy='joined')
     confirmed_by = db.relationship('User', foreign_keys=[confirmed_by_user_id], lazy='joined')
+    requisition = db.relationship('LabourRequisition', foreign_keys=[requisition_id], back_populates='arrivals', lazy='joined')
 
     def to_dict(self):
         """Serialize arrival to dictionary for JSON responses"""
@@ -76,6 +77,16 @@ class LabourArrival(db.Model):
             'hourly_rate': float(self.worker.hourly_rate) if self.worker.hourly_rate else 0.0
         } if self.worker else None
 
+        # Include requisition details for grouping in UI
+        requisition_data = {
+            'requisition_id': self.requisition.requisition_id,
+            'requisition_code': self.requisition.requisition_code,
+            'work_description': self.requisition.work_description,
+            'skill_required': self.requisition.skill_required,
+            'workers_count': self.requisition.workers_count,
+            'site_name': self.requisition.site_name
+        } if self.requisition else None
+
         return {
             'arrival_id': self.arrival_id,
             'requisition_id': self.requisition_id,
@@ -86,7 +97,8 @@ class LabourArrival(db.Model):
             'departure_time': self.departure_time,
             'departed_at': self.departed_at.isoformat() if self.departed_at else None,
             'confirmed_at': self.confirmed_at.isoformat() if self.confirmed_at else None,
-            'worker': worker_data
+            'worker': worker_data,
+            'requisition': requisition_data
         }
 
     def __repr__(self):

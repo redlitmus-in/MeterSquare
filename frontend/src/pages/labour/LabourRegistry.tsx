@@ -24,6 +24,7 @@ const LabourRegistry: React.FC = () => {
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('active');
+  const [skillFilter, setSkillFilter] = useState<string>('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
   const [formData, setFormData] = useState<CreateWorkerData>({
@@ -40,6 +41,7 @@ const LabourRegistry: React.FC = () => {
     notes: ''
   });
   const [skillInput, setSkillInput] = useState('');
+  const [countryCode, setCountryCode] = useState('+971'); // Default UAE
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalWorkers, setTotalWorkers] = useState(0);
@@ -59,6 +61,7 @@ const LabourRegistry: React.FC = () => {
     setError(null);
     const result = await labourService.getWorkers({
       status: statusFilter,
+      skill: skillFilter || undefined,
       search: searchTerm,
       page: currentPage,
       per_page: ITEMS_PER_PAGE
@@ -75,7 +78,7 @@ const LabourRegistry: React.FC = () => {
       setWorkers([]);
     }
     setLoading(false);
-  }, [statusFilter, searchTerm, currentPage]);
+  }, [statusFilter, skillFilter, searchTerm, currentPage]);
 
   useEffect(() => {
     fetchWorkers();
@@ -100,8 +103,16 @@ const LabourRegistry: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Combine country code with phone number
+    const fullPhone = formData.phone ? `${countryCode}${formData.phone}` : '';
+    const submissionData = {
+      ...formData,
+      phone: fullPhone
+    };
+
     if (editingWorker) {
-      const result = await labourService.updateWorker(editingWorker.worker_id, formData);
+      const result = await labourService.updateWorker(editingWorker.worker_id, submissionData);
       if (result.success) {
         showSuccess('Worker updated successfully');
         setShowAddModal(false);
@@ -111,7 +122,7 @@ const LabourRegistry: React.FC = () => {
         showError(result.message || 'Failed to update worker');
       }
     } else {
-      const result = await labourService.createWorker(formData);
+      const result = await labourService.createWorker(submissionData);
       if (result.success) {
         showSuccess('Worker added successfully');
         setShowAddModal(false);
@@ -125,9 +136,29 @@ const LabourRegistry: React.FC = () => {
 
   const handleEdit = (worker: Worker) => {
     setEditingWorker(worker);
+
+    // Parse phone number to extract country code
+    let phoneNumber = worker.phone || '';
+    let detectedCountryCode = '+971'; // Default UAE
+
+    if (phoneNumber) {
+      // Remove all non-digits except +
+      const cleanPhone = phoneNumber.replace(/[^\d+]/g, '');
+
+      // Try to detect country code
+      for (const option of countryCodeOptions) {
+        if (cleanPhone.startsWith(option.code)) {
+          detectedCountryCode = option.code;
+          phoneNumber = cleanPhone.slice(option.code.length);
+          break;
+        }
+      }
+    }
+
+    setCountryCode(detectedCountryCode);
     setFormData({
       full_name: worker.full_name,
-      phone: worker.phone || '',
+      phone: phoneNumber,
       email: worker.email || '',
       hourly_rate: worker.hourly_rate,
       skills: worker.skills || [],
@@ -166,10 +197,21 @@ const LabourRegistry: React.FC = () => {
       id_number: '',
       notes: ''
     });
+    setCountryCode('+971'); // Reset to default UAE
     setEditingWorker(null);
   };
 
   const skillOptions = ['Mason', 'Carpenter', 'Helper', 'Electrician', 'Plumber', 'Welder', 'Painter', 'Fitter'];
+
+  const countryCodeOptions = [
+    { code: '+971', name: 'UAE', flag: '🇦🇪' },
+    { code: '+91', name: 'India', flag: '🇮🇳' },
+    { code: '+92', name: 'Pakistan', flag: '🇵🇰' },
+    { code: '+880', name: 'Bangladesh', flag: '🇧🇩' },
+    { code: '+63', name: 'Philippines', flag: '🇵🇭' },
+    { code: '+94', name: 'Sri Lanka', flag: '🇱🇰' },
+    { code: '+977', name: 'Nepal', flag: '🇳🇵' },
+  ];
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -202,6 +244,19 @@ const LabourRegistry: React.FC = () => {
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
           <option value="on_leave">On Leave</option>
+        </select>
+        <select
+          value={skillFilter}
+          onChange={(e) => {
+            setSkillFilter(e.target.value);
+            setCurrentPage(1); // Reset to first page on filter change
+          }}
+          className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+        >
+          <option value="">All Skills</option>
+          {skillOptions.map((skill) => (
+            <option key={skill} value={skill}>{skill}</option>
+          ))}
         </select>
         <button
           onClick={() => {
@@ -434,13 +489,34 @@ const LabourRegistry: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                  <input
-                    type="tel"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone (for WhatsApp)</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={countryCode}
+                      onChange={(e) => setCountryCode(e.target.value)}
+                      className="w-32 px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-sm"
+                    >
+                      {countryCodeOptions.map((option) => (
+                        <option key={option.code} value={option.code}>
+                          {option.flag} {option.code}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="tel"
+                      placeholder="501234567"
+                      value={formData.phone}
+                      onChange={(e) => {
+                        // Only allow digits
+                        const value = e.target.value.replace(/\D/g, '');
+                        setFormData({ ...formData, phone: value });
+                      }}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Full number: {countryCode}{formData.phone || 'XXXXXXXXX'}
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Hourly Rate (AED) *</label>

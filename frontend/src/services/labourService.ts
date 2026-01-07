@@ -127,6 +127,14 @@ export interface LabourArrival {
     skills: string[];
     hourly_rate: number;
   };
+  requisition?: {
+    requisition_id: number;
+    requisition_code: string;
+    work_description: string;
+    skill_required: string;
+    workers_count: number;
+    site_name: string;
+  };
 }
 
 export interface DailyAttendance {
@@ -198,6 +206,21 @@ export interface PayrollWorkerGroup {
   total_cost: number;
 }
 
+export interface PayrollRequisitionGroup {
+  requisition_id: number | null;
+  requisition_code: string;
+  work_description: string;
+  skill_required: string;
+  site_name: string | null;
+  workers_count: number | null;
+  total_hours: number;
+  total_regular_hours: number;
+  total_overtime_hours: number;
+  total_cost: number;
+  total_days: number;
+  workers: PayrollWorkerGroup[];
+}
+
 export interface PayrollProjectGroup {
   project_id: number;
   project_name: string;
@@ -208,7 +231,7 @@ export interface PayrollProjectGroup {
   total_cost: number;
   total_days: number;
   worker_count: number;
-  workers: PayrollWorkerGroup[];
+  requisitions: PayrollRequisitionGroup[];
 }
 
 export interface DashboardStats {

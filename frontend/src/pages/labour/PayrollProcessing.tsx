@@ -4,13 +4,12 @@
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { labourService, DailyAttendance, PayrollSummary, PayrollProjectGroup } from '@/services/labourService';
+import { labourService, PayrollSummary, PayrollProjectGroup } from '@/services/labourService';
 import { apiClient } from '@/api/config';
 import { showSuccess, showError, showLoading, dismissToast } from '@/utils/toastHelper';
 import { exportPayrollToPDF, exportProjectPayrollToPDF } from '@/utils/payrollPdfExport';
 import {
   BanknotesIcon,
-  ClockIcon,
   CalendarDaysIcon,
   BuildingOfficeIcon,
   ChevronDownIcon,
@@ -30,9 +29,7 @@ interface Project {
 const PayrollProcessing: React.FC = () => {
   const [summary, setSummary] = useState<PayrollSummary[]>([]);
   const [groupedByProject, setGroupedByProject] = useState<PayrollProjectGroup[]>([]);
-  const [attendance, setAttendance] = useState<DailyAttendance[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'summary' | 'details'>('summary');
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
 
@@ -109,36 +106,22 @@ const PayrollProcessing: React.FC = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    if (view === 'summary') {
-      const result = await labourService.getPayrollSummary({
-        start_date: startDate,
-        end_date: endDate,
-        project_id: projectId
-      });
-      if (result.success) {
-        setSummary(result.data);
-        setGroupedByProject(result.grouped_by_project || []);
-        // Auto-expand all projects on load
-        if (result.grouped_by_project && result.grouped_by_project.length > 0) {
-          setExpandedProjects(new Set(result.grouped_by_project.map(p => p.project_id)));
-        }
-      } else {
-        showError(result.message || 'Failed to fetch payroll summary');
-        setSummary([]);
-        setGroupedByProject([]);
+    const result = await labourService.getPayrollSummary({
+      start_date: startDate,
+      end_date: endDate,
+      project_id: projectId
+    });
+    if (result.success) {
+      setSummary(result.data);
+      setGroupedByProject(result.grouped_by_project || []);
+      // Auto-expand all projects on load
+      if (result.grouped_by_project && result.grouped_by_project.length > 0) {
+        setExpandedProjects(new Set(result.grouped_by_project.map(p => p.project_id)));
       }
     } else {
-      const result = await labourService.getLockedForPayroll({
-        start_date: startDate,
-        end_date: endDate,
-        project_id: projectId
-      });
-      if (result.success) {
-        setAttendance(result.data);
-      } else {
-        showError(result.message || 'Failed to fetch attendance');
-        setAttendance([]);
-      }
+      showError(result.message || 'Failed to fetch payroll summary');
+      setSummary([]);
+      setGroupedByProject([]);
     }
     setLoading(false);
   };
@@ -149,16 +132,7 @@ const PayrollProcessing: React.FC = () => {
 
   useEffect(() => {
     fetchData();
-  }, [view, startDate, endDate, projectId]);
-
-  const formatDate = (isoString: string) => {
-    return new Date(isoString).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  const formatTime = (isoString: string | undefined) => {
-    if (!isoString) return '-';
-    return new Date(isoString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  };
+  }, [startDate, endDate, projectId]);
 
   // Smart duration format: show minutes if < 1 hour, otherwise show hours
   const formatDuration = (hours: number | undefined | null) => {
@@ -245,7 +219,7 @@ const PayrollProcessing: React.FC = () => {
           <FunnelIcon className="w-5 h-5 text-gray-500" />
           <span className="font-medium text-gray-700">Filters</span>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {/* Start Date */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -305,33 +279,6 @@ const PayrollProcessing: React.FC = () => {
             )}
           </div>
 
-          {/* View Toggle */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">View</label>
-            <div className="flex rounded-lg border border-gray-300 overflow-hidden">
-              <button
-                onClick={() => setView('summary')}
-                className={`flex-1 px-3 py-2 text-sm font-medium ${
-                  view === 'summary'
-                    ? 'bg-teal-600 text-white'
-                    : 'bg-white text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                Summary
-              </button>
-              <button
-                onClick={() => setView('details')}
-                className={`flex-1 px-3 py-2 text-sm font-medium ${
-                  view === 'details'
-                    ? 'bg-teal-600 text-white'
-                    : 'bg-white text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                Details
-              </button>
-            </div>
-          </div>
-
           {/* Export All PDF Button */}
           <div className="flex items-end">
             <button
@@ -352,9 +299,7 @@ const PayrollProcessing: React.FC = () => {
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600"></div>
         </div>
-      ) : view === 'summary' ? (
-        // Summary View - Grouped by Project with Collapsible Sections
-        groupedByProject.length === 0 ? (
+      ) : groupedByProject.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
             <BanknotesIcon className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No payroll data</h3>
@@ -401,7 +346,7 @@ const PayrollProcessing: React.FC = () => {
                   </div>
                 </button>
 
-                {/* Workers List - Collapsible Content */}
+                {/* Requisitions List - Collapsible Content */}
                 <AnimatePresence>
                   {expandedProjects.has(project.project_id) && (
                     <motion.div
@@ -411,21 +356,50 @@ const PayrollProcessing: React.FC = () => {
                       transition={{ duration: 0.2 }}
                       className="overflow-hidden"
                     >
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase w-10"></th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Worker</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Regular</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Overtime</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total Hrs</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
-                            <th className="px-5 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cost</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {project.workers.map((worker) => {
+                      {/* Iterate over requisitions */}
+                      {project.requisitions && project.requisitions.map((requisition) => (
+                        <div key={requisition.requisition_id || 'no_req'} className="border-t border-gray-200">
+                          {/* Requisition Header */}
+                          <div className="bg-gradient-to-r from-purple-50 to-blue-50 px-5 py-3 border-b border-purple-200">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-semibold text-gray-900">
+                                  <span className="text-purple-600">{requisition.requisition_code}</span>
+                                  <span className="mx-2 text-gray-400">•</span>
+                                  <span>{requisition.work_description}</span>
+                                </p>
+                                <p className="text-sm text-gray-600 mt-1">
+                                  <span className="font-medium">{requisition.skill_required}</span>
+                                  {requisition.site_name && (
+                                    <>
+                                      <span className="mx-2">•</span>
+                                      <span>{requisition.site_name}</span>
+                                    </>
+                                  )}
+                                </p>
+                              </div>
+                              <div className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full border border-purple-200">
+                                <strong>{requisition.workers.length}</strong> / {requisition.workers_count || requisition.workers.length} Workers
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Workers Table for this Requisition */}
+                          <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase w-10"></th>
+                                <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Worker</th>
+                                <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days</th>
+                                <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Regular</th>
+                                <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Overtime</th>
+                                <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total Hrs</th>
+                                <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
+                                <th className="px-5 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cost</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {requisition.workers.map((worker) => {
                             const workerKey = `${project.project_id}-${worker.worker_id}`;
                             const isExpanded = expandedWorkers.has(workerKey);
                             return (
@@ -499,10 +473,12 @@ const PayrollProcessing: React.FC = () => {
                                   )}
                                 </AnimatePresence>
                               </React.Fragment>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ))}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -533,75 +509,11 @@ const PayrollProcessing: React.FC = () => {
             </div>
           </div>
         )
-      ) : (
-        // Details View
-        attendance.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-            <ClockIcon className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No attendance records</h3>
-            <p className="mt-1 text-sm text-gray-500">No locked attendance for the selected period.</p>
-          </div>
-        ) : (
-          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Worker</th>
-                  <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
-                  <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Clock In</th>
-                  <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Clock Out</th>
-                  <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
-                  <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
-                  <th className="px-5 py-3.5 text-right text-xs font-medium text-gray-500 uppercase">Cost</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {attendance.map((record) => (
-                  <motion.tr
-                    key={record.attendance_id}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="hover:bg-gray-50"
-                  >
-                    <td className="px-5 py-4 text-sm text-gray-900">
-                      {formatDate(record.attendance_date)}
-                    </td>
-                    <td className="px-5 py-4">
-                      <div>
-                        <p className="font-medium text-gray-900">{record.worker_name}</p>
-                        <p className="text-sm text-gray-500">{record.worker_code}</p>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 text-sm text-gray-600">
-                      {record.project_name || `#${record.project_id}`}
-                    </td>
-                    <td className="px-5 py-4 text-sm text-gray-600">
-                      {formatTime(record.clock_in_time)}
-                    </td>
-                    <td className="px-5 py-4 text-sm text-gray-600">
-                      {formatTime(record.clock_out_time)}
-                    </td>
-                    <td className="px-5 py-4 text-sm text-gray-900 font-medium">
-                      {formatDuration(record.total_hours)}
-                    </td>
-                    <td className="px-5 py-4 text-sm text-gray-600">
-                      AED {record.hourly_rate}/hr
-                    </td>
-                    <td className="px-5 py-4 text-sm text-right font-medium text-gray-900">
-                      AED {record.total_cost?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '-'}
-                    </td>
-                  </motion.tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
-      )}
+      }
 
       {/* Period Info */}
       <div className="mt-4 text-sm text-gray-500 text-center">
-        Showing {view === 'summary' ? 'payroll summary' : 'attendance details'} from {new Date(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} to {new Date(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+        Showing payroll summary from {new Date(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} to {new Date(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
       </div>
     </div>
   );
