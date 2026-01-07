@@ -31,6 +31,8 @@ interface RDNItem {
   condition: 'Good' | 'Damaged' | 'Defective';
   return_reason: string;
   material_return_id?: number;
+  processing_notes?: string;
+  processing_action?: string;
 }
 
 interface ReturnDeliveryNote {
@@ -175,6 +177,12 @@ const ReceiveReturns: React.FC = () => {
     const itemAction = itemActions.get(itemId);
     if (!itemAction) return;
 
+    // Validate notes for disposal action
+    if (itemAction.action === RETURN_ACTIONS.MARK_FOR_DISPOSAL && !itemAction.notes?.trim()) {
+      showError('Notes are mandatory for disposal action. Please provide a reason for disposal.');
+      return;
+    }
+
     // Set processing state for this item
     setItemActions((prev) => {
       const newMap = new Map(prev);
@@ -248,6 +256,17 @@ const ReceiveReturns: React.FC = () => {
   const handleConfirmReceipt = async () => {
     if (!selectedRDN) return;
 
+    // Validate notes for disposal actions
+    const unprocessedActions = Array.from(itemActions.values()).filter(item => !item.processed);
+    const disposalItemsWithoutNotes = unprocessedActions.filter(
+      item => item.action === RETURN_ACTIONS.MARK_FOR_DISPOSAL && !item.notes?.trim()
+    );
+
+    if (disposalItemsWithoutNotes.length > 0) {
+      showError('Notes are mandatory for disposal actions. Please provide notes for all items marked for disposal.');
+      return;
+    }
+
     setConfirming(true);
     try {
       // STEP 1: Confirm receipt (status: IN_TRANSIT → RECEIVED)
@@ -264,13 +283,11 @@ const ReceiveReturns: React.FC = () => {
       }
 
       // STEP 2: Process all unprocessed items with their actions using batch endpoint
-      const unprocessedItems = Array.from(itemActions.values())
-        .filter(item => !item.processed)
-        .map(item => ({
-          item_id: item.return_item_id,
-          action: item.action,
-          notes: item.notes || ''
-        }));
+      const unprocessedItems = unprocessedActions.map(item => ({
+        item_id: item.return_item_id,
+        action: item.action,
+        notes: item.notes || ''
+      }));
 
       if (unprocessedItems.length > 0) {
         const result = await apiClient.post(
@@ -532,37 +549,48 @@ const ReceiveReturns: React.FC = () => {
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="text-left text-gray-500 border-b border-gray-200">
-                              <th className="pb-2 font-medium">Material</th>
-                              <th className="pb-2 font-medium text-right">Quantity</th>
-                              <th className="pb-2 font-medium">Condition</th>
-                              <th className="pb-2 font-medium">Reason</th>
-                              {['RECEIVED', 'PARTIAL'].includes(rdn.status) && (
-                                <th className="pb-2 font-medium text-center">Status</th>
+                              <th className="pb-2 pr-1 font-medium">Material</th>
+                              <th className="pb-2 px-2 font-medium text-center w-24">Quantity</th>
+                              <th className="pb-2 px-2 font-medium text-center w-24">Condition</th>
+                              <th className="pb-2 px-2 font-medium">Reason</th>
+                              {['RECEIVED', 'PARTIAL', 'APPROVED'].includes(rdn.status) && (
+                                <th className="pb-2 px-2 font-medium text-center w-24">Status</th>
                               )}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
                             {rdn.items.map((item) => (
                               <tr key={item.return_item_id} className="hover:bg-white">
-                                <td className="py-2">
-                                  <p className="font-medium text-gray-900">{item.material_name}</p>
+                                <td className="py-2 pr-1">
+                                  <p className="font-medium text-gray-900 text-sm">{item.material_name}</p>
                                   <p className="text-xs text-gray-500">{item.material_code}</p>
                                 </td>
-                                <td className="py-2 text-right font-medium text-gray-900">
-                                  {item.quantity} {item.unit}
+                                <td className="py-2 px-2 text-center">
+                                  <span className="font-semibold text-gray-900">{item.quantity}</span>
+                                  <span className="text-gray-500 ml-1 text-xs">{item.unit}</span>
                                 </td>
-                                <td className="py-2">
-                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${CONDITION_COLORS[item.condition.toUpperCase()] || CONDITION_COLORS.GOOD}`}>
+                                <td className="py-2 px-2 text-center">
+                                  <span className={`px-2 py-1 rounded-full text-xs font-medium inline-block ${CONDITION_COLORS[item.condition.toUpperCase()] || CONDITION_COLORS.GOOD}`}>
                                     {item.condition}
                                   </span>
                                 </td>
-                                <td className="py-2 text-gray-600 text-xs">{item.return_reason || '-'}</td>
-                                {['RECEIVED', 'PARTIAL'].includes(rdn.status) && (
-                                  <td className="py-2 text-center">
+                                <td className="py-2 px-2">
+                                  <span className="text-gray-600 text-xs">
+                                    {item.processing_notes || item.return_reason || '-'}
+                                  </span>
+                                </td>
+                                {['RECEIVED', 'PARTIAL', 'APPROVED'].includes(rdn.status) && (
+                                  <td className="py-2 px-2 text-center">
                                     {item.material_return_id ? (
-                                      <span className="text-xs text-green-600 font-medium">Processed</span>
+                                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                                        <CheckCircleIcon className="w-3 h-3" />
+                                        Processed
+                                      </span>
                                     ) : (
-                                      <span className="text-xs text-orange-600 font-medium">Pending</span>
+                                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-medium">
+                                        <ClockIcon className="w-3 h-3" />
+                                        Pending
+                                      </span>
                                     )}
                                   </td>
                                 )}
@@ -747,15 +775,24 @@ const ReceiveReturns: React.FC = () => {
                             {needsNotes && (
                               <div className="mt-3">
                                 <label className="block text-xs font-medium text-gray-700 mb-1">
-                                  Notes (Optional)
+                                  Notes {currentAction === RETURN_ACTIONS.MARK_FOR_DISPOSAL ? (
+                                    <span className="text-red-600">*</span>
+                                  ) : (
+                                    <span className="text-gray-500">(Optional)</span>
+                                  )}
                                 </label>
                                 <textarea
                                   value={itemAction?.notes || ''}
                                   onChange={(e) => updateItemNotes(item.return_item_id, e.target.value)}
                                   rows={2}
                                   disabled={isProcessing}
-                                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
-                                  placeholder="Additional notes for this action..."
+                                  required={currentAction === RETURN_ACTIONS.MARK_FOR_DISPOSAL}
+                                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 ${
+                                    currentAction === RETURN_ACTIONS.MARK_FOR_DISPOSAL ? 'border-red-300' : 'border-gray-300'
+                                  }`}
+                                  placeholder={currentAction === RETURN_ACTIONS.MARK_FOR_DISPOSAL
+                                    ? "Required: Explain why this material should be disposed..."
+                                    : "Additional notes for this action..."}
                                 />
                               </div>
                             )}

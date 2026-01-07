@@ -114,6 +114,7 @@ const MaterialReceipts: React.FC = () => {
 
   const [deliveryNotes, setDeliveryNotes] = useState<DeliveryNote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [activeTab, setActiveTab] = useState<'pending' | 'return' | 'history'>('pending');
   const [returnSubTab, setReturnSubTab] = useState<'returnable' | 'rdns'>('returnable');
   const [historySubTab, setHistorySubTab] = useState<'returns' | 'received'>('returns');
@@ -298,18 +299,55 @@ const MaterialReceipts: React.FC = () => {
   const handleConfirmReceipt = async () => {
     if (!selectedNote) return;
 
+    const deliveryNoteId = selectedNote.delivery_note_id;
+    const currentUser = 'Current User'; // You can get this from auth context if available
+
     try {
       setConfirming(true);
-      await apiClient.post(`/delivery_note/${selectedNote.delivery_note_id}/confirm`, {
-        receiver_notes: receiverNotes
-      });
-      showSuccess('Delivery confirmed successfully!');
+
+      // Optimistic UI update - immediately update the state
+      setDeliveryNotes(prevNotes =>
+        prevNotes.map(note =>
+          note.delivery_note_id === deliveryNoteId
+            ? {
+                ...note,
+                status: 'DELIVERED',
+                received_at: new Date().toISOString(),
+                received_by: currentUser,
+                receiver_notes: receiverNotes
+              }
+            : note
+        )
+      );
+
+      // Close modal immediately for smooth UX
       setShowConfirmModal(false);
       setSelectedNote(null);
-      fetchDeliveryNotes();
+
+      // Show success message
+      showSuccess('Delivery confirmed successfully!');
+
+      // Background API call and sync
+      setSyncing(true);
+      try {
+        await apiClient.post(`/delivery_note/${deliveryNoteId}/confirm`, {
+          receiver_notes: receiverNotes
+        });
+
+        // Fetch fresh data in background to ensure consistency
+        await Promise.all([
+          fetchDeliveryNotes(),
+          fetchReturnableData() // Refresh returnable materials since this delivery is now available for returns
+        ]);
+      } finally {
+        setSyncing(false);
+      }
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       showError(error.response?.data?.error || 'Failed to confirm delivery');
+
+      // Revert optimistic update on error
+      fetchDeliveryNotes();
     } finally {
       setConfirming(false);
     }
@@ -412,25 +450,59 @@ const MaterialReceipts: React.FC = () => {
 
   const handleIssueRDN = async (rdnId: number, rdnNumber: string) => {
     try {
-      const response = await apiClient.post(`/return_delivery_note/${rdnId}/issue`, {});
+      // Optimistic UI update
+      setReturnDeliveryNotes(prevNotes =>
+        prevNotes.map(rdn =>
+          rdn.return_note_id === rdnId
+            ? { ...rdn, status: 'ISSUED', issued_at: new Date().toISOString() }
+            : rdn
+        )
+      );
+
       showSuccess('RDN issued successfully! Ready for dispatch.');
+
+      // Background API call
+      setSyncing(true);
+      const response = await apiClient.post(`/return_delivery_note/${rdnId}/issue`, {});
       setCreatedRDN(response.data.return_delivery_note);
-      setShowRDNSuccessModal(true); // NOW show success modal with download option
-      fetchReturnDeliveryNotes();
+      setShowRDNSuccessModal(true);
+
+      // Refresh in background
+      await fetchReturnDeliveryNotes();
+      setSyncing(false);
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       showError(error.response?.data?.error || 'Failed to issue RDN');
+      fetchReturnDeliveryNotes(); // Revert on error
+      setSyncing(false);
     }
   };
 
   const handleDispatchRDN = async (rdnId: number) => {
     try {
-      await apiClient.post(`/return_delivery_note/${rdnId}/dispatch`, {});
+      // Optimistic UI update
+      setReturnDeliveryNotes(prevNotes =>
+        prevNotes.map(rdn =>
+          rdn.return_note_id === rdnId
+            ? { ...rdn, status: 'IN_TRANSIT', dispatched_at: new Date().toISOString() }
+            : rdn
+        )
+      );
+
       showSuccess('RDN dispatched successfully!');
-      fetchReturnDeliveryNotes();
+
+      // Background API call
+      setSyncing(true);
+      await apiClient.post(`/return_delivery_note/${rdnId}/dispatch`, {});
+
+      // Refresh in background
+      await fetchReturnDeliveryNotes();
+      setSyncing(false);
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       showError(error.response?.data?.error || 'Failed to dispatch RDN');
+      fetchReturnDeliveryNotes(); // Revert on error
+      setSyncing(false);
     }
   };
 
@@ -495,13 +567,22 @@ const MaterialReceipts: React.FC = () => {
                 <p className="text-sm text-gray-600">Confirm delivery of materials to your sites</p>
               </div>
             </div>
-            <button
-              onClick={fetchDeliveryNotes}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <ArrowPathIcon className="w-4 h-4" />
-              Refresh
-            </button>
+            <div className="flex items-center gap-3">
+              {syncing && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg">
+                  <ArrowPathIcon className="w-4 h-4 text-blue-600 animate-spin" />
+                  <span className="text-sm text-blue-700 font-medium">Syncing...</span>
+                </div>
+              )}
+              <button
+                onClick={fetchDeliveryNotes}
+                disabled={syncing}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ArrowPathIcon className="w-4 h-4" />
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
       </div>

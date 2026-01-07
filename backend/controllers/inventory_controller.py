@@ -4728,7 +4728,7 @@ def process_all_return_delivery_items(return_note_id):
                     add_to_stock=False,
                     return_reason=item.return_reason,
                     reference_number=rdn.return_note_number,
-                    notes=item.notes,
+                    notes=item_action.get('notes', ''),
                     disposal_status='pending_approval',
                     created_by=rdn.created_by
                 )
