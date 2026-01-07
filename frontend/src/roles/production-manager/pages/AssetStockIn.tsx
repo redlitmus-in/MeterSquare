@@ -362,7 +362,7 @@ const AssetStockIn: React.FC = () => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate('/pm/returnable-assets')}
+            onClick={() => navigate('/production-manager/returnable-assets')}
             className="p-2 hover:bg-gray-100 rounded-lg"
           >
             <ArrowLeft className="w-5 h-5" />

@@ -24,6 +24,7 @@ const MaterialDisposalPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedItem, setSelectedItem] = useState<MaterialReturn | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<'pending' | 'approved'>('pending');
 
   useEffect(() => {
     fetchDisposalItems();
@@ -35,9 +36,9 @@ const MaterialDisposalPage: React.FC = () => {
       const response = await inventoryService.getAllMaterialReturns();
       const returns = response?.returns || [];
 
-      // Filter items with pending_review status (sent to TD for disposal)
+      // Filter items with pending_review or approved_disposal status
       const disposals = returns.filter((ret: MaterialReturn) =>
-        ret.disposal_status === 'pending_review'
+        ret.disposal_status === 'pending_review' || ret.disposal_status === 'approved_disposal'
       );
 
       setDisposalItems(disposals);
@@ -49,22 +50,38 @@ const MaterialDisposalPage: React.FC = () => {
     }
   };
 
-  // Filter by search
+  // Filter by tab and search
   const filteredItems = useMemo(() => {
-    if (!searchTerm) return disposalItems;
-
-    const term = searchTerm.toLowerCase();
-    return disposalItems.filter(item => {
-      const materialName = item.material_name || '';
-      const materialCode = item.material_code || '';
-      const refNumber = item.reference_number || '';
-      return (
-        materialName.toLowerCase().includes(term) ||
-        materialCode.toLowerCase().includes(term) ||
-        refNumber.toLowerCase().includes(term)
-      );
+    // First filter by tab
+    let items = disposalItems.filter(item => {
+      if (activeTab === 'pending') {
+        return item.disposal_status === 'pending_review';
+      } else {
+        return item.disposal_status === 'approved_disposal';
+      }
     });
-  }, [disposalItems, searchTerm]);
+
+    // Then filter by search term
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      items = items.filter(item => {
+        const materialName = item.material_name || '';
+        const materialCode = item.material_code || '';
+        const refNumber = item.reference_number || '';
+        return (
+          materialName.toLowerCase().includes(term) ||
+          materialCode.toLowerCase().includes(term) ||
+          refNumber.toLowerCase().includes(term)
+        );
+      });
+    }
+
+    return items;
+  }, [disposalItems, searchTerm, activeTab]);
+
+  // Count items by status
+  const pendingCount = disposalItems.filter(item => item.disposal_status === 'pending_review').length;
+  const approvedCount = disposalItems.filter(item => item.disposal_status === 'approved_disposal').length;
 
   const handleViewDetails = (item: MaterialReturn) => {
     setSelectedItem(item);
@@ -121,18 +138,51 @@ const MaterialDisposalPage: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Search and Stats */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-          <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-            {/* Stats */}
-            <div className="flex items-center gap-2">
-              <div className="px-4 py-2 bg-red-50 rounded-lg border border-red-200">
-                <span className="text-2xl font-bold text-red-600">{disposalItems.length}</span>
-                <span className="text-sm text-red-600 ml-2">Pending TD Approval</span>
+        {/* Tabs */}
+        <div className="flex justify-center mb-6">
+          <div className="inline-flex bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <button
+              onClick={() => setActiveTab('pending')}
+              className={`px-4 py-2 text-xs font-medium transition-colors ${
+                activeTab === 'pending'
+                  ? 'bg-amber-50 text-amber-700 border-b-2 border-amber-600'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                <span>Pending TD Approval</span>
+                {pendingCount > 0 && (
+                  <span className="ml-1.5 px-1.5 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full">
+                    {pendingCount}
+                  </span>
+                )}
               </div>
-            </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('approved')}
+              className={`px-4 py-2 text-xs font-medium transition-colors border-l border-gray-200 ${
+                activeTab === 'approved'
+                  ? 'bg-green-50 text-green-700 border-b-2 border-green-600'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>TD Approved - Ready for Disposal</span>
+                {approvedCount > 0 && (
+                  <span className="ml-1.5 px-1.5 py-0.5 bg-green-100 text-green-700 text-xs font-semibold rounded-full">
+                    {approvedCount}
+                  </span>
+                )}
+              </div>
+            </button>
+          </div>
+        </div>
 
-            {/* Search */}
+        {/* Search */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+          <div className="flex items-center justify-center">
             <div className="flex-1 max-w-md">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -219,10 +269,17 @@ const MaterialDisposalPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-center">
-                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                          <Clock className="w-3 h-3" />
-                          Awaiting TD
-                        </span>
+                        {item.disposal_status === 'pending_review' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                            <Clock className="w-3 h-3" />
+                            Awaiting TD
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <Trash2 className="w-3 h-3" />
+                            TD Approved
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <button
@@ -245,7 +302,9 @@ const MaterialDisposalPage: React.FC = () => {
               <p className="text-sm text-gray-500">
                 {searchTerm
                   ? 'Try adjusting your search'
-                  : 'No materials pending TD disposal approval'}
+                  : activeTab === 'pending'
+                  ? 'No materials pending TD disposal approval'
+                  : 'No TD-approved materials awaiting disposal'}
               </p>
             </div>
           )}
@@ -363,10 +422,27 @@ const MaterialDisposalPage: React.FC = () => {
             </div>
 
             {/* Status Footer */}
-            <div className="px-6 py-4 bg-amber-50 border-t border-amber-200 rounded-b-xl">
-              <div className="flex items-center gap-2 text-amber-700">
-                <Clock className="w-5 h-5" />
-                <span className="font-medium">Awaiting Technical Director approval for disposal</span>
+            <div className={`px-6 py-4 border-t rounded-b-xl ${
+              selectedItem.disposal_status === 'pending_review'
+                ? 'bg-amber-50 border-amber-200'
+                : 'bg-green-50 border-green-200'
+            }`}>
+              <div className={`flex items-center gap-2 ${
+                selectedItem.disposal_status === 'pending_review'
+                  ? 'text-amber-700'
+                  : 'text-green-700'
+              }`}>
+                {selectedItem.disposal_status === 'pending_review' ? (
+                  <>
+                    <Clock className="w-5 h-5" />
+                    <span className="font-medium">Awaiting Technical Director approval for disposal</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-5 h-5" />
+                    <span className="font-medium">TD Approved - Ready for physical disposal</span>
+                  </>
+                )}
               </div>
             </div>
           </div>
