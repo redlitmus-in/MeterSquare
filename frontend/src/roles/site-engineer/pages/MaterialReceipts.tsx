@@ -159,6 +159,8 @@ const MaterialReceipts: React.FC = () => {
   // STAGE 1: Material Selection Cart State
   const [showMaterialSelectionModal, setShowMaterialSelectionModal] = useState(false);
   const [selectedProjectForModal, setSelectedProjectForModal] = useState<number | null>(null);
+
+  // Initialize cart from localStorage if available
   const [selectedMaterialsCart, setSelectedMaterialsCart] = useState<Array<{
     delivery_note_item_id: number;
     inventory_material_id: number;
@@ -172,7 +174,42 @@ const MaterialReceipts: React.FC = () => {
     original_dn: string;
     project_id: number;
     project_name: string;
-  }>>([]);
+  }>>(() => {
+    // Load saved cart from localStorage on initial render
+    const savedCart = localStorage.getItem('materialReturnCart');
+    if (savedCart) {
+      try {
+        return JSON.parse(savedCart);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  // Save cart to localStorage whenever it changes
+  useEffect(() => {
+    if (selectedMaterialsCart.length > 0) {
+      localStorage.setItem('materialReturnCart', JSON.stringify(selectedMaterialsCart));
+    } else {
+      localStorage.removeItem('materialReturnCart');
+    }
+  }, [selectedMaterialsCart]);
+
+  // Switch to return tab if there are items in cart on page load
+  useEffect(() => {
+    const savedCart = localStorage.getItem('materialReturnCart');
+    if (savedCart) {
+      try {
+        const cart = JSON.parse(savedCart);
+        if (cart && cart.length > 0) {
+          setActiveTab('return');
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }, []);
 
   // STAGE 2: RDN Creation Modal State (uses saved cart)
   const [showRDNModal, setShowRDNModal] = useState(false);

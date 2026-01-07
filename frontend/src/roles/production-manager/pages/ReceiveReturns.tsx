@@ -111,10 +111,9 @@ const ReceiveReturns: React.FC = () => {
   const openConfirmModal = (rdn: ReturnDeliveryNote) => {
     setSelectedRDN(rdn);
 
-    // If RDN is already received, mark receipt as confirmed
-    if (['RECEIVED', 'PARTIAL'].includes(rdn.status)) {
-      setReceiptConfirmed(true);
-    }
+    // Check if receipt is already confirmed based on RDN status
+    const isAlreadyConfirmed = ['RECEIVED', 'PARTIAL', 'PROCESSED'].includes(rdn.status);
+    setReceiptConfirmed(isAlreadyConfirmed);
 
     // Initialize actions for each item based on condition
     const initialActions = new Map<number, ItemAction>();
@@ -123,7 +122,7 @@ const ReceiveReturns: React.FC = () => {
         ? RETURN_ACTIONS.ADD_TO_STOCK
         : RETURN_ACTIONS.SEND_FOR_REPAIR;
 
-      // Mark already processed items
+      // Check if item is already processed (has material_return_id)
       const isProcessed = !!item.material_return_id;
 
       initialActions.set(item.return_item_id, {

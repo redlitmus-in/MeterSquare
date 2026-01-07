@@ -198,13 +198,15 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
 
             {/* Content */}
             <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)] space-y-4">
-              {returnableProjects.length === 0 ? (
+              {returnableProjects.filter(p => p.materials.some(m => m.returnable_quantity > 0)).length === 0 ? (
                 <div className="text-center py-12">
                   <CubeIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                   <p className="text-gray-500">No returnable materials available</p>
                 </div>
               ) : (
-                returnableProjects.map((project) => (
+                returnableProjects
+                  .filter((project) => project.materials.some(m => m.returnable_quantity > 0))
+                  .map((project) => (
                   <div key={project.project_id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                     <div className="flex items-center gap-2 mb-3">
                       <BuildingOfficeIcon className="w-5 h-5 text-indigo-600" />
@@ -212,7 +214,9 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
                       <span className="text-xs text-gray-500">({project.project_code})</span>
                     </div>
                     <div className="space-y-3">
-                      {project.materials.map((material) => {
+                      {project.materials
+                        .filter((material) => material.returnable_quantity > 0)
+                        .map((material) => {
                         const isSelected = tempSelection.some(
                           m => m.delivery_note_item_id === material.delivery_note_item_id
                         );

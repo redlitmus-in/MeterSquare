@@ -209,6 +209,7 @@ def build_returnable_material_item(delivery_note, item, material):
         'size': material.size,
         'unit': material.unit,
         'original_quantity': item.quantity,
+        'dispatched_quantity': rdn_items_quantity,  # Quantity in RDNs (in transit, not yet received)
         'returned_quantity': returned_qty,
         'pending_return_quantity': rdn_items_quantity,
         'returnable_quantity': returnable_qty,
