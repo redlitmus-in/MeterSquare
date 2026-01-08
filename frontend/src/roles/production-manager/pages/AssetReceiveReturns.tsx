@@ -431,6 +431,7 @@ const AssetReceiveReturns: React.FC = () => {
                       'return_to_stock': { label: 'Returned to Stock', color: 'bg-green-100 text-green-700' },
                       'send_to_repair': { label: 'Sent to Repair', color: 'bg-orange-100 text-orange-700' },
                       'dispose': { label: 'Disposed', color: 'bg-red-100 text-red-700' },
+                      'pending_disposal': { label: 'Pending TD Approval', color: 'bg-yellow-100 text-yellow-700' },
                       'write_off': { label: 'Written Off', color: 'bg-gray-100 text-gray-700' }
                     };
                     return actionMap[action || ''] || { label: action || '-', color: 'bg-gray-100 text-gray-600' };

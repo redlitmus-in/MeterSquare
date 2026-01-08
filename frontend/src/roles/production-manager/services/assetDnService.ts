@@ -13,7 +13,7 @@ export type AssetCondition = 'new' | 'good' | 'fair' | 'poor' | 'damaged';
 export type ADNStatus = 'DRAFT' | 'ISSUED' | 'IN_TRANSIT' | 'DELIVERED' | 'PARTIAL' | 'CANCELLED';
 export type ARDNStatus = 'DRAFT' | 'ISSUED' | 'IN_TRANSIT' | 'RECEIVED' | 'PROCESSED' | 'CANCELLED';
 export type ReportedCondition = 'ok' | 'damaged' | 'lost' | 'needs_repair';
-export type ActionTaken = 'return_to_stock' | 'send_to_repair' | 'dispose' | 'write_off';
+export type ActionTaken = 'return_to_stock' | 'send_to_repair' | 'dispose' | 'pending_disposal' | 'write_off';
 
 export interface AssetCategory {
   category_id: number;

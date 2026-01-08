@@ -1010,16 +1010,60 @@ def process_return_note(ardn_id):
                         asset_item.current_project_id = None
 
             elif item_data['action_taken'] in ['dispose', 'write_off']:
-                # Write off from inventory
-                if category.tracking_mode == 'quantity':
-                    category.total_quantity = max(0, (category.total_quantity or 0) - ardn_item.quantity)
+                # Create disposal request for TD approval (don't directly reduce inventory)
+                # Note: Inventory reduction is deferred until TD approves the disposal request.
+                # See asset_disposal_controller.py approve_disposal()
+
+                # Check for existing pending disposal request to avoid duplicates
+                existing_disposal = AssetDisposal.query.filter_by(
+                    return_item_id=ardn_item.return_item_id,
+                    status='pending_review'
+                ).first()
+                if existing_disposal:
+                    # Already has pending disposal request, just update action
+                    ardn_item.action_taken = 'pending_disposal'
+                    continue
+
+                # Determine disposal reason from verified condition
+                verified = ardn_item.verified_condition or ardn_item.reported_condition
+                if verified == 'damaged':
+                    disposal_reason = 'damaged'
+                elif verified == 'lost':
+                    disposal_reason = 'lost'
                 else:
+                    disposal_reason = 'damaged'  # Default
+
+                # Calculate estimated value
+                unit_price = category.unit_price or 0
+                estimated_value = unit_price * ardn_item.quantity
+
+                # Create AssetDisposal record for TD approval
+                disposal = AssetDisposal(
+                    return_item_id=ardn_item.return_item_id,
+                    category_id=ardn_item.category_id,
+                    asset_item_id=ardn_item.asset_item_id,
+                    quantity=ardn_item.quantity,
+                    disposal_reason=disposal_reason,
+                    justification=ardn_item.damage_description or item_data.get('pm_notes', ''),
+                    estimated_value=estimated_value,
+                    requested_by=user_name,
+                    requested_by_id=user_id,
+                    status='pending_review',
+                    source_type='return',
+                    source_ardn_id=ardn_id,
+                    project_id=ardn.project_id
+                )
+                db.session.add(disposal)
+
+                # Set action to pending_disposal (will change to 'dispose' when TD approves)
+                ardn_item.action_taken = 'pending_disposal'
+
+                # Update individual asset item status if applicable
+                if category.tracking_mode == 'individual' and ardn_item.asset_item_id:
                     asset_item = ReturnableAssetItem.query.get(ardn_item.asset_item_id)
                     if asset_item:
-                        asset_item.current_status = 'retired'
+                        asset_item.current_status = 'pending_disposal'
                         asset_item.current_project_id = None
-                        asset_item.is_active = False
-                        category.total_quantity = max(0, (category.total_quantity or 0) - 1)
 
             # Update original ADN item if linked
             if ardn_item.original_adn_item_id:

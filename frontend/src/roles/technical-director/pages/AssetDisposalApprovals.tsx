@@ -65,7 +65,7 @@ const AssetDisposalApprovals: React.FC = () => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
   const [reviewNotes, setReviewNotes] = useState('');
-  const [rejectAction, setRejectAction] = useState<'return_to_stock' | 'send_to_repair'>('return_to_stock');
+  const [rejectAction, setRejectAction] = useState<'return_to_stock' | 'send_to_repair' | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -135,13 +135,13 @@ const AssetDisposalApprovals: React.FC = () => {
       const detail = await getAssetDisposalDetail(disposal.disposal_id);
       setSelectedDisposal(detail || disposal);
       setReviewNotes('');
-      setRejectAction('return_to_stock');
+      setRejectAction(null);
       setShowDetailModal(true);
     } catch (error) {
       // Fall back to basic info
       setSelectedDisposal(disposal);
       setReviewNotes('');
-      setRejectAction('return_to_stock');
+      setRejectAction(null);
       setShowDetailModal(true);
     }
   };
@@ -176,6 +176,11 @@ const AssetDisposalApprovals: React.FC = () => {
 
   const handleReject = async () => {
     if (!selectedDisposal) return;
+
+    if (!rejectAction) {
+      showError('Please select what should happen to the asset');
+      return;
+    }
 
     if (!reviewNotes.trim()) {
       showError('Please provide a reason for rejection');
@@ -697,37 +702,24 @@ const AssetDisposalApprovals: React.FC = () => {
                 {selectedDisposal.status === 'pending_review' && (
                   <>
                     {/* Reject Action Selection */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        If Rejected, What Should Happen to the Asset?
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <label className="text-sm font-medium text-gray-700">
+                        To Reject:
                       </label>
-                      <div className="flex gap-4">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="rejectAction"
-                            value="return_to_stock"
-                            checked={rejectAction === 'return_to_stock'}
-                            onChange={() => setRejectAction('return_to_stock')}
-                            className="w-4 h-4 text-blue-600"
-                          />
-                          <span className="text-sm text-gray-700">Return to Stock</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="rejectAction"
-                            value="send_to_repair"
-                            checked={rejectAction === 'send_to_repair'}
-                            onChange={() => setRejectAction('send_to_repair')}
-                            className="w-4 h-4 text-blue-600"
-                          />
-                          <span className="text-sm text-gray-700 flex items-center gap-1">
-                            <Wrench className="w-4 h-4" />
-                            Send to Repair
-                          </span>
-                        </label>
-                      </div>
+                      <select
+                        value={rejectAction || ''}
+                        onChange={(e) => setRejectAction(e.target.value === '' ? null : e.target.value as 'return_to_stock' | 'send_to_repair')}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                      >
+                        <option value="">-- Select action --</option>
+                        <option value="return_to_stock">Return to Stock</option>
+                        <option value="send_to_repair">Send to Repair</option>
+                      </select>
+                      {rejectAction && (
+                        <span className="text-xs text-yellow-600">
+                          (Approve disabled)
+                        </span>
+                      )}
                     </div>
 
                     <div>
@@ -759,8 +751,13 @@ const AssetDisposalApprovals: React.FC = () => {
                       <div className="flex items-center gap-3">
                         <button
                           onClick={handleReject}
-                          disabled={saving}
-                          className="inline-flex items-center gap-2 px-6 py-2.5 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                          disabled={saving || !rejectAction}
+                          className={`inline-flex items-center gap-2 px-6 py-2.5 rounded-lg transition-colors font-medium ${
+                            saving || !rejectAction
+                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'bg-yellow-600 text-white hover:bg-yellow-700'
+                          }`}
+                          title={!rejectAction ? 'Select rejection action first' : 'Reject this disposal request'}
                         >
                           {saving ? (
                             <>
@@ -777,8 +774,13 @@ const AssetDisposalApprovals: React.FC = () => {
 
                         <button
                           onClick={handleApproveClick}
-                          disabled={saving}
-                          className="inline-flex items-center gap-2 px-6 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-sm"
+                          disabled={saving || !!rejectAction}
+                          className={`inline-flex items-center gap-2 px-6 py-2.5 rounded-lg transition-colors font-medium shadow-sm ${
+                            saving || rejectAction
+                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'bg-red-600 text-white hover:bg-red-700'
+                          }`}
+                          title={rejectAction ? 'Clear rejection selection to enable approval' : 'Approve this disposal request'}
                         >
                           {saving ? (
                             <>
