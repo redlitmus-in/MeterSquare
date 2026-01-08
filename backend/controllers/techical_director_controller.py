@@ -2201,7 +2201,7 @@ def get_td_tab_counts():
             BOQ.revision_number > 0
         ).with_entities(func.count()).scalar()
 
-        # Count for Assigned tab (projects where user_id is not null/empty)
+        # Count for Assigned tab (projects where user_id is not null/empty AND NOT rejected/completed/cancelled)
         assigned_count = db.session.query(BOQ).join(
             Project, BOQ.project_id == Project.project_id
         ).filter(
@@ -2209,7 +2209,8 @@ def get_td_tab_counts():
             Project.is_deleted == False,
             Project.user_id != None,
             Project.user_id != '[]',
-            Project.user_id != 'null'
+            Project.user_id != 'null',
+            ~BOQ.status.in_(['Rejected', 'rejected', 'Completed', 'completed', 'Client_Cancelled', 'Cancelled', 'cancelled'])
         ).with_entities(func.count()).scalar()
 
         # Count for Completed tab
