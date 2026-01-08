@@ -824,6 +824,14 @@ def get_pending_requisitions():
         user_id = current_user.get('user_id')
         user_role = normalize_role(current_user.get('role', ''))
 
+        # Log the current user details for debugging
+        print(f"\n=== get_pending_requisitions called ===")
+        print(f"Current User: {current_user.get('full_name')} (ID: {user_id})")
+        print(f"Role: {current_user.get('role')} -> Normalized: {user_role}")
+        log.info(f"=== get_pending_requisitions called ===")
+        log.info(f"Current User: {current_user.get('full_name')} (ID: {user_id})")
+        log.info(f"Role: {current_user.get('role')} -> Normalized: {user_role}")
+
         # Validate user_id
         if not user_id:
             return jsonify({"error": "User ID not found in session"}), 401
@@ -840,38 +848,78 @@ def get_pending_requisitions():
         )
 
         # Filter by status
-        # For 'pending', include both 'pending' and 'send_to_pm' statuses
+        # For 'pending' tab on PM side, only show requisitions that have been sent to PM (send_to_pm status)
+        # This excludes draft requisitions that are still 'pending' on SE side
         if status == 'pending':
-            query = query.filter(LabourRequisition.status.in_(['pending', 'send_to_pm']))
+            query = query.filter(LabourRequisition.status == 'send_to_pm')
         elif status in ['approved', 'rejected']:
             query = query.filter(LabourRequisition.status == status)
 
         if project_id:
             query = query.filter(LabourRequisition.project_id == project_id)
 
-        # Role-based project filtering
-        # Admin and TD can see all requisitions
+        # Role-based filtering - different logic for pending vs approved/rejected tabs
         if user_role not in SUPER_ADMIN_ROLES:
-            assigned_project_ids = get_user_assigned_project_ids(user_id)
+            if user_role == 'pm' or user_role == 'projectmanager':
+                # For PENDING tab: filter by project_id (PM's assigned projects)
+                # For APPROVED/REJECTED tabs: filter by approved_by_user_id
+                if status == 'pending':
+                    log.info(f"PM user_id {user_id} - filtering PENDING by project_id")
 
-            if assigned_project_ids:
-                # Filter requisitions to only show those from assigned projects
-                query = query.filter(LabourRequisition.project_id.in_(assigned_project_ids))
+                    # Get all projects and find which ones this PM is assigned to
+                    from models.project import Project
+                    all_projects = Project.query.filter(
+                        Project.is_deleted == False,
+                        Project.user_id.isnot(None)
+                    ).all()
+
+                    assigned_project_ids = []
+                    for proj in all_projects:
+                        if proj.user_id and isinstance(proj.user_id, list) and user_id in proj.user_id:
+                            assigned_project_ids.append(proj.project_id)
+
+                    log.info(f"PM {user_id} assigned to projects: {assigned_project_ids}")
+
+                    if assigned_project_ids:
+                        query = query.filter(LabourRequisition.project_id.in_(assigned_project_ids))
+                    else:
+                        log.warning(f"No assigned projects found for PM user_id: {user_id}")
+                        return jsonify({
+                            "success": True,
+                            "requisitions": [],
+                            "pagination": {
+                                "page": page,
+                                "per_page": per_page,
+                                "total": 0,
+                                "pages": 0
+                            }
+                        }), 200
+                else:
+                    # For approved/rejected tabs: filter by approved_by_user_id
+                    log.info(f"PM user_id {user_id} - filtering {status.upper()} by approved_by_user_id")
+                    query = query.filter(LabourRequisition.approved_by_user_id == user_id)
             else:
-                # User has no assigned projects, return empty result
-                return jsonify({
-                    "success": True,
-                    "requisitions": [],
-                    "pagination": {
-                        "page": page,
-                        "per_page": per_page,
-                        "total": 0,
-                        "pages": 0
-                    }
-                }), 200
+                # For other roles (SE, etc), use project assignment filtering
+                assigned_project_ids = get_user_assigned_project_ids(user_id)
+                if assigned_project_ids:
+                    query = query.filter(LabourRequisition.project_id.in_(assigned_project_ids))
+                else:
+                    log.warning(f"No assigned projects found for user_id: {user_id}, role: {user_role}")
+                    return jsonify({
+                        "success": True,
+                        "requisitions": [],
+                        "pagination": {
+                            "page": page,
+                            "per_page": per_page,
+                            "total": 0,
+                            "pages": 0
+                        }
+                    }), 200
 
         query = query.order_by(LabourRequisition.required_date.desc())
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        log.info(f"Returning {len(paginated.items)} requisitions (Total: {paginated.total})")
 
         return jsonify({
             "success": True,

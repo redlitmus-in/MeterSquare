@@ -98,22 +98,56 @@ const WorkerAssignments: React.FC = () => {
     setShowAssignModal(true);
     setLoadingWorkers(true);
     setShowAddWorkerForm(false);
+
+    // Extract unique skills from labour_items
+    let skillsToFetch: string[] = [];
+    if (requisition.labour_items && requisition.labour_items.length > 0) {
+      // Get all unique skills from labour items
+      const uniqueSkills = new Set<string>();
+      requisition.labour_items.forEach((item: any) => {
+        if (item.skill_required) {
+          uniqueSkills.add(item.skill_required);
+        }
+      });
+      skillsToFetch = Array.from(uniqueSkills);
+    } else {
+      // Fallback to single skill (old format)
+      skillsToFetch = [requisition.skill_required];
+    }
+
     setNewWorkerData({
       full_name: '',
       phone: '',
       hourly_rate: 0,
-      skills: [requisition.skill_required]
+      skills: skillsToFetch
     });
 
-    const result = await labourService.getAvailableWorkers(
-      requisition.skill_required,
-      requisition.required_date
-    );
-    if (result.success) {
-      setAvailableWorkers(result.data);
-    } else {
-      showError(result.message || 'Failed to fetch available workers');
+    // Fetch workers for all unique skills
+    try {
+      const allWorkers: Worker[] = [];
+      const workerIds = new Set<number>();
+
+      for (const skill of skillsToFetch) {
+        const result = await labourService.getAvailableWorkers(
+          skill,
+          requisition.required_date
+        );
+        if (result.success && result.data) {
+          // Add workers, avoiding duplicates
+          result.data.forEach((worker: Worker) => {
+            if (!workerIds.has(worker.worker_id)) {
+              allWorkers.push(worker);
+              workerIds.add(worker.worker_id);
+            }
+          });
+        }
+      }
+
+      setAvailableWorkers(allWorkers);
+    } catch (error) {
+      showError('Failed to fetch available workers');
     }
+
     setLoadingWorkers(false);
   };
 
@@ -171,8 +205,9 @@ const WorkerAssignments: React.FC = () => {
       }
 
       // If selecting, check if we've reached the limit
-      if (selectedRequisition && prev.length >= selectedRequisition.workers_count) {
-        showError(`Cannot select more than ${selectedRequisition.workers_count} workers for this requisition`);
+      const maxWorkers = selectedRequisition?.total_workers_count || selectedRequisition?.workers_count || 0;
+      if (selectedRequisition && prev.length >= maxWorkers) {
+        showError(`Cannot select more than ${maxWorkers} workers for this requisition`);
         return prev;
       }
 
@@ -189,8 +224,9 @@ const WorkerAssignments: React.FC = () => {
     }
 
     // Check if exact number of workers is selected
-    if (selectedWorkerIds.length !== selectedRequisition.workers_count) {
-      showError(`Please select exactly ${selectedRequisition.workers_count} workers (currently selected: ${selectedWorkerIds.length})`);
+    const requiredWorkers = selectedRequisition.total_workers_count || selectedRequisition.workers_count;
+    if (selectedWorkerIds.length !== requiredWorkers) {
+      showError(`Please select exactly ${requiredWorkers} workers (currently selected: ${selectedWorkerIds.length})`);
       return;
     }
 
@@ -366,76 +402,120 @@ const WorkerAssignments: React.FC = () => {
             </div>
 
             <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
-              {/* Status Row */}
-              <div className="flex items-center gap-2 mb-6 pb-4 border-b border-gray-100">
-                <span className="text-sm text-gray-500">Status:</span>
-                <span className="px-2.5 py-1 text-xs font-medium rounded bg-gray-100 text-gray-700">Approved</span>
-                {detailsRequisition.assignment_status === 'assigned' && (
-                  <span className="px-2.5 py-1 text-xs font-medium rounded bg-gray-100 text-gray-700">
-                    Workers Assigned
+              {/* Status Badges Row */}
+              <div className="flex flex-wrap items-center gap-2 mb-6 pb-4 border-b border-gray-100">
+                <span className="px-3 py-1 text-sm font-medium rounded-full bg-green-100 text-green-800">Approved</span>
+                {detailsRequisition.assignment_status === 'assigned' ? (
+                  <span className="px-3 py-1 text-sm font-medium rounded-full bg-blue-100 text-blue-800">
+                    Pending Assignment
                   </span>
-                )}
+                ) : null}
               </div>
 
-              {/* Details Grid */}
-              <div className="space-y-4">
-                <div className="border-b border-gray-100 pb-4">
-                  <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Work Description</h3>
-                  <p className="text-gray-900">{detailsRequisition.work_description}</p>
+              {/* Labour Items Section */}
+              {detailsRequisition.labour_items && detailsRequisition.labour_items.length > 0 ? (
+                <div className="mb-6">
+                  <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Labour Items ({detailsRequisition.labour_items.length} {detailsRequisition.labour_items.length === 1 ? 'item' : 'items'})</h3>
+                  <div className="space-y-3">
+                    {detailsRequisition.labour_items.map((item: any, index: number) => (
+                      <div key={index} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                        <div className="flex items-start justify-between mb-2">
+                          <h4 className="text-sm font-medium text-gray-900">{item.work_description || item.item_name || `Item ${index + 1}`}</h4>
+                          <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800 font-medium flex items-center gap-1">
+                            <UsersIcon className="w-3 h-3" />
+                            {item.workers_count} worker{item.workers_count !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          <p className="flex items-center gap-1.5">
+                            <WrenchScrewdriverIcon className="w-4 h-4 text-gray-400" />
+                            <span className="font-medium">Skill:</span> {item.skill_required || item.skill_lab01}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
+              ) : (
+                /* Fallback to old single-item format */
+                <div className="mb-6">
+                  <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Labour Details</h3>
+                  <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                    <div className="flex items-start justify-between mb-2">
+                      <h4 className="text-sm font-medium text-gray-900">{detailsRequisition.work_description}</h4>
+                      <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800 font-medium flex items-center gap-1">
+                        <UsersIcon className="w-3 h-3" />
+                        {detailsRequisition.workers_count} worker{detailsRequisition.workers_count !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      <p className="flex items-center gap-1.5">
+                        <WrenchScrewdriverIcon className="w-4 h-4 text-gray-400" />
+                        <span className="font-medium">Skill:</span> {detailsRequisition.skill_required}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-                <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+              {/* Project & Site Info */}
+              <div className="space-y-4 mb-6">
+                <div>
+                  <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Project</h3>
+                  <p className="text-sm text-gray-900 font-medium">{detailsRequisition.project_name || `#${detailsRequisition.project_id}`}</p>
+                </div>
+                <div>
+                  <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Site/Location</h3>
+                  <p className="text-sm text-gray-900">{detailsRequisition.site_name}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Project</h3>
-                    <p className="text-gray-900">{detailsRequisition.project_name || `#${detailsRequisition.project_id}`}</p>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Total Workers</h3>
+                    <p className="text-sm text-gray-900 font-semibold">{detailsRequisition.total_workers_count || detailsRequisition.workers_count} worker{(detailsRequisition.total_workers_count || detailsRequisition.workers_count) !== 1 ? 's' : ''}</p>
                   </div>
                   <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Site</h3>
-                    <p className="text-gray-900">{detailsRequisition.site_name}</p>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Required Date</h3>
+                    <p className="text-sm text-gray-900">{new Date(detailsRequisition.required_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Request Info */}
+              <div className="border-t border-gray-200 pt-4 space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Request Date</h3>
+                    <p className="text-sm text-gray-900">{new Date(detailsRequisition.request_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
                   </div>
                   <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Skill Required</h3>
-                    <p className="text-gray-900 font-medium">{detailsRequisition.skill_required}</p>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Requested By</h3>
+                    <p className="text-sm text-gray-900">{detailsRequisition.requested_by_name}</p>
                   </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Workers Count</h3>
-                    <p className="text-gray-900 font-medium">{detailsRequisition.workers_count}</p>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Required Date</h3>
-                    <p className="text-gray-900">{new Date(detailsRequisition.required_date).toLocaleDateString()}</p>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Request Date</h3>
-                    <p className="text-gray-900">{new Date(detailsRequisition.request_date).toLocaleDateString()}</p>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Requested By</h3>
-                    <p className="text-gray-900">{detailsRequisition.requested_by_name}</p>
-                  </div>
-                  {detailsRequisition.approved_by_name && (
+                </div>
+                {detailsRequisition.approved_by_name && (
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Approved By</h3>
-                      <p className="text-gray-900">{detailsRequisition.approved_by_name}</p>
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Approved By</h3>
+                      <p className="text-sm text-gray-900">{detailsRequisition.approved_by_name}</p>
                       {detailsRequisition.approval_date && (
                         <p className="text-xs text-gray-500 mt-0.5">
-                          {new Date(detailsRequisition.approval_date).toLocaleDateString()}
+                          {new Date(detailsRequisition.approval_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                         </p>
                       )}
                     </div>
-                  )}
-                  {detailsRequisition.assignment_status === 'assigned' && detailsRequisition.assigned_by_name && (
-                    <div>
-                      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Assigned By</h3>
-                      <p className="text-gray-900">{detailsRequisition.assigned_by_name}</p>
-                      {detailsRequisition.assignment_date && (
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          {new Date(detailsRequisition.assignment_date).toLocaleDateString()}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
+                    {detailsRequisition.assignment_status === 'assigned' && detailsRequisition.assigned_by_name && (
+                      <div>
+                        <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Assigned By</h3>
+                        <p className="text-sm text-gray-900">{detailsRequisition.assigned_by_name}</p>
+                        {detailsRequisition.assignment_date && (
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {new Date(detailsRequisition.assignment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -475,7 +555,13 @@ const WorkerAssignments: React.FC = () => {
               <div>
                 <h2 className="text-lg font-semibold">Assign Workers</h2>
                 <p className="text-sm text-gray-500">
-                  {selectedRequisition.requisition_code} - {selectedRequisition.skill_required} x {selectedRequisition.workers_count}
+                  {selectedRequisition.requisition_code} - {selectedRequisition.labour_items && selectedRequisition.labour_items.length > 0 ? (
+                    <>
+                      {Array.from(new Set(selectedRequisition.labour_items.map((item: any) => item.skill_required))).join(', ')} x {selectedRequisition.total_workers_count || selectedRequisition.workers_count}
+                    </>
+                  ) : (
+                    <>{selectedRequisition.skill_required} x {selectedRequisition.workers_count}</>
+                  )}
                 </p>
               </div>
               <button
@@ -488,7 +574,18 @@ const WorkerAssignments: React.FC = () => {
 
             <div className="p-4">
               <p className="text-sm text-gray-600 mb-4">
-                Select {selectedRequisition.workers_count} worker(s) with <span className="font-medium text-purple-600">{selectedRequisition.skill_required}</span> skill
+                Select {selectedRequisition.total_workers_count || selectedRequisition.workers_count} worker(s) with {selectedRequisition.labour_items && selectedRequisition.labour_items.length > 0 ? (
+                  <>
+                    {Array.from(new Set(selectedRequisition.labour_items.map((item: any) => item.skill_required))).map((skill, idx, arr) => (
+                      <span key={idx}>
+                        <span className="font-medium text-purple-600">{skill}</span>
+                        {idx < arr.length - 1 ? ', ' : ''}
+                      </span>
+                    ))} skill{Array.from(new Set(selectedRequisition.labour_items.map((item: any) => item.skill_required))).length > 1 ? 's' : ''}
+                  </>
+                ) : (
+                  <><span className="font-medium text-purple-600">{selectedRequisition.skill_required}</span> skill</>
+                )}
               </p>
 
               {loadingWorkers ? (
@@ -503,7 +600,8 @@ const WorkerAssignments: React.FC = () => {
                       {availableWorkers.map((worker) => {
                         const isAlreadyAssigned = worker.is_assigned || false;
                         const isSelected = selectedWorkerIds.includes(worker.worker_id);
-                        const limitReached = selectedRequisition && selectedWorkerIds.length >= selectedRequisition.workers_count && !isSelected;
+                        const maxWorkers = selectedRequisition?.total_workers_count || selectedRequisition?.workers_count || 0;
+                        const limitReached = selectedRequisition && selectedWorkerIds.length >= maxWorkers && !isSelected;
                         const canSelect = !isAlreadyAssigned && !limitReached;
 
                         return (
@@ -570,7 +668,13 @@ const WorkerAssignments: React.FC = () => {
                   {availableWorkers.length === 0 && !showAddWorkerForm && (
                     <div className="text-center py-6 bg-gray-50 rounded-lg mb-4">
                       <UsersIcon className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                      <p className="text-gray-600 text-sm">No available workers with "{selectedRequisition.skill_required}" skill</p>
+                      <p className="text-gray-600 text-sm">
+                        No available workers with {selectedRequisition.labour_items && selectedRequisition.labour_items.length > 0 ? (
+                          <>"{Array.from(new Set(selectedRequisition.labour_items.map((item: any) => item.skill_required))).join('", "')}" skill{Array.from(new Set(selectedRequisition.labour_items.map((item: any) => item.skill_required))).length > 1 ? 's' : ''}</>
+                        ) : (
+                          <>"{selectedRequisition.skill_required}" skill</>
+                        )}
+                      </p>
                       <p className="text-gray-400 text-xs mt-1">Add a new worker below to continue</p>
                     </div>
                   )}
@@ -636,11 +740,82 @@ const WorkerAssignments: React.FC = () => {
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Skill</label>
-                          <div className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg">
-                            <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded font-medium">
-                              {selectedRequisition.skill_required}
-                            </span>
-                            <span className="text-xs text-gray-400">(auto-assigned)</span>
+                          <div className="space-y-2">
+                            {/* Display existing skills with remove option */}
+                            <div className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg flex-wrap min-h-[42px]">
+                              {newWorkerData.skills && newWorkerData.skills.length > 0 ? (
+                                newWorkerData.skills.map((skill, idx) => (
+                                  <span key={idx} className="flex items-center gap-1 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded font-medium">
+                                    {skill}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setNewWorkerData(prev => ({
+                                          ...prev,
+                                          skills: prev.skills.filter((_, i) => i !== idx)
+                                        }));
+                                      }}
+                                      className="hover:bg-purple-200 rounded-full p-0.5"
+                                      title="Remove skill"
+                                    >
+                                      <XMarkIcon className="w-3 h-3" />
+                                    </button>
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-xs text-gray-400">No skills added</span>
+                              )}
+                            </div>
+                            {/* Add new skill input with button */}
+                            <div className="flex gap-2">
+                              <input
+                                id="skill-input"
+                                type="text"
+                                placeholder="Type skill name"
+                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-purple-500 focus:border-purple-500"
+                                onKeyPress={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    const input = e.currentTarget;
+                                    const skillName = input.value.trim();
+                                    if (skillName && !newWorkerData.skills.includes(skillName)) {
+                                      setNewWorkerData(prev => ({
+                                        ...prev,
+                                        skills: [...prev.skills, skillName]
+                                      }));
+                                      input.value = '';
+                                    } else if (newWorkerData.skills.includes(skillName)) {
+                                      showError('Skill already added');
+                                    } else if (!skillName) {
+                                      showError('Please enter a skill name');
+                                    }
+                                  }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const input = document.getElementById('skill-input') as HTMLInputElement;
+                                  if (input) {
+                                    const skillName = input.value.trim();
+                                    if (skillName && !newWorkerData.skills.includes(skillName)) {
+                                      setNewWorkerData(prev => ({
+                                        ...prev,
+                                        skills: [...prev.skills, skillName]
+                                      }));
+                                      input.value = '';
+                                    } else if (newWorkerData.skills.includes(skillName)) {
+                                      showError('Skill already added');
+                                    } else if (!skillName) {
+                                      showError('Please enter a skill name');
+                                    }
+                                  }
+                                }}
+                                className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                              >
+                                Add
+                              </button>
+                            </div>
                           </div>
                         </div>
                         <div className="flex gap-2 pt-2">
@@ -678,13 +853,13 @@ const WorkerAssignments: React.FC = () => {
               <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-200">
                 <div className="text-sm text-gray-600">
                   <p className="flex items-center gap-2">
-                    Selected: <span className={`font-medium ${selectedWorkerIds.length === selectedRequisition.workers_count ? 'text-green-600' : selectedWorkerIds.length > selectedRequisition.workers_count ? 'text-red-600' : 'text-gray-900'}`}>
+                    Selected: <span className={`font-medium ${selectedWorkerIds.length === (selectedRequisition.total_workers_count || selectedRequisition.workers_count) ? 'text-green-600' : selectedWorkerIds.length > (selectedRequisition.total_workers_count || selectedRequisition.workers_count) ? 'text-red-600' : 'text-gray-900'}`}>
                       {selectedWorkerIds.length}
-                    </span> / {selectedRequisition.workers_count}
-                    {selectedWorkerIds.length === selectedRequisition.workers_count && (
+                    </span> / {selectedRequisition.total_workers_count || selectedRequisition.workers_count}
+                    {selectedWorkerIds.length === (selectedRequisition.total_workers_count || selectedRequisition.workers_count) && (
                       <span className="text-xs text-green-600">✓ Ready</span>
                     )}
-                    {selectedWorkerIds.length > selectedRequisition.workers_count && (
+                    {selectedWorkerIds.length > (selectedRequisition.total_workers_count || selectedRequisition.workers_count) && (
                       <span className="text-xs text-red-600">Too many!</span>
                     )}
                   </p>
@@ -701,7 +876,7 @@ const WorkerAssignments: React.FC = () => {
                   </button>
                   <button
                     onClick={handleShowConfirmation}
-                    disabled={selectedWorkerIds.length === 0 || selectedWorkerIds.length !== selectedRequisition.workers_count || assigning}
+                    disabled={selectedWorkerIds.length === 0 || selectedWorkerIds.length !== (selectedRequisition.total_workers_count || selectedRequisition.workers_count) || assigning}
                     className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Assign Selected

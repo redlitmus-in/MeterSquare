@@ -400,35 +400,34 @@ const RequisitionApprovals: React.FC = () => {
               )}
 
               {/* Details Grid */}
-              <div className="space-y-4">
-                {/* Labour Items */}
+              <div className="space-y-6">
+                {/* Work Description Section */}
                 <div className="border-b border-gray-100 pb-4">
-                  <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Labour Items</h3>
-                  <div className="space-y-3">
-                    {selectedRequisition.labour_items && selectedRequisition.labour_items.length > 0 ? (
-                      selectedRequisition.labour_items.map((item: any, idx: number) => (
-                        <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Work Description</h3>
+                  <p className="text-sm text-gray-900">{selectedRequisition.work_description}</p>
+                </div>
+
+                {/* Labour Items Section - Only show if multiple items exist */}
+                {selectedRequisition.labour_items && selectedRequisition.labour_items.length > 0 && (
+                  <div className="border-b border-gray-100 pb-6">
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Labour Items</h3>
+                    <div className="space-y-3">
+                      {selectedRequisition.labour_items.map((item: any, idx: number) => (
+                        <div key={idx} className="bg-white border border-gray-200 rounded-lg p-4">
                           <div className="flex items-start justify-between mb-2">
                             <p className="text-sm font-medium text-gray-900">{item.work_description}</p>
-                            <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
-                              {item.workers_count} worker{item.workers_count !== 1 ? 's' : ''}
+                            <span className="ml-3 px-3 py-1 bg-blue-50 text-blue-600 text-sm font-semibold rounded-md whitespace-nowrap">
+                              {item.workers_count} workers
                             </span>
                           </div>
-                          <p className="text-xs text-gray-600">
+                          <p className="text-xs text-gray-600 mt-1">
                             <span className="font-medium">Skill:</span> {item.skill_required}
                           </p>
                         </div>
-                      ))
-                    ) : (
-                      <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                        <p className="text-sm text-gray-900">{selectedRequisition.work_description}</p>
-                        <p className="text-xs text-gray-600 mt-1">
-                          <span className="font-medium">Skill:</span> {selectedRequisition.skill_required}
-                        </p>
-                      </div>
-                    )}
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                   <div>
