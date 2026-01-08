@@ -12,7 +12,17 @@ import {
   PencilSquareIcon,
   TrashIcon,
   UserPlusIcon,
-  XMarkIcon
+  XMarkIcon,
+  EyeIcon,
+  PhoneIcon,
+  IdentificationIcon,
+  CurrencyDollarIcon,
+  UserIcon,
+  ExclamationTriangleIcon,
+  DocumentTextIcon,
+  CalendarIcon,
+  ChevronDownIcon,
+  CheckIcon
 } from '@heroicons/react/24/outline';
 
 const ITEMS_PER_PAGE = 20;
@@ -27,6 +37,8 @@ const LabourRegistry: React.FC = () => {
   const [skillFilter, setSkillFilter] = useState<string>('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
+  const [viewingWorker, setViewingWorker] = useState<Worker | null>(null);
+  const [showViewModal, setShowViewModal] = useState(false);
   const [formData, setFormData] = useState<CreateWorkerData>({
     full_name: '',
     phone: '',
@@ -41,10 +53,12 @@ const LabourRegistry: React.FC = () => {
     notes: ''
   });
   const [skillInput, setSkillInput] = useState('');
+  const [showSkillDropdown, setShowSkillDropdown] = useState(false);
   const [countryCode, setCountryCode] = useState('+971'); // Default UAE
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalWorkers, setTotalWorkers] = useState(0);
+  const [allSkillsFromDB, setAllSkillsFromDB] = useState<string[]>([]);
 
   // Debounce search input
   useEffect(() => {
@@ -84,14 +98,63 @@ const LabourRegistry: React.FC = () => {
     fetchWorkers();
   }, [fetchWorkers]);
 
+  // Fetch all unique skills from workers in DB (once at mount)
+  useEffect(() => {
+    const fetchAllSkills = async () => {
+      // Fetch a large batch of workers to get all unique skills
+      const result = await labourService.getWorkers({
+        status: '', // All statuses
+        per_page: 500 // Get many workers to extract skills
+      });
+      if (result.success && result.data) {
+        const skills = result.data.flatMap(w => w.skills || []);
+        const uniqueSkills = [...new Set(skills)];
+        setAllSkillsFromDB(uniqueSkills);
+      }
+    };
+    fetchAllSkills();
+  }, []);
+
+  // Keyboard accessibility - close modals on Escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showViewModal) {
+          setShowViewModal(false);
+          setViewingWorker(null);
+        }
+        if (showAddModal) {
+          setShowAddModal(false);
+          resetForm();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [showViewModal, showAddModal]);
+
   const handleAddSkill = () => {
-    if (skillInput.trim() && !formData.skills?.includes(skillInput.trim())) {
+    const trimmedSkill = skillInput.trim();
+    if (trimmedSkill && !formData.skills?.includes(trimmedSkill)) {
       setFormData({
         ...formData,
-        skills: [...(formData.skills || []), skillInput.trim()]
+        skills: [...(formData.skills || []), trimmedSkill]
       });
       setSkillInput('');
+      setShowSkillDropdown(false);
     }
+  };
+
+  const handleSelectSkill = (skill: string) => {
+    if (!formData.skills?.includes(skill)) {
+      setFormData({
+        ...formData,
+        skills: [...(formData.skills || []), skill]
+      });
+    }
+    setSkillInput('');
+    setShowSkillDropdown(false);
   };
 
   const handleRemoveSkill = (skill: string) => {
@@ -132,6 +195,11 @@ const LabourRegistry: React.FC = () => {
       }
     }
     resetForm();
+  };
+
+  const handleView = (worker: Worker) => {
+    setViewingWorker(worker);
+    setShowViewModal(true);
   };
 
   const handleEdit = (worker: Worker) => {
@@ -199,9 +267,26 @@ const LabourRegistry: React.FC = () => {
     });
     setCountryCode('+971'); // Reset to default UAE
     setEditingWorker(null);
+    setSkillInput('');
+    setShowSkillDropdown(false);
   };
 
-  const skillOptions = ['Mason', 'Carpenter', 'Helper', 'Electrician', 'Plumber', 'Welder', 'Painter', 'Fitter'];
+  // Default skills + dynamically extracted from all workers in DB
+  const defaultSkills = ['Mason', 'Carpenter', 'Helper', 'Electrician', 'Plumber', 'Welder', 'Painter', 'Fitter'];
+
+  // Combine default skills with skills from DB
+  const skillOptions = React.useMemo(() => {
+    const allSkills = [...new Set([...defaultSkills, ...allSkillsFromDB])];
+    return allSkills.sort((a, b) => a.localeCompare(b));
+  }, [allSkillsFromDB]);
+
+  // Filter skills based on input and exclude already selected
+  const filteredSkillOptions = React.useMemo(() => {
+    const searchLower = skillInput.toLowerCase().trim();
+    return skillOptions
+      .filter(skill => !formData.skills?.includes(skill))
+      .filter(skill => !searchLower || skill.toLowerCase().includes(searchLower));
+  }, [skillOptions, skillInput, formData.skills]);
 
   const countryCodeOptions = [
     { code: '+971', name: 'UAE', flag: '🇦🇪' },
@@ -370,10 +455,18 @@ const LabourRegistry: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => handleView(worker)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                          title="View details"
+                        >
+                          <EyeIcon className="w-4 h-4" />
+                          View
+                        </button>
                         <button
                           onClick={() => handleEdit(worker)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
                           title="Edit worker"
                         >
                           <PencilSquareIcon className="w-4 h-4" />
@@ -381,7 +474,7 @@ const LabourRegistry: React.FC = () => {
                         </button>
                         <button
                           onClick={() => handleDelete(worker.worker_id)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-gray-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                           title="Delete worker"
                         >
                           <TrashIcon className="w-4 h-4" />
@@ -534,39 +627,114 @@ const LabourRegistry: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Skills</label>
-                <div className="flex gap-2 mb-2">
-                  <select
-                    value={skillInput}
-                    onChange={(e) => setSkillInput(e.target.value)}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                  >
-                    <option value="">Select skill...</option>
-                    {skillOptions.map((skill) => (
-                      <option key={skill} value={skill}>{skill}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleAddSkill}
-                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-                  >
-                    Add
-                  </button>
+
+                {/* Professional Custom Dropdown */}
+                <div className="relative">
+                  <div className="flex gap-2 mb-2">
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        placeholder="Search or type a new skill..."
+                        value={skillInput}
+                        onChange={(e) => {
+                          setSkillInput(e.target.value);
+                          setShowSkillDropdown(true);
+                        }}
+                        onFocus={() => setShowSkillDropdown(true)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddSkill();
+                          }
+                          if (e.key === 'Escape') {
+                            setShowSkillDropdown(false);
+                          }
+                        }}
+                        className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSkillDropdown(!showSkillDropdown)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                      >
+                        <ChevronDownIcon className={`w-4 h-4 transition-transform ${showSkillDropdown ? 'rotate-180' : ''}`} />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddSkill}
+                      disabled={!skillInput.trim()}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Add
+                    </button>
+                  </div>
+
+                  {/* Dropdown Menu */}
+                  {showSkillDropdown && filteredSkillOptions.length > 0 && (
+                    <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {filteredSkillOptions.map((skill) => (
+                        <button
+                          key={skill}
+                          type="button"
+                          onClick={() => handleSelectSkill(skill)}
+                          className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 flex items-center justify-between transition-colors"
+                        >
+                          <span>{skill}</span>
+                          {formData.skills?.includes(skill) && (
+                            <CheckIcon className="w-4 h-4 text-purple-600" />
+                          )}
+                        </button>
+                      ))}
+                      {skillInput.trim() && !skillOptions.includes(skillInput.trim()) && (
+                        <button
+                          type="button"
+                          onClick={handleAddSkill}
+                          className="w-full px-3 py-2 text-left text-sm text-purple-600 hover:bg-purple-50 border-t border-gray-100 font-medium"
+                        >
+                          + Add "{skillInput.trim()}" as new skill
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Show "Add new" option when no matches */}
+                  {showSkillDropdown && filteredSkillOptions.length === 0 && skillInput.trim() && (
+                    <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg">
+                      <button
+                        type="button"
+                        onClick={handleAddSkill}
+                        className="w-full px-3 py-2 text-left text-sm text-purple-600 hover:bg-purple-50 font-medium"
+                      >
+                        + Add "{skillInput.trim()}" as new skill
+                      </button>
+                    </div>
+                  )}
                 </div>
+
+                {/* Click outside to close dropdown */}
+                {showSkillDropdown && (
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setShowSkillDropdown(false)}
+                  />
+                )}
+
+                {/* Selected Skills Tags */}
                 {formData.skills && formData.skills.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 mt-2">
                     {formData.skills.map((skill, idx) => (
                       <span
                         key={idx}
-                        className="px-2 py-1 bg-purple-100 text-purple-700 text-sm rounded flex items-center gap-1"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 text-gray-700 text-sm rounded-md border border-gray-200"
                       >
                         {skill}
                         <button
                           type="button"
                           onClick={() => handleRemoveSkill(skill)}
-                          className="hover:text-purple-900"
+                          className="text-gray-400 hover:text-gray-600 transition-colors"
                         >
-                          <XMarkIcon className="w-3 h-3" />
+                          <XMarkIcon className="w-3.5 h-3.5" />
                         </button>
                       </span>
                     ))}
@@ -662,6 +830,200 @@ const LabourRegistry: React.FC = () => {
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* View Worker Modal */}
+      {showViewModal && viewingWorker && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowViewModal(false);
+              setViewingWorker(null);
+            }
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-5 border-b border-gray-200">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Worker Details</h2>
+                <p className="text-sm text-gray-500 mt-0.5">{viewingWorker.worker_code}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowViewModal(false);
+                  setViewingWorker(null);
+                }}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                aria-label="Close modal"
+              >
+                <XMarkIcon className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5">
+              {/* Worker Name and Status */}
+              <div className="flex items-start justify-between mb-6 pb-4 border-b border-gray-100">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
+                    <UserIcon className="w-8 h-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-semibold text-gray-900">{viewingWorker.full_name}</h3>
+                    <p className="text-sm text-gray-500 capitalize">{viewingWorker.worker_type} Worker</p>
+                  </div>
+                </div>
+                <span className={`px-3 py-1 text-sm font-medium rounded-full ${
+                  viewingWorker.status === 'active' ? 'bg-green-50 text-green-700 border border-green-200' :
+                  viewingWorker.status === 'inactive' ? 'bg-gray-50 text-gray-700 border border-gray-200' :
+                  'bg-amber-50 text-amber-700 border border-amber-200'
+                }`}>
+                  {viewingWorker.status === 'active' ? 'Active' :
+                   viewingWorker.status === 'inactive' ? 'Inactive' : 'On Leave'}
+                </span>
+              </div>
+
+              {/* Details Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Contact Information */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-gray-900 uppercase tracking-wide">Contact Information</h4>
+
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <PhoneIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-gray-500">Phone</p>
+                      <p className="text-sm text-gray-900">{viewingWorker.phone || 'Not provided'}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <IdentificationIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-gray-500">ID Number</p>
+                      <p className="text-sm text-gray-900">{viewingWorker.id_number || 'Not provided'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Work Information */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-gray-900 uppercase tracking-wide">Work Information</h4>
+
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <CurrencyDollarIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-gray-500">Hourly Rate</p>
+                      <p className="text-sm font-medium text-gray-900">AED {(viewingWorker.hourly_rate ?? 0).toFixed(2)}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <UserIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-gray-500">Worker Type</p>
+                      <p className="text-sm text-gray-900 capitalize">{viewingWorker.worker_type}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <CalendarIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-gray-500">Added On</p>
+                      <p className="text-sm text-gray-900">
+                        {viewingWorker.created_at
+                          ? new Date(viewingWorker.created_at).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric'
+                            })
+                          : 'Not available'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Skills Section */}
+              {viewingWorker.skills && viewingWorker.skills.length > 0 && (
+                <div className="mt-5 pt-4 border-t border-gray-100">
+                  <h4 className="text-sm font-medium text-gray-900 uppercase tracking-wide mb-3">Skills</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {viewingWorker.skills.map((skill, idx) => (
+                      <span
+                        key={idx}
+                        className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg"
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Emergency Contact */}
+              <div className="mt-5 pt-4 border-t border-gray-100">
+                <h4 className="text-sm font-medium text-gray-900 uppercase tracking-wide mb-3">Emergency Contact</h4>
+                <div className={`flex items-start gap-3 p-3 rounded-lg border ${
+                  viewingWorker.emergency_contact || viewingWorker.emergency_phone
+                    ? 'bg-red-50 border-red-100'
+                    : 'bg-gray-50 border-gray-200'
+                }`}>
+                  <ExclamationTriangleIcon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                    viewingWorker.emergency_contact || viewingWorker.emergency_phone
+                      ? 'text-red-400'
+                      : 'text-gray-400'
+                  }`} />
+                  <div>
+                    <p className="text-xs text-gray-500">Contact Name</p>
+                    <p className="text-sm font-medium text-gray-900">{viewingWorker.emergency_contact || 'Not provided'}</p>
+                    <p className="text-xs text-gray-500 mt-2">Contact Phone</p>
+                    <p className="text-sm text-gray-700">{viewingWorker.emergency_phone || 'Not provided'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Notes */}
+              {viewingWorker.notes && (
+                <div className="mt-5 pt-4 border-t border-gray-100">
+                  <h4 className="text-sm font-medium text-gray-900 uppercase tracking-wide mb-3">Notes</h4>
+                  <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <DocumentTextIcon className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap">{viewingWorker.notes}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex gap-3 p-5 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={() => {
+                  setShowViewModal(false);
+                  setViewingWorker(null);
+                }}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  setShowViewModal(false);
+                  handleEdit(viewingWorker);
+                }}
+                className="flex-1 px-4 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
+              >
+                Edit Worker
+              </button>
+            </div>
           </motion.div>
         </div>
       )}

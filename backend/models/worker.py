@@ -2,6 +2,7 @@
 Worker Model for Labour Management System
 Stores worker registry information including skills, rates, and contact details.
 """
+import re
 from datetime import datetime
 from config.db import db
 from sqlalchemy.dialects.postgresql import JSONB
@@ -81,10 +82,23 @@ class Worker(db.Model):
 
     @staticmethod
     def generate_worker_code():
-        """Generate the next worker code (WRK-001, WRK-002, etc.)"""
-        from sqlalchemy import func
-        last_worker = db.session.query(func.max(Worker.worker_id)).scalar()
-        next_id = (last_worker or 0) + 1
+        """
+        Generate the next worker code (WRK-001, WRK-002, etc.)
+        Includes soft-deleted workers to prevent code reuse.
+        """
+        # Include all workers (even soft-deleted) to prevent code reuse
+        # Uses FOR UPDATE lock to prevent race conditions in concurrent creation
+        existing_codes = db.session.query(Worker.worker_code).with_for_update().all()
+        max_num = 0
+        for (code,) in existing_codes:
+            if code:
+                # Extract numeric part from codes like WRK-001, WRK-259
+                match = re.search(r'WRK-(\d+)', code, re.IGNORECASE)
+                if match:
+                    num = int(match.group(1))
+                    if num > max_num:
+                        max_num = num
+        next_id = max_num + 1
         return f"WRK-{next_id:03d}"
 
     def __repr__(self):

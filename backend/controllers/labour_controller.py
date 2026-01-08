@@ -29,6 +29,50 @@ log = get_logger()
 # Initialize WhatsApp service
 whatsapp_service = WhatsAppService()
 
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+# Role sets for authorization (normalized without spaces/underscores)
+SUPER_ADMIN_ROLES = frozenset(['admin', 'td', 'technicaldirector'])
+LABOUR_ADMIN_ROLES = frozenset(['admin', 'td', 'technicaldirector', 'productionmanager'])
+
+
+def normalize_role(role: str) -> str:
+    """Normalize role string for consistent comparison."""
+    if not role:
+        return ''
+    return role.lower().replace(' ', '').replace('_', '').replace('-', '')
+
+
+def get_user_assigned_project_ids(user_id: int) -> list:
+    """
+    Get list of project IDs where user is assigned in any role.
+    Returns empty list if user_id is None or invalid.
+    """
+    if not user_id:
+        return []
+
+    from models.project import Project
+
+    assigned_projects = Project.query.filter(
+        Project.is_deleted == False,
+        or_(
+            # PM: user_id is JSONB array, check if user_id is in the array
+            Project.user_id.contains([user_id]),
+            # Site Supervisor/SE
+            Project.site_supervisor_id == user_id,
+            # MEP Supervisor: mep_supervisor_id is JSONB array
+            Project.mep_supervisor_id.contains([user_id]),
+            # Estimator
+            Project.estimator_id == user_id,
+            # Buyer
+            Project.buyer_id == user_id
+        )
+    ).with_entities(Project.project_id).all()
+
+    return [p.project_id for p in assigned_projects]
+
 
 # =============================================================================
 # STEP 1: WORKER REGISTRY (Production Manager)
@@ -593,9 +637,15 @@ def resubmit_requisition(requisition_id):
 # =============================================================================
 
 def get_pending_requisitions():
-    """Get requisitions for PM with optional status filter"""
+    """Get requisitions for PM with optional status filter, filtered by user's assigned projects"""
     try:
         current_user = g.user
+        user_id = current_user.get('user_id')
+        user_role = normalize_role(current_user.get('role', ''))
+
+        # Validate user_id
+        if not user_id:
+            return jsonify({"error": "User ID not found in session"}), 401
 
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 20, type=int), 100)
@@ -614,6 +664,27 @@ def get_pending_requisitions():
 
         if project_id:
             query = query.filter(LabourRequisition.project_id == project_id)
+
+        # Role-based project filtering
+        # Admin and TD can see all requisitions
+        if user_role not in SUPER_ADMIN_ROLES:
+            assigned_project_ids = get_user_assigned_project_ids(user_id)
+
+            if assigned_project_ids:
+                # Filter requisitions to only show those from assigned projects
+                query = query.filter(LabourRequisition.project_id.in_(assigned_project_ids))
+            else:
+                # User has no assigned projects, return empty result
+                return jsonify({
+                    "success": True,
+                    "requisitions": [],
+                    "pagination": {
+                        "page": page,
+                        "per_page": per_page,
+                        "total": 0,
+                        "pages": 0
+                    }
+                }), 200
 
         query = query.order_by(LabourRequisition.required_date.desc())
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -725,8 +796,16 @@ def reject_requisition(requisition_id):
 # =============================================================================
 
 def get_approved_requisitions():
-    """Get approved requisitions with optional assignment status filter"""
+    """Get approved requisitions with optional assignment status filter, filtered by user's assigned projects"""
     try:
+        current_user = g.user
+        user_id = current_user.get('user_id')
+        user_role = normalize_role(current_user.get('role', ''))
+
+        # Validate user_id
+        if not user_id:
+            return jsonify({"error": "User ID not found in session"}), 401
+
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 20, type=int), 100)
         assignment_status = request.args.get('assignment_status')  # 'unassigned' or 'assigned'
@@ -741,6 +820,26 @@ def get_approved_requisitions():
         # Filter by assignment status if provided
         if assignment_status in ['unassigned', 'assigned']:
             query = query.filter(LabourRequisition.assignment_status == assignment_status)
+
+        # Role-based project filtering
+        # Admin, TD, and Production Manager can see all approved requisitions
+        if user_role not in LABOUR_ADMIN_ROLES:
+            assigned_project_ids = get_user_assigned_project_ids(user_id)
+
+            if assigned_project_ids:
+                query = query.filter(LabourRequisition.project_id.in_(assigned_project_ids))
+            else:
+                # User has no assigned projects, return empty result
+                return jsonify({
+                    "success": True,
+                    "requisitions": [],
+                    "pagination": {
+                        "page": page,
+                        "per_page": per_page,
+                        "total": 0,
+                        "pages": 0
+                    }
+                }), 200
 
         query = query.order_by(LabourRequisition.required_date.desc())
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -1890,38 +1989,90 @@ def get_payroll_summary():
 # =============================================================================
 
 def get_labour_dashboard():
-    """Get dashboard statistics for labour management"""
+    """Get dashboard statistics for labour management, filtered by user's assigned projects"""
     try:
         current_user = g.user
-        user_role = current_user.get('role', '').lower()
+        user_id = current_user.get('user_id')
+        user_role = normalize_role(current_user.get('role', ''))
+
+        # Validate user_id
+        if not user_id:
+            return jsonify({"error": "User ID not found in session"}), 401
 
         today = date.today()
 
+        # Role-based project filtering
+        # Admin, TD, and Production Manager can see all stats
+        assigned_project_ids = None
+
+        if user_role not in LABOUR_ADMIN_ROLES:
+            assigned_project_ids = get_user_assigned_project_ids(user_id)
+
+        # Build queries with optional project filtering
+        pending_req_query = LabourRequisition.query.filter(
+            LabourRequisition.status == 'pending',
+            LabourRequisition.is_deleted == False
+        )
+        approved_unassigned_query = LabourRequisition.query.filter(
+            LabourRequisition.status == 'approved',
+            LabourRequisition.assignment_status == 'unassigned',
+            LabourRequisition.is_deleted == False
+        )
+        arrivals_pending_query = LabourArrival.query.filter(
+            LabourArrival.arrival_date == today,
+            LabourArrival.arrival_status == 'assigned',
+            LabourArrival.is_deleted == False
+        )
+        arrivals_confirmed_query = LabourArrival.query.filter(
+            LabourArrival.arrival_date == today,
+            LabourArrival.arrival_status == 'confirmed',
+            LabourArrival.is_deleted == False
+        )
+        pending_lock_query = DailyAttendance.query.filter(
+            DailyAttendance.approval_status == 'pending',
+            DailyAttendance.is_deleted == False
+        )
+
+        # Apply project filter if user has restricted access
+        if assigned_project_ids is not None:
+            if assigned_project_ids:
+                pending_req_query = pending_req_query.filter(
+                    LabourRequisition.project_id.in_(assigned_project_ids)
+                )
+                approved_unassigned_query = approved_unassigned_query.filter(
+                    LabourRequisition.project_id.in_(assigned_project_ids)
+                )
+                arrivals_pending_query = arrivals_pending_query.filter(
+                    LabourArrival.project_id.in_(assigned_project_ids)
+                )
+                arrivals_confirmed_query = arrivals_confirmed_query.filter(
+                    LabourArrival.project_id.in_(assigned_project_ids)
+                )
+                pending_lock_query = pending_lock_query.filter(
+                    DailyAttendance.project_id.in_(assigned_project_ids)
+                )
+            else:
+                # User has no assigned projects, return zero stats
+                return jsonify({
+                    "success": True,
+                    "dashboard": {
+                        'total_workers': 0,
+                        'pending_requisitions': 0,
+                        'approved_unassigned': 0,
+                        'today_arrivals_pending': 0,
+                        'today_arrivals_confirmed': 0,
+                        'pending_lock': 0
+                    },
+                    "date": today.isoformat()
+                }), 200
+
         stats = {
             'total_workers': Worker.query.filter(Worker.is_deleted == False, Worker.status == 'active').count(),
-            'pending_requisitions': LabourRequisition.query.filter(
-                LabourRequisition.status == 'pending',
-                LabourRequisition.is_deleted == False
-            ).count(),
-            'approved_unassigned': LabourRequisition.query.filter(
-                LabourRequisition.status == 'approved',
-                LabourRequisition.assignment_status == 'unassigned',
-                LabourRequisition.is_deleted == False
-            ).count(),
-            'today_arrivals_pending': LabourArrival.query.filter(
-                LabourArrival.arrival_date == today,
-                LabourArrival.arrival_status == 'assigned',
-                LabourArrival.is_deleted == False
-            ).count(),
-            'today_arrivals_confirmed': LabourArrival.query.filter(
-                LabourArrival.arrival_date == today,
-                LabourArrival.arrival_status == 'confirmed',
-                LabourArrival.is_deleted == False
-            ).count(),
-            'pending_lock': DailyAttendance.query.filter(
-                DailyAttendance.approval_status == 'pending',
-                DailyAttendance.is_deleted == False
-            ).count()
+            'pending_requisitions': pending_req_query.count(),
+            'approved_unassigned': approved_unassigned_query.count(),
+            'today_arrivals_pending': arrivals_pending_query.count(),
+            'today_arrivals_confirmed': arrivals_confirmed_query.count(),
+            'pending_lock': pending_lock_query.count()
         }
 
         return jsonify({
