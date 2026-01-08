@@ -26,6 +26,8 @@ from controllers.labour_controller import (
     get_requisitions_by_project,
     update_requisition,
     resubmit_requisition,
+    delete_requisition,
+    resend_requisition,
     # Step 3: Approvals
     get_pending_requisitions,
     approve_requisition,
@@ -157,11 +159,25 @@ def edit_requisition(requisition_id):
     return update_requisition(requisition_id)
 
 
-@labour_routes.route('/requisitions/<int:requisition_id>/resubmit', methods=['POST'])
+@labour_routes.route('/requisitions/<int:requisition_id>/resubmit', methods=['POST', 'PUT'])
 @jwt_required
 def resubmit_req(requisition_id):
-    """Resubmit rejected requisition with edits (Site Engineer)"""
+    """Resubmit/update requisition with edits (Site Engineer)"""
     return resubmit_requisition(requisition_id)
+
+
+@labour_routes.route('/requisitions/<int:requisition_id>', methods=['DELETE'])
+@jwt_required
+def delete_req(requisition_id):
+    """Delete requisition (Site Engineer - only pending)"""
+    return delete_requisition(requisition_id)
+
+
+@labour_routes.route('/requisitions/<int:requisition_id>/resend', methods=['POST'])
+@jwt_required
+def resend_req(requisition_id):
+    """Resend pending requisition to PM (Site Engineer)"""
+    return resend_requisition(requisition_id)
 
 
 @labour_routes.route('/requisitions/by-project/<int:project_id>', methods=['GET'])

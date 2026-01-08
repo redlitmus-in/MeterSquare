@@ -48,13 +48,43 @@ const RequisitionApprovals: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('pending');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedRequisition, setSelectedRequisition] = useState<LabourRequisition | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<any>(null);
+  const perPage = 15;
+
+  // Tab counts state
+  const [tabCounts, setTabCounts] = useState<Record<TabType, number>>({
+    pending: 0,
+    approved: 0,
+    rejected: 0
+  });
+
+  // Fetch counts for all tabs
+  const fetchTabCounts = async () => {
+    try {
+      const results = await Promise.all([
+        labourService.getPendingRequisitions('pending'),
+        labourService.getPendingRequisitions('approved'),
+        labourService.getPendingRequisitions('rejected')
+      ]);
+
+      setTabCounts({
+        pending: results[0].success ? results[0].data.length : 0,
+        approved: results[1].success ? results[1].data.length : 0,
+        rejected: results[2].success ? results[2].data.length : 0
+      });
+    } catch (error) {
+      console.error('Failed to fetch tab counts:', error);
+    }
+  };
 
   const fetchRequisitions = async () => {
     setLoading(true);
     try {
-      const result = await labourService.getPendingRequisitions(activeTab);
+      const result = await labourService.getPendingRequisitions(activeTab, undefined, currentPage, perPage);
       if (result.success) {
         setRequisitions(result.data);
+        setPagination(result.pagination);
       } else {
         showError(result.message || 'Failed to fetch requisitions');
       }
@@ -66,8 +96,13 @@ const RequisitionApprovals: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchRequisitions();
+    setCurrentPage(1); // Reset to page 1 when changing tabs
   }, [activeTab]);
+
+  useEffect(() => {
+    fetchRequisitions();
+    fetchTabCounts();
+  }, [activeTab, currentPage]);
 
   const handleApprove = async (requisitionId: number) => {
     setProcessing(requisitionId);
@@ -75,6 +110,7 @@ const RequisitionApprovals: React.FC = () => {
     if (result.success) {
       showSuccess('Requisition approved successfully');
       fetchRequisitions();
+      fetchTabCounts(); // Refresh counts
     } else {
       showError(result.message || 'Failed to approve requisition');
     }
@@ -95,6 +131,7 @@ const RequisitionApprovals: React.FC = () => {
       setRejectingId(null);
       setRejectionReason('');
       fetchRequisitions();
+      fetchTabCounts(); // Refresh counts
     } else {
       showError(result.message || 'Failed to reject requisition');
     }
@@ -169,6 +206,13 @@ const RequisitionApprovals: React.FC = () => {
             >
               <Icon className="w-4 h-4" />
               {tab.label}
+              {tabCounts[tab.key] > 0 && (
+                <span className={`ml-1 px-2 py-0.5 text-xs font-semibold rounded-full ${
+                  isActive ? 'bg-white' : 'bg-gray-200 text-gray-700'
+                }`}>
+                  {tabCounts[tab.key]}
+                </span>
+              )}
             </button>
           );
         })}
@@ -250,6 +294,66 @@ const RequisitionApprovals: React.FC = () => {
         </div>
       )}
 
+      {/* Pagination */}
+      {pagination && pagination.pages > 1 && (
+        <div className="mt-6 flex items-center justify-between bg-white px-4 py-3 border border-gray-200 rounded-lg">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-700">
+              Showing <span className="font-medium">{(currentPage - 1) * perPage + 1}</span> to{' '}
+              <span className="font-medium">{Math.min(currentPage * perPage, pagination.total)}</span> of{' '}
+              <span className="font-medium">{pagination.total}</span> results
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Previous
+            </button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => {
+                // Show first page, last page, current page, and pages around current
+                const showPage =
+                  page === 1 ||
+                  page === pagination.pages ||
+                  (page >= currentPage - 1 && page <= currentPage + 1);
+
+                if (!showPage) {
+                  // Show ellipsis
+                  if (page === currentPage - 2 || page === currentPage + 2) {
+                    return <span key={page} className="px-2 text-gray-500">...</span>;
+                  }
+                  return null;
+                }
+
+                return (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                      currentPage === page
+                        ? 'bg-teal-600 text-white font-medium'
+                        : 'border border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setCurrentPage(Math.min(pagination.pages, currentPage + 1))}
+              disabled={currentPage === pagination.pages}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* View Details Modal */}
       {showDetailsModal && selectedRequisition && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -297,9 +401,33 @@ const RequisitionApprovals: React.FC = () => {
 
               {/* Details Grid */}
               <div className="space-y-4">
+                {/* Labour Items */}
                 <div className="border-b border-gray-100 pb-4">
-                  <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Work Description</h3>
-                  <p className="text-gray-900">{selectedRequisition.work_description}</p>
+                  <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Labour Items</h3>
+                  <div className="space-y-3">
+                    {selectedRequisition.labour_items && selectedRequisition.labour_items.length > 0 ? (
+                      selectedRequisition.labour_items.map((item: any, idx: number) => (
+                        <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                          <div className="flex items-start justify-between mb-2">
+                            <p className="text-sm font-medium text-gray-900">{item.work_description}</p>
+                            <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
+                              {item.workers_count} worker{item.workers_count !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-600">
+                            <span className="font-medium">Skill:</span> {item.skill_required}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                        <p className="text-sm text-gray-900">{selectedRequisition.work_description}</p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          <span className="font-medium">Skill:</span> {selectedRequisition.skill_required}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-8 gap-y-4">
@@ -312,12 +440,8 @@ const RequisitionApprovals: React.FC = () => {
                     <p className="text-gray-900">{selectedRequisition.site_name}</p>
                   </div>
                   <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Skill Required</h3>
-                    <p className="text-gray-900 font-medium">{selectedRequisition.skill_required}</p>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Workers Count</h3>
-                    <p className="text-gray-900 font-medium">{selectedRequisition.workers_count}</p>
+                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Total Workers</h3>
+                    <p className="text-gray-900 font-medium">{selectedRequisition.total_workers_count || selectedRequisition.workers_count} worker(s)</p>
                   </div>
                   <div>
                     <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Required Date</h3>

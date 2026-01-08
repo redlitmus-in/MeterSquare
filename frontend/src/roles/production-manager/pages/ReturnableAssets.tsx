@@ -71,7 +71,7 @@ const ReturnableAssets: React.FC = () => {
       await apiClient.post('/assets/disposal', {
         category_id: disposalCategory.category_id,
         quantity: disposalQuantity,
-        reason: disposalReason.trim(),
+        disposal_reason: disposalReason.trim(),
         notes: disposalNotes.trim()
       });
       showSuccess(`Disposal request submitted for ${disposalQuantity} ${disposalCategory.category_name}`);

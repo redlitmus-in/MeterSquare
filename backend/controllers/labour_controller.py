@@ -343,49 +343,91 @@ def get_workers_by_skill(skill):
 # =============================================================================
 
 def create_requisition():
-    """Site Engineer creates a labour requisition"""
+    """Site Engineer creates a labour requisition with multiple labour items"""
     try:
         current_user = g.user
         data = request.get_json()
 
         # Validate required fields
-        required = ['project_id', 'site_name', 'work_description', 'skill_required', 'workers_count', 'required_date']
+        required = ['project_id', 'site_name', 'required_date', 'labour_items']
         for field in required:
             if not data.get(field):
                 return jsonify({"error": f"{field} is required"}), 400
 
-        # Generate requisition code
-        requisition_code = LabourRequisition.generate_requisition_code()
+        # Validate labour_items array
+        labour_items = data.get('labour_items', [])
+        if not isinstance(labour_items, list) or len(labour_items) == 0:
+            return jsonify({"error": "labour_items must be a non-empty array"}), 400
 
-        requisition = LabourRequisition(
-            requisition_code=requisition_code,
-            project_id=data['project_id'],
-            site_name=data['site_name'],
-            work_description=data['work_description'],
-            skill_required=data['skill_required'],
-            workers_count=int(data['workers_count']),
-            required_date=datetime.strptime(data['required_date'], '%Y-%m-%d').date(),
-            # BOQ labour item tracking (optional)
-            boq_id=data.get('boq_id'),
-            item_id=data.get('item_id'),
-            labour_id=data.get('labour_id'),
-            work_status='pending_assignment',
-            requested_by_user_id=current_user.get('user_id'),
-            requested_by_name=current_user.get('full_name', 'Unknown'),
-            status='pending',
-            created_by=current_user.get('full_name', 'System')
-        )
+        # Validate each labour item
+        for idx, item in enumerate(labour_items):
+            required_item_fields = ['work_description', 'skill_required', 'workers_count']
+            for field in required_item_fields:
+                if not item.get(field):
+                    return jsonify({"error": f"labour_items[{idx}].{field} is required"}), 400
 
-        db.session.add(requisition)
-        db.session.commit()
+        # Generate requisition code with retry logic for race conditions
+        max_retries = 5
+        requisition = None
 
-        log.info(f"Requisition created: {requisition_code} by {current_user.get('full_name')}")
+        for attempt in range(max_retries):
+            try:
+                # Generate unique requisition code
+                requisition_code = LabourRequisition.generate_requisition_code()
+
+                # Get first labour item for backward compatibility fields
+                first_item = labour_items[0]
+                total_workers = sum(item.get('workers_count', 0) for item in labour_items)
+
+                # Create single requisition with multiple labour items
+                requisition = LabourRequisition(
+                    requisition_code=requisition_code,
+                    project_id=data['project_id'],
+                    site_name=data['site_name'],
+                    required_date=datetime.strptime(data['required_date'], '%Y-%m-%d').date(),
+                    labour_items=labour_items,  # Store all labour items in JSONB
+                    # Backward compatibility: populate old fields with first item or summary
+                    work_description=first_item.get('work_description') if len(labour_items) == 1 else f"Multiple Labour Items ({len(labour_items)} items)",
+                    skill_required=first_item.get('skill_required') if len(labour_items) == 1 else "Multiple Skills",
+                    workers_count=total_workers,  # Total workers across all items
+                    boq_id=first_item.get('boq_id'),
+                    item_id=first_item.get('item_id'),
+                    labour_id=first_item.get('labour_id'),
+                    work_status='pending_assignment',
+                    requested_by_user_id=current_user.get('user_id'),
+                    requested_by_name=current_user.get('full_name', 'Unknown'),
+                    status='pending',
+                    created_by=current_user.get('full_name', 'System')
+                )
+
+                db.session.add(requisition)
+                db.session.commit()
+
+                log.info(f"Requisition created: {requisition_code} with {len(labour_items)} labour items, {total_workers} total workers by {current_user.get('full_name')}")
+                break  # Success, exit retry loop
+
+            except Exception as commit_error:
+                db.session.rollback()
+
+                # Check if it's a unique constraint violation on requisition_code
+                if 'labour_requisitions_requisition_code_key' in str(commit_error):
+                    if attempt < max_retries - 1:
+                        log.warning(f"Requisition code collision on attempt {attempt + 1}, retrying...")
+                        import time
+                        time.sleep(0.1)  # Wait 100ms before retry
+                        continue  # Retry with new code
+                    else:
+                        log.error(f"Failed to generate unique requisition code after {max_retries} attempts")
+                        return jsonify({"error": "Failed to generate unique requisition code. Please try again."}), 500
+                else:
+                    # Different error, raise it
+                    raise commit_error
 
         # TODO: Send notification to PM
 
         return jsonify({
             "success": True,
-            "message": "Requisition submitted successfully",
+            "message": f"Requisition submitted successfully with {len(labour_items)} labour item(s)",
             "requisition": requisition.to_dict()
         }), 201
 
@@ -402,7 +444,7 @@ def get_my_requisitions():
         user_id = current_user.get('user_id')
 
         page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 20, type=int), 100)
+        per_page = min(request.args.get('per_page', 15, type=int), 100)
         status = request.args.get('status')
 
         query = LabourRequisition.query.filter(
@@ -411,7 +453,12 @@ def get_my_requisitions():
         )
 
         if status:
-            query = query.filter(LabourRequisition.status == status)
+            # Support comma-separated status values (e.g., 'pending,send_to_pm')
+            if ',' in status:
+                status_list = [s.strip() for s in status.split(',')]
+                query = query.filter(LabourRequisition.status.in_(status_list))
+            else:
+                query = query.filter(LabourRequisition.status == status)
 
         query = query.order_by(LabourRequisition.created_at.desc())
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -561,7 +608,7 @@ def update_requisition(requisition_id):
 
 
 def resubmit_requisition(requisition_id):
-    """Resubmit a rejected requisition with optional edits (Site Engineer)"""
+    """Resubmit a rejected or pending requisition with optional edits (Site Engineer)"""
     try:
         current_user = g.user
         data = request.get_json()
@@ -574,8 +621,9 @@ def resubmit_requisition(requisition_id):
         if not requisition:
             return jsonify({"error": "Requisition not found"}), 404
 
-        if requisition.status != 'rejected':
-            return jsonify({"error": "Can only resubmit rejected requisitions"}), 400
+        # Allow resubmit for rejected or pending requisitions
+        if requisition.status not in ['rejected', 'pending']:
+            return jsonify({"error": "Can only resubmit rejected or pending requisitions"}), 400
 
         # Verify the requester is the original creator
         if requisition.requested_by_user_id != current_user.get('user_id'):
@@ -583,52 +631,185 @@ def resubmit_requisition(requisition_id):
             if user_role not in ['admin', 'pm', 'project_manager']:
                 return jsonify({"error": "Only the original requester can resubmit"}), 403
 
-        # Update fields if provided (with validation)
+        # Update site_name if provided
         if 'site_name' in data:
             if not data['site_name'] or not str(data['site_name']).strip():
                 return jsonify({"error": "site_name cannot be empty"}), 400
             requisition.site_name = str(data['site_name']).strip()
-        if 'work_description' in data:
-            if not data['work_description'] or not str(data['work_description']).strip():
-                return jsonify({"error": "work_description cannot be empty"}), 400
-            requisition.work_description = str(data['work_description']).strip()
-        if 'skill_required' in data:
-            if not data['skill_required'] or not str(data['skill_required']).strip():
-                return jsonify({"error": "skill_required cannot be empty"}), 400
-            requisition.skill_required = str(data['skill_required']).strip()
-        if 'workers_count' in data:
-            count = int(data['workers_count'])
-            if count < 1 or count > 500:
-                return jsonify({"error": "workers_count must be between 1 and 500"}), 400
-            requisition.workers_count = count
+
+        # Update required_date if provided
         if 'required_date' in data:
             new_date = datetime.strptime(data['required_date'], '%Y-%m-%d').date()
             if new_date < date.today():
                 return jsonify({"error": "required_date cannot be in the past"}), 400
             requisition.required_date = new_date
 
-        # Reset approval status to pending
-        requisition.status = 'pending'
-        requisition.rejection_reason = None
-        requisition.approved_by_user_id = None
-        requisition.approved_by_name = None
-        requisition.approval_date = None
-        requisition.request_date = datetime.utcnow()  # Update request date to now
+        # Update labour_items if provided
+        if 'labour_items' in data:
+            labour_items = data.get('labour_items', [])
+
+            # Validate labour_items array
+            if not isinstance(labour_items, list) or len(labour_items) == 0:
+                return jsonify({"error": "labour_items must be a non-empty array"}), 400
+
+            # Validate each labour item
+            for idx, item in enumerate(labour_items):
+                if not item.get('work_description', '').strip():
+                    return jsonify({"error": f"work_description is required for labour item {idx + 1}"}), 400
+                if not item.get('skill_required', '').strip():
+                    return jsonify({"error": f"skill_required is required for labour item {idx + 1}"}), 400
+                if not item.get('workers_count') or int(item.get('workers_count', 0)) < 1:
+                    return jsonify({"error": f"workers_count must be at least 1 for labour item {idx + 1}"}), 400
+
+            # Update labour_items
+            requisition.labour_items = labour_items
+
+            # Update backward compatibility fields
+            total_workers = sum(item.get('workers_count', 0) for item in labour_items)
+            first_item = labour_items[0]
+
+            if len(labour_items) == 1:
+                requisition.work_description = first_item.get('work_description')
+                requisition.skill_required = first_item.get('skill_required')
+                requisition.workers_count = first_item.get('workers_count')
+            else:
+                requisition.work_description = f"Multiple Labour Items ({len(labour_items)} items)"
+                requisition.skill_required = "Multiple Skills"
+                requisition.workers_count = total_workers
+
+        # Legacy fields support (if labour_items not provided)
+        else:
+            if 'work_description' in data:
+                if not data['work_description'] or not str(data['work_description']).strip():
+                    return jsonify({"error": "work_description cannot be empty"}), 400
+                requisition.work_description = str(data['work_description']).strip()
+            if 'skill_required' in data:
+                if not data['skill_required'] or not str(data['skill_required']).strip():
+                    return jsonify({"error": "skill_required cannot be empty"}), 400
+                requisition.skill_required = str(data['skill_required']).strip()
+            if 'workers_count' in data:
+                count = int(data['workers_count'])
+                if count < 1 or count > 500:
+                    return jsonify({"error": "workers_count must be between 1 and 500"}), 400
+                requisition.workers_count = count
+
+        # Keep status unchanged - just update the data
+        # User must manually click "Resend to PM" to send
         requisition.last_modified_by = current_user.get('full_name', 'System')
 
         db.session.commit()
 
-        log.info(f"Requisition resubmitted: {requisition.requisition_code} by {current_user.get('full_name')}")
+        log.info(f"Requisition updated: {requisition.requisition_code} by {current_user.get('full_name')}")
 
         return jsonify({
             "success": True,
-            "message": "Requisition resubmitted successfully",
+            "message": "Requisition updated successfully. Click 'Resend to PM' to send for approval.",
             "requisition": requisition.to_dict()
         }), 200
 
     except Exception as e:
         db.session.rollback()
         log.error(f"Error resubmitting requisition: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+def delete_requisition(requisition_id):
+    """Delete a requisition (soft delete) - Site Engineer can only delete pending requisitions"""
+    try:
+        current_user = g.user
+
+        requisition = LabourRequisition.query.filter_by(
+            requisition_id=requisition_id,
+            is_deleted=False
+        ).first()
+
+        if not requisition:
+            return jsonify({"error": "Requisition not found"}), 404
+
+        # Only allow deletion of pending requisitions
+        if requisition.status != 'pending':
+            return jsonify({"error": "Can only delete pending requisitions"}), 400
+
+        # Verify the requester is the original creator
+        if requisition.requested_by_user_id != current_user.get('user_id'):
+            user_role = current_user.get('role', '').lower()
+            if user_role not in ['admin', 'pm', 'project_manager']:
+                return jsonify({"error": "Only the original requester can delete"}), 403
+
+        # Check if workers have been assigned
+        if requisition.assignment_status == 'assigned':
+            return jsonify({"error": "Cannot delete requisition with assigned workers"}), 400
+
+        # Soft delete
+        requisition.is_deleted = True
+        requisition.last_modified_by = current_user.get('full_name', 'System')
+
+        db.session.commit()
+
+        log.info(f"Requisition deleted: {requisition.requisition_code} by {current_user.get('full_name')}")
+
+        return jsonify({
+            "success": True,
+            "message": "Requisition deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error deleting requisition: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+def resend_requisition(requisition_id):
+    """Resend/notify PM about a pending or rejected requisition"""
+    try:
+        current_user = g.user
+
+        requisition = LabourRequisition.query.filter_by(
+            requisition_id=requisition_id,
+            is_deleted=False
+        ).first()
+
+        if not requisition:
+            return jsonify({"error": "Requisition not found"}), 404
+
+        # Only allow resending pending or rejected requisitions
+        if requisition.status not in ['pending', 'rejected']:
+            return jsonify({"error": "Can only send pending or rejected requisitions"}), 400
+
+        # Verify the requester is the original creator
+        if requisition.requested_by_user_id != current_user.get('user_id'):
+            user_role = current_user.get('role', '').lower()
+            if user_role not in ['admin', 'pm', 'project_manager']:
+                return jsonify({"error": "Only the original requester can resend"}), 403
+
+        # Update request date to show it was resent
+        requisition.request_date = datetime.utcnow()
+        requisition.last_modified_by = current_user.get('full_name', 'System')
+
+        # Change status to send_to_pm to indicate it's been sent to PM
+        requisition.status = 'send_to_pm'
+
+        # Clear rejection reason if it was previously rejected
+        if requisition.rejection_reason:
+            requisition.rejection_reason = None
+            requisition.approved_by_user_id = None
+            requisition.approved_by_name = None
+            requisition.approval_date = None
+
+        db.session.commit()
+
+        # TODO: Send notification to PM
+
+        log.info(f"Requisition resent: {requisition.requisition_code} by {current_user.get('full_name')}")
+
+        return jsonify({
+            "success": True,
+            "message": "Requisition resent to Project Manager"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error resending requisition: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -648,7 +829,7 @@ def get_pending_requisitions():
             return jsonify({"error": "User ID not found in session"}), 401
 
         page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 20, type=int), 100)
+        per_page = min(request.args.get('per_page', 15, type=int), 100)
         project_id = request.args.get('project_id', type=int)
         status = request.args.get('status', 'pending')  # Default to pending
 
@@ -659,7 +840,10 @@ def get_pending_requisitions():
         )
 
         # Filter by status
-        if status in ['pending', 'approved', 'rejected']:
+        # For 'pending', include both 'pending' and 'send_to_pm' statuses
+        if status == 'pending':
+            query = query.filter(LabourRequisition.status.in_(['pending', 'send_to_pm']))
+        elif status in ['approved', 'rejected']:
             query = query.filter(LabourRequisition.status == status)
 
         if project_id:
@@ -718,8 +902,9 @@ def approve_requisition(requisition_id):
         if not requisition:
             return jsonify({"error": "Requisition not found"}), 404
 
-        if requisition.status != 'pending':
-            return jsonify({"error": "Requisition is not pending"}), 400
+        # Allow approving both 'pending' and 'send_to_pm' status
+        if requisition.status not in ['pending', 'send_to_pm']:
+            return jsonify({"error": "Requisition is not pending or already processed"}), 400
 
         requisition.status = 'approved'
         requisition.approved_by_user_id = current_user.get('user_id')
@@ -763,8 +948,9 @@ def reject_requisition(requisition_id):
         if not requisition:
             return jsonify({"error": "Requisition not found"}), 404
 
-        if requisition.status != 'pending':
-            return jsonify({"error": "Requisition is not pending"}), 400
+        # Allow rejecting both 'pending' and 'send_to_pm' status
+        if requisition.status not in ['pending', 'send_to_pm']:
+            return jsonify({"error": "Requisition is not pending or already processed"}), 400
 
         requisition.status = 'rejected'
         requisition.approved_by_user_id = current_user.get('user_id')

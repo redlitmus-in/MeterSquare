@@ -26,7 +26,9 @@ import {
   WrenchScrewdriverIcon,
   UserGroupIcon,
   PencilSquareIcon,
-  ArrowPathIcon
+  ArrowPathIcon,
+  TrashIcon,
+  PaperAirplaneIcon
 } from '@heroicons/react/24/outline';
 
 // API response structure from /projects/assigned-to-me
@@ -142,10 +144,28 @@ const LabourRequisition: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('pending');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<any>(null);
+  const perPage = 15;
+
+  // Tab counts
+  const [tabCounts, setTabCounts] = useState<Record<TabType, number>>({
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+    assigned: 0
+  });
 
   // View details modal
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedRequisition, setSelectedRequisition] = useState<RequisitionType | null>(null);
+  const [relatedRequisitions, setRelatedRequisitions] = useState<RequisitionType[]>([]);
+
+  // Confirmation dialog state
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmTitle, setConfirmTitle] = useState('');
 
   // Edit rejected requisition modal
   const [showEditModal, setShowEditModal] = useState(false);
@@ -157,6 +177,7 @@ const LabourRequisition: React.FC = () => {
     workers_count: 1,
     required_date: ''
   });
+  const [editLabourItems, setEditLabourItems] = useState<any[]>([]);
   const [resubmitting, setResubmitting] = useState(false);
 
   // Projects and BOQ data
@@ -348,43 +369,40 @@ const LabourRequisition: React.FC = () => {
 
     setSubmitting(true);
 
-    // Create all requisition requests in parallel
-    const requests = selectedLabours.map((labour) => {
-      const requisitionData: CreateRequisitionData = {
-        project_id: formData.project_id,
-        site_name: formData.site_name,
+    try {
+      // Create single requisition with multiple labour items
+      const labour_items = selectedLabours.map((labour) => ({
         work_description: `${labour.item_name} - ${labour.sub_item_name || labour.labour_role}`,
         skill_required: labour.labour_role,
         workers_count: labour.workers_count,
-        required_date: formData.required_date,
-        // BOQ labour item tracking
         boq_id: labour.boq_id,
         item_id: labour.item_id,
         labour_id: labour.labour_id ? String(labour.labour_id) : undefined
+      }));
+
+      const requisitionData: CreateRequisitionData = {
+        project_id: formData.project_id,
+        site_name: formData.site_name,
+        required_date: formData.required_date,
+        labour_items: labour_items
       };
-      return labourService.createRequisition(requisitionData);
-    });
 
-    // Execute all requests in parallel
-    const results = await Promise.allSettled(requests);
+      const result = await labourService.createRequisition(requisitionData);
 
-    // Count successes and failures
-    const successCount = results.filter(
-      (r) => r.status === 'fulfilled' && r.value.success
-    ).length;
-    const failCount = results.length - successCount;
+      setSubmitting(false);
 
-    setSubmitting(false);
-
-    if (successCount > 0) {
-      showSuccess(`${successCount} requisition(s) created successfully`);
-      fetchRequisitions();
-      setShowAddModal(false);
-      resetForm();
-    }
-
-    if (failCount > 0) {
-      showError(`${failCount} requisition(s) failed to create`);
+      if (result.success) {
+        showSuccess(`Requisition created successfully with ${selectedLabours.length} labour item(s)`);
+        fetchRequisitions();
+        fetchTabCounts();
+        setShowAddModal(false);
+        resetForm();
+      } else {
+        showError(result.error || 'Failed to create requisition');
+      }
+    } catch (error: any) {
+      setSubmitting(false);
+      showError(error.message || 'Failed to create requisition');
     }
   };
 
@@ -395,11 +413,15 @@ const LabourRequisition: React.FC = () => {
     if (activeTab === 'assigned') {
       // For assigned tab, fetch approved requisitions with assignment_status = 'assigned'
       statusFilter = 'approved';
+    } else if (activeTab === 'pending') {
+      // For pending tab, fetch all requisitions that haven't been approved/rejected yet
+      // This includes both 'pending' (not yet sent) and 'send_to_pm' (sent to PM)
+      statusFilter = 'pending,send_to_pm';
     } else {
       statusFilter = activeTab;
     }
 
-    const result = await labourService.getMyRequisitions(statusFilter);
+    const result = await labourService.getMyRequisitions(statusFilter, currentPage, perPage);
     if (result.success) {
       let data = result.data;
       // Additional filtering for assigned tab
@@ -407,27 +429,75 @@ const LabourRequisition: React.FC = () => {
         data = data.filter((req: RequisitionType) => req.assignment_status === 'assigned');
       }
       setRequisitions(data);
+      setPagination(result.pagination);
     } else {
       showError(result.message || 'Failed to fetch requisitions');
     }
     setLoading(false);
   };
 
+  // Fetch counts for all tabs
+  const fetchTabCounts = async () => {
+    try {
+      const results = await Promise.all([
+        labourService.getMyRequisitions('pending,send_to_pm'),
+        labourService.getMyRequisitions('approved'),
+        labourService.getMyRequisitions('rejected'),
+        labourService.getMyRequisitions('approved')
+      ]);
+
+      // Count assigned requisitions (approved with assignment_status = 'assigned')
+      const assignedCount = results[3].success
+        ? results[3].data.filter((req: RequisitionType) => req.assignment_status === 'assigned').length
+        : 0;
+
+      setTabCounts({
+        pending: results[0].success ? results[0].data.length : 0,
+        approved: results[1].success ? results[1].data.length : 0,
+        rejected: results[2].success ? results[2].data.length : 0,
+        assigned: assignedCount
+      });
+    } catch (error) {
+      console.error('Failed to fetch tab counts:', error);
+    }
+  };
+
   // View details handler
   const handleViewDetails = (requisition: RequisitionType) => {
     setSelectedRequisition(requisition);
+
+    // Find all related requisitions created in the same batch
+    // Same project, same requester, and created within the same minute
+    const clickedDate = new Date(requisition.request_date);
+    const related = requisitions.filter(req => {
+      if (req.project_id !== requisition.project_id) return false;
+      if (req.requested_by_id !== requisition.requested_by_id) return false;
+
+      // Check if request dates are within 1 minute of each other
+      const reqDate = new Date(req.request_date);
+      const timeDiff = Math.abs(reqDate.getTime() - clickedDate.getTime());
+      return timeDiff < 60000; // 60000ms = 1 minute
+    });
+
+    setRelatedRequisitions(related);
     setShowDetailsModal(true);
   };
 
   // Fetch projects only once on mount
   useEffect(() => {
     fetchProjects();
+    fetchTabCounts();
   }, []);
 
-  // Fetch requisitions when tab changes
+  // Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Fetch requisitions when tab or page changes
   useEffect(() => {
     fetchRequisitions();
-  }, [activeTab]);
+  }, [activeTab, currentPage]);
 
   // When project is selected - auto-fill form with project data
   const handleProjectSelect = async (projectId: number) => {
@@ -524,7 +594,102 @@ const LabourRequisition: React.FC = () => {
       workers_count: requisition.workers_count || 1,
       required_date: requisition.required_date?.split('T')[0] || new Date().toISOString().split('T')[0]
     });
+
+    // Initialize labour items for editing
+    if (requisition.labour_items && requisition.labour_items.length > 0) {
+      setEditLabourItems(JSON.parse(JSON.stringify(requisition.labour_items))); // Deep copy
+    } else {
+      // Fallback for old format
+      setEditLabourItems([{
+        work_description: requisition.work_description || '',
+        skill_required: requisition.skill_required || '',
+        workers_count: requisition.workers_count || 1,
+        boq_id: requisition.boq_id,
+        item_id: requisition.item_id,
+        labour_id: requisition.labour_id
+      }]);
+    }
+
     setShowEditModal(true);
+  };
+
+  // Show custom confirmation dialog
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmTitle(title);
+    setConfirmMessage(message);
+    setConfirmAction(() => onConfirm);
+    setShowConfirmDialog(true);
+  };
+
+  // Handle confirmation
+  const handleConfirm = () => {
+    if (confirmAction) {
+      confirmAction();
+    }
+    setShowConfirmDialog(false);
+    setConfirmAction(null);
+  };
+
+  // Handle delete requisition
+  const handleDeleteRequisition = (requisitionId: number) => {
+    showConfirm(
+      'Delete Requisition',
+      'Are you sure you want to delete this requisition? This action cannot be undone.',
+      async () => {
+        try {
+          const response = await apiClient.delete(`/labour/requisitions/${requisitionId}`);
+          if (response.data.success) {
+            showSuccess('Requisition deleted successfully');
+            fetchRequisitions();
+            fetchTabCounts();
+          } else {
+            showError(response.data.error || 'Failed to delete requisition');
+          }
+        } catch (error: any) {
+          showError(error.response?.data?.error || 'Failed to delete requisition');
+        }
+      }
+    );
+  };
+
+  // Handle resend/resubmit pending requisition to PM
+  const handleResendRequisition = (requisitionId: number) => {
+    showConfirm(
+      'Send to Project Manager',
+      'Send this requisition to Project Manager for approval?',
+      async () => {
+        try {
+          const response = await apiClient.post(`/labour/requisitions/${requisitionId}/resend`);
+          if (response.data.success) {
+            showSuccess('Requisition sent to Project Manager successfully');
+            fetchRequisitions();
+            fetchTabCounts();
+          } else {
+            showError(response.data.error || 'Failed to send requisition');
+          }
+        } catch (error: any) {
+          showError(error.response?.data?.error || 'Failed to send requisition');
+        }
+      }
+    );
+  };
+
+  // Update labour item field
+  const updateLabourItemField = (index: number, field: string, value: any) => {
+    setEditLabourItems(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+  };
+
+  // Remove labour item from edit list
+  const removeLabourItem = (index: number) => {
+    if (editLabourItems.length === 1) {
+      showError('Cannot remove the last labour item');
+      return;
+    }
+    setEditLabourItems(prev => prev.filter((_, i) => i !== index));
   };
 
   // Handle resubmitting edited requisition
@@ -534,18 +699,6 @@ const LabourRequisition: React.FC = () => {
     // Client-side validation
     if (!editFormData.site_name?.trim()) {
       showError('Site/Location is required');
-      return;
-    }
-    if (!editFormData.work_description?.trim()) {
-      showError('Work description is required');
-      return;
-    }
-    if (!editFormData.skill_required?.trim()) {
-      showError('Skill required is required');
-      return;
-    }
-    if (editFormData.workers_count < 1 || editFormData.workers_count > 500) {
-      showError('Workers count must be between 1 and 500');
       return;
     }
     if (!editFormData.required_date) {
@@ -561,18 +714,49 @@ const LabourRequisition: React.FC = () => {
       return;
     }
 
-    setResubmitting(true);
-    const result = await labourService.resubmitRequisition(editingRequisition.requisition_id, editFormData);
-
-    if (result.success) {
-      showSuccess('Requisition resubmitted successfully');
-      setShowEditModal(false);
-      setEditingRequisition(null);
-      fetchRequisitions();
-    } else {
-      showError(result.message || 'Failed to resubmit requisition');
+    // Validate labour items
+    for (let i = 0; i < editLabourItems.length; i++) {
+      const item = editLabourItems[i];
+      if (!item.work_description?.trim()) {
+        showError(`Work description is required for labour item ${i + 1}`);
+        return;
+      }
+      if (!item.skill_required?.trim()) {
+        showError(`Skill is required for labour item ${i + 1}`);
+        return;
+      }
+      if (!item.workers_count || item.workers_count < 1) {
+        showError(`Workers count must be at least 1 for labour item ${i + 1}`);
+        return;
+      }
     }
-    setResubmitting(false);
+
+    setResubmitting(true);
+
+    try {
+      const payload = {
+        site_name: editFormData.site_name,
+        required_date: editFormData.required_date,
+        labour_items: editLabourItems
+      };
+
+      const response = await apiClient.put(`/labour/requisitions/${editingRequisition.requisition_id}/resubmit`, payload);
+
+      if (response.data.success) {
+        showSuccess(response.data.message || 'Requisition updated and sent to Project Manager successfully');
+        setShowEditModal(false);
+        setEditingRequisition(null);
+        setEditLabourItems([]);
+        fetchRequisitions();
+        fetchTabCounts();
+      } else {
+        showError(response.data.error || 'Failed to update requisition');
+      }
+    } catch (error: any) {
+      showError(error.response?.data?.error || 'Failed to update requisition');
+    } finally {
+      setResubmitting(false);
+    }
   };
 
   // Get status info for a labour item
@@ -695,6 +879,13 @@ const LabourRequisition: React.FC = () => {
                 >
                   <Icon className={`w-4 h-4 ${isActive ? 'text-purple-600' : ''}`} />
                   {tab.label}
+                  {tabCounts[tab.key] > 0 && (
+                    <span className={`ml-1 px-2 py-0.5 text-xs font-semibold rounded-full ${
+                      isActive ? 'bg-purple-100 text-purple-600' : 'bg-gray-200 text-gray-700'
+                    }`}>
+                      {tabCounts[tab.key]}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -740,19 +931,62 @@ const LabourRequisition: React.FC = () => {
                   <button
                     onClick={() => handleViewDetails(req)}
                     className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-purple-600 border border-purple-200 rounded hover:bg-purple-50 transition-colors"
+                    title="View Details"
                   >
                     <EyeIcon className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">View</span>
                   </button>
-                  {/* Edit & Resend button for rejected requisitions */}
+
+                  {/* Actions for pending requisitions */}
+                  {req.status === 'pending' && (
+                    <>
+                      <button
+                        onClick={() => handleEditRequisition(req)}
+                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-blue-600 border border-blue-200 rounded hover:bg-blue-50 transition-colors"
+                        title="Edit Requisition"
+                      >
+                        <PencilSquareIcon className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Edit</span>
+                      </button>
+                      <button
+                        onClick={() => handleResendRequisition(req.requisition_id)}
+                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-green-600 border border-green-200 rounded hover:bg-green-50 transition-colors"
+                        title="Send to PM"
+                      >
+                        <PaperAirplaneIcon className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Send to PM</span>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteRequisition(req.requisition_id)}
+                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50 transition-colors"
+                        title="Delete Requisition"
+                      >
+                        <TrashIcon className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Delete</span>
+                      </button>
+                    </>
+                  )}
+
+                  {/* View, Edit, and Resend buttons for rejected requisitions */}
                   {req.status === 'rejected' && (
-                    <button
-                      onClick={() => handleEditRequisition(req)}
-                      className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-orange-600 border border-orange-200 rounded hover:bg-orange-50 transition-colors"
-                    >
-                      <PencilSquareIcon className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Edit & Resend</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleEditRequisition(req)}
+                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-blue-600 border border-blue-200 rounded hover:bg-blue-50 transition-colors"
+                        title="Edit Requisition"
+                      >
+                        <PencilSquareIcon className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Edit</span>
+                      </button>
+                      <button
+                        onClick={() => handleResendRequisition(req.requisition_id)}
+                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-green-600 border border-green-200 rounded hover:bg-green-50 transition-colors"
+                        title="Resend to PM"
+                      >
+                        <PaperAirplaneIcon className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Resend to PM</span>
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -764,6 +998,66 @@ const LabourRequisition: React.FC = () => {
               )}
             </motion.div>
           ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {pagination && pagination.pages > 1 && (
+        <div className="mt-6 flex items-center justify-between bg-white px-4 py-3 border border-gray-200 rounded-lg">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-700">
+              Showing <span className="font-medium">{(currentPage - 1) * perPage + 1}</span> to{' '}
+              <span className="font-medium">{Math.min(currentPage * perPage, pagination.total)}</span> of{' '}
+              <span className="font-medium">{pagination.total}</span> results
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Previous
+            </button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => {
+                // Show first page, last page, current page, and pages around current
+                const showPage =
+                  page === 1 ||
+                  page === pagination.pages ||
+                  (page >= currentPage - 1 && page <= currentPage + 1);
+
+                if (!showPage) {
+                  // Show ellipsis
+                  if (page === currentPage - 2 || page === currentPage + 2) {
+                    return <span key={page} className="px-2 text-gray-500">...</span>;
+                  }
+                  return null;
+                }
+
+                return (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                      currentPage === page
+                        ? 'bg-purple-600 text-white font-medium'
+                        : 'border border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setCurrentPage(Math.min(pagination.pages, currentPage + 1))}
+              disabled={currentPage === pagination.pages}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+            </button>
+          </div>
         </div>
       )}
 
@@ -1088,7 +1382,7 @@ const LabourRequisition: React.FC = () => {
                     ) : (
                       <>
                         <PlusIcon className="w-5 h-5" />
-                        Submit {selectedLabours.length > 0 ? `${selectedLabours.length} Requisition(s)` : 'Requisition'}
+                        Create {selectedLabours.length > 0 ? `${selectedLabours.length} Requisition(s)` : 'Requisition'}
                       </>
                     )}
                   </button>
@@ -1114,14 +1408,24 @@ const LabourRequisition: React.FC = () => {
                   <ClipboardDocumentListIcon className="w-6 h-6 text-gray-600" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold text-gray-900">{selectedRequisition.requisition_code}</h2>
-                  <p className="text-sm text-gray-500">Requisition Details</p>
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Labour Requisitions
+                    {relatedRequisitions.length > 1 && (
+                      <span className="ml-2 text-sm font-normal text-gray-500">
+                        ({relatedRequisitions.length} requisitions)
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    {relatedRequisitions.length > 1 ? 'Batch created together' : 'Requisition Details'}
+                  </p>
                 </div>
               </div>
               <button
                 onClick={() => {
                   setShowDetailsModal(false);
                   setSelectedRequisition(null);
+                  setRelatedRequisitions([]);
                 }}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               >
@@ -1131,106 +1435,171 @@ const LabourRequisition: React.FC = () => {
 
             {/* Content */}
             <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
-              {/* Status Row */}
-              <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">Status:</span>
-                  <span className={`px-2.5 py-1 text-xs font-medium rounded ${
-                    selectedRequisition.status === 'pending' ? 'bg-gray-100 text-gray-700' :
-                    selectedRequisition.status === 'approved' ? 'bg-gray-100 text-gray-700' :
-                    selectedRequisition.status === 'rejected' ? 'bg-gray-100 text-gray-700' :
-                    'bg-gray-100 text-gray-700'
-                  }`}>
-                    {selectedRequisition.status === 'pending' && 'Pending Approval'}
-                    {selectedRequisition.status === 'approved' && 'Approved'}
-                    {selectedRequisition.status === 'rejected' && 'Rejected'}
-                  </span>
-                  {selectedRequisition.status === 'approved' && selectedRequisition.assignment_status && (
-                    <span className="px-2.5 py-1 text-xs font-medium rounded bg-gray-100 text-gray-700">
-                      {selectedRequisition.assignment_status === 'assigned' ? 'Workers Assigned' : 'Pending Assignment'}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {selectedRequisition.status === 'rejected' && selectedRequisition.rejection_reason && (
-                <div className="mb-6 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                  <p className="text-sm text-gray-700">
-                    <span className="font-medium">Rejection Reason:</span> {selectedRequisition.rejection_reason}
-                  </p>
+              {/* Show common project info if multiple requisitions */}
+              {relatedRequisitions.length > 1 && (
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Project</h3>
+                      <p className="text-gray-900">{selectedRequisition.project_name || `Project #${selectedRequisition.project_id}`}</p>
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Requested By</h3>
+                      <p className="text-gray-900">{selectedRequisition.requested_by_name || '-'}</p>
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Request Date</h3>
+                      <p className="text-gray-900">
+                        {selectedRequisition.request_date ? new Date(selectedRequisition.request_date).toLocaleDateString('en-US', {
+                          weekday: 'short',
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric'
+                        }) : '-'}
+                      </p>
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Site/Location</h3>
+                      <p className="text-gray-900">{selectedRequisition.site_name || '-'}</p>
+                    </div>
+                  </div>
                 </div>
               )}
 
-              {/* Details Grid */}
-              <div className="space-y-4">
-                {/* Work Description */}
-                <div className="border-b border-gray-100 pb-4">
-                  <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Work Description</h3>
-                  <p className="text-gray-900">{selectedRequisition.work_description}</p>
-                </div>
-
-                {/* Two Column Grid */}
-                <div className="grid grid-cols-2 gap-x-8 gap-y-4">
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Project</h3>
-                    <p className="text-gray-900">{selectedRequisition.project_name || `Project #${selectedRequisition.project_id}`}</p>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Site/Location</h3>
-                    <p className="text-gray-900">{selectedRequisition.site_name || '-'}</p>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Skill Required</h3>
-                    <p className="text-gray-900 font-medium">{selectedRequisition.skill_required}</p>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Workers Requested</h3>
-                    <p className="text-gray-900 font-medium">{selectedRequisition.workers_count} worker(s)</p>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Required Date</h3>
-                    <p className="text-gray-900">
-                      {new Date(selectedRequisition.required_date).toLocaleDateString('en-US', {
-                        weekday: 'short',
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric'
-                      })}
-                    </p>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Request Date</h3>
-                    <p className="text-gray-900">
-                      {selectedRequisition.request_date ? new Date(selectedRequisition.request_date).toLocaleDateString('en-US', {
-                        weekday: 'short',
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric'
-                      }) : '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Requested By</h3>
-                    <p className="text-gray-900">{selectedRequisition.requested_by_name || '-'}</p>
-                  </div>
-                  {(selectedRequisition.status === 'approved' || selectedRequisition.status === 'rejected') && selectedRequisition.approved_by_name && (
-                    <div>
-                      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
-                        {selectedRequisition.status === 'approved' ? 'Approved By' : 'Rejected By'}
-                      </h3>
-                      <p className="text-gray-900">{selectedRequisition.approved_by_name}</p>
-                      {selectedRequisition.approval_date && (
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          {new Date(selectedRequisition.approval_date).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric'
-                          })}
-                        </p>
-                      )}
+              {/* Loop through all related requisitions */}
+              <div className="space-y-6">
+                {relatedRequisitions.map((requisition, index) => (
+                  <div key={requisition.requisition_id} className={`${index > 0 ? 'pt-6 border-t border-gray-200' : ''}`}>
+                    {/* Requisition Header */}
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-base font-semibold text-gray-900">{requisition.requisition_code}</h3>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2.5 py-1 text-xs font-medium rounded ${
+                          requisition.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                          requisition.status === 'approved' ? 'bg-green-100 text-green-700' :
+                          requisition.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {requisition.status === 'pending' && 'Pending Approval'}
+                          {requisition.status === 'approved' && 'Approved'}
+                          {requisition.status === 'rejected' && 'Rejected'}
+                        </span>
+                        {requisition.status === 'approved' && requisition.assignment_status && (
+                          <span className="px-2.5 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700">
+                            {requisition.assignment_status === 'assigned' ? 'Workers Assigned' : 'Pending Assignment'}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  )}
-                </div>
+
+                    {requisition.status === 'rejected' && requisition.rejection_reason && (
+                      <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                        <p className="text-sm text-red-700">
+                          <span className="font-medium">Rejection Reason:</span> {requisition.rejection_reason}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Requisition Details */}
+                    <div className="space-y-4">
+                      {/* Labour Items */}
+                      <div>
+                        <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Labour Items</h4>
+                        <div className="space-y-3">
+                          {requisition.labour_items && requisition.labour_items.length > 0 ? (
+                            requisition.labour_items.map((item: any, idx: number) => (
+                              <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                                <div className="flex items-start justify-between mb-2">
+                                  <p className="text-sm font-medium text-gray-900">{item.work_description}</p>
+                                  <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
+                                    {item.workers_count} worker{item.workers_count !== 1 ? 's' : ''}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-600">
+                                  <span className="font-medium">Skill:</span> {item.skill_required}
+                                </p>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                              <p className="text-sm text-gray-900">{requisition.work_description}</p>
+                              <p className="text-xs text-gray-600 mt-1">
+                                <span className="font-medium">Skill:</span> {requisition.skill_required}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Summary Info */}
+                      <div className="grid grid-cols-2 gap-x-8 gap-y-3 pt-3 border-t border-gray-100">
+                        {relatedRequisitions.length === 1 && (
+                          <>
+                            <div>
+                              <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Project</h4>
+                              <p className="text-gray-900">{requisition.project_name || `Project #${requisition.project_id}`}</p>
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Site/Location</h4>
+                              <p className="text-gray-900">{requisition.site_name || '-'}</p>
+                            </div>
+                          </>
+                        )}
+                        <div>
+                          <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Total Workers</h4>
+                          <p className="text-gray-900 font-medium">{requisition.total_workers_count || requisition.workers_count} worker(s)</p>
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Required Date</h4>
+                          <p className="text-gray-900">
+                            {new Date(requisition.required_date).toLocaleDateString('en-US', {
+                              weekday: 'short',
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
+                            })}
+                          </p>
+                        </div>
+                        {relatedRequisitions.length === 1 && (
+                          <>
+                            <div>
+                              <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Request Date</h4>
+                              <p className="text-gray-900">
+                                {requisition.request_date ? new Date(requisition.request_date).toLocaleDateString('en-US', {
+                                  weekday: 'short',
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric'
+                                }) : '-'}
+                              </p>
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Requested By</h4>
+                              <p className="text-gray-900">{requisition.requested_by_name || '-'}</p>
+                            </div>
+                          </>
+                        )}
+                        {(requisition.status === 'approved' || requisition.status === 'rejected') && requisition.approved_by_name && (
+                          <div>
+                            <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
+                              {requisition.status === 'approved' ? 'Approved By' : 'Rejected By'}
+                            </h4>
+                            <p className="text-gray-900">{requisition.approved_by_name}</p>
+                            {requisition.approval_date && (
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                {new Date(requisition.approval_date).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                })}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -1240,6 +1609,7 @@ const LabourRequisition: React.FC = () => {
                 onClick={() => {
                   setShowDetailsModal(false);
                   setSelectedRequisition(null);
+                  setRelatedRequisitions([]);
                 }}
                 className="w-full px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
               >
@@ -1308,49 +1678,78 @@ const LabourRequisition: React.FC = () => {
                   />
                 </div>
 
-                {/* Work Description */}
+                {/* Required Date */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Work Description</label>
-                  <textarea
-                    value={editFormData.work_description}
-                    onChange={(e) => setEditFormData({ ...editFormData, work_description: e.target.value })}
-                    rows={3}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Required Date</label>
+                  <input
+                    type="date"
+                    value={editFormData.required_date}
+                    onChange={(e) => setEditFormData({ ...editFormData, required_date: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                    placeholder="Describe the work to be done"
                   />
                 </div>
 
-                {/* Skill Required - Read-only as it's tied to BOQ labour item */}
+                {/* Labour Items */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Skill Required</label>
-                  <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg">
-                    <span className="px-2.5 py-1 bg-purple-100 text-purple-700 text-sm rounded font-medium">
-                      {editFormData.skill_required}
-                    </span>
-                    <span className="text-xs text-gray-400">(from BOQ labour item)</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">Labour Items ({editLabourItems.length})</label>
                   </div>
-                </div>
+                  <div className="space-y-3">
+                    {editLabourItems.map((item, index) => (
+                      <div key={index} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                        <div className="flex items-start justify-between mb-3">
+                          <h4 className="text-sm font-medium text-gray-900">Labour Item {index + 1}</h4>
+                          {editLabourItems.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeLabourItem(index)}
+                              className="p-1 hover:bg-red-100 rounded text-red-500"
+                              title="Remove this labour item"
+                            >
+                              <XMarkIcon className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
 
-                {/* Workers Count & Required Date - Side by Side */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Workers Count</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={editFormData.workers_count}
-                      onChange={(e) => setEditFormData({ ...editFormData, workers_count: Math.max(1, parseInt(e.target.value) || 1) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Required Date</label>
-                    <input
-                      type="date"
-                      value={editFormData.required_date}
-                      onChange={(e) => setEditFormData({ ...editFormData, required_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                    />
+                        {/* Work Description */}
+                        <div className="mb-3">
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Work Description</label>
+                          <textarea
+                            value={item.work_description || ''}
+                            onChange={(e) => updateLabourItemField(index, 'work_description', e.target.value)}
+                            rows={2}
+                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white"
+                            placeholder="Describe the work"
+                            autoComplete="off"
+                          />
+                        </div>
+
+                        {/* Skill Required */}
+                        <div className="mb-3">
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Skill Required</label>
+                          <input
+                            type="text"
+                            value={item.skill_required || ''}
+                            onChange={(e) => updateLabourItemField(index, 'skill_required', e.target.value)}
+                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white"
+                            placeholder="e.g., Mason, Carpenter"
+                            autoComplete="off"
+                          />
+                        </div>
+
+                        {/* Workers Count */}
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Workers Count</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.workers_count || 1}
+                            onChange={(e) => updateLabourItemField(index, 'workers_count', Math.max(1, parseInt(e.target.value) || 1))}
+                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                          />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -1382,16 +1781,56 @@ const LabourRequisition: React.FC = () => {
                   {resubmitting ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      Resubmitting...
+                      Updating...
                     </>
                   ) : (
                     <>
-                      <ArrowPathIcon className="w-5 h-5" />
-                      Resubmit for Approval
+                      <CheckCircleIcon className="w-5 h-5" />
+                      Update
                     </>
                   )}
                 </button>
               </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Custom Confirmation Dialog */}
+      {showConfirmDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            {/* Header */}
+            <div className="p-5 bg-gradient-to-r from-purple-600 to-purple-700">
+              <h3 className="text-lg font-semibold text-white">{confirmTitle}</h3>
+            </div>
+
+            {/* Content */}
+            <div className="p-6">
+              <p className="text-gray-700 text-base leading-relaxed">{confirmMessage}</p>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowConfirmDialog(false);
+                  setConfirmAction(null);
+                }}
+                className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirm}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-700 rounded-lg hover:from-purple-700 hover:to-purple-800 transition-all shadow-md hover:shadow-lg"
+              >
+                OK
+              </button>
             </div>
           </motion.div>
         </div>

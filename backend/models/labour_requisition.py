@@ -21,15 +21,19 @@ class LabourRequisition(db.Model):
     requisition_code = db.Column(db.String(50), unique=True, nullable=False, index=True)  # Auto: REQ-001
     project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False, index=True)
     site_name = db.Column(db.String(255), nullable=False)
-    work_description = db.Column(db.Text, nullable=False)
-    skill_required = db.Column(db.String(100), nullable=False)  # Mason, Helper, Carpenter, etc.
-    workers_count = db.Column(db.Integer, nullable=False)
     required_date = db.Column(db.Date, nullable=False, index=True)
 
-    # BOQ Labour Item Reference (for tracking which labour items have requisitions)
+    # Labour items as JSONB array - stores multiple labours in single requisition
+    # Format: [{"work_description": "...", "skill_required": "...", "workers_count": 5, "boq_id": 1, "item_id": "...", "labour_id": "..."}]
+    labour_items = db.Column(JSONB, nullable=False)
+
+    # DEPRECATED: These fields kept for backward compatibility, but use labour_items for new requisitions
+    work_description = db.Column(db.Text, nullable=True)
+    skill_required = db.Column(db.String(100), nullable=True)
+    workers_count = db.Column(db.Integer, nullable=True)
     boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=True, index=True)
-    item_id = db.Column(db.String(100), nullable=True, index=True)  # BOQ item ID (e.g., 'item_1_1')
-    labour_id = db.Column(db.String(100), nullable=True, index=True)  # Labour item ID (e.g., 'lab_1_1_1')
+    item_id = db.Column(db.String(100), nullable=True, index=True)
+    labour_id = db.Column(db.String(100), nullable=True, index=True)
 
     # Work completion status (tracks labour work progress)
     work_status = db.Column(db.String(50), default='pending_assignment', index=True)  # pending_assignment, assigned, in_progress, completed
@@ -69,16 +73,22 @@ class LabourRequisition(db.Model):
 
     def to_dict(self):
         """Serialize requisition to dictionary for JSON responses"""
+        # Calculate total workers count from labour_items
+        total_workers = sum(item.get('workers_count', 0) for item in (self.labour_items or []))
+
         return {
             'requisition_id': self.requisition_id,
             'requisition_code': self.requisition_code,
             'project_id': self.project_id,
             'project_name': self.project.project_name if self.project else None,
             'site_name': self.site_name,
+            'required_date': self.required_date.isoformat() if self.required_date else None,
+            'labour_items': self.labour_items or [],
+            'total_workers_count': total_workers,
+            # Backward compatibility fields (deprecated, use labour_items instead)
             'work_description': self.work_description,
             'skill_required': self.skill_required,
             'workers_count': self.workers_count,
-            'required_date': self.required_date.isoformat() if self.required_date else None,
             'boq_id': self.boq_id,
             'item_id': self.item_id,
             'labour_id': self.labour_id,
@@ -120,10 +130,44 @@ class LabourRequisition(db.Model):
     @staticmethod
     def generate_requisition_code():
         """Generate the next requisition code (REQ-001, REQ-002, etc.)"""
-        from sqlalchemy import func
-        last_req = db.session.query(func.max(LabourRequisition.requisition_id)).scalar()
-        next_id = (last_req or 0) + 1
-        return f"REQ-{next_id:03d}"
+        from sqlalchemy import text
+
+        # Use PostgreSQL advisory lock to serialize code generation across sessions
+        # Lock ID: 123456 (arbitrary number for labour requisition codes)
+        lock_id = 123456
+
+        try:
+            # Acquire advisory lock (waits if another session holds it)
+            db.session.execute(text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": lock_id})
+
+            # Now safely query for the next number
+            result = db.session.execute(
+                text("""
+                    SELECT COALESCE(
+                        MAX(
+                            CAST(
+                                SUBSTRING(requisition_code FROM 'REQ-([0-9]+)')
+                                AS INTEGER
+                            )
+                        ),
+                        0
+                    ) + 1 AS next_number
+                    FROM labour_requisitions
+                    WHERE requisition_code ~ '^REQ-[0-9]+$'
+                """)
+            ).fetchone()
+
+            if result and result[0]:
+                next_number = result[0]
+            else:
+                next_number = 1
+
+            code = f"REQ-{next_number:03d}"
+            return code
+
+        finally:
+            # Always release the advisory lock
+            db.session.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": lock_id})
 
     def __repr__(self):
         return f"<LabourRequisition {self.requisition_code}: {self.skill_required} x{self.workers_count}>"

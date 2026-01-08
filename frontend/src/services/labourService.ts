@@ -55,17 +55,28 @@ export interface CreateWorkerData {
   notes?: string;
 }
 
+export interface LabourItem {
+  work_description: string;
+  skill_required: string;
+  workers_count: number;
+  boq_id?: number;
+  item_id?: string;
+  labour_id?: string;
+}
+
 export interface LabourRequisition {
   requisition_id: number;
   requisition_code: string;
   project_id: number;
   project_name?: string;
   site_name: string;
-  work_description: string;
-  skill_required: string;
-  workers_count: number;
   required_date: string;
-  // BOQ labour item tracking
+  labour_items: LabourItem[];
+  total_workers_count: number;
+  // Backward compatibility fields (deprecated)
+  work_description?: string;
+  skill_required?: string;
+  workers_count?: number;
   boq_id?: number;
   item_id?: string;
   labour_id?: string;
@@ -92,11 +103,12 @@ export interface LabourRequisition {
 export interface CreateRequisitionData {
   project_id: number;
   site_name: string;
-  work_description: string;
-  skill_required: string;
-  workers_count: number;
   required_date: string;
-  // BOQ labour item tracking
+  labour_items: LabourItem[];
+  // Backward compatibility (deprecated, use labour_items array)
+  work_description?: string;
+  skill_required?: string;
+  workers_count?: number;
   boq_id?: number;
   item_id?: string;
   labour_id?: string;
@@ -414,14 +426,19 @@ class LabourService {
 
   /**
    * Get my requisitions (Site Engineer's own requests)
+   * @param status - Filter by status
+   * @param page - Page number (default: 1)
+   * @param perPage - Items per page (default: 15)
    */
-  async getMyRequisitions(status?: string): Promise<{ success: boolean; data: LabourRequisition[]; message?: string }> {
+  async getMyRequisitions(status?: string, page: number = 1, perPage: number = 15): Promise<{ success: boolean; data: LabourRequisition[]; pagination?: any; message?: string }> {
     try {
-      const params = status ? { status } : {};
+      const params: Record<string, string | number> = { page, per_page: perPage };
+      if (status) params.status = status;
       const response = await apiClient.get('/labour/requisitions/my-requests', { params });
       return {
         success: true,
-        data: response.data.requisitions || []
+        data: response.data.requisitions || [],
+        pagination: response.data.pagination
       };
     } catch (error: any) {
       console.error('Error fetching my requisitions:', error);
@@ -538,16 +555,19 @@ class LabourService {
    * Get requisitions for approval with optional status filter
    * @param status - Filter by status: 'pending' | 'approved' | 'rejected'
    * @param projectId - Optional project ID filter
+   * @param page - Page number (default: 1)
+   * @param perPage - Items per page (default: 15)
    */
-  async getPendingRequisitions(status?: string, projectId?: number): Promise<{ success: boolean; data: LabourRequisition[]; message?: string }> {
+  async getPendingRequisitions(status?: string, projectId?: number, page: number = 1, perPage: number = 15): Promise<{ success: boolean; data: LabourRequisition[]; pagination?: any; message?: string }> {
     try {
-      const params: Record<string, string | number> = {};
+      const params: Record<string, string | number> = { page, per_page: perPage };
       if (status) params.status = status;
       if (projectId) params.project_id = projectId;
       const response = await apiClient.get('/labour/requisitions/pending', { params });
       return {
         success: true,
-        data: response.data.requisitions || []
+        data: response.data.requisitions || [],
+        pagination: response.data.pagination
       };
     } catch (error: any) {
       console.error('Error fetching requisitions:', error);
