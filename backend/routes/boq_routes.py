@@ -49,14 +49,6 @@ def create_boq_route():
         return access_check
     return create_boq()
 
-@boq_routes.route('/all_boq', methods=['GET'])
-@jwt_required
-def get_all_boq_route():
-    """View all BOQs (Estimator, PM, SE, TD, or Admin)"""
-    access_check = check_boq_access()
-    if access_check:
-        return access_check
-    return get_all_boq()
 
 @boq_routes.route('/boq/<int:boq_id>', methods=['GET'])
 @jwt_required
@@ -303,7 +295,81 @@ def create_custom_unit_route():
     if access_check:
         return access_check
     return create_custom_unit()
-    
+
+@boq_routes.route('/pending_boq', methods=['GET'])
+@jwt_required
+def get_pending_boq_route():
+    """View all BOQs (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_pending_boq()
+
+
+@boq_routes.route('/approved_boq', methods=['GET'])
+@jwt_required
+def approved_boq_route():
+    """View all approved BOQs (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_approved_boq()
+
+@boq_routes.route('/rejected_boq', methods=['GET'])
+@jwt_required
+def rejected_boq_route():
+    """View all rejected BOQs (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_rejected_boq()
+
+@boq_routes.route('/completed_boq', methods=['GET'])
+@jwt_required
+def completed_boq_route():
+    """View all completed BOQs (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_completed_boq()
+
+@boq_routes.route('/cancelled_boq', methods=['GET'])
+@jwt_required
+def get_cancelled_boq_route():
+    """View all cancelled BOQs (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_cancelled_boq()
+
+@boq_routes.route('/revisions_boq', methods=['GET'])
+@jwt_required
+def get_revisions_boq_route():
+    """View all revision BOQs (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_revisions_boq()
+
+@boq_routes.route('/all_send_boq', methods=['GET'])
+@jwt_required
+def get_send_to_client_boq_route():
+    """View all completed BOQs (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_send_to_client_boq()
+
+
+@boq_routes.route('/estimator_tab_counts', methods=['GET'])
+@jwt_required
+def get_estimator_tab_counts_route():
+    """Get lightweight tab counts for estimator hub (single SQL query)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_estimator_tab_counts()
+
 @boq_routes.route('/send_client_revision/<int:boq_id>', methods=['GET'])
 @jwt_required
 def send_td_client_boq_email_route(boq_id):

@@ -439,7 +439,6 @@ class ReturnDeliveryNoteItem(db.Model):
     quantity = db.Column(db.Float, nullable=False)
     condition = db.Column(db.String(20), nullable=False)  # Good, Damaged, Defective
     return_reason = db.Column(db.Text, nullable=True)
-    notes = db.Column(db.Text, nullable=True)
 
     # Acceptance tracking
     quantity_accepted = db.Column(db.Float, nullable=True)
@@ -454,6 +453,21 @@ class ReturnDeliveryNoteItem(db.Model):
     material_return = db.relationship('MaterialReturn', backref='return_note_item', lazy=True)
 
     def to_dict(self):
+        # Get processing notes from MaterialReturn if available
+        processing_notes = None
+        processing_action = None
+        if self.material_return:
+            processing_notes = self.material_return.disposal_notes
+            # Determine action based on disposal_status
+            if self.material_return.disposal_status == 'approved' and self.material_return.add_to_stock:
+                processing_action = 'Added to Stock'
+            elif self.material_return.disposal_status == 'sent_for_repair':
+                processing_action = 'Sent for Repair'
+            elif self.material_return.disposal_status == 'pending_review':
+                processing_action = 'Pending Disposal Approval'
+            elif self.material_return.disposal_status == 'approved_for_disposal':
+                processing_action = 'Approved for Disposal'
+
         return {
             'return_item_id': self.return_item_id,
             'return_note_id': self.return_note_id,
@@ -463,7 +477,6 @@ class ReturnDeliveryNoteItem(db.Model):
             'quantity': self.quantity,
             'condition': self.condition,
             'return_reason': self.return_reason,
-            'notes': self.notes,
             'quantity_accepted': self.quantity_accepted,
             'acceptance_status': self.acceptance_status,
             'inventory_transaction_id': self.inventory_transaction_id,
@@ -471,5 +484,8 @@ class ReturnDeliveryNoteItem(db.Model):
             'material_code': self.inventory_material.material_code if self.inventory_material else None,
             'material_name': self.inventory_material.material_name if self.inventory_material else None,
             'brand': self.inventory_material.brand if self.inventory_material else None,
-            'unit': self.inventory_material.unit if self.inventory_material else None
+            'unit': self.inventory_material.unit if self.inventory_material else None,
+            # Include processing details from MaterialReturn
+            'processing_notes': processing_notes,
+            'processing_action': processing_action
         }

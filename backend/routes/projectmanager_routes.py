@@ -24,7 +24,7 @@ def check_pm_or_admin_access():
     """
     current_user = g.user
     user_role = current_user.get('role', '').lower()
-    if user_role not in ['projectmanager', 'admin']:
+    if user_role not in ['projectmanager', 'admin', 'mep']:
         return jsonify({
             "error": "Access denied. Project Manager or Admin role required.",
             "required_roles": ["projectManager", "admin"],
@@ -67,16 +67,6 @@ def check_pm_or_mep_or_admin_access():
 # BOQ ROUTES - Project Manager BOQ Management
 # ============================================================================
 
-#Role based listout a boq
-@pm_routes.route('/pm_boq', methods=['GET'])
-@jwt_required
-def get_all_PM_boqs_route():
-    # SHARED: Allow PM, MEP, and Admin access
-    access_check = check_pm_or_mep_or_admin_access()
-    if access_check:
-        return access_check
-    return get_all_pm_boqs()
-
 @pm_routes.route('/boq/send_estimator', methods=['POST'])
 @jwt_required
 def send_boq_to_estimator_route():
@@ -86,6 +76,24 @@ def send_boq_to_estimator_route():
         return access_check
     return send_boq_to_estimator()
 
+# Dashboard statistics
+@pm_routes.route('/pm_dashboard', methods=['GET'])
+@jwt_required
+def get_pm_dashboard_route():
+    """Get PM dashboard statistics (PM or Admin)"""
+    access_check = check_pm_or_admin_access()
+    if access_check:
+        return access_check
+    return get_pm_dashboard()
+
+@pm_routes.route('/all_sitesupervisor', methods=['GET'])
+@jwt_required
+def get_all_sitesupervisor_route():
+    """Get PM dashboard statistics (PM or Admin)"""
+    access_check = check_pm_or_admin_access()
+    if access_check:
+        return access_check
+    return get_all_sitesupervisor()
 
 # ============================================================================
 # SITE ENGINEER (SE) ROUTES - PM manages Site Engineers
@@ -101,15 +109,6 @@ def create_sitesupervisor_route():
         return access_check
     return create_sitesupervisor()
 
-# Get all site engineers/supervisors
-@pm_routes.route('/all_sitesupervisor', methods=['GET'])
-@jwt_required
-def get_all_sitesupervisor_route():
-    """SHARED: PM, MEP, or Admin views all Site Engineers"""
-    access_check = check_pm_or_mep_or_admin_access()
-    if access_check:
-        return access_check
-    return get_all_sitesupervisor()
 
 # Get specific site engineer by ID
 @pm_routes.route('/get_sitesupervisor/<int:site_supervisor_id>', methods=['GET'])
@@ -275,3 +274,67 @@ def get_project_completion_details_route(project_id):
     if access_check:
         return access_check
     return get_project_completion_details(project_id) 
+
+@pm_routes.route('/pm_approval_boq', methods=['GET'])
+@jwt_required
+def get_pm_approval_boq_route():
+    """View BOQs pending PM approval for current user"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return get_pm_approval_boq()
+
+
+@pm_routes.route('/pm_assign_project', methods=['GET'])
+@jwt_required
+def get_pm_assign_project_route():
+    """View projects assigned to current PM based on BOQ.last_pm_user_id"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return get_pm_assign_project()
+
+@pm_routes.route('/pm_approve_boq', methods=['GET'])
+@jwt_required
+def get_pm_approved_boq_route():
+    """View projects assigned to current PM based on BOQ.last_pm_user_id"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return get_pm_approved_boq()
+
+@pm_routes.route('/pm_production_management', methods=['GET'])
+@jwt_required
+def get_pm_production_management_boqs_route():
+    """Get ALL BOQs for PM Production Management view (shows all project BOQs)"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return get_pm_production_management_boqs()
+
+@pm_routes.route('/pm_pending_boq', methods=['GET'])
+@jwt_required
+def get_pm_pending_boq_route():
+    """View PM Pending BOQs - status Approved and Project.user_id contains current user"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return get_pm_pending_boq()
+
+@pm_routes.route('/pm_rejected_boq', methods=['GET'])
+@jwt_required
+def get_pm_rejected_boq_route():
+    """View PM Rejected BOQs - status PM_Rejected and last_pm_user_id matches current user"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return get_pm_rejected_boq()
+
+@pm_routes.route('/pm_completed_project', methods=['GET'])
+@jwt_required
+def get_pm_completed_project_route():
+    """View PM Completed Projects - status Completed and Project.user_id contains current user"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return get_pm_completed_project()

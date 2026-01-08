@@ -434,7 +434,7 @@ class AssetReturnDeliveryNote(db.Model):
 
     # Status tracking
     status = db.Column(db.String(20), default='DRAFT')  # DRAFT, ISSUED, IN_TRANSIT, RECEIVED, PROCESSED, CANCELLED
-    return_reason = db.Column(db.String(100), nullable=True)  # project_complete, not_needed, damaged, etc.
+    return_reason = db.Column(db.Text, nullable=True)  # project_complete, not_needed, damaged, etc.
     notes = db.Column(db.Text, nullable=True)
 
     # Store acceptance/processing

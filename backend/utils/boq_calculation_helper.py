@@ -3,58 +3,6 @@ BOQ Calculation Helper
 Ensures all BOQ items have calculated values before PDF generation
 """
 
-
-def calculate_preliminary_cost_analysis(cost_details):
-    """
-    Calculate detailed cost analysis for preliminaries
-
-    Args:
-        cost_details: Dict containing quantity, unit, rate
-
-    Returns:
-        dict: Complete cost analysis with all calculated fields
-    """
-    quantity = cost_details.get('quantity', 1)
-    rate = cost_details.get('rate', 0)
-    client_amount = quantity * rate
-
-    # Default percentages (same as sub-items)
-    misc_percentage = cost_details.get('misc_percentage', 10.0)
-    overhead_profit_percentage = cost_details.get('overhead_profit_percentage', 25.0)
-    transport_percentage = cost_details.get('transport_percentage', 5.0)
-
-    # Calculate amounts
-    misc_amount = client_amount * (misc_percentage / 100)
-    overhead_profit_amount = client_amount * (overhead_profit_percentage / 100)
-    transport_amount = client_amount * (transport_percentage / 100)
-
-    # Planned profit is same as overhead & profit amount
-    planned_profit = overhead_profit_amount
-
-    # Internal cost (assuming no materials/labour for preliminaries, just percentages)
-    # Internal cost = Misc + O&P + Transport
-    internal_cost = misc_amount + overhead_profit_amount + transport_amount
-
-    # Negotiable Margin = Client Amount - Internal Cost
-    negotiable_margin = client_amount - internal_cost
-
-    return {
-        'quantity': quantity,
-        'unit': cost_details.get('unit', 'Nos'),
-        'rate': rate,
-        'client_amount': round(client_amount, 2),
-        'internal_cost': round(internal_cost, 2),
-        'misc_percentage': misc_percentage,
-        'misc_amount': round(misc_amount, 2),
-        'overhead_profit_percentage': overhead_profit_percentage,
-        'overhead_profit_amount': round(overhead_profit_amount, 2),
-        'transport_percentage': transport_percentage,
-        'transport_amount': round(transport_amount, 2),
-        'planned_profit': round(planned_profit, 2),
-        'negotiable_margin': round(negotiable_margin, 2)
-    }
-
-
 def calculate_boq_values(items, boq_json=None):
     """
     Calculate all missing values for BOQ items

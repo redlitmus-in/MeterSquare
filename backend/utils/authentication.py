@@ -405,32 +405,6 @@ def verification_otp():
     )
     return response
    
-# def conformation_email(admin_id,full_name):
-#     from app import create_app  
-#     app = create_app()
-#     mail = Mail(app)
-#     email=Admin.query.filter_by(admin_id=admin_id).first()
-#     if email:
-#         email=email.email_id
-#         get_email_text = Email.query.filter_by(email_id=email).first().email_text
-#         msg = Message('Conformation Email', sender=SENDER_EMAIL, recipients=[get_email_text])
-#         msg.html = f"""
-#         <html>
-#         <body>
-#             <p>Hello,</p>
-#             <p>{full_name}</p>
-#             <p>Team has accepted your work. Congratulations!</p>
-#             <p>Best regards,<br>ERP Team</p>
-#         </body>
-#         </html>
-#         """
-#     try:
-#         mail.send(msg)
-#         return "Verification email sent!"
-#     except Exception as e:
-#         return f"Failed to send email: {str(e)}"
-
-
 # JWT Required Decorator
 from functools import wraps
 

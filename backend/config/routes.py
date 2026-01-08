@@ -4,6 +4,7 @@ from routes.project_routes import project_routes
 from routes.boq_routes import boq_routes
 from routes.technical_routes import technical_routes
 from routes.projectmanager_routes import pm_routes
+from routes.mep_routes import mep_routes
 from routes.sitesupervisor_routes import sitesupervisor_routes
 from routes.estimator_routes import estimator_routes
 from routes.purchase_route import purchase_routes
@@ -20,6 +21,7 @@ from routes.asset_routes import asset_routes
 from routes.asset_dn_routes import asset_dn_routes
 from routes.asset_disposal_routes import asset_disposal_routes
 from routes.support_routes import support_routes
+from routes.labour_routes import labour_routes
 
 # Import and register the routes from the route blueprints
 
@@ -29,6 +31,7 @@ def initialize_routes(app):
     app.register_blueprint(boq_routes)
     app.register_blueprint(technical_routes)
     app.register_blueprint(pm_routes)
+    app.register_blueprint(mep_routes)
     app.register_blueprint(sitesupervisor_routes)
     app.register_blueprint(estimator_routes)
     app.register_blueprint(purchase_routes)
@@ -46,3 +49,4 @@ def initialize_routes(app):
     app.register_blueprint(asset_dn_routes)
     app.register_blueprint(asset_disposal_routes)
     app.register_blueprint(support_routes)
+    app.register_blueprint(labour_routes)

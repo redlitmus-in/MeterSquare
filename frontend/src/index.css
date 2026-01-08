@@ -1,0 +1,524 @@
+/* Import Corporate Theme */
+@import './styles/corporate-theme.css';
+/* Import Mobile Responsive Styles */
+@import './styles/mobile-responsive.css';
+/* ✅ PERFORMANCE: Import lightweight CSS animations (alternative to framer-motion) */
+@import './styles/animations.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom utility to hide scrollbar */
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+  }
+  
+  /* Thin scrollbar utilities */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 3px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+  
+  .scrollbar-thumb-gray-300 {
+    scrollbar-color: #d1d5db #f3f4f6;
+  }
+  
+  .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+  }
+  
+  .scrollbar-track-gray-100::-webkit-scrollbar-track {
+    background: #f3f4f6;
+  }
+
+  /* Text clamp utilities for responsive text truncation */
+  .line-clamp-1 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+  }
+
+  .line-clamp-2 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .line-clamp-3 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  .line-clamp-4 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+  }
+}
+
+/* Custom CSS for enhanced animations and interior design aesthetics */
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(45deg, #007bff, #dc3545);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(45deg, #0056b3, #c82333);
+}
+
+/* Glass morphism effect */
+.glass {
+  background: rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Gradient text animation */
+.gradient-text {
+  background: linear-gradient(-45deg, #007bff, #dc3545, #0056b3, #007bff);
+  background-size: 400% 400%;
+  animation: gradientShift 3s ease infinite;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* Floating animation */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+.float {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Pulse glow effect */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(0, 123, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(0, 123, 255, 0.6);
+  }
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Shimmer effect */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* Custom input styles */
+.input-glass {
+  background: rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: all 0.3s ease;
+}
+
+.input-glass:focus {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: #007bff;
+  box-shadow: 0 0 20px rgba(0, 123, 255, 0.3);
+}
+
+/* Button hover effects */
+.btn-gradient {
+  background: linear-gradient(45deg, #007bff, #dc3545);
+  transition: all 0.3s ease;
+}
+
+.btn-gradient:hover {
+  background: linear-gradient(45deg, #0056b3, #c82333);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(0, 123, 255, 0.4);
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: all 0.3s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* Loading spinner */
+.spinner {
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top: 2px solid #007bff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Parallax effect */
+.parallax {
+  transform-style: preserve-3d;
+  perspective: 1000px;
+}
+
+/* Interior design inspired patterns */
+.pattern-dots {
+  background-image: radial-gradient(circle, rgba(0, 123, 255, 0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.pattern-lines {
+  background-image: linear-gradient(45deg, rgba(0, 123, 255, 0.05) 25%, transparent 25%), 
+                    linear-gradient(-45deg, rgba(0, 123, 255, 0.05) 25%, transparent 25%);
+  background-size: 40px 40px;
+}
+
+/* Responsive design utilities */
+@media (max-width: 768px) {
+  .glass {
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+  }
+  
+  .gradient-text {
+    background-size: 200% 200%;
+  }
+}
+
+/* Dark mode enhancements */
+@media (prefers-color-scheme: dark) {
+  .glass {
+    background: rgba(0, 0, 0, 0.2);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+}
+
+/* Remove default focus outline */
+*:focus {
+  outline: none !important;
+}
+
+/* Remove focus outline from all interactive elements */
+button:focus,
+a:focus,
+input:focus,
+textarea:focus,
+select:focus,
+[role="button"]:focus,
+[tabindex]:focus,
+[contenteditable]:focus,
+div:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Remove tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Optional: Add subtle focus indication for keyboard navigation only */
+*:focus-visible {
+  outline: none !important;
+}
+
+/* Custom animations for form elements */
+.form-field-enter {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.form-field-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 300ms, transform 300ms;
+}
+
+.form-field-exit {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.form-field-exit-active {
+  opacity: 0;
+  transform: translateY(-20px);
+  transition: opacity 300ms, transform 300ms;
+}
+
+/* Interior design color palette */
+:root {
+  --interior-primary: #007bff;
+  --interior-secondary: #dc3545;
+  --interior-accent: #0056b3;
+  --interior-neutral: #64748b;
+  --interior-light: #f8fafc;
+  --interior-dark: #1e293b;
+  
+  /* shadcn/ui CSS Variables */
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 84% 4.9%;
+  --primary: 221.2 83.2% 53.3%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222.2 84% 4.9%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+  --accent: 210 40% 96%;
+  --accent-foreground: 222.2 84% 4.9%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 221.2 83.2% 53.3%;
+  --radius: 0.5rem;
+}
+
+/* Custom utility classes */
+.text-interior-primary {
+  color: var(--interior-primary);
+}
+
+.bg-interior-primary {
+  background-color: var(--interior-primary);
+}
+
+.border-interior-primary {
+  border-color: var(--interior-primary);
+}
+
+/* Enhanced button styles */
+.btn-interior {
+  background: linear-gradient(135deg, var(--interior-primary), var(--interior-secondary));
+  color: white;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-interior:hover {
+  background: linear-gradient(135deg, var(--interior-secondary), var(--interior-accent));
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 123, 255, 0.4);
+}
+
+.btn-interior:active {
+  transform: translateY(0);
+}
+
+/* Form validation styles */
+.input-error {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.input-success {
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+/* Loading states */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+}
+
+/* Success animation */
+@keyframes success-bounce {
+  0%, 20%, 53%, 80%, 100% {
+    transform: translate3d(0, 0, 0);
+  }
+  40%, 43% {
+    transform: translate3d(0, -30px, 0);
+  }
+  70% {
+    transform: translate3d(0, -15px, 0);
+  }
+  90% {
+    transform: translate3d(0, -4px, 0);
+  }
+}
+
+.success-bounce {
+  animation: success-bounce 1s ease;
+}
+
+/* Error shake animation */
+@keyframes error-shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: translateX(-10px);
+  }
+  20%, 40%, 60%, 80% {
+    transform: translateX(10px);
+  }
+}
+
+.error-shake {
+  animation: error-shake 0.6s ease-in-out;
+}
+
+
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

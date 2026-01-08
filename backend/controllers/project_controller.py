@@ -110,7 +110,7 @@ def create_project():
             start_date=start_date,
             end_date=end_date,
             duration_days=duration_days,
-            status=data.get('status', 'active'),
+            status=data.get('status', 'draft'),
             completion_requested=False,
             user_id=None,  # PM will be assigned later by TD, not set on creation
             created_by=current_user.get('email'),
@@ -516,7 +516,7 @@ def get_assigned_projects():
         user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
 
         # ✅ Get admin viewing context
-        from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
+        from utils.admin_viewing_context import get_effective_user_context
         context = get_effective_user_context()
         effective_role = context.get('effective_role', user_role)
         is_admin_viewing = context.get('is_admin_viewing', False)
@@ -541,16 +541,39 @@ def get_assigned_projects():
 
         if effective_role in ['siteengineer', 'sitesupervisor']:
             # Site Engineer / Site Supervisor projects
+            # SE can be assigned via:
+            # 1. Project.site_supervisor_id (direct assignment)
+            # 2. pm_assign_ss.assigned_to_se_id (item-level assignment)
+
             if is_admin_viewing:
                 # Admin viewing as specific SE: Show only THAT SE's projects
                 effective_user_id = context.get('effective_user_id')
                 if effective_user_id:
-                    # Specific user selected - filter by that user
-                    projects = Project.query.options(*eager_load_options).filter(
-                        Project.site_supervisor_id == effective_user_id,
-                        Project.is_deleted == False,
-                        Project.status != 'completed'
-                    ).all()
+                    # Get project IDs from pm_assign_ss assignments
+                    pm_assign_query = db.session.query(PMAssignSS.project_id).filter(
+                        PMAssignSS.assigned_to_se_id == effective_user_id,
+                        PMAssignSS.is_deleted == False,
+                        PMAssignSS.pm_confirmed_completion == False,
+                        PMAssignSS.project_id.isnot(None)
+                    ).distinct()
+                    assigned_project_ids = [row[0] for row in pm_assign_query.all()]
+
+                    # Filter projects: either site_supervisor_id matches OR in pm_assign_ss
+                    if assigned_project_ids:
+                        projects = Project.query.options(*eager_load_options).filter(
+                            or_(
+                                Project.site_supervisor_id == effective_user_id,
+                                Project.project_id.in_(assigned_project_ids)
+                            ),
+                            Project.is_deleted == False,
+                            Project.status != 'completed'
+                        ).all()
+                    else:
+                        projects = Project.query.options(*eager_load_options).filter(
+                            Project.site_supervisor_id == effective_user_id,
+                            Project.is_deleted == False,
+                            Project.status != 'completed'
+                        ).all()
                     log.info(f"Admin viewing as SE user {effective_user_id}: Fetched {len(projects)} projects for that SE")
                 else:
                     # No specific user, show all SE projects
@@ -561,13 +584,35 @@ def get_assigned_projects():
                     ).all()
                     log.info(f"Admin viewing as SE role: Fetched {len(projects)} total SE projects")
             else:
-                # Regular SE: Show only THEIR projects
-                projects = Project.query.options(*eager_load_options).filter(
-                    Project.site_supervisor_id == user_id,
-                    Project.is_deleted == False,
-                    Project.status != 'completed'
-                ).all()
-                log.info(f"Regular SE {user_id}: Fetched {len(projects)} assigned projects")
+                # Regular SE: Show projects assigned via site_supervisor_id OR pm_assign_ss
+                # Get project IDs from pm_assign_ss assignments
+                pm_assign_query = db.session.query(PMAssignSS.project_id).filter(
+                    PMAssignSS.assigned_to_se_id == user_id,
+                    PMAssignSS.is_deleted == False,
+                    PMAssignSS.pm_confirmed_completion == False,
+                    PMAssignSS.project_id.isnot(None)
+                ).distinct()
+                assigned_project_ids = [row[0] for row in pm_assign_query.all()]
+                log.info(f"SE {user_id}: Found {len(assigned_project_ids)} projects via pm_assign_ss: {assigned_project_ids}")
+
+                # Filter projects: either site_supervisor_id matches OR in pm_assign_ss
+                if assigned_project_ids:
+                    projects = Project.query.options(*eager_load_options).filter(
+                        or_(
+                            Project.site_supervisor_id == user_id,
+                            Project.project_id.in_(assigned_project_ids)
+                        ),
+                        Project.is_deleted == False,
+                        Project.status != 'completed'
+                    ).all()
+                else:
+                    # No pm_assign_ss assignments, just check site_supervisor_id
+                    projects = Project.query.options(*eager_load_options).filter(
+                        Project.site_supervisor_id == user_id,
+                        Project.is_deleted == False,
+                        Project.status != 'completed'
+                    ).all()
+                log.info(f"Regular SE {user_id}: Fetched {len(projects)} assigned projects (via site_supervisor_id or pm_assign_ss)")
 
         elif effective_role in ['projectmanager']:
             # Project Manager projects
@@ -624,8 +669,12 @@ def get_assigned_projects():
         for project in projects:
             project_info = {
                 "project_id": project.project_id,
+                "project_code": project.project_code,
                 "project_name": project.project_name,
-                "project_status" : project.status,
+                "project_status": project.status,
+                "location": project.location,
+                "floor_name": project.floor_name,
+                "area": project.area,
                 "areas": []
             }
 
@@ -671,7 +720,29 @@ def get_assigned_projects():
 
                 items = boq_details.get('items', [])
 
+                # For SE users, filter items to only show assigned ones
+                se_assigned_item_indices = None
+                if effective_role in ['siteengineer', 'sitesupervisor'] and not is_admin_viewing:
+                    # Get SE's assigned item indices for this BOQ from pm_assign_ss
+                    se_assignments = PMAssignSS.query.filter(
+                        PMAssignSS.boq_id == boq.boq_id,
+                        PMAssignSS.assigned_to_se_id == user_id,
+                        PMAssignSS.is_deleted == False,
+                        PMAssignSS.pm_confirmed_completion == False
+                    ).all()
+
+                    if se_assignments:
+                        # Collect all assigned item indices for this SE
+                        se_assigned_item_indices = set()
+                        for assignment in se_assignments:
+                            if assignment.item_indices:
+                                se_assigned_item_indices.update(assignment.item_indices)
+                        log.info(f"SE {user_id} assigned item indices for BOQ {boq.boq_id}: {se_assigned_item_indices}")
+
                 for idx, item in enumerate(items):
+                    # Skip items not assigned to this SE (if SE filtering is active)
+                    if se_assigned_item_indices is not None and idx not in se_assigned_item_indices:
+                        continue
                     # Get item overhead amount - calculate from base_total of sub-items
                     item_overhead = item.get('overhead_amount', 0)
                     overhead_percentage = item.get('overhead_percentage', 0)
@@ -712,7 +783,6 @@ def get_assigned_projects():
 
                     # Calculate consumed overhead from approved change requests
                     from models.change_request import ChangeRequest
-                    from sqlalchemy import or_
                     consumed_overhead = 0.0
 
                     # Special handling for items created by change requests
@@ -778,34 +848,79 @@ def get_assigned_projects():
                                 }
                                 materials_list.append(material_info)
 
+                            # Extract labour for this sub-item
+                            labour = sub_item.get('labour', [])
+                            labour_list = []
+
+                            for lab_idx, lab in enumerate(labour):
+                                # Use master_labour_id if available, otherwise generate one
+                                labour_id = lab.get('master_labour_id', lab.get('labour_id', ''))
+                                if not labour_id:
+                                    labour_id = f"lab_{boq.boq_id}_{idx + 1}_{sub_item_idx + 1}_{lab_idx + 1}"
+
+                                labour_info = {
+                                    "labour_id": str(labour_id),
+                                    "labour_role": lab.get('labour_role', lab.get('role', '')),
+                                    "labour_type": lab.get('labour_type', lab.get('work_type', 'Contract')),
+                                    "hours": lab.get('hours', 0),
+                                    "rate_per_hour": lab.get('rate_per_hour', 0),
+                                    "amount": lab.get('amount', 0)
+                                }
+                                labour_list.append(labour_info)
+
                             sub_item_info = {
                                 "sub_item_id": sub_item_id,
                                 "sub_item_name": sub_item.get('sub_item_name', ''),
-                                "materials": materials_list
+                                "materials": materials_list,
+                                "labour": labour_list
                             }
-                            log.debug(f"Adding sub-item '{sub_item.get('sub_item_name', '')}' with {len(materials_list)} materials")
+                            log.debug(f"Adding sub-item '{sub_item.get('sub_item_name', '')}' with {len(materials_list)} materials and {len(labour_list)} labour")
                             item_info["sub_items"].append(sub_item_info)
                     else:
                         # Fallback: for items without sub_items, treat materials as direct sub-items
                         materials = item.get('materials', [])
-                        log.debug(f"Item '{item.get('item_name', '')}' has {len(materials)} materials (no sub-items)")
+                        item_labour = item.get('labour', [])  # Labour at item level
+                        log.debug(f"Item '{item.get('item_name', '')}' has {len(materials)} materials and {len(item_labour)} labour (no sub-items)")
+
+                        # Create pseudo sub-item with all materials and labour from item level
+                        materials_list = []
                         for mat_idx, material in enumerate(materials):
                             # Use master_material_id if available, otherwise generate one
                             material_id = material.get('master_material_id', '')
                             if not material_id:
                                 material_id = f"mat_{boq.boq_id}_{idx + 1}_{mat_idx + 1}"
 
-                            # Create a pseudo sub-item for this material
+                            materials_list.append({
+                                "material_id": str(material_id),
+                                "material_name": material.get('material_name', ''),
+                                "unit": material.get('unit', ''),
+                                "unit_price": material.get('unit_price', 0),
+                                "quantity": material.get('quantity', 0)
+                            })
+
+                        # Extract labour from item level
+                        labour_list = []
+                        for lab_idx, lab in enumerate(item_labour):
+                            labour_id = lab.get('master_labour_id', lab.get('labour_id', ''))
+                            if not labour_id:
+                                labour_id = f"lab_{boq.boq_id}_{idx + 1}_{lab_idx + 1}"
+
+                            labour_list.append({
+                                "labour_id": str(labour_id),
+                                "labour_role": lab.get('labour_role', lab.get('role', '')),
+                                "labour_type": lab.get('labour_type', lab.get('work_type', 'Contract')),
+                                "hours": lab.get('hours', 0),
+                                "rate_per_hour": lab.get('rate_per_hour', 0),
+                                "amount": lab.get('amount', 0)
+                            })
+
+                        # Create a single pseudo sub-item for this item
+                        if materials_list or labour_list:
                             sub_item_info = {
-                                "sub_item_id": f"subitem_{boq.boq_id}_{idx + 1}_{mat_idx + 1}",
-                                "sub_item_name": material.get('material_name', ''),
-                                "materials": [{
-                                    "material_id": str(material_id),
-                                    "material_name": material.get('material_name', ''),
-                                    "unit": material.get('unit', ''),
-                                    "unit_price": material.get('unit_price', 0),
-                                    "quantity": material.get('quantity', 0)
-                                }]
+                                "sub_item_id": f"subitem_{boq.boq_id}_{idx + 1}_1",
+                                "sub_item_name": item.get('item_name', ''),
+                                "materials": materials_list,
+                                "labour": labour_list
                             }
                             item_info["sub_items"].append(sub_item_info)
 

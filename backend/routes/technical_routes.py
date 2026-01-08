@@ -1,22 +1,7 @@
 from flask import Blueprint, g, jsonify
-from controllers.projectmanager_controller import (
-    create_pm,
-    get_all_pm,
-    get_pm_id,
-    update_pm,
-    delete_pm,
-    assign_projects
-)
+from controllers.projectmanager_controller import *
 from utils.authentication import jwt_required
-from controllers.techical_director_controller import (
-    get_all_td_boqs,
-    td_mail_send,
-    get_td_se_boq_vendor_requests,
-    get_td_dashboard_stats,
-    get_td_purchase_orders,
-    get_td_purchase_order_by_id,
-    get_td_production_management_boqs
-)
+from controllers.techical_director_controller import *
 from utils.response_cache import cached_response, cache_dashboard_data
 
 technical_routes = Blueprint('technical_routes', __name__, url_prefix='/api')
@@ -38,17 +23,6 @@ def check_estimator_td_or_admin_access():
     if user_role not in ['estimator', 'technicaldirector', 'admin']:
         return jsonify({"error": "Access denied. Estimator, Technical Director or Admin role required."}), 403
     return None
-
-# BOQ Management
-@technical_routes.route('/td_boqs', methods=['GET'])
-@jwt_required
-@cached_response(timeout=30, key_prefix='td_boqs')  # Cache for 30 seconds
-def get_all_td_boqs_route():
-    """TD or Admin views all BOQs"""
-    access_check = check_td_or_admin_access()
-    if access_check:
-        return access_check
-    return get_all_td_boqs()
 
 @technical_routes.route('/td_approval', methods=['POST'])
 @jwt_required
@@ -239,6 +213,87 @@ def get_td_purchase_order_by_id_route(cr_id):
     if access_check:
         return access_check
     return get_td_purchase_order_by_id(cr_id) 
+
+@technical_routes.route('/td_pending_boq', methods=['GET'])
+@jwt_required
+def get_td_pending_boq_route():
+    """TD or Admin views all BOQs"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_pending_boq()
+
+@technical_routes.route('/td_client_boq', methods=['GET'])
+@jwt_required
+def get_client_boq_route():
+    """TD or Admin views all BOQs"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_client_boq()
+
+@technical_routes.route('/td_assign_boq', methods=['GET'])
+@jwt_required
+def get_td_assign_boq_route():
+    """View BOQs for projects assigned to current PM based on Project.user_id"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_assign_boq()
+
+@technical_routes.route('/td_approved_boq', methods=['GET'])
+@jwt_required
+def td_approved_boq_route():
+    """View BOQs for projects assigned to current PM based on Project.user_id"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return td_approved_boq()
+
+@technical_routes.route('/td_revisions_boq', methods=['GET'])
+@jwt_required
+def get_td_revisions_boq_route():
+    """Get BOQs with revisions (revision_number > 0)"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_revisions_boq()
+
+@technical_routes.route('/td_completed_boq', methods=['GET'])
+@jwt_required
+def get_td_completed_boq_route():
+    """Get BOQs with completed status"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_completed_boq()
+
+@technical_routes.route('/td_rejected_boq', methods=['GET'])
+@jwt_required
+def get_td_rejected_boq_route():
+    """Get BOQs with rejected status (rejected by TD)"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_rejected_boq()
+
+@technical_routes.route('/td_cancelled_boq', methods=['GET'])
+@jwt_required
+def get_td_cancelled_boq_route():
+    """Get BOQs with cancelled status"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_cancelled_boq()
+
+@technical_routes.route('/td_tab_counts', methods=['GET'])
+@jwt_required
+def get_td_tab_counts_route():
+    """Get counts for all TD tabs"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_tab_counts()
 
 @technical_routes.route('/td_production_management', methods=['GET'])
 @jwt_required

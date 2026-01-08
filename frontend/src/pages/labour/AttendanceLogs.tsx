@@ -1,0 +1,334 @@
+/**
+ * Attendance Logs Page
+ * Site Engineer: Clock-in/clock-out workers (Step 6)
+ */
+import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { labourService, DailyAttendance } from '@/services/labourService';
+import { apiClient } from '@/api/config';
+import { showSuccess, showError } from '@/utils/toastHelper';
+import {
+  ClockIcon,
+  PlayIcon,
+  StopIcon,
+  UserGroupIcon,
+  BuildingOfficeIcon,
+  CalendarDaysIcon,
+  ChevronDownIcon
+} from '@heroicons/react/24/outline';
+
+// Project interface
+interface Project {
+  project_id: number;
+  project_name: string;
+  project_code: string;
+}
+
+const AttendanceLogs: React.FC = () => {
+  const [attendance, setAttendance] = useState<DailyAttendance[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [processing, setProcessing] = useState<number | null>(null);
+  const [summary, setSummary] = useState<any>(null);
+
+  // Fetch SE's assigned projects
+  const fetchProjects = async () => {
+    setLoadingProjects(true);
+    try {
+      const response = await apiClient.get('/projects/assigned-to-me');
+      const projectList = response.data?.projects || response.data || [];
+      setProjects(projectList);
+      if (projectList.length > 0 && !selectedProject) {
+        setSelectedProject(projectList[0]);
+      }
+    } catch (error) {
+      console.error('Error fetching projects:', error);
+      showError('Failed to fetch your projects');
+    }
+    setLoadingProjects(false);
+  };
+
+  const fetchAttendance = async () => {
+    if (!selectedProject) return;
+    setLoading(true);
+    const result = await labourService.getDailyAttendance(selectedProject.project_id, selectedDate);
+    if (result.success) {
+      setAttendance(result.data);
+      setSummary(result.summary);
+    } else {
+      setAttendance([]);
+      setSummary(null);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchProjects();
+  }, []);
+
+  useEffect(() => {
+    if (selectedProject) {
+      fetchAttendance();
+    }
+  }, [selectedProject, selectedDate]);
+
+  const handleClockIn = async (workerId: number, hourlyRate: number) => {
+    if (!selectedProject) return;
+    setProcessing(workerId);
+    const now = new Date().toISOString();
+    const result = await labourService.clockIn({
+      worker_id: workerId,
+      project_id: selectedProject.project_id,
+      attendance_date: selectedDate,
+      clock_in_time: now,
+      hourly_rate: hourlyRate
+    });
+    if (result.success) {
+      showSuccess('Worker clocked in');
+      fetchAttendance();
+    } else {
+      showError(result.message || 'Failed to clock in');
+    }
+    setProcessing(null);
+  };
+
+  const handleClockOut = async (attendanceId: number) => {
+    setProcessing(attendanceId);
+    const now = new Date().toISOString();
+    const result = await labourService.clockOut(attendanceId, now);
+    if (result.success) {
+      showSuccess('Worker clocked out');
+      fetchAttendance();
+    } else {
+      showError(result.message || 'Failed to clock out');
+    }
+    setProcessing(null);
+  };
+
+  const formatTime = (isoString: string | undefined) => {
+    if (!isoString) return '-';
+    return new Date(isoString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  // Smart duration format: show minutes if < 1 hour, otherwise show hours
+  const formatDuration = (hours: number | undefined | null) => {
+    if (hours === undefined || hours === null) return '-';
+    if (hours < 1) {
+      const minutes = Math.round(hours * 60);
+      return `${minutes} min`;
+    }
+    return `${hours.toFixed(1)} hrs`;
+  };
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Attendance Logs</h1>
+        <p className="text-gray-600">Track worker clock-in and clock-out times</p>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+        <div className="flex flex-col sm:flex-row gap-4">
+          {/* Project Dropdown */}
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <BuildingOfficeIcon className="w-4 h-4 inline mr-1" />
+              Select Project
+            </label>
+            {loadingProjects ? (
+              <div className="px-4 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                <div className="animate-pulse h-5 bg-gray-200 rounded w-3/4"></div>
+              </div>
+            ) : projects.length === 0 ? (
+              <div className="px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 text-sm">
+                No projects assigned to you
+              </div>
+            ) : (
+              <div className="relative">
+                <select
+                  value={selectedProject?.project_id || ''}
+                  onChange={(e) => {
+                    const proj = projects.find(p => p.project_id === parseInt(e.target.value));
+                    setSelectedProject(proj || null);
+                  }}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white pr-10"
+                >
+                  <option value="">Select a project...</option>
+                  {projects.map(project => (
+                    <option key={project.project_id} value={project.project_id}>
+                      {project.project_code} - {project.project_name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDownIcon className="w-5 h-5 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            )}
+          </div>
+
+          {/* Date Picker */}
+          <div className="sm:w-48">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <CalendarDaysIcon className="w-4 h-4 inline mr-1" />
+              Date
+            </label>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      {summary && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <UserGroupIcon className="w-8 h-8 text-blue-600" />
+              <div>
+                <p className="text-2xl font-bold text-blue-800">{summary.total_workers || 0}</p>
+                <p className="text-sm text-blue-600">Total Workers</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <PlayIcon className="w-8 h-8 text-green-600" />
+              <div>
+                <p className="text-2xl font-bold text-green-800">{summary.clocked_in || 0}</p>
+                <p className="text-sm text-green-600">Clocked In</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <StopIcon className="w-8 h-8 text-gray-600" />
+              <div>
+                <p className="text-2xl font-bold text-gray-800">{summary.clocked_out || 0}</p>
+                <p className="text-sm text-gray-600">Clocked Out</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <ClockIcon className="w-8 h-8 text-purple-600" />
+              <div>
+                <p className="text-2xl font-bold text-purple-800">{formatDuration(summary.total_hours)}</p>
+                <p className="text-sm text-purple-600">Total Time</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Attendance Table */}
+      {!selectedProject ? (
+        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+          <BuildingOfficeIcon className="mx-auto h-12 w-12 text-gray-400" />
+          <h3 className="mt-2 text-sm font-medium text-gray-900">Select a Project</h3>
+          <p className="mt-1 text-sm text-gray-500">Choose a project from the dropdown to see attendance records.</p>
+        </div>
+      ) : loading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+      ) : attendance.length === 0 ? (
+        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+          <ClockIcon className="mx-auto h-12 w-12 text-gray-400" />
+          <h3 className="mt-2 text-sm font-medium text-gray-900">No attendance records</h3>
+          <p className="mt-1 text-sm text-gray-500">No workers have clocked in for this date.</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Worker</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clock In</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clock Out</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cost</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {attendance.map((record) => (
+                <motion.tr
+                  key={record.attendance_id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="hover:bg-gray-50"
+                >
+                  <td className="px-4 py-3">
+                    <div>
+                      <p className="font-medium text-gray-900">{record.worker_name}</p>
+                      <p className="text-sm text-gray-500">{record.worker_code}</p>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {formatTime(record.clock_in_time)}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {formatTime(record.clock_out_time)}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900 font-medium">
+                    {formatDuration(record.total_hours)}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    AED {record.hourly_rate}/hr
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900 font-medium">
+                    {record.total_cost ? `AED ${record.total_cost.toFixed(2)}` : '-'}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 text-xs rounded-full ${
+                      record.approval_status === 'locked'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {record.approval_status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {!record.clock_in_time ? (
+                      <button
+                        onClick={() => handleClockIn(record.worker_id, record.hourly_rate)}
+                        disabled={processing === record.worker_id}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50"
+                      >
+                        <PlayIcon className="w-4 h-4" />
+                        Clock In
+                      </button>
+                    ) : !record.clock_out_time ? (
+                      <button
+                        onClick={() => handleClockOut(record.attendance_id)}
+                        disabled={processing === record.attendance_id}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50"
+                      >
+                        <StopIcon className="w-4 h-4" />
+                        Clock Out
+                      </button>
+                    ) : (
+                      <span className="text-sm text-gray-500">Completed</span>
+                    )}
+                  </td>
+                </motion.tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AttendanceLogs;
