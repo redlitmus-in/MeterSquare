@@ -139,6 +139,7 @@ interface ProjectOption {
   project_id: number;
   project_name: string;
   project_code: string;
+  location?: string;
   my_completion_requested?: boolean;
   my_work_confirmed?: boolean;
 }
@@ -225,7 +226,7 @@ const SiteAssets: React.FC = () => {
     site_location: ''
   });
   const [assetCategories, setAssetCategories] = useState<Array<{category_id: number; category_code: string; category_name: string; tracking_mode: string; available_quantity: number}>>([]);
-  const [projects, setProjects] = useState<Array<{project_id: number; project_name: string; project_code: string}>>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [submittingRequisition, setSubmittingRequisition] = useState(false);
   const [confirmReceiptReqId, setConfirmReceiptReqId] = useState<number | null>(null);
   const [receiptNotes, setReceiptNotes] = useState('');
@@ -237,6 +238,11 @@ const SiteAssets: React.FC = () => {
   const [editRequiredDate, setEditRequiredDate] = useState('');
   const [editUrgency, setEditUrgency] = useState<Urgency>('normal');
   const [editSiteLocation, setEditSiteLocation] = useState('');
+  const [editItems, setEditItems] = useState<Array<{category_id: number; category_name: string; quantity: number}>>([]);
+
+  // Confirmation modal state
+  const [showConfirmSendPM, setShowConfirmSendPM] = useState(false);
+  const [pendingSendRequisition, setPendingSendRequisition] = useState<AssetRequisition | null>(null);
 
   // Requisition sub-tab state
   type ReqSubTab = 'draft' | 'pending' | 'rejected' | 'dispatched' | 'completed';
@@ -517,10 +523,16 @@ const SiteAssets: React.FC = () => {
 
   // Send requisition to PM for approval
   const handleSendToPM = async (req: AssetRequisition) => {
-    if (!confirm('Send this requisition to PM for approval?')) return;
+    setPendingSendRequisition(req);
+    setShowConfirmSendPM(true);
+  };
+
+  // Confirm and send to PM
+  const confirmSendToPM = async () => {
+    if (!pendingSendRequisition) return;
     setSubmittingRequisition(true);
     try {
-      await sendToPM(req.requisition_id);
+      await sendToPM(pendingSendRequisition.requisition_id);
       showSuccess('Requisition sent to PM for approval');
       fetchRequisitions();
     } catch (err: unknown) {
@@ -528,6 +540,8 @@ const SiteAssets: React.FC = () => {
       showError(errMsg);
     } finally {
       setSubmittingRequisition(false);
+      setShowConfirmSendPM(false);
+      setPendingSendRequisition(null);
     }
   };
 
@@ -538,6 +552,21 @@ const SiteAssets: React.FC = () => {
     setEditRequiredDate(req.required_date?.split('T')[0] || '');
     setEditUrgency(req.urgency);
     setEditSiteLocation(req.site_location || '');
+
+    // Initialize items for editing
+    const items = req.items && req.items.length > 0
+      ? req.items.map(item => ({
+          category_id: item.category_id,
+          category_name: item.category_name,
+          quantity: item.quantity
+        }))
+      : [{
+          category_id: req.category_id || 0,
+          category_name: req.category_name || '',
+          quantity: req.quantity || 1
+        }];
+    setEditItems(items);
+
     setShowEditReqModal(true);
   };
 
@@ -549,6 +578,7 @@ const SiteAssets: React.FC = () => {
     setEditRequiredDate('');
     setEditUrgency('normal');
     setEditSiteLocation('');
+    setEditItems([]);
   };
 
   // Handle update requisition
@@ -563,6 +593,12 @@ const SiteAssets: React.FC = () => {
       showError('Required date is required');
       return;
     }
+    // Validate items
+    if (editItems.length === 0 || editItems.some(item => item.quantity <= 0)) {
+      showError('All items must have a quantity greater than 0');
+      return;
+    }
+
     setSubmittingRequisition(true);
     try {
       await updateRequisition(editRequisition.requisition_id, {
@@ -570,6 +606,10 @@ const SiteAssets: React.FC = () => {
         required_date: editRequiredDate,
         urgency: editUrgency,
         site_location: editSiteLocation.trim() || undefined,
+        items: editItems.map(item => ({
+          category_id: item.category_id,
+          quantity: item.quantity
+        }))
       });
       showSuccess('Requisition updated successfully');
       closeEditReqModal();
@@ -2769,7 +2809,15 @@ const SiteAssets: React.FC = () => {
                     </label>
                     <select
                       value={requisitionForm.project_id}
-                      onChange={(e) => setRequisitionForm(prev => ({ ...prev, project_id: Number(e.target.value) }))}
+                      onChange={(e) => {
+                        const projectId = Number(e.target.value);
+                        const selectedProject = projects.find(p => p.project_id === projectId);
+                        setRequisitionForm(prev => ({
+                          ...prev,
+                          project_id: projectId,
+                          site_location: selectedProject?.location || ''
+                        }));
+                      }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       required
                     >
@@ -3152,6 +3200,19 @@ const SiteAssets: React.FC = () => {
               </div>
 
               <form onSubmit={handleUpdateRequisition} className="p-5 space-y-4">
+                {/* Project Name (Read-only) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Project <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editRequisition.project_name || 'N/A'}
+                    readOnly
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                  />
+                </div>
+
                 {/* Show rejection reason if pm_rejected */}
                 {editRequisition.status === 'pm_rejected' && editRequisition.pm_rejection_reason && (
                   <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -3160,17 +3221,124 @@ const SiteAssets: React.FC = () => {
                   </div>
                 )}
 
-                {/* Items display (read-only) */}
-                <div className="p-3 bg-gray-50 rounded-lg">
-                  <p className="text-xs font-medium text-gray-500 mb-2">Items:</p>
-                  {(editRequisition.items && editRequisition.items.length > 0
-                    ? editRequisition.items
-                    : [{ category_name: editRequisition.category_name, quantity: editRequisition.quantity }]
-                  ).map((item, idx) => (
-                    <div key={idx} className="text-sm text-gray-700">
-                      {idx + 1}. {item.category_name} × {item.quantity}
+                {/* Add Items to Request - same format as Request Assets modal */}
+                <div className="border border-gray-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                    <h3 className="text-sm font-semibold text-gray-700">Add Items to Request</h3>
+                  </div>
+
+                  <div className="grid grid-cols-12 gap-2 mb-3">
+                    <div className="col-span-8">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Search category..."
+                          value={categorySearch}
+                          onChange={(e) => {
+                            setCategorySearch(e.target.value);
+                            setShowCategoryDropdown(true);
+                          }}
+                          onFocus={() => setShowCategoryDropdown(true)}
+                          onBlur={() => setTimeout(() => setShowCategoryDropdown(false), 200)}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        />
+                        {showCategoryDropdown && (
+                          <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                            {assetCategories
+                              .filter(cat =>
+                                (cat.category_name.toLowerCase().includes(categorySearch.toLowerCase()) ||
+                                cat.category_code.toLowerCase().includes(categorySearch.toLowerCase())) &&
+                                cat.available_quantity > 0
+                              )
+                              .map(cat => (
+                                <div
+                                  key={cat.category_id}
+                                  onClick={() => {
+                                    if (editItems.some(item => item.category_id === cat.category_id)) {
+                                      showError('This category is already added');
+                                      return;
+                                    }
+                                    setEditItems([...editItems, {
+                                      category_id: cat.category_id,
+                                      category_name: cat.category_name,
+                                      quantity: 1
+                                    }]);
+                                    setCategorySearch('');
+                                    setShowCategoryDropdown(false);
+                                  }}
+                                  className="px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm font-medium text-gray-900">{cat.category_name}</span>
+                                    <span className="text-xs text-green-600">Avail: {cat.available_quantity}</span>
+                                  </div>
+                                  <p className="text-xs text-gray-500">{cat.category_code}</p>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  ))}
+                    <div className="col-span-4">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Qty</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value="1"
+                        readOnly
+                        className="w-full px-3 py-2 text-sm text-center border border-gray-300 rounded-lg bg-gray-50"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Items List */}
+                  {editItems.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-blue-600">{editItems.length} {editItems.length === 1 ? 'item' : 'items'} in request</p>
+                      {editItems.map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-900">{idx + 1}. {item.category_name}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const newItems = [...editItems];
+                                newItems[idx].quantity = Math.max(1, parseInt(e.target.value) || 1);
+                                setEditItems(newItems);
+                              }}
+                              className="w-16 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (editItems.length > 1) {
+                                  setEditItems(editItems.filter((_, i) => i !== idx));
+                                } else {
+                                  showError('At least one item is required');
+                                }
+                              }}
+                              className="text-red-600 hover:text-red-800 p-1"
+                              title="Remove item"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 text-center py-2">No items selected</p>
+                  )}
                 </div>
 
                 {/* Purpose */}
@@ -3252,6 +3420,99 @@ const SiteAssets: React.FC = () => {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Custom Confirmation Modal - Send to PM */}
+      <AnimatePresence>
+        {showConfirmSendPM && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            onClick={() => {
+              setShowConfirmSendPM(false);
+              setPendingSendRequisition(null);
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Icon and Header */}
+              <div className="flex flex-col items-center mb-4">
+                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mb-3">
+                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-bold text-gray-900">Send to Project Manager?</h3>
+              </div>
+
+              {/* Message */}
+              <p className="text-gray-600 text-center mb-6">
+                Are you sure you want to send this requisition to the Project Manager for approval?
+              </p>
+
+              {/* Requisition Info */}
+              {pendingSendRequisition && (
+                <div className="bg-gray-50 rounded-lg p-3 mb-6 border border-gray-200">
+                  <div className="text-sm">
+                    <div className="flex justify-between mb-1">
+                      <span className="text-gray-500">Requisition Code:</span>
+                      <span className="font-medium text-gray-900">{pendingSendRequisition.requisition_code}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Project:</span>
+                      <span className="font-medium text-gray-900">{pendingSendRequisition.project_name}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConfirmSendPM(false);
+                    setPendingSendRequisition(null);
+                  }}
+                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                  disabled={submittingRequisition}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmSendToPM}
+                  disabled={submittingRequisition}
+                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all font-medium shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {submittingRequisition ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Sending...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                      </svg>
+                      <span>Send to PM</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}
