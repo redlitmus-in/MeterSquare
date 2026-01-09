@@ -4,46 +4,8 @@ Blueprint for the proper DN/RDN flow for returnable assets.
 """
 
 from flask import Blueprint
-from controllers.asset_dn_controller import (
-    # Stock In
-    create_stock_in,
-    get_stock_in_list,
-    # Asset Delivery Note (ADN)
-    create_delivery_note,
-    get_delivery_notes,
-    get_delivery_note,
-    dispatch_delivery_note,
-    receive_delivery_note,
-    # Asset Return Delivery Note (ARDN)
-    create_return_note,
-    get_return_notes,
-    get_return_note,
-    issue_return_note,
-    update_return_note,
-    dispatch_return_note,
-    receive_return_note,
-    process_return_note,
-    # Dashboard & Utility
-    get_dn_dashboard,
-    get_available_for_dispatch,
-    get_project_dispatched_assets,
-    # Stock In Documents
-    upload_stock_in_document,
-    get_stock_in_document,
-    delete_stock_in_document,
-    # PDF Downloads
-    download_asset_delivery_note,
-    download_asset_return_note,
-    # Site Engineer
-    get_se_dispatched_assets,
-    se_receive_adn,
-    se_receive_selected_items,
-    get_se_movement_history,
-    # Asset Repairs
-    get_asset_repair_items,
-    complete_asset_repair,
-    dispose_unrepairable_asset,
-)
+from controllers.asset_dn_controller import *
+from controllers.asset_dn_controller import *
 from controllers.auth_controller import jwt_required
 
 # Create blueprint
@@ -263,3 +225,9 @@ def dispose_unrepairable_asset_route(return_item_id):
 def get_se_movement_history_route():
     """Get ADN/ARDN movement history for SE's assigned projects"""
     return get_se_movement_history()
+
+@asset_dn_routes.route('/api/assets/ss_return_notes', methods=['GET'])
+@jwt_required
+def get_ss_return_notes_route():
+    """Get list of Asset Return Delivery Notes for Site Supervisor"""
+    return get_ss_return_notes()

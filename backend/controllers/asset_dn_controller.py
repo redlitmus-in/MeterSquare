@@ -16,18 +16,7 @@ from config.db import db
 from sqlalchemy import func, and_
 
 logger = logging.getLogger(__name__)
-from models.returnable_assets import (
-    ReturnableAssetCategory,
-    ReturnableAssetItem,
-    AssetDeliveryNote,
-    AssetDeliveryNoteItem,
-    AssetReturnDeliveryNote,
-    AssetReturnDeliveryNoteItem,
-    AssetStockIn,
-    AssetStockInItem,
-    AssetMaintenance,
-    AssetDisposal
-)
+from models.returnable_assets import *
 from models.project import Project
 from models.user import User
 
@@ -2173,4 +2162,122 @@ def get_se_movement_history():
         import traceback
         logger.error(f"Error fetching SE movement history: {str(e)}")
         logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def get_ss_return_notes():
+    """Get list of Asset Return Delivery Notes - filtered by user's assigned projects"""
+    try:
+        user_id = g.user.get('user_id')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'User not authenticated'}), 401
+
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        status = request.args.get('status')
+        project_id = request.args.get('project_id', type=int)
+
+        # Get SE's assigned projects from pm_assign_ss table
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import or_
+
+        se_project_ids = []
+        se_assignments = db.session.query(PMAssignSS.project_id).filter(
+            or_(
+                PMAssignSS.ss_ids.contains([user_id]),
+                PMAssignSS.assigned_to_se_id == user_id
+            ),
+            PMAssignSS.is_deleted == False
+        ).distinct().all()
+
+        se_project_ids = [p[0] for p in se_assignments if p[0]]
+
+        # If no projects assigned, return empty list
+        if not se_project_ids:
+            return jsonify({
+                'success': True,
+                'data': [],
+                'pagination': {
+                    'page': page,
+                    'per_page': per_page,
+                    'total': 0,
+                    'pages': 0
+                }
+            }), 200
+
+        # Filter return notes by SE's assigned projects
+        query = AssetReturnDeliveryNote.query.filter(
+            AssetReturnDeliveryNote.project_id.in_(se_project_ids)
+        )
+
+        if status:
+            query = query.filter_by(status=status)
+        if project_id:
+            # Additional filter if specific project requested
+            if project_id in se_project_ids:
+                query = query.filter_by(project_id=project_id)
+            else:
+                # Requested project not assigned to this SE
+                return jsonify({
+                    'success': True,
+                    'data': [],
+                    'pagination': {
+                        'page': page,
+                        'per_page': per_page,
+                        'total': 0,
+                        'pages': 0
+                    }
+                }), 200
+
+        query = query.order_by(AssetReturnDeliveryNote.created_at.desc())
+
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        # Batch load projects
+        project_ids = list(set(ardn.project_id for ardn in pagination.items))
+        projects_map = batch_load_projects(project_ids)
+
+        # Batch load users for resolving 'System' names
+        user_ids = set()
+        for ardn in pagination.items:
+            if ardn.returned_by_id:
+                user_ids.add(ardn.returned_by_id)
+            if ardn.prepared_by_id:
+                user_ids.add(ardn.prepared_by_id)
+        users_map = batch_load_users(list(user_ids))
+
+        result = []
+        for ardn in pagination.items:
+            ardn_dict = ardn.to_dict()
+            project = projects_map.get(ardn.project_id)
+            ardn_dict['project_name'] = project.project_name if project else None
+
+            # Resolve user names if stored as 'System'
+            if not ardn_dict.get('returned_by') or ardn_dict.get('returned_by') == 'System':
+                user = users_map.get(ardn.returned_by_id) or users_map.get(ardn.prepared_by_id)
+                if user:
+                    ardn_dict['returned_by'] = user.full_name or user.email or '-'
+                else:
+                    ardn_dict['returned_by'] = '-'
+
+            if not ardn_dict.get('prepared_by') or ardn_dict.get('prepared_by') == 'System':
+                user = users_map.get(ardn.prepared_by_id)
+                if user:
+                    ardn_dict['prepared_by'] = user.full_name or user.email or '-'
+                else:
+                    ardn_dict['prepared_by'] = '-'
+
+            result.append(ardn_dict)
+
+        return jsonify({
+            'success': True,
+            'data': result,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': pagination.total,
+                'pages': pagination.pages
+            }
+        })
+
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

@@ -666,7 +666,7 @@ const SiteAssets: React.FC = () => {
   const fetchMyReturnNotes = async () => {
     try {
       setLoadingReturns(true);
-      const response = await apiClient.get('/assets/return-notes', {
+      const response = await apiClient.get('/assets/ss_return_notes', {
         params: { per_page: 50 }
       });
       if (response.data.success) {
@@ -876,10 +876,10 @@ const SiteAssets: React.FC = () => {
 
   // Auto-fetch return notes when returns tab is selected
   useEffect(() => {
-    if (activeTab === 'returns' && !returnsLoaded && !loadingReturns) {
+    if (activeTab === 'returns') {
       fetchMyReturnNotes();
     }
-  }, [activeTab, returnsLoaded, loadingReturns]);
+  }, [activeTab]);
 
   // Auto-fetch history when history tab is selected
   useEffect(() => {
@@ -1914,20 +1914,22 @@ const SiteAssets: React.FC = () => {
                                   <div className="p-1.5 bg-gray-100 rounded">
                                     <CubeIcon className="w-4 h-4 text-gray-700" />
                                   </div>
-                                  <div className="flex-1">
+                                  <div className="flex-1 min-w-0">
                                     <p className="font-medium text-sm">{item.category_name}</p>
                                     <p className="text-xs text-gray-500">
                                       {item.quantity} unit(s) • {item.item_code || '-'}
                                     </p>
                                   </div>
-                                  <span className={`px-2 py-0.5 rounded text-xs ${getConditionColor(item.reported_condition)}`}>
-                                    {item.reported_condition}
-                                  </span>
-                                  {item.damage_description && (
-                                    <span className="text-xs text-gray-700 max-w-[150px] truncate" title={item.damage_description}>
-                                      {item.damage_description}
+                                  <div className="flex flex-col items-start gap-1.5 flex-shrink-0">
+                                    <span className={`px-2 py-0.5 rounded text-xs whitespace-nowrap ${getConditionColor(item.reported_condition)}`}>
+                                      {item.reported_condition}
                                     </span>
-                                  )}
+                                    {item.damage_description && (
+                                      <p className="text-xs text-red-600 text-left leading-relaxed max-w-[220px]">
+                                        {item.damage_description}
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
                               ))}
                             </div>
