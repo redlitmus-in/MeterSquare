@@ -1727,7 +1727,7 @@ const AssetDispatch: React.FC = () => {
                               <span className="text-xs text-gray-400 w-5">{idx + 1}.</span>
                               <span className="font-medium">{item.category_name || item.category_code}</span>
                             </div>
-                            <span className="text-gray-600">× {item.quantity}</span>
+                            <span className="text-gray-600">{item.quantity}</span>
                           </div>
                         ))}
                       </div>
