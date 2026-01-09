@@ -253,3 +253,12 @@ def complete_asset_repair_route(return_item_id):
 def dispose_unrepairable_asset_route(return_item_id):
     """Mark unrepairable asset for disposal - creates disposal request for TD approval"""
     return dispose_unrepairable_asset(return_item_id)
+
+
+# ==================== SE MOVEMENT HISTORY ROUTE ====================
+
+@asset_dn_routes.route('/api/assets/se/movement-history', methods=['GET'])
+@jwt_required
+def get_se_movement_history_route():
+    """Get ADN/ARDN movement history for SE's assigned projects"""
+    return get_se_movement_history()

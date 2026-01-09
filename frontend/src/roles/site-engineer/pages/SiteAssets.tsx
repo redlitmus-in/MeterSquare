@@ -850,72 +850,14 @@ const SiteAssets: React.FC = () => {
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
-      // Get SE's assigned project IDs from assets
-      const allAssets = [...pendingReceipt, ...received];
-      const projectIds: number[] = [...new Set(allAssets.map(a => a.project_id))];
-      const projectNames: Record<number, string> = {};
-
-      // Build project name map from assets
-      allAssets.forEach(a => {
-        projectNames[a.project_id] = a.project_name;
-      });
-
-      // If no assets, fetch assigned projects
-      if (projectIds.length === 0) {
-        try {
-          const projectsResponse = await apiClient.get('/projects/assigned-to-me');
-          const assignedProjects = projectsResponse.data.projects || [];
-          assignedProjects.forEach((p: { project_id: number; project_name: string }) => {
-            projectIds.push(p.project_id);
-            projectNames[p.project_id] = p.project_name;
-          });
-        } catch (err) {
-          console.error('Error fetching assigned projects:', err);
-        }
-      }
-
-      if (projectIds.length === 0) {
-        setHistory([]);
-        setLoadingHistory(false);
-        return;
-      }
-
-      // Fetch movements for all SE's projects in parallel
-      const allHistory: AssetHistory[] = [];
-
-      const historyPromises = projectIds.map(projectId =>
-        apiClient.get(`/assets/movements?project_id=${projectId}&limit=50`)
-          .then(response => ({
-            projectId,
-            movements: response.data.movements || []
-          }))
-          .catch(err => {
-            console.error(`Error fetching history for project ${projectId}:`, err);
-            return { projectId, movements: [] };
-          })
-      );
-
-      const historyResults = await Promise.all(historyPromises);
-
-      historyResults.forEach(({ projectId, movements }) => {
-        movements.forEach((m: AssetHistory) => {
-          allHistory.push({
-            ...m,
-            project_name: projectNames[projectId] || m.project_name || `Project #${projectId}`
-          });
-        });
-      });
-
-      // Sort by date descending
-      allHistory.sort((a, b) => {
-        const dateA = new Date(a.dispatched_at || a.returned_at || a.created_at).getTime();
-        const dateB = new Date(b.dispatched_at || b.returned_at || b.created_at).getTime();
-        return dateB - dateA;
-      });
-
-      setHistory(allHistory.slice(0, 50)); // Limit to 50 records
+      // Call new ADN/ARDN movement history endpoint
+      const response = await apiClient.get('/assets/se/movement-history?limit=50');
+      const data = response.data.data || {};
+      const movements = data.movements || [];
+      setHistory(movements);
     } catch (err) {
       console.error('Error fetching history:', err);
+      showError('Failed to load movement history');
     } finally {
       setLoadingHistory(false);
     }
@@ -2236,7 +2178,7 @@ const SiteAssets: React.FC = () => {
                     <p className="text-sm">No movement history found for your projects</p>
                   </div>
                 ) : (
-                  <div className="max-h-[500px] overflow-y-auto">
+                  <div className="h-[calc(100vh-350px)] min-h-[600px] overflow-y-auto">
                     {/* Group by project */}
                     {Object.entries(
                       history.reduce((acc, h) => {

@@ -12,6 +12,7 @@ Flow:
 import logging
 from datetime import datetime
 from flask import request, jsonify
+from flask import request, jsonify
 from config.db import db
 from sqlalchemy import func, and_
 
@@ -1995,3 +1996,185 @@ def dispose_unrepairable_asset(return_item_id):
         db.session.rollback()
         logger.error(f"Error creating disposal request: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
+<<<<<<< HEAD
+
+
+def get_se_movement_history():
+    """Get ADN/ARDN movement history for SE's assigned projects"""
+    try:
+        user_id = g.user.get('user_id')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'User not authenticated'}), 401
+
+        limit = request.args.get('limit', 50, type=int)
+        project_id_filter = request.args.get('project_id', type=int)
+
+        # Get SE's assigned projects
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import or_
+
+        pm_assignments = PMAssignSS.query.filter(
+            PMAssignSS.is_deleted == False,
+            or_(
+                PMAssignSS.ss_ids.contains([user_id]),
+                PMAssignSS.assigned_to_se_id == user_id
+            )
+        ).all()
+        pm_project_ids = list(set(a.project_id for a in pm_assignments if a.project_id))
+
+        # Also check Project.site_supervisor_id
+        conditions = [Project.site_supervisor_id == user_id]
+        if pm_project_ids:
+            conditions.append(Project.project_id.in_(pm_project_ids))
+
+        my_projects = Project.query.filter(or_(*conditions)).all()
+        project_ids = [p.project_id for p in my_projects]
+        projects_map = {p.project_id: p for p in my_projects}
+
+        if not project_ids:
+            return jsonify({
+                'success': True,
+                'data': {'movements': []}
+            })
+
+        # Apply project filter if specified
+        if project_id_filter:
+            if project_id_filter in project_ids:
+                project_ids = [project_id_filter]
+            else:
+                return jsonify({
+                    'success': True,
+                    'data': {'movements': []}
+                })
+
+        movements = []
+
+        # Get ADNs (Dispatches) for SE's projects
+        adns = AssetDeliveryNote.query.filter(
+            AssetDeliveryNote.project_id.in_(project_ids),
+            AssetDeliveryNote.status.in_(['IN_TRANSIT', 'PARTIAL', 'DELIVERED'])
+        ).order_by(AssetDeliveryNote.created_at.desc()).limit(limit).all()
+
+        # Batch load categories for ADN items
+        all_category_ids = set()
+        all_asset_item_ids = set()
+        for adn in adns:
+            for item in adn.items:
+                all_category_ids.add(item.category_id)
+                if item.asset_item_id:
+                    all_asset_item_ids.add(item.asset_item_id)
+
+        categories = ReturnableAssetCategory.query.filter(
+            ReturnableAssetCategory.category_id.in_(all_category_ids)
+        ).all() if all_category_ids else []
+        category_map = {c.category_id: c for c in categories}
+
+        asset_items = ReturnableAssetItem.query.filter(
+            ReturnableAssetItem.item_id.in_(all_asset_item_ids)
+        ).all() if all_asset_item_ids else []
+        asset_item_map = {a.item_id: a for a in asset_items}
+
+        # Convert ADNs to movement records
+        for adn in adns:
+            project = projects_map.get(adn.project_id)
+            for item in adn.items:
+                category = category_map.get(item.category_id)
+                asset_item = asset_item_map.get(item.asset_item_id) if item.asset_item_id else None
+
+                movements.append({
+                    'movement_id': adn.adn_id * 100000 + item.item_id,  # Unique numeric ID
+                    'movement_type': 'DISPATCH',
+                    'category_name': category.category_name if category else 'Unknown',
+                    'category_code': category.category_code if category else None,
+                    'item_code': asset_item.item_code if asset_item else None,
+                    'serial_number': asset_item.serial_number if asset_item else None,
+                    'project_id': adn.project_id,
+                    'project_name': project.project_name if project else f'Project #{adn.project_id}',
+                    'quantity': item.quantity,
+                    'condition_before': item.condition_at_dispatch,
+                    'dispatched_at': adn.dispatched_at.isoformat() if adn.dispatched_at else adn.created_at.isoformat(),
+                    'dispatched_by': adn.dispatched_by or adn.prepared_by,
+                    'adn_number': adn.adn_number,
+                    'adn_status': adn.status,
+                    'notes': adn.notes,
+                    'created_at': adn.created_at.isoformat()
+                })
+
+        # Get ARDNs (Returns) for SE's projects
+        ardns = AssetReturnDeliveryNote.query.filter(
+            AssetReturnDeliveryNote.project_id.in_(project_ids),
+            AssetReturnDeliveryNote.status.in_(['ISSUED', 'IN_TRANSIT', 'RECEIVED', 'PROCESSED'])
+        ).order_by(AssetReturnDeliveryNote.created_at.desc()).limit(limit).all()
+
+        # Batch load categories for ARDN items
+        all_category_ids = set()
+        all_asset_item_ids = set()
+        for ardn in ardns:
+            for item in ardn.items:
+                all_category_ids.add(item.category_id)
+                if item.asset_item_id:
+                    all_asset_item_ids.add(item.asset_item_id)
+
+        categories = ReturnableAssetCategory.query.filter(
+            ReturnableAssetCategory.category_id.in_(all_category_ids)
+        ).all() if all_category_ids else []
+        category_map = {c.category_id: c for c in categories}
+
+        asset_items = ReturnableAssetItem.query.filter(
+            ReturnableAssetItem.item_id.in_(all_asset_item_ids)
+        ).all() if all_asset_item_ids else []
+        asset_item_map = {a.item_id: a for a in asset_items}
+
+        # Convert ARDNs to movement records
+        for ardn in ardns:
+            project = projects_map.get(ardn.project_id)
+            # Resolve user names
+            returned_by_name = resolve_user_name(
+                ardn.returned_by or ardn.prepared_by,
+                ardn.returned_by_id or ardn.prepared_by_id
+            )
+
+            for item in ardn.items:
+                category = category_map.get(item.category_id)
+                asset_item = asset_item_map.get(item.asset_item_id) if item.asset_item_id else None
+
+                movements.append({
+                    'movement_id': ardn.ardn_id * 100000 + item.return_item_id,  # Unique numeric ID
+                    'movement_type': 'RETURN',
+                    'category_name': category.category_name if category else 'Unknown',
+                    'category_code': category.category_code if category else None,
+                    'item_code': asset_item.item_code if asset_item else None,
+                    'serial_number': asset_item.serial_number if asset_item else None,
+                    'project_id': ardn.project_id,
+                    'project_name': project.project_name if project else f'Project #{ardn.project_id}',
+                    'quantity': item.quantity,
+                    'condition_before': item.reported_condition,
+                    'condition_after': item.verified_condition,
+                    'returned_at': ardn.return_date.isoformat() if ardn.return_date else ardn.created_at.isoformat(),
+                    'returned_by': returned_by_name,
+                    'ardn_number': ardn.ardn_number,
+                    'ardn_status': ardn.status,
+                    'return_reason': ardn.return_reason,
+                    'action_taken': item.action_taken,
+                    'notes': item.return_notes or ardn.notes,
+                    'created_at': ardn.created_at.isoformat()
+                })
+
+        # Sort by created_at descending
+        movements.sort(key=lambda x: x['created_at'], reverse=True)
+
+        # Limit to specified number
+        movements = movements[:limit]
+
+        return jsonify({
+            'success': True,
+            'data': {'movements': movements}
+        })
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Error fetching SE movement history: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': str(e)}), 500
+=======
+>>>>>>> c20d523a999ccdda92f4a434cf0bb521caa683fb
