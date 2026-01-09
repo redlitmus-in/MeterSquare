@@ -440,6 +440,7 @@ def confirm_requisition_receipt(requisition_id):
     try:
         user_id = g.user.get('user_id')
         user_name = g.user.get('full_name', g.user.get('email', 'Unknown'))
+        user_email = g.user.get('email', 'system')
 
         if not user_id:
             return jsonify({'success': False, 'error': 'User not authenticated'}), 401
@@ -465,14 +466,39 @@ def confirm_requisition_receipt(requisition_id):
         if requisition.requested_by_user_id != user_id:
             return jsonify({'success': False, 'error': 'Only the requester can confirm receipt'}), 403
 
+        receipt_time = datetime.utcnow()
+
         # Update requisition
         requisition.status = RequisitionStatus.COMPLETED
         requisition.approval_required_from = None
         requisition.received_by_user_id = user_id
         requisition.received_by_name = user_name
-        requisition.received_at = datetime.utcnow()
+        requisition.received_at = receipt_time
         requisition.receipt_notes = data.get('notes')
-        requisition.last_modified_by = g.user.get('email', 'system')
+        requisition.last_modified_by = user_email
+
+        # CRITICAL FIX: If requisition is linked to an ADN, update ADN status to DELIVERED
+        if requisition.adn_id:
+            from models.returnable_assets import AssetDeliveryNote, AssetDeliveryNoteItem
+
+            adn = AssetDeliveryNote.query.get(requisition.adn_id)
+            if adn:
+                # Update ADN to DELIVERED status
+                adn.status = 'DELIVERED'
+                adn.received_by = user_name
+                adn.received_by_id = user_id
+                adn.received_at = receipt_time
+                adn.receiver_notes = data.get('notes')
+                adn.last_modified_by = user_email
+
+                # Mark all ADN items as received
+                for item in adn.items:
+                    item.is_received = True
+                    item.received_at = receipt_time
+                    item.received_by = user_name
+                    item.received_by_id = user_id
+
+                current_app.logger.info(f"Updated ADN {adn.adn_number} to DELIVERED status")
 
         db.session.commit()
 
