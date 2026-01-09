@@ -112,6 +112,8 @@ export interface AssetDeliveryNote {
   driver_contact?: string;
   status: ADNStatus;
   notes?: string;
+  requisition_id?: number;
+  requisition_code?: string;
   received_by?: string;
   received_by_id?: number;
   received_at?: string;
@@ -263,6 +265,7 @@ export const createDeliveryNote = async (data: {
   driver_name?: string;
   driver_contact?: string;
   notes?: string;
+  requisition_id?: number; // Link to asset requisition
   items: Array<{
     category_id: number;
     asset_item_id?: number;

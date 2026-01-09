@@ -14,14 +14,15 @@ import {
 } from 'lucide-react';
 import { apiClient, API_BASE_URL } from '@/api/config';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import { assetService, AssetCategory, AssetItem } from '../services/assetService';
 import {
   createDeliveryNote,
   getDeliveryNotes,
   dispatchDeliveryNote,
   getAvailableForDispatch,
   AssetDeliveryNote,
-  AssetCondition
+  AssetCondition,
+  AssetCategory,
+  AssetItem
 } from '../services/assetDnService';
 import {
   AssetRequisition,
@@ -38,7 +39,7 @@ import {
 import { showSuccess, showError } from '@/utils/toastHelper';
 
 type SubTabType = 'requisitions' | 'delivery-notes';
-type RequisitionTabType = 'pending' | 'ready_dispatch' | 'dispatched' | 'rejected';
+type RequisitionTabType = 'pending' | 'ready_dispatch' | 'rejected';
 
 interface SiteEngineer {
   user_id: number;
@@ -129,20 +130,21 @@ const AssetDispatch: React.FC = () => {
   const [quantityExpanded, setQuantityExpanded] = useState(true);
   const [individualExpanded, setIndividualExpanded] = useState(true);
 
+  // Linked requisition state (when creating DN from requisition)
+  const [linkedRequisitionId, setLinkedRequisitionId] = useState<number | null>(null);
+  const [linkedRequisitionCode, setLinkedRequisitionCode] = useState<string | null>(null);
+
   // ==================== REQUISITIONS STATE ====================
   const [pendingRequisitions, setPendingRequisitions] = useState<AssetRequisition[]>([]);
   const [readyDispatchRequisitions, setReadyDispatchRequisitions] = useState<AssetRequisition[]>([]);
-  const [dispatchedRequisitions, setDispatchedRequisitions] = useState<AssetRequisition[]>([]);
   const [rejectedRequisitions, setRejectedRequisitions] = useState<AssetRequisition[]>([]);
 
   const [loadingPending, setLoadingPending] = useState(false);
   const [loadingReadyDispatch, setLoadingReadyDispatch] = useState(false);
-  const [loadingDispatched, setLoadingDispatched] = useState(false);
   const [loadingRejected, setLoadingRejected] = useState(false);
 
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [readyDispatchLoaded, setReadyDispatchLoaded] = useState(false);
-  const [dispatchedLoaded, setDispatchedLoaded] = useState(false);
   const [rejectedLoaded, setRejectedLoaded] = useState(false);
 
   const [activeReqTab, setActiveReqTab] = useState<RequisitionTabType>('pending');
@@ -152,7 +154,7 @@ const AssetDispatch: React.FC = () => {
   const [selectedRequisition, setSelectedRequisition] = useState<AssetRequisition | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showActionModal, setShowActionModal] = useState(false);
-  const [actionType, setActionType] = useState<'approve' | 'reject' | 'dispatch'>('approve');
+  const [actionType, setActionType] = useState<'approve' | 'reject'>('approve');
   const [actionNotes, setActionNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -160,20 +162,36 @@ const AssetDispatch: React.FC = () => {
   // ==================== FETCH FUNCTIONS ====================
 
   // Fetch form data (projects and available assets) - only when needed
-  const fetchFormData = useCallback(async () => {
+  // Returns the fetched data to avoid race conditions when using data immediately after fetch
+  const fetchFormData = useCallback(async (): Promise<{
+    projects: Project[];
+    categories: AssetCategory[];
+    items: AssetItem[];
+  } | null> => {
     try {
       setLoadingFormData(true);
       const [projectsRes, availableData] = await Promise.all([
         apiClient.get('/all_project', { params: { per_page: 100, has_se_assigned: 'true' } }),
         getAvailableForDispatch()
       ]);
-      setProjects(projectsRes.data?.projects || projectsRes.data?.data || []);
-      setAvailableCategories(availableData.quantity_based);
-      setAvailableItems(availableData.individual_items);
+      const fetchedProjects = projectsRes.data?.projects || projectsRes.data?.data || [];
+      const fetchedCategories = availableData.quantity_based;
+      const fetchedItems = availableData.individual_items;
+
+      setProjects(fetchedProjects);
+      setAvailableCategories(fetchedCategories);
+      setAvailableItems(fetchedItems);
       setFormDataLoaded(true);
+
+      return {
+        projects: fetchedProjects,
+        categories: fetchedCategories,
+        items: fetchedItems
+      };
     } catch (error) {
       console.error('Error fetching form data:', error);
       showError('Failed to load form data');
+      return null;
     } finally {
       setLoadingFormData(false);
     }
@@ -257,22 +275,6 @@ const AssetDispatch: React.FC = () => {
     }
   }, []);
 
-  // Fetch dispatched requisitions
-  const fetchDispatched = useCallback(async () => {
-    try {
-      setLoadingDispatched(true);
-      const data = await getProdMgrPendingRequisitions({ status: 'all' });
-      const dispatched = data.filter(r => ['dispatched', 'completed'].includes(r.status));
-      setDispatchedRequisitions(dispatched);
-      setDispatchedLoaded(true);
-    } catch (err) {
-      console.error('Error fetching dispatched requisitions:', err);
-      showError('Failed to load dispatched requisitions');
-    } finally {
-      setLoadingDispatched(false);
-    }
-  }, []);
-
   // Fetch rejected requisitions
   const fetchRejected = useCallback(async () => {
     try {
@@ -311,16 +313,14 @@ const AssetDispatch: React.FC = () => {
       fetchPending();
     } else if (activeReqTab === 'ready_dispatch' && !readyDispatchLoaded && !loadingReadyDispatch) {
       fetchReadyDispatch();
-    } else if (activeReqTab === 'dispatched' && !dispatchedLoaded && !loadingDispatched) {
-      fetchDispatched();
     } else if (activeReqTab === 'rejected' && !rejectedLoaded && !loadingRejected) {
       fetchRejected();
     }
   }, [
     activeSubTab, activeReqTab,
-    pendingLoaded, readyDispatchLoaded, dispatchedLoaded, rejectedLoaded,
-    loadingPending, loadingReadyDispatch, loadingDispatched, loadingRejected,
-    fetchPending, fetchReadyDispatch, fetchDispatched, fetchRejected
+    pendingLoaded, readyDispatchLoaded, rejectedLoaded,
+    loadingPending, loadingReadyDispatch, loadingRejected,
+    fetchPending, fetchReadyDispatch, fetchRejected
   ]);
 
   // Lazy load DN tabs
@@ -354,21 +354,19 @@ const AssetDispatch: React.FC = () => {
     switch (activeReqTab) {
       case 'pending': return pendingRequisitions;
       case 'ready_dispatch': return readyDispatchRequisitions;
-      case 'dispatched': return dispatchedRequisitions;
       case 'rejected': return rejectedRequisitions;
       default: return pendingRequisitions;
     }
-  }, [activeReqTab, pendingRequisitions, readyDispatchRequisitions, dispatchedRequisitions, rejectedRequisitions]);
+  }, [activeReqTab, pendingRequisitions, readyDispatchRequisitions, rejectedRequisitions]);
 
   const isReqLoading = useMemo(() => {
     switch (activeReqTab) {
       case 'pending': return loadingPending;
       case 'ready_dispatch': return loadingReadyDispatch;
-      case 'dispatched': return loadingDispatched;
       case 'rejected': return loadingRejected;
       default: return false;
     }
-  }, [activeReqTab, loadingPending, loadingReadyDispatch, loadingDispatched, loadingRejected]);
+  }, [activeReqTab, loadingPending, loadingReadyDispatch, loadingRejected]);
 
   const filteredRequisitions = useMemo(() => {
     if (!reqSearchTerm) return currentRequisitions;
@@ -393,9 +391,8 @@ const AssetDispatch: React.FC = () => {
   const reqStatusCounts = useMemo(() => ({
     pending: pendingRequisitions.length,
     ready_dispatch: readyDispatchRequisitions.length,
-    dispatched: dispatchedRequisitions.length,
     rejected: rejectedRequisitions.length,
-  }), [pendingRequisitions, readyDispatchRequisitions, dispatchedRequisitions, rejectedRequisitions]);
+  }), [pendingRequisitions, readyDispatchRequisitions, rejectedRequisitions]);
 
   const refreshCurrentReqTab = useCallback(() => {
     if (activeReqTab === 'pending') {
@@ -404,14 +401,11 @@ const AssetDispatch: React.FC = () => {
     } else if (activeReqTab === 'ready_dispatch') {
       setReadyDispatchLoaded(false);
       fetchReadyDispatch();
-    } else if (activeReqTab === 'dispatched') {
-      setDispatchedLoaded(false);
-      fetchDispatched();
     } else if (activeReqTab === 'rejected') {
       setRejectedLoaded(false);
       fetchRejected();
     }
-  }, [activeReqTab, fetchPending, fetchReadyDispatch, fetchDispatched, fetchRejected]);
+  }, [activeReqTab, fetchPending, fetchReadyDispatch, fetchRejected]);
 
   // ==================== DN HELPERS ====================
 
@@ -458,7 +452,7 @@ const AssetDispatch: React.FC = () => {
     setFormDataLoaded(false);
   }, [dnStatusFilter, fetchDraftDNs, fetchIssuedDNs, fetchDeliveredDNs]);
 
-  const openActionModal = (requisition: AssetRequisition, action: 'approve' | 'reject' | 'dispatch') => {
+  const openActionModal = (requisition: AssetRequisition, action: 'approve' | 'reject') => {
     setSelectedRequisition(requisition);
     setActionType(action);
     setActionNotes('');
@@ -507,23 +501,6 @@ const AssetDispatch: React.FC = () => {
       fetchPending();
     } catch (error: unknown) {
       showError(error instanceof Error ? error.message : 'Failed to reject requisition');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleReqDispatch = async () => {
-    if (!selectedRequisition) return;
-    setSubmitting(true);
-    try {
-      await dispatchRequisition(selectedRequisition.requisition_id, { notes: actionNotes || undefined });
-      showSuccess('Requisition dispatched successfully');
-      setShowActionModal(false);
-      setReadyDispatchLoaded(false);
-      setDispatchedLoaded(false);
-      fetchReadyDispatch();
-    } catch (error: unknown) {
-      showError(error instanceof Error ? error.message : 'Failed to dispatch requisition');
     } finally {
       setSubmitting(false);
     }
@@ -643,6 +620,7 @@ const AssetDispatch: React.FC = () => {
         driver_name: driverName || undefined,
         driver_contact: driverContact || undefined,
         notes: notes || undefined,
+        requisition_id: linkedRequisitionId || undefined,
         items: dispatchItems.map(item => ({
           category_id: item.category_id,
           asset_item_id: item.asset_item_id,
@@ -651,7 +629,26 @@ const AssetDispatch: React.FC = () => {
           notes: item.notes || undefined
         }))
       });
-      showSuccess(`Delivery Note created: ${result.adn_number}`);
+
+      // If linked to a requisition, mark it as dispatched
+      if (linkedRequisitionId) {
+        try {
+          await dispatchRequisition(linkedRequisitionId, {
+            notes: `Linked to DN: ${result.adn_number}`,
+            adn_id: result.adn_id
+          });
+          showSuccess(`Delivery Note ${result.adn_number} created and requisition dispatched`);
+          // Refresh ready_dispatch tab (requisition moved out)
+          setReadyDispatchLoaded(false);
+        } catch (reqError) {
+          console.error('Error dispatching linked requisition:', reqError);
+          showSuccess(`Delivery Note created: ${result.adn_number}`);
+          showError('Warning: Requisition status could not be updated. Please update it manually.');
+        }
+      } else {
+        showSuccess(`Delivery Note created: ${result.adn_number}`);
+      }
+
       resetDNForm();
       // Refresh draft tab since new DN starts as DRAFT
       setDraftLoaded(false);
@@ -702,6 +699,114 @@ const AssetDispatch: React.FC = () => {
     setNotes('');
     setDispatchItems([]);
     setShowForm(false);
+    setLinkedRequisitionId(null);
+    setLinkedRequisitionCode(null);
+  };
+
+  // Handle dispatch by opening DN form with requisition data
+  const handleDispatchWithDN = async (requisition: AssetRequisition) => {
+    try {
+      // Switch to delivery-notes tab first for visual feedback
+      setActiveSubTab('delivery-notes');
+      setDnStatusFilter('DRAFT');
+
+      // Get form data - either from existing state or fetch fresh
+      let projectsList = projects;
+      let categoriesList = availableCategories;
+
+      if (!formDataLoaded) {
+        const fetchedData = await fetchFormData();
+        if (!fetchedData) {
+          // Fetch failed, error already shown by fetchFormData
+          return;
+        }
+        projectsList = fetchedData.projects;
+        categoriesList = fetchedData.categories;
+      }
+
+      // Store the linked requisition
+      setLinkedRequisitionId(requisition.requisition_id);
+      setLinkedRequisitionCode(requisition.requisition_code);
+
+      // Find the project and set it
+      const projectId = requisition.project_id;
+      if (projectId) {
+        setSelectedProjectId(projectId);
+        const selectedProject = projectsList.find(p => p.project_id === projectId);
+        if (selectedProject) {
+          setSiteLocation(requisition.site_location || selectedProject.location || '');
+          const ses = selectedProject.site_supervisors || [];
+          setAvailableSEs(ses);
+        }
+      }
+
+      // Set attention_to as the requester's name
+      setAttentionTo(requisition.requested_by_name || '');
+
+      // Pre-fill items from the requisition
+      const prefilledItems: DispatchItem[] = [];
+
+      if (requisition.items && requisition.items.length > 0) {
+        // Multiple items
+        for (const item of requisition.items) {
+          // Find the matching category in available assets
+          const category = categoriesList.find(c => c.category_id === item.category_id);
+
+          if (category) {
+            prefilledItems.push({
+              category_id: item.category_id,
+              category_name: item.category_name || category.category_name,
+              category_code: item.category_code || category.category_code,
+              tracking_mode: category.tracking_mode === 'individual' ? 'individual' : 'quantity',
+              quantity: item.quantity || 1,
+              available: category.available_quantity ?? item.quantity ?? 1,
+              condition: 'good',
+              notes: ''
+            });
+          } else {
+            // Category not found in available, add anyway for visibility
+            prefilledItems.push({
+              category_id: item.category_id,
+              category_name: item.category_name || 'Unknown',
+              category_code: item.category_code || '',
+              tracking_mode: 'quantity',
+              quantity: item.quantity || 1,
+              available: item.quantity || 1,
+              condition: 'good',
+              notes: ''
+            });
+          }
+        }
+      } else if (requisition.category_id) {
+        // Single item (old format)
+        const category = categoriesList.find(c => c.category_id === requisition.category_id);
+        prefilledItems.push({
+          category_id: requisition.category_id,
+          category_name: requisition.category_name || (category?.category_name || 'Unknown'),
+          category_code: requisition.category_code || (category?.category_code || ''),
+          tracking_mode: category?.tracking_mode === 'individual' ? 'individual' : 'quantity',
+          quantity: requisition.quantity || 1,
+          available: category?.available_quantity ?? requisition.quantity ?? 1,
+          condition: 'good',
+          notes: ''
+        });
+      }
+
+      setDispatchItems(prefilledItems);
+
+      // Add requisition code to notes
+      setNotes(`For Requisition: ${requisition.requisition_code}`);
+
+      // Open the form
+      setShowForm(true);
+      setShowActionModal(false);
+    } catch (error) {
+      console.error('Error preparing dispatch form:', error);
+      showError('Failed to prepare dispatch form. Please try again.');
+      // Reset linked requisition state on error
+      setLinkedRequisitionId(null);
+      setLinkedRequisitionCode(null);
+    }
   };
 
   const handleDownloadDN = async (dn: AssetDeliveryNote) => {
@@ -761,7 +866,6 @@ const AssetDispatch: React.FC = () => {
   const reqTabs: { key: RequisitionTabType; label: string; icon: React.ReactNode; color: string }[] = [
     { key: 'pending', label: 'Pending Approval', icon: <Clock className="h-4 w-4" />, color: 'yellow' },
     { key: 'ready_dispatch', label: 'Ready to Dispatch', icon: <Truck className="h-4 w-4" />, color: 'blue' },
-    { key: 'dispatched', label: 'Dispatched', icon: <CheckCircle className="h-4 w-4" />, color: 'green' },
     { key: 'rejected', label: 'Rejected', icon: <XCircle className="h-4 w-4" />, color: 'red' }
   ];
 
@@ -881,7 +985,6 @@ const AssetDispatch: React.FC = () => {
               <p className="text-sm text-gray-500">
                 {activeReqTab === 'pending' ? 'No requisitions waiting for your approval'
                   : activeReqTab === 'ready_dispatch' ? 'No approved requisitions ready for dispatch'
-                  : activeReqTab === 'dispatched' ? 'No dispatched requisitions'
                   : 'No rejected requisitions'}
               </p>
             </div>
@@ -969,11 +1072,11 @@ const AssetDispatch: React.FC = () => {
                       )}
                       {requisition.status === 'prod_mgr_approved' && (
                         <button
-                          onClick={() => openActionModal(requisition, 'dispatch')}
+                          onClick={() => handleDispatchWithDN(requisition)}
                           className="px-3 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-1"
                         >
                           <Truck className="h-4 w-4" />
-                          <span className="hidden md:inline">Dispatch</span>
+                          <span className="hidden md:inline">Create DN</span>
                         </button>
                       )}
                     </div>
@@ -1032,102 +1135,144 @@ const AssetDispatch: React.FC = () => {
           {/* Create DN Form */}
           {showForm && (
             <div className="bg-white rounded-xl shadow-sm border p-6">
-              <h2 className="text-lg font-semibold mb-4">New Asset Delivery Note (ADN)</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">New Asset Delivery Note (ADN)</h2>
+                {linkedRequisitionCode && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg">
+                    <Package className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-700">
+                      Linked to: {linkedRequisitionCode}
+                    </span>
+                  </div>
+                )}
+              </div>
               {loadingFormData ? (
                 <div className="flex items-center justify-center py-12">
                   <ModernLoadingSpinners size="md" />
                 </div>
               ) : (
               <form onSubmit={handleSubmitDN} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Project *</label>
-                    <select
-                      value={selectedProjectId || ''}
-                      onChange={(e) => handleProjectSelect(Number(e.target.value) || null)}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
-                      required
-                    >
-                      <option value="">Select Project</option>
-                      {projects.map(p => (
-                        <option key={p.project_id} value={p.project_id}>
-                          {p.project_name} ({p.project_code})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Site Location</label>
-                    <input
-                      type="text"
-                      value={siteLocation}
-                      onChange={(e) => setSiteLocation(e.target.value)}
-                      placeholder="Auto-populated from project"
-                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 ${siteLocation ? 'bg-green-50' : ''}`}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Attention To (Site Engineer) *</label>
-                    {availableSEs.length > 1 ? (
+                {/* Project & Site Information */}
+                <div className="border-b pb-4">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Delivery Information</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Project *
+                        {linkedRequisitionId && <span className="text-xs text-blue-600 ml-2">(From Requisition)</span>}
+                      </label>
                       <select
-                        value={attentionTo}
-                        onChange={(e) => setAttentionTo(e.target.value)}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                        value={selectedProjectId || ''}
+                        onChange={(e) => handleProjectSelect(Number(e.target.value) || null)}
+                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 ${linkedRequisitionId ? 'bg-gray-50 cursor-not-allowed' : ''}`}
                         required
+                        disabled={linkedRequisitionId ? true : false}
                       >
-                        <option value="">-- Select Site Engineer --</option>
-                        {availableSEs.map(se => (
-                          <option key={se.user_id} value={se.full_name}>{se.full_name}</option>
+                        <option value="">Select Project</option>
+                        {projects.map(p => (
+                          <option key={p.project_id} value={p.project_id}>
+                            {p.project_name} ({p.project_code})
+                          </option>
                         ))}
                       </select>
-                    ) : (
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Site Location
+                        {linkedRequisitionId && <span className="text-xs text-blue-600 ml-2">(From Requisition)</span>}
+                      </label>
                       <input
                         type="text"
-                        value={attentionTo}
-                        onChange={(e) => setAttentionTo(e.target.value)}
-                        placeholder={availableSEs.length === 0 ? "Select a project first" : "Auto-populated"}
-                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 ${attentionTo ? 'bg-green-50' : ''}`}
-                        readOnly={availableSEs.length === 1}
-                        required={availableSEs.length === 0}
+                        value={siteLocation}
+                        onChange={(e) => setSiteLocation(e.target.value)}
+                        placeholder="Auto-populated from project"
+                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 ${linkedRequisitionId ? 'bg-gray-50 cursor-not-allowed' : siteLocation ? 'bg-green-50' : ''}`}
+                        disabled={linkedRequisitionId ? true : false}
                       />
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number</label>
-                    <input
-                      type="text"
-                      value={vehicleNumber}
-                      onChange={(e) => setVehicleNumber(e.target.value)}
-                      placeholder="e.g., ABC-1234"
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
-                    <input
-                      type="text"
-                      value={driverName}
-                      onChange={(e) => setDriverName(e.target.value)}
-                      placeholder="Driver name"
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
-                    />
+                    </div>
                   </div>
                 </div>
 
-                {/* Asset Selection */}
-                <div className="border rounded-lg overflow-hidden">
-                  <div className="bg-gray-50 px-4 py-3 border-b">
-                    <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-                      <Package className="w-5 h-5 text-orange-600" />
-                      Select Assets to Dispatch
-                    </h3>
+                {/* Recipient & Transport Details */}
+                <div className="border-b pb-4">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Recipient & Transport Details</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Attention To (Site Engineer) *
+                        {linkedRequisitionId && <span className="text-xs text-blue-600 ml-2">(Requester)</span>}
+                      </label>
+                      {availableSEs.length > 1 && !linkedRequisitionId ? (
+                        <select
+                          value={attentionTo}
+                          onChange={(e) => setAttentionTo(e.target.value)}
+                          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                          required
+                        >
+                          <option value="">-- Select Site Engineer --</option>
+                          {availableSEs.map(se => (
+                            <option key={se.user_id} value={se.full_name}>{se.full_name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={attentionTo}
+                          onChange={(e) => setAttentionTo(e.target.value)}
+                          placeholder={availableSEs.length === 0 ? "Select a project first" : "Auto-populated"}
+                          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 ${linkedRequisitionId ? 'bg-gray-50 cursor-not-allowed' : attentionTo ? 'bg-green-50' : ''}`}
+                          readOnly={linkedRequisitionId ? true : availableSEs.length === 1}
+                          required={availableSEs.length === 0}
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number</label>
+                      <input
+                        type="text"
+                        value={vehicleNumber}
+                        onChange={(e) => setVehicleNumber(e.target.value)}
+                        placeholder="e.g., ABC-1234"
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
                   </div>
-                  <div className="p-4 space-y-4">
-                    {/* Quantity-based Assets */}
-                    {availableCategories.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
+                      <input
+                        type="text"
+                        value={driverName}
+                        onChange={(e) => setDriverName(e.target.value)}
+                        placeholder="Driver name"
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Driver Contact</label>
+                      <input
+                        type="text"
+                        value={driverContact}
+                        onChange={(e) => setDriverContact(e.target.value)}
+                        placeholder="Driver contact number"
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Asset Selection - Only show if NOT creating from requisition */}
+                {!linkedRequisitionId && (
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 px-4 py-3 border-b">
+                      <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                        <Package className="w-5 h-5 text-orange-600" />
+                        Select Assets to Dispatch
+                      </h3>
+                    </div>
+                    <div className="p-4 space-y-4">
+                      {/* Quantity-based Assets */}
+                      {availableCategories.length > 0 && (
                       <div className="bg-blue-50 rounded-lg overflow-hidden">
                         <button
                           type="button"
@@ -1245,62 +1390,68 @@ const AssetDispatch: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Selected Items */}
-                    {dispatchItems.length > 0 && (
-                      <div className="bg-green-50 rounded-lg p-3">
-                        <p className="text-sm font-medium text-green-800 mb-2 flex items-center gap-2">
-                          <Check className="w-4 h-4" />
-                          Items to Dispatch ({dispatchItems.length})
-                        </p>
-                        <div className="space-y-2">
-                          {dispatchItems.map((item, index) => (
-                            <div key={index} className="flex items-center gap-3 p-3 bg-white border border-green-200 rounded-lg">
-                              <div className={`p-2 rounded-lg ${item.tracking_mode === 'individual' ? 'bg-purple-100' : 'bg-blue-100'}`}>
-                                <Package className={`w-4 h-4 ${item.tracking_mode === 'individual' ? 'text-purple-600' : 'text-blue-600'}`} />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <span className="font-semibold text-gray-900 block">{item.category_name}</span>
-                                {item.tracking_mode === 'individual' && (
-                                  <span className="text-xs text-gray-500">
-                                    {item.serial_number ? `SN: ${item.serial_number}` : item.item_code}
-                                  </span>
-                                )}
-                              </div>
-                              {item.tracking_mode === 'quantity' && (
-                                <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg">
-                                  <label className="text-xs text-gray-600 font-medium">Qty:</label>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max={item.available}
-                                    value={item.quantity}
-                                    onChange={(e) => updateDispatchItem(index, 'quantity', parseInt(e.target.value) || 1)}
-                                    className="w-14 px-2 py-1 text-sm border rounded text-center font-semibold"
-                                  />
-                                  <span className="text-xs text-gray-400">/ {item.available}</span>
-                                </div>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => removeDispatchItem(index)}
-                                className="p-2 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ))}
+                      {!linkedRequisitionId && dispatchItems.length === 0 && availableCategories.length === 0 && availableItems.length === 0 && (
+                        <div className="text-center py-8 text-gray-400">
+                          <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                          <p>No assets available for dispatch</p>
                         </div>
-                      </div>
-                    )}
-
-                    {dispatchItems.length === 0 && availableCategories.length === 0 && availableItems.length === 0 && (
-                      <div className="text-center py-8 text-gray-400">
-                        <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                        <p>No assets available for dispatch</p>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Items to Dispatch - Always show, especially for requisition-linked DNs */}
+                {dispatchItems.length > 0 && (
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 px-3 py-2 border-b">
+                      <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                        <Check className="w-4 h-4 text-green-600" />
+                        Items to Dispatch ({dispatchItems.length})
+                      </h3>
+                    </div>
+                    <div className="p-3 space-y-1.5">
+                      {dispatchItems.map((item, index) => (
+                        <div key={index} className="flex items-center gap-2 p-2 bg-white border border-gray-200 rounded-lg">
+                          <div className={`p-1.5 rounded-lg ${item.tracking_mode === 'individual' ? 'bg-purple-100' : 'bg-blue-100'}`}>
+                            <Package className={`w-3.5 h-3.5 ${item.tracking_mode === 'individual' ? 'text-purple-600' : 'text-blue-600'}`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm font-semibold text-gray-900 block">{item.category_name}</span>
+                            {item.tracking_mode === 'individual' && (
+                              <span className="text-xs text-gray-500">
+                                {item.serial_number ? `SN: ${item.serial_number}` : item.item_code}
+                              </span>
+                            )}
+                          </div>
+                          {item.tracking_mode === 'quantity' && (
+                            <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-1 rounded-lg">
+                              <label className="text-xs text-gray-600 font-medium">Qty:</label>
+                              <input
+                                type="number"
+                                min="1"
+                                max={item.available}
+                                value={item.quantity}
+                                onChange={(e) => updateDispatchItem(index, 'quantity', parseInt(e.target.value) || 1)}
+                                className="w-12 px-1.5 py-0.5 text-sm border rounded text-center font-semibold"
+                                disabled={linkedRequisitionId ? true : false}
+                              />
+                              <span className="text-xs text-gray-400">/ {item.available}</span>
+                            </div>
+                          )}
+                          {!linkedRequisitionId && (
+                            <button
+                              type="button"
+                              onClick={() => removeDispatchItem(index)}
+                              className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Notes */}
                 <div>
@@ -1645,7 +1796,6 @@ const AssetDispatch: React.FC = () => {
               <h2 className="text-lg font-semibold text-gray-900">
                 {actionType === 'approve' && 'Approve Requisition'}
                 {actionType === 'reject' && 'Reject Requisition'}
-                {actionType === 'dispatch' && 'Dispatch Requisition'}
               </h2>
               <p className="text-sm text-gray-500 mt-1">
                 {selectedRequisition.requisition_code} - {selectedRequisition.items && selectedRequisition.items.length > 0
@@ -1660,24 +1810,6 @@ const AssetDispatch: React.FC = () => {
                   <p className="text-sm text-red-700">
                     This action cannot be undone. The requester will be notified of the rejection.
                   </p>
-                </div>
-              )}
-              {actionType === 'dispatch' && (
-                <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
-                  <Truck className="h-5 w-5 text-blue-500 mt-0.5" />
-                  <div className="text-sm text-blue-700">
-                    <p className="font-medium">Dispatch Details</p>
-                    {selectedRequisition.items && selectedRequisition.items.length > 0 ? (
-                      <div className="space-y-1 mt-1">
-                        {selectedRequisition.items.map((item, idx) => (
-                          <p key={idx}>{item.quantity}× {item.category_name || item.category_code}</p>
-                        ))}
-                      </div>
-                    ) : (
-                      <p>Quantity: {selectedRequisition.quantity} {selectedRequisition.category_name}</p>
-                    )}
-                    <p className="mt-2">To: {selectedRequisition.project_name}</p>
-                  </div>
                 </div>
               )}
               {actionType === 'reject' && (
@@ -1734,16 +1866,6 @@ const AssetDispatch: React.FC = () => {
                 >
                   {submitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
                   Reject
-                </button>
-              )}
-              {actionType === 'dispatch' && (
-                <button
-                  onClick={handleReqDispatch}
-                  disabled={submitting}
-                  className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg flex items-center gap-2 disabled:opacity-50"
-                >
-                  {submitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />}
-                  Dispatch
                 </button>
               )}
             </div>
