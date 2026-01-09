@@ -1231,63 +1231,130 @@ def dispatch_requisition(requisition_id):
         if requisition.status != RequisitionStatus.PROD_MGR_APPROVED:
             return jsonify({'success': False, 'error': f'Cannot dispatch. Current status: {requisition.status}'}), 400
 
-        # Handle multi-item or single-item stock validation and deduction
-        if requisition.items and len(requisition.items) > 0:
-            # Multi-item: validate and deduct stock for each item
-            insufficient_items = []
-            categories_to_update = []
+        # CRITICAL: If linking to ADN, validate and link FIRST before stock operations
+        # This prevents DUAL DEDUCTION bug where stock is deducted twice:
+        # - Once when requisition is dispatched (here)
+        # - Again when the linked ADN is dispatched
+        adn_id = data.get('adn_id')
+        if adn_id:
+            from models.returnable_assets import AssetDeliveryNote
+            adn = AssetDeliveryNote.query.with_for_update().get(adn_id)
 
-            for item in requisition.items:
-                cat_id = item.get('category_id')
-                requested_qty = item.get('quantity', 1)
-                category = ReturnableAssetCategory.query.with_for_update().get(cat_id)
+            if not adn:
+                return jsonify({'success': False, 'error': f'ADN {adn_id} not found'}), 404
 
+            # Verify ADN is for same project
+            if adn.project_id != requisition.project_id:
+                return jsonify({'success': False, 'error': 'ADN project mismatch with requisition'}), 400
+
+            # Verify ADN is in valid state for linking
+            if adn.status not in ['DRAFT', 'ISSUED']:
+                return jsonify({'success': False, 'error': f'Cannot link to ADN with status {adn.status}. ADN must be DRAFT or ISSUED'}), 400
+
+            # Link requisition to ADN
+            requisition.adn_id = adn_id
+            current_app.logger.info(
+                f"Requisition {requisition_id} linked to ADN {adn_id}. "
+                f"Stock deduction will be deferred to ADN dispatch."
+            )
+
+        is_linked_to_adn = requisition.adn_id is not None
+
+        if not is_linked_to_adn:
+            # Handle multi-item or single-item stock validation and deduction
+            if requisition.items and len(requisition.items) > 0:
+                # Multi-item: validate and deduct stock for each item
+                insufficient_items = []
+                categories_to_update = []
+
+                for item in requisition.items:
+                    cat_id = item.get('category_id')
+                    requested_qty = item.get('quantity', 1)
+                    category = ReturnableAssetCategory.query.with_for_update().get(cat_id)
+
+                    if not category:
+                        return jsonify({'success': False, 'error': f'Category {cat_id} not found'}), 404
+
+                    available = category.available_quantity or 0
+                    if requested_qty > available:
+                        insufficient_items.append(
+                            f"{item.get('category_name', 'Item')}: Available {available}, Requested {requested_qty}"
+                        )
+                    else:
+                        categories_to_update.append((category, requested_qty))
+
+                if insufficient_items:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Insufficient stock for: {"; ".join(insufficient_items)}'
+                    }), 400
+
+                # Deduct stock from all categories
+                for category, qty in categories_to_update:
+                    category.available_quantity = (category.available_quantity or 0) - qty
+                    category.last_modified_by = g.user.get('email', 'system')
+            else:
+                # Legacy single-item: validate and deduct stock
+                category = ReturnableAssetCategory.query.with_for_update().get(requisition.category_id)
                 if not category:
-                    return jsonify({'success': False, 'error': f'Category {cat_id} not found'}), 404
+                    return jsonify({'success': False, 'error': 'Asset category not found'}), 404
 
                 available = category.available_quantity or 0
+                requested_qty = requisition.quantity or 1
                 if requested_qty > available:
-                    insufficient_items.append(
-                        f"{item.get('category_name', 'Item')}: Available {available}, Requested {requested_qty}"
-                    )
-                else:
-                    categories_to_update.append((category, requested_qty))
+                    return jsonify({
+                        'success': False,
+                        'error': f'Insufficient stock. Available: {available}, Requested: {requested_qty}'
+                    }), 400
 
-            if insufficient_items:
-                return jsonify({
-                    'success': False,
-                    'error': f'Insufficient stock for: {"; ".join(insufficient_items)}'
-                }), 400
-
-            # Deduct stock from all categories
-            for category, qty in categories_to_update:
-                category.available_quantity = (category.available_quantity or 0) - qty
+                # Deduct from available quantity
+                category.available_quantity = available - requested_qty
                 category.last_modified_by = g.user.get('email', 'system')
+
+                # If individual tracking, update item status
+                if category.tracking_mode == 'individual' and requisition.asset_item_id:
+                    item = ReturnableAssetItem.query.with_for_update().get(requisition.asset_item_id)
+                    if item:
+                        item.current_status = 'dispatched'
+                        item.current_project_id = requisition.project_id
+                        item.last_modified_by = g.user.get('email', 'system')
         else:
-            # Legacy single-item: validate and deduct stock
-            category = ReturnableAssetCategory.query.with_for_update().get(requisition.category_id)
-            if not category:
-                return jsonify({'success': False, 'error': 'Asset category not found'}), 404
+            # Requisition is linked to ADN - stock will be deducted when ADN is dispatched
+            # Still validate sufficient stock exists, but don't deduct yet
+            if requisition.items and len(requisition.items) > 0:
+                # Multi-item: validate stock availability
+                insufficient_items = []
+                for item in requisition.items:
+                    cat_id = item.get('category_id')
+                    category = ReturnableAssetCategory.query.get(cat_id)
+                    if not category:
+                        return jsonify({'success': False, 'error': f'Category {cat_id} not found'}), 404
 
-            available = category.available_quantity or 0
-            requested_qty = requisition.quantity or 1
-            if requested_qty > available:
-                return jsonify({
-                    'success': False,
-                    'error': f'Insufficient stock. Available: {available}, Requested: {requested_qty}'
-                }), 400
+                    available = category.available_quantity or 0
+                    requested_qty = item.get('quantity', 1)
+                    if requested_qty > available:
+                        insufficient_items.append(
+                            f"{item.get('category_name', 'Item')}: Available {available}, Requested {requested_qty}"
+                        )
 
-            # Deduct from available quantity
-            category.available_quantity = available - requested_qty
-            category.last_modified_by = g.user.get('email', 'system')
+                if insufficient_items:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Insufficient stock for ADN dispatch: {"; ".join(insufficient_items)}'
+                    }), 400
+            else:
+                # Legacy single-item: validate stock availability
+                category = ReturnableAssetCategory.query.get(requisition.category_id)
+                if not category:
+                    return jsonify({'success': False, 'error': 'Asset category not found'}), 404
 
-            # If individual tracking, update item status
-            if category.tracking_mode == 'individual' and requisition.asset_item_id:
-                item = ReturnableAssetItem.query.with_for_update().get(requisition.asset_item_id)
-                if item:
-                    item.current_status = 'dispatched'
-                    item.current_project_id = requisition.project_id
-                    item.last_modified_by = g.user.get('email', 'system')
+                available = category.available_quantity or 0
+                requested_qty = requisition.quantity or 1
+                if requested_qty > available:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Insufficient stock for ADN dispatch. Available: {available}, Requested: {requested_qty}'
+                    }), 400
 
         # Update requisition
         requisition.status = RequisitionStatus.DISPATCHED
@@ -1298,9 +1365,7 @@ def dispatch_requisition(requisition_id):
         requisition.dispatch_notes = data.get('notes')
         requisition.last_modified_by = g.user.get('email', 'system')
 
-        # Optionally link to ADN if provided
-        if data.get('adn_id'):
-            requisition.adn_id = data.get('adn_id')
+        # Note: ADN linking (if provided) was already done earlier to prevent race conditions
 
         db.session.commit()
 

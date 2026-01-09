@@ -66,11 +66,19 @@ interface ItemAction {
   processing?: boolean;
 }
 
-type TabType = 'pending' | 'received' | 'all';
+type TabType = 'pending' | 'received';
 
 const ReceiveReturns: React.FC = () => {
-  const [returnDeliveryNotes, setReturnDeliveryNotes] = useState<ReturnDeliveryNote[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Lazy loading pattern - separate state for each tab
+  const [pendingRDNs, setPendingRDNs] = useState<ReturnDeliveryNote[]>([]);
+  const [receivedRDNs, setReceivedRDNs] = useState<ReturnDeliveryNote[]>([]);
+
+  const [loadingPending, setLoadingPending] = useState(false);
+  const [loadingReceived, setLoadingReceived] = useState(false);
+
+  const [pendingLoaded, setPendingLoaded] = useState(false);
+  const [receivedLoaded, setReceivedLoaded] = useState(false);
+
   const [expandedRDNs, setExpandedRDNs] = useState<Set<number>>(new Set());
   const [activeTab, setActiveTab] = useState<TabType>('pending');
 
@@ -83,22 +91,65 @@ const ReceiveReturns: React.FC = () => {
   const [receiptConfirmed, setReceiptConfirmed] = useState(false);
   const confirmingReceiptRef = React.useRef(false);
 
-  const fetchReturnDeliveryNotes = useCallback(async () => {
+  // Fetch pending (In Transit) RDNs
+  const fetchPendingRDNs = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoadingPending(true);
       const response = await apiClient.get('/pm-return-delivery-notes');
-      setReturnDeliveryNotes(response.data.return_delivery_notes || []);
+      const allRDNs = response.data.return_delivery_notes || [];
+
+      // Filter for pending: IN_TRANSIT or RECEIVED/PARTIAL with unprocessed items
+      const pending = allRDNs.filter((rdn: ReturnDeliveryNote) => {
+        const allItemsProcessed = rdn.items.every(item => item.material_return_id);
+        return rdn.status === 'IN_TRANSIT' || (['RECEIVED', 'PARTIAL'].includes(rdn.status) && !allItemsProcessed);
+      });
+
+      setPendingRDNs(pending);
+      setPendingLoaded(true);
     } catch (err) {
-      console.error('Error fetching return delivery notes:', err);
-      showError('Failed to load return delivery notes');
+      console.error('Error fetching pending RDNs:', err);
+      showError('Failed to load pending return delivery notes');
     } finally {
-      setLoading(false);
+      setLoadingPending(false);
     }
   }, []);
 
+  // Fetch received (processed) RDNs
+  const fetchReceivedRDNs = useCallback(async () => {
+    try {
+      setLoadingReceived(true);
+      const response = await apiClient.get('/pm-return-delivery-notes');
+      const allRDNs = response.data.return_delivery_notes || [];
+
+      // Filter for received: RECEIVED/PARTIAL/APPROVED where all items are processed
+      const received = allRDNs.filter((rdn: ReturnDeliveryNote) => {
+        const allItemsProcessed = rdn.items.every(item => item.material_return_id);
+        return ['RECEIVED', 'PARTIAL', 'APPROVED'].includes(rdn.status) && allItemsProcessed;
+      });
+
+      setReceivedRDNs(received);
+      setReceivedLoaded(true);
+    } catch (err) {
+      console.error('Error fetching received RDNs:', err);
+      showError('Failed to load received return delivery notes');
+    } finally {
+      setLoadingReceived(false);
+    }
+  }, []);
+
+  // Load pending on mount
   useEffect(() => {
-    fetchReturnDeliveryNotes();
-  }, [fetchReturnDeliveryNotes]);
+    fetchPendingRDNs();
+  }, [fetchPendingRDNs]);
+
+  // Lazy load based on active tab
+  useEffect(() => {
+    if (activeTab === 'pending' && !pendingLoaded && !loadingPending) {
+      fetchPendingRDNs();
+    } else if (activeTab === 'received' && !receivedLoaded && !loadingReceived) {
+      fetchReceivedRDNs();
+    }
+  }, [activeTab, pendingLoaded, receivedLoaded, loadingPending, loadingReceived, fetchPendingRDNs, fetchReceivedRDNs]);
 
   const toggleRDNExpand = (rdnId: number) => {
     const newExpanded = new Set(expandedRDNs);
@@ -230,7 +281,14 @@ const ReceiveReturns: React.FC = () => {
           setTimeout(() => {
             showSuccess('All items processed! Return delivery complete.');
             closeConfirmModal();
-            fetchReturnDeliveryNotes();
+            // Refresh both tabs since status may change
+            setPendingLoaded(false);
+            setReceivedLoaded(false);
+            if (activeTab === 'pending') {
+              fetchPendingRDNs();
+            } else {
+              fetchReceivedRDNs();
+            }
           }, 100);
         }
 
@@ -302,7 +360,14 @@ const ReceiveReturns: React.FC = () => {
 
       showSuccess('Return delivery processed successfully!');
       closeConfirmModal();
-      fetchReturnDeliveryNotes();
+      // Refresh both tabs since status may change
+      setPendingLoaded(false);
+      setReceivedLoaded(false);
+      if (activeTab === 'pending') {
+        fetchPendingRDNs();
+      } else {
+        fetchReceivedRDNs();
+      }
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       showError(error.response?.data?.error || 'Failed to process return delivery');
@@ -311,34 +376,31 @@ const ReceiveReturns: React.FC = () => {
     }
   };
 
-  // Filter RDNs by tab
-  const filteredRDNs = returnDeliveryNotes.filter((rdn) => {
-    // Check if all items are processed
-    const allItemsProcessed = rdn.items.every(item => item.material_return_id);
+  // Get current RDNs based on active tab
+  const currentRDNs = activeTab === 'pending' ? pendingRDNs : receivedRDNs;
 
-    if (activeTab === 'pending') {
-      // Show RDNs that are in transit OR have unprocessed items
-      return rdn.status === 'IN_TRANSIT' || (['RECEIVED', 'PARTIAL'].includes(rdn.status) && !allItemsProcessed);
-    } else if (activeTab === 'received') {
-      // Show only RDNs where all items are processed
-      return ['RECEIVED', 'PARTIAL', 'APPROVED'].includes(rdn.status) && allItemsProcessed;
-    }
-    return true;
-  });
+  // Get current loading state
+  const isLoading = activeTab === 'pending' ? loadingPending : loadingReceived;
 
+  // Get tab counts
   const getTabCount = (tab: TabType): number => {
     if (tab === 'pending') {
-      return returnDeliveryNotes.filter((r) => {
-        const allItemsProcessed = r.items.every(item => item.material_return_id);
-        return r.status === 'IN_TRANSIT' || (['RECEIVED', 'PARTIAL'].includes(r.status) && !allItemsProcessed);
-      }).length;
+      return pendingLoaded ? pendingRDNs.length : 0;
     } else if (tab === 'received') {
-      return returnDeliveryNotes.filter((r) => {
-        const allItemsProcessed = r.items.every(item => item.material_return_id);
-        return ['RECEIVED', 'PARTIAL', 'APPROVED'].includes(r.status) && allItemsProcessed;
-      }).length;
+      return receivedLoaded ? receivedRDNs.length : 0;
     }
-    return returnDeliveryNotes.length;
+    return 0;
+  };
+
+  // Refresh function
+  const refreshCurrentTab = () => {
+    if (activeTab === 'pending') {
+      setPendingLoaded(false);
+      fetchPendingRDNs();
+    } else {
+      setReceivedLoaded(false);
+      fetchReceivedRDNs();
+    }
   };
 
   return (
@@ -352,10 +414,11 @@ const ReceiveReturns: React.FC = () => {
               <p className="text-sm text-gray-500 mt-1">Manage returned materials from project sites</p>
             </div>
             <button
-              onClick={fetchReturnDeliveryNotes}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              onClick={refreshCurrentTab}
+              disabled={isLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
-              <ArrowPathIcon className="w-4 h-4" />
+              <ArrowPathIcon className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
           </div>
@@ -387,32 +450,21 @@ const ReceiveReturns: React.FC = () => {
             <CheckCircleIcon className="w-4 h-4" />
             Received ({getTabCount('received')})
           </button>
-          <button
-            onClick={() => setActiveTab('all')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-              activeTab === 'all'
-                ? 'bg-gray-100 text-gray-700 border-2 border-gray-300'
-                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-            }`}
-          >
-            <DocumentTextIcon className="w-4 h-4" />
-            All ({getTabCount('all')})
-          </button>
         </div>
 
         {/* Content */}
-        {loading ? (
+        {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <ModernLoadingSpinners size="md" />
           </div>
-        ) : filteredRDNs.length === 0 ? (
+        ) : currentRDNs.length === 0 ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
             <DocumentTextIcon className="w-12 h-12 text-gray-400 mx-auto mb-3" />
             <p className="text-gray-500">No return delivery notes in this category.</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredRDNs.map((rdn) => {
+            {currentRDNs.map((rdn) => {
               const statusBadge = RDN_STATUS_BADGES[rdn.status] || RDN_STATUS_BADGES.DRAFT;
               const isExpanded = expandedRDNs.has(rdn.return_note_id);
 
