@@ -2475,12 +2475,12 @@ const SiteAssets: React.FC = () => {
                               {/* Damage Description if not good */}
                               {cond.condition !== 'good' && (
                                 <div className="mt-2">
-                                  <input
-                                    type="text"
+                                  <textarea
+                                    rows={3}
                                     value={cond.damage_description}
                                     onChange={(e) => updateItemCondition(item.adn_item_id, 'damage_description', e.target.value)}
                                     placeholder={cond.condition === 'damaged' ? 'Describe damage...' : 'Describe condition...'}
-                                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
                                   />
                                   {!cond.damage_description.trim() && (
                                     <p className="text-xs text-red-500 mt-1">* Required for non-good condition</p>
