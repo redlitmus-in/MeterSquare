@@ -1833,17 +1833,46 @@ def update_attendance(attendance_id):
 # =============================================================================
 
 def get_attendance_to_lock():
-    """Get attendance records with optional status filter"""
+    """Get attendance records with optional status filter - only for PM's assigned projects"""
     try:
+        user_id = g.user.get('user_id')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'User not authenticated'}), 401
+
         project_id = request.args.get('project_id', type=int)
         date_str = request.args.get('date')
         approval_status = request.args.get('approval_status', 'pending')  # 'pending' or 'locked'
+
+        # Get PM's assigned projects from pm_assign_ss table
+        from models.pm_assign_ss import PMAssignSS
+
+        pm_project_ids = []
+        pm_assignments = PMAssignSS.query.filter(
+            or_(
+                PMAssignSS.pm_ids == user_id,
+                PMAssignSS.assigned_by_pm_id == user_id
+            ),
+            PMAssignSS.is_deleted == False
+        ).all()
+
+        for assignment in pm_assignments:
+            if assignment.project_id and assignment.project_id not in pm_project_ids:
+                pm_project_ids.append(assignment.project_id)
+
+        # If no projects assigned, return empty list
+        if not pm_project_ids:
+            return jsonify({
+                "success": True,
+                "attendance": [],
+                "total_records": 0
+            }), 200
 
         query = DailyAttendance.query.options(
             joinedload(DailyAttendance.worker),
             joinedload(DailyAttendance.project)
         ).filter(
-            DailyAttendance.is_deleted == False
+            DailyAttendance.is_deleted == False,
+            DailyAttendance.project_id.in_(pm_project_ids)  # CRITICAL: Filter by PM's projects
         )
 
         # Filter by approval status
@@ -1851,7 +1880,16 @@ def get_attendance_to_lock():
             query = query.filter(DailyAttendance.approval_status == approval_status)
 
         if project_id:
-            query = query.filter(DailyAttendance.project_id == project_id)
+            # Additional filter if specific project requested
+            if project_id in pm_project_ids:
+                query = query.filter(DailyAttendance.project_id == project_id)
+            else:
+                # Requested project not assigned to this PM
+                return jsonify({
+                    "success": True,
+                    "attendance": [],
+                    "total_records": 0
+                }), 200
 
         if date_str:
             target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
