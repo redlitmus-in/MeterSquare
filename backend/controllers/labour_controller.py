@@ -519,7 +519,21 @@ def get_requisitions_by_project(project_id):
         # Build a lookup map by labour_id for quick status checking
         labour_status_map = {}
         for req in requisitions:
-            if req.labour_id:
+            # Handle both old single labour_id and new labour_items array
+            if req.labour_items and isinstance(req.labour_items, list):
+                # Modern requisitions with multiple labour items
+                for item in req.labour_items:
+                    labour_id = item.get('labour_id')
+                    if labour_id:
+                        labour_status_map[str(labour_id)] = {
+                            'requisition_id': req.requisition_id,
+                            'requisition_code': req.requisition_code,
+                            'status': req.status,
+                            'work_status': req.work_status,
+                            'assignment_status': req.assignment_status
+                        }
+            elif req.labour_id:
+                # Legacy single labour item (backward compatibility)
                 labour_status_map[req.labour_id] = {
                     'requisition_id': req.requisition_id,
                     'requisition_code': req.requisition_code,

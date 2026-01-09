@@ -247,8 +247,18 @@ const RequisitionApprovals: React.FC = () => {
                   <span className="font-semibold text-gray-900 text-sm">{req.requisition_code}</span>
                   {getStatusBadge(req.status, req.assignment_status)}
                   <span className="text-xs text-gray-400 hidden sm:inline">|</span>
-                  <span className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 font-medium">{req.skill_required}</span>
-                  <span className="text-xs text-gray-600"><UsersIcon className="w-3 h-3 inline mr-0.5" />{req.workers_count}</span>
+                  {req.labour_items && req.labour_items.length > 0 ? (
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {Array.from(new Set(req.labour_items.map((item: any) => item.skill_required))).map((skill: string, idx: number) => (
+                        <span key={idx} className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 font-medium">
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 font-medium">{req.skill_required}</span>
+                  )}
+                  <span className="text-xs text-gray-600"><UsersIcon className="w-3 h-3 inline mr-0.5" />{req.workers_count || req.total_workers_count}</span>
                   <span className="text-xs text-gray-500 hidden md:inline">
                     <CalendarIcon className="w-3 h-3 inline mr-0.5" />
                     {new Date(req.required_date).toLocaleDateString()}
