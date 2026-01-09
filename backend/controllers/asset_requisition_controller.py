@@ -604,6 +604,16 @@ def update_requisition(requisition_id):
             }), 400
 
         # Update allowed fields
+        if 'project_id' in data:
+            new_project_id = data['project_id']
+            if not new_project_id or new_project_id == 0:
+                return jsonify({'success': False, 'error': 'project_id cannot be empty'}), 400
+            # Verify project exists
+            project = Project.query.get(new_project_id)
+            if not project:
+                return jsonify({'success': False, 'error': 'Project not found'}), 404
+            requisition.project_id = new_project_id
+
         if 'purpose' in data:
             if not data['purpose'] or not isinstance(data['purpose'], str) or not data['purpose'].strip():
                 return jsonify({'success': False, 'error': 'purpose cannot be empty'}), 400

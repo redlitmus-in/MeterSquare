@@ -234,6 +234,7 @@ const SiteAssets: React.FC = () => {
   // Edit requisition modal state
   const [showEditReqModal, setShowEditReqModal] = useState(false);
   const [editRequisition, setEditRequisition] = useState<AssetRequisition | null>(null);
+  const [editProjectId, setEditProjectId] = useState<number>(0);
   const [editPurpose, setEditPurpose] = useState('');
   const [editRequiredDate, setEditRequiredDate] = useState('');
   const [editUrgency, setEditUrgency] = useState<Urgency>('normal');
@@ -281,6 +282,7 @@ const SiteAssets: React.FC = () => {
 
   // Multi-item requisition state
   const [requisitionItems, setRequisitionItems] = useState<RequisitionItem[]>([]);
+  const [itemIdCounter, setItemIdCounter] = useState(0); // Counter for unique IDs
 
   // Category search state
   const [categorySearch, setCategorySearch] = useState('');
@@ -363,6 +365,7 @@ const SiteAssets: React.FC = () => {
       site_location: ''
     });
     setRequisitionItems([]); // Reset items list
+    setItemIdCounter(0); // Reset ID counter
     setCategorySearch('');
     setShowCategoryDropdown(false);
     setShowRequisitionModal(true);
@@ -388,12 +391,14 @@ const SiteAssets: React.FC = () => {
     const existingItem = requisitionItems.find(item => item.category_id === requisitionForm.category_id);
     if (existingItem) {
       const newQty = existingItem.quantity + requisitionForm.quantity;
-      // Warn if exceeding available
-      if (newQty > availableQty && availableQty > 0) {
-        showSuccess(`Updated ${category.category_name} quantity to ${newQty} (${availableQty} available)`);
-      } else {
-        showSuccess(`Updated ${category.category_name} quantity to ${newQty}`);
+
+      // Validate against available quantity
+      if (newQty > availableQty) {
+        showError(`Cannot exceed available quantity (${availableQty}) for ${category.category_name}`);
+        return;
       }
+
+      showSuccess(`Updated ${category.category_name} quantity to ${newQty}`);
       setRequisitionItems(prev => prev.map(item =>
         item.category_id === requisitionForm.category_id
           ? { ...item, quantity: newQty }
@@ -401,12 +406,13 @@ const SiteAssets: React.FC = () => {
       ));
     } else {
       // Validate quantity against available for new item
-      if (requisitionForm.quantity > availableQty && availableQty > 0) {
-        showError(`Only ${availableQty} available. You can still request more but approval may be delayed.`);
+      if (requisitionForm.quantity > availableQty) {
+        showError(`Cannot exceed available quantity (${availableQty}) for ${category.category_name}`);
+        return;
       }
 
       const newItem: RequisitionItem = {
-        id: Date.now(),
+        id: Date.now() + itemIdCounter,
         category_id: category.category_id,
         category_code: category.category_code,
         category_name: category.category_name,
@@ -414,6 +420,8 @@ const SiteAssets: React.FC = () => {
         available_quantity: availableQty
       };
       setRequisitionItems(prev => [...prev, newItem]);
+      setItemIdCounter(prev => prev + 1);
+      showSuccess(`Added ${category.category_name} to requisition`);
     }
 
     // Reset category selection for next item
@@ -435,8 +443,18 @@ const SiteAssets: React.FC = () => {
   // Update item quantity in requisition list
   const updateItemQuantity = (itemId: number, quantity: number) => {
     if (quantity < 1) return;
-    setRequisitionItems(prev => prev.map(item =>
-      item.id === itemId ? { ...item, quantity } : item
+
+    const item = requisitionItems.find(i => i.id === itemId);
+    if (!item) return;
+
+    const availableQty = item.available_quantity ?? 0;
+    if (quantity > availableQty) {
+      showError(`Cannot exceed available quantity (${availableQty}) for ${item.category_name}`);
+      return;
+    }
+
+    setRequisitionItems(prev => prev.map(i =>
+      i.id === itemId ? { ...i, quantity } : i
     ));
   };
 
@@ -548,6 +566,7 @@ const SiteAssets: React.FC = () => {
   // Open edit requisition modal
   const openEditReqModal = (req: AssetRequisition) => {
     setEditRequisition(req);
+    setEditProjectId(req.project_id || 0);
     setEditPurpose(req.purpose);
     setEditRequiredDate(req.required_date?.split('T')[0] || '');
     setEditUrgency(req.urgency);
@@ -574,6 +593,7 @@ const SiteAssets: React.FC = () => {
   const closeEditReqModal = () => {
     setShowEditReqModal(false);
     setEditRequisition(null);
+    setEditProjectId(0);
     setEditPurpose('');
     setEditRequiredDate('');
     setEditUrgency('normal');
@@ -585,6 +605,10 @@ const SiteAssets: React.FC = () => {
   const handleUpdateRequisition = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editRequisition) return;
+    if (!editProjectId || editProjectId === 0) {
+      showError('Please select a project');
+      return;
+    }
     if (!editPurpose.trim()) {
       showError('Purpose is required');
       return;
@@ -602,6 +626,7 @@ const SiteAssets: React.FC = () => {
     setSubmittingRequisition(true);
     try {
       await updateRequisition(editRequisition.requisition_id, {
+        project_id: editProjectId,
         purpose: editPurpose.trim(),
         required_date: editRequiredDate,
         urgency: editUrgency,
@@ -2878,9 +2903,13 @@ const SiteAssets: React.FC = () => {
                               <div className="px-3 py-2 text-sm text-gray-500">No categories found</div>
                             ) : (
                               filteredCategories.map(c => {
-                                const inListQty = getCategoryInListQty(c.category_id);
-                                const isInList = inListQty !== null;
-                                const isOutOfStock = (c.available_quantity ?? 0) === 0;
+                                const existingItem = requisitionItems.find(item => item.category_id === c.category_id);
+                                const isInList = existingItem !== undefined;
+                                const currentQty = existingItem?.quantity || 0;
+                                const availableQty = c.available_quantity ?? 0;
+                                const isOutOfStock = availableQty === 0;
+                                const isMaxedOut = isInList && currentQty >= availableQty;
+
                                 return (
                                   <button
                                     key={c.category_id}
@@ -2888,14 +2917,51 @@ const SiteAssets: React.FC = () => {
                                     disabled={isOutOfStock}
                                     onClick={() => {
                                       if (isOutOfStock) return;
-                                      setRequisitionForm(prev => ({ ...prev, category_id: c.category_id }));
+
+                                      if (isInList) {
+                                        // If already in list, increase quantity by 1 if not maxed out
+                                        if (currentQty >= availableQty) {
+                                          showError(`Cannot exceed available quantity (${availableQty}) for ${c.category_name}`);
+                                          return;
+                                        }
+
+                                        setRequisitionItems(prev => prev.map(item =>
+                                          item.category_id === c.category_id
+                                            ? { ...item, quantity: currentQty + 1 }
+                                            : item
+                                        ));
+                                        showSuccess(`Increased ${c.category_name} quantity to ${currentQty + 1}`);
+                                      } else {
+                                        // Add new item with quantity 1
+                                        if (availableQty < 1) {
+                                          showError(`No stock available for ${c.category_name}`);
+                                          return;
+                                        }
+
+                                        const newItem: RequisitionItem = {
+                                          id: Date.now() + itemIdCounter,
+                                          category_id: c.category_id,
+                                          category_code: c.category_code,
+                                          category_name: c.category_name,
+                                          quantity: 1,
+                                          available_quantity: availableQty
+                                        };
+                                        setRequisitionItems(prev => [...prev, newItem]);
+                                        setItemIdCounter(prev => prev + 1);
+                                        showSuccess(`Added ${c.category_name} to requisition`);
+                                      }
+
                                       setCategorySearch('');
                                       setShowCategoryDropdown(false);
                                     }}
                                     className={`w-full px-3 py-2 text-left text-sm flex justify-between items-center gap-2 ${
                                       isOutOfStock
                                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-60'
-                                        : `hover:bg-blue-50 ${requisitionForm.category_id === c.category_id ? 'bg-blue-100' : ''} ${isInList ? 'bg-yellow-50 border-l-2 border-yellow-400' : ''}`
+                                        : isMaxedOut
+                                        ? 'bg-red-50 opacity-60 cursor-not-allowed'
+                                        : isInList
+                                        ? 'bg-yellow-50 border-l-2 border-yellow-400 hover:bg-yellow-100'
+                                        : 'hover:bg-blue-50'
                                     }`}
                                   >
                                     <div className="flex-1 min-w-0">
@@ -2903,8 +2969,10 @@ const SiteAssets: React.FC = () => {
                                         {c.category_code} - {c.category_name}
                                       </span>
                                       {isInList && !isOutOfStock && (
-                                        <span className="ml-2 text-xs text-yellow-700 bg-yellow-100 px-1.5 py-0.5 rounded">
-                                          In list: {inListQty}
+                                        <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
+                                          isMaxedOut ? 'text-red-700 bg-red-100' : 'text-yellow-700 bg-yellow-100'
+                                        }`}>
+                                          {currentQty} / {availableQty} {isMaxedOut ? '(Max)' : ''}
                                         </span>
                                       )}
                                       {isOutOfStock && (
@@ -2916,7 +2984,7 @@ const SiteAssets: React.FC = () => {
                                     <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
                                       isOutOfStock ? 'bg-red-100 text-red-500' : 'bg-green-100 text-green-700'
                                     }`}>
-                                      {isOutOfStock ? 'Unavailable' : `Avail: ${c.available_quantity}`}
+                                      {isOutOfStock ? 'Unavailable' : `Avail: ${availableQty}`}
                                     </span>
                                   </button>
                                 );
@@ -3200,17 +3268,30 @@ const SiteAssets: React.FC = () => {
               </div>
 
               <form onSubmit={handleUpdateRequisition} className="p-5 space-y-4">
-                {/* Project Name (Read-only) */}
+                {/* Project Selection - Same as Create Modal */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Project <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
-                    value={editRequisition.project_name || 'N/A'}
-                    readOnly
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
-                  />
+                  <select
+                    value={editProjectId}
+                    onChange={(e) => {
+                      const projectId = Number(e.target.value);
+                      const selectedProject = projects.find(p => p.project_id === projectId);
+                      setEditProjectId(projectId);
+                      // Auto-fetch location from project
+                      setEditSiteLocation(selectedProject?.location || '');
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    required
+                  >
+                    <option value={0}>Select project...</option>
+                    {projects.map(p => (
+                      <option key={p.project_id} value={p.project_id}>
+                        {p.project_code} - {p.project_name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Show rejection reason if pm_rejected */}
@@ -3252,33 +3333,73 @@ const SiteAssets: React.FC = () => {
                               .filter(cat =>
                                 (cat.category_name.toLowerCase().includes(categorySearch.toLowerCase()) ||
                                 cat.category_code.toLowerCase().includes(categorySearch.toLowerCase())) &&
-                                cat.available_quantity > 0
+                                (cat.available_quantity ?? 0) > 0
                               )
-                              .map(cat => (
-                                <div
-                                  key={cat.category_id}
-                                  onClick={() => {
-                                    if (editItems.some(item => item.category_id === cat.category_id)) {
-                                      showError('This category is already added');
-                                      return;
-                                    }
-                                    setEditItems([...editItems, {
-                                      category_id: cat.category_id,
-                                      category_name: cat.category_name,
-                                      quantity: 1
-                                    }]);
-                                    setCategorySearch('');
-                                    setShowCategoryDropdown(false);
-                                  }}
-                                  className="px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm font-medium text-gray-900">{cat.category_name}</span>
-                                    <span className="text-xs text-green-600">Avail: {cat.available_quantity}</span>
+                              .map(cat => {
+                                const existingItemIndex = editItems.findIndex(item => item.category_id === cat.category_id);
+                                const isAlreadyAdded = existingItemIndex !== -1;
+                                const currentQty = isAlreadyAdded ? editItems[existingItemIndex].quantity : 0;
+                                const availableQty = cat.available_quantity ?? 0;
+                                const isMaxedOut = isAlreadyAdded && currentQty >= availableQty;
+
+                                return (
+                                  <div
+                                    key={cat.category_id}
+                                    onClick={() => {
+                                      if (isAlreadyAdded) {
+                                        // If already added, increase quantity by 1 if not maxed out
+                                        if (currentQty >= availableQty) {
+                                          showError(`Cannot exceed available quantity (${availableQty}) for ${cat.category_name}`);
+                                          return;
+                                        }
+
+                                        const newQty = currentQty + 1;
+                                        setEditItems(prevItems => {
+                                          const newItems = [...prevItems];
+                                          newItems[existingItemIndex] = {
+                                            ...newItems[existingItemIndex],
+                                            quantity: newQty
+                                          };
+                                          return newItems;
+                                        });
+                                        showSuccess(`Increased ${cat.category_name} quantity to ${newQty}`);
+                                      } else {
+                                        // Add new item with quantity 1
+                                        if (availableQty < 1) {
+                                          showError(`No stock available for ${cat.category_name}`);
+                                          return;
+                                        }
+                                        setEditItems(prevItems => [...prevItems, {
+                                          category_id: cat.category_id,
+                                          category_name: cat.category_name,
+                                          quantity: 1
+                                        }]);
+                                        showSuccess(`Added ${cat.category_name} to requisition`);
+                                      }
+                                      setCategorySearch('');
+                                      setShowCategoryDropdown(false);
+                                    }}
+                                    className={`px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                                      isMaxedOut ? 'bg-red-50 opacity-60 cursor-not-allowed' : isAlreadyAdded ? 'bg-yellow-50' : ''
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm font-medium text-gray-900">{cat.category_name}</span>
+                                      <div className="flex items-center gap-2">
+                                        {isAlreadyAdded && (
+                                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                            isMaxedOut ? 'text-red-700 bg-red-100' : 'text-yellow-700 bg-yellow-100'
+                                          }`}>
+                                            {currentQty} / {availableQty} {isMaxedOut ? '(Max)' : ''}
+                                          </span>
+                                        )}
+                                        <span className="text-xs text-green-600">Avail: {availableQty}</span>
+                                      </div>
+                                    </div>
+                                    <p className="text-xs text-gray-500">{cat.category_code}</p>
                                   </div>
-                                  <p className="text-xs text-gray-500">{cat.category_code}</p>
-                                </div>
-                              ))}
+                                );
+                              })}
                           </div>
                         )}
                       </div>
@@ -3310,9 +3431,23 @@ const SiteAssets: React.FC = () => {
                               min="1"
                               value={item.quantity}
                               onChange={(e) => {
-                                const newItems = [...editItems];
-                                newItems[idx].quantity = Math.max(1, parseInt(e.target.value) || 1);
-                                setEditItems(newItems);
+                                const newValue = Math.max(1, parseInt(e.target.value) || 1);
+                                const category = assetCategories.find(c => c.category_id === item.category_id);
+                                const availableQty = category?.available_quantity ?? 0;
+
+                                if (newValue > availableQty) {
+                                  showError(`Cannot exceed available quantity (${availableQty}) for ${item.category_name}`);
+                                  return;
+                                }
+
+                                setEditItems(prevItems => {
+                                  const newItems = [...prevItems];
+                                  newItems[idx] = {
+                                    ...newItems[idx],
+                                    quantity: newValue
+                                  };
+                                  return newItems;
+                                });
                               }}
                               className="w-16 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                             />
