@@ -418,55 +418,26 @@ const RequisitionApprovals: React.FC = () => {
                 </div>
 
                 {/* Labour Items Section - Only show if multiple items exist */}
-                {selectedRequisition.labour_items && selectedRequisition.labour_items.length > 0 && (() => {
-                  // Distribute assigned workers across labour items based on workers_count
-                  let workerIndex = 0;
-                  return (
-                    <div className="border-b border-gray-100 pb-6">
-                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Labour Items</h3>
-                      <div className="space-y-3">
-                        {selectedRequisition.labour_items.map((item: any, idx: number) => {
-                          // Get the workers for this specific item based on workers_count
-                          const itemWorkers = selectedRequisition.assigned_workers
-                            ? selectedRequisition.assigned_workers.slice(workerIndex, workerIndex + item.workers_count)
-                            : [];
-                          workerIndex += item.workers_count;
-
-                          return (
-                            <div key={idx} className="bg-white border border-gray-200 rounded-lg p-4">
-                              <div className="flex items-start justify-between mb-2">
-                                <p className="text-sm font-medium text-gray-900">{item.work_description}</p>
-                                <span className="ml-3 px-3 py-1 bg-blue-50 text-blue-600 text-sm font-semibold rounded-md whitespace-nowrap">
-                                  {item.workers_count} worker{item.workers_count !== 1 ? 's' : ''}
-                                </span>
-                              </div>
-                              <p className="text-xs text-gray-600 mt-1">
-                                <span className="font-medium">Skill:</span> {item.skill_required}
-                              </p>
-
-                              {/* Show assigned workers for this specific item */}
-                              {selectedRequisition.assignment_status === 'assigned' && itemWorkers.length > 0 && (
-                                <div className="mt-3 pt-3 border-t border-gray-200">
-                                  <p className="text-xs font-medium text-gray-500 uppercase mb-2">
-                                    Assigned Workers ({itemWorkers.length})
-                                  </p>
-                                  <div className="space-y-1.5">
-                                    {itemWorkers.map((worker: any, widx: number) => (
-                                      <div key={widx} className="flex items-center justify-between bg-green-50 px-3 py-2 rounded-md">
-                                        <span className="text-sm text-gray-900">{worker.full_name}</span>
-                                        <span className="text-xs font-medium text-green-700">{worker.worker_code}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                {selectedRequisition.labour_items && selectedRequisition.labour_items.length > 0 && (
+                  <div className="border-b border-gray-100 pb-6">
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Labour Items</h3>
+                    <div className="space-y-3">
+                      {selectedRequisition.labour_items.map((item: any, idx: number) => (
+                        <div key={idx} className="bg-white border border-gray-200 rounded-lg p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <p className="text-sm font-medium text-gray-900">{item.work_description}</p>
+                            <span className="ml-3 px-3 py-1 bg-blue-50 text-blue-600 text-sm font-semibold rounded-md whitespace-nowrap">
+                              {item.workers_count} workers
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-600 mt-1">
+                            <span className="font-medium">Skill:</span> {item.skill_required}
+                          </p>
+                        </div>
+                      ))}
                     </div>
-                  );
-                })()}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                   <div>

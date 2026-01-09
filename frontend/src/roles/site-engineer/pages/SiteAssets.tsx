@@ -666,7 +666,7 @@ const SiteAssets: React.FC = () => {
   const fetchMyReturnNotes = async () => {
     try {
       setLoadingReturns(true);
-      const response = await apiClient.get('/assets/ss_return_notes', {
+      const response = await apiClient.get('/assets/return-notes', {
         params: { per_page: 50 }
       });
       if (response.data.success) {
@@ -1967,27 +1967,25 @@ const SiteAssets: React.FC = () => {
                               {ardn.items.map(item => (
                                 <div
                                   key={item.return_item_id}
-                                  className="flex items-start gap-3 p-2 bg-white rounded-lg border border-gray-200"
+                                  className="flex items-center gap-3 p-2 bg-white rounded-lg border border-gray-200"
                                 >
-                                  <div className="p-1.5 bg-orange-100 rounded mt-0.5">
-                                    <CubeIcon className="w-4 h-4 text-orange-600" />
+                                  <div className="p-1.5 bg-gray-100 rounded">
+                                    <CubeIcon className="w-4 h-4 text-gray-700" />
                                   </div>
-                                  <div className="flex-1 min-w-0">
+                                  <div className="flex-1">
                                     <p className="font-medium text-sm">{item.category_name}</p>
                                     <p className="text-xs text-gray-500">
                                       {item.quantity} unit(s) • {item.item_code || '-'}
                                     </p>
                                   </div>
-                                  <div className="flex flex-col items-start gap-1.5 flex-shrink-0">
-                                    <span className={`px-2 py-0.5 rounded text-xs whitespace-nowrap ${getConditionColor(item.reported_condition)}`}>
-                                      {item.reported_condition}
+                                  <span className={`px-2 py-0.5 rounded text-xs ${getConditionColor(item.reported_condition)}`}>
+                                    {item.reported_condition}
+                                  </span>
+                                  {item.damage_description && (
+                                    <span className="text-xs text-gray-700 max-w-[150px] truncate" title={item.damage_description}>
+                                      {item.damage_description}
                                     </span>
-                                    {item.damage_description && (
-                                      <p className="text-xs text-red-600 text-left leading-relaxed max-w-[220px]">
-                                        {item.damage_description}
-                                      </p>
-                                    )}
-                                  </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
