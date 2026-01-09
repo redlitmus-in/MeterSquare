@@ -438,6 +438,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-purple-600'
       },
       {
+        name: 'Asset Requisition Approvals',
+        href: buildPath('/asset-requisition-approvals'),
+        icon: DocumentCheckIcon,
+        iconSolid: DocumentCheckSolid,
+        color: 'text-teal-600'
+      },
+      {
         name: 'Labour',
         href: buildPath('/labour/approvals'),
         icon: ClipboardDocumentListIcon,

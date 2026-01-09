@@ -19,10 +19,29 @@ import {
   ArrowDownTrayIcon,
   PrinterIcon,
   PencilIcon,
+  PlusIcon,
 } from '@heroicons/react/24/outline';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { showError, showSuccess } from '@/utils/toastHelper';
 import { apiClient, API_BASE_URL } from '@/api/config';
+import {
+  AssetRequisition,
+  CreateRequisitionPayload,
+  getMyRequisitions,
+  createAssetRequisition,
+  confirmRequisitionReceipt,
+  cancelRequisition,
+  sendToPM,
+  updateRequisition,
+  STATUS_LABELS,
+  STATUS_COLORS,
+  URGENCY_LABELS,
+  URGENCY_COLORS,
+  Urgency,
+  canSendToPM,
+  canEditRequisition,
+  canCancelRequisition,
+} from '../services/assetRequisitionService';
 
 // Types - Updated for ADN flow
 interface DispatchedAsset {
@@ -105,6 +124,25 @@ interface MyReturnNote {
   }>;
 }
 
+// Multi-item requisition type
+interface RequisitionItem {
+  id: number;
+  category_id: number;
+  category_code: string;
+  category_name: string;
+  quantity: number;
+  available_quantity: number;
+}
+
+// Project type for filtering
+interface ProjectOption {
+  project_id: number;
+  project_name: string;
+  project_code: string;
+  my_completion_requested?: boolean;
+  my_work_confirmed?: boolean;
+}
+
 // Constants for colors
 const CONDITION_COLORS: Record<string, string> = {
   good: 'bg-green-100 text-green-700 border-green-200',
@@ -174,6 +212,84 @@ const SiteAssets: React.FC = () => {
   const [dispatchVehicleNumber, setDispatchVehicleNumber] = useState('');
   const [dispatchDriverContact, setDispatchDriverContact] = useState('');
 
+  // Asset Requisition state
+  const [requisitions, setRequisitions] = useState<AssetRequisition[]>([]);
+  const [showRequisitionModal, setShowRequisitionModal] = useState(false);
+  const [requisitionForm, setRequisitionForm] = useState<CreateRequisitionPayload>({
+    project_id: 0,
+    category_id: 0,
+    quantity: 1,
+    required_date: '',
+    urgency: 'normal',
+    purpose: '',
+    site_location: ''
+  });
+  const [assetCategories, setAssetCategories] = useState<Array<{category_id: number; category_code: string; category_name: string; tracking_mode: string; available_quantity: number}>>([]);
+  const [projects, setProjects] = useState<Array<{project_id: number; project_name: string; project_code: string}>>([]);
+  const [submittingRequisition, setSubmittingRequisition] = useState(false);
+  const [confirmReceiptReqId, setConfirmReceiptReqId] = useState<number | null>(null);
+  const [receiptNotes, setReceiptNotes] = useState('');
+
+  // Edit requisition modal state
+  const [showEditReqModal, setShowEditReqModal] = useState(false);
+  const [editRequisition, setEditRequisition] = useState<AssetRequisition | null>(null);
+  const [editPurpose, setEditPurpose] = useState('');
+  const [editRequiredDate, setEditRequiredDate] = useState('');
+  const [editUrgency, setEditUrgency] = useState<Urgency>('normal');
+  const [editSiteLocation, setEditSiteLocation] = useState('');
+
+  // Requisition sub-tab state
+  type ReqSubTab = 'draft' | 'pending' | 'rejected' | 'dispatched' | 'completed';
+  const [reqSubTab, setReqSubTab] = useState<ReqSubTab>('draft');
+
+  // Get current user ID from localStorage
+  const currentUserId = useMemo(() => {
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      return user.user_id || 0;
+    } catch {
+      return 0;
+    }
+  }, []);
+
+  // Filter requisitions by sub-tab
+  const filteredRequisitions = useMemo(() => {
+    const statusMap: Record<ReqSubTab, string[]> = {
+      draft: ['draft'],
+      pending: ['pending_pm', 'pending_prod_mgr', 'pm_approved', 'prod_mgr_approved'],
+      rejected: ['pm_rejected', 'prod_mgr_rejected'],
+      dispatched: ['dispatched'],
+      completed: ['completed'],
+    };
+    return requisitions.filter(r => statusMap[reqSubTab]?.includes(r.status));
+  }, [requisitions, reqSubTab]);
+
+  // Count requisitions by status for sub-tabs
+  const reqStatusCounts = useMemo(() => ({
+    draft: requisitions.filter(r => r.status === 'draft').length,
+    pending: requisitions.filter(r => ['pending_pm', 'pending_prod_mgr', 'pm_approved', 'prod_mgr_approved'].includes(r.status)).length,
+    rejected: requisitions.filter(r => ['pm_rejected', 'prod_mgr_rejected'].includes(r.status)).length,
+    dispatched: requisitions.filter(r => r.status === 'dispatched').length,
+    completed: requisitions.filter(r => r.status === 'completed').length,
+  }), [requisitions]);
+
+  // Multi-item requisition state
+  const [requisitionItems, setRequisitionItems] = useState<RequisitionItem[]>([]);
+
+  // Category search state
+  const [categorySearch, setCategorySearch] = useState('');
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+
+  // Tab state for organized navigation
+  type TabType = 'assets' | 'requisitions' | 'returns' | 'history';
+  const [activeTab, setActiveTab] = useState<TabType>('assets');
+
+  // Loading states for each tab
+  const [loadingRequisitions, setLoadingRequisitions] = useState(false);
+  const [loadingReturns, setLoadingReturns] = useState(false);
+  const [requisitionsLoaded, setRequisitionsLoaded] = useState(false);
+  const [returnsLoaded, setReturnsLoaded] = useState(false);
+
   const fetchAssets = useCallback(async () => {
     try {
       setLoading(true);
@@ -184,8 +300,6 @@ const SiteAssets: React.FC = () => {
       setReceived(data.received || []);
       // Reset checked items on refresh
       setCheckedItems(new Set());
-      // Also fetch my return notes
-      fetchMyReturnNotes();
     } catch (err) {
       console.error('Error fetching dispatched assets:', err);
       showError('Failed to load dispatched assets');
@@ -194,9 +308,299 @@ const SiteAssets: React.FC = () => {
     }
   }, []);
 
+  // Fetch my asset requisitions
+  const fetchRequisitions = async () => {
+    try {
+      setLoadingRequisitions(true);
+      const data = await getMyRequisitions();
+      setRequisitions(data);
+      setRequisitionsLoaded(true);
+    } catch (err) {
+      console.error('Error fetching requisitions:', err);
+    } finally {
+      setLoadingRequisitions(false);
+    }
+  };
+
+  // Fetch categories and projects for requisition form
+  const fetchRequisitionFormData = async () => {
+    try {
+      const [categoriesRes, projectsRes] = await Promise.all([
+        apiClient.get('/assets/categories'),
+        apiClient.get('/se_ongoing_projects')  // Use SE ongoing projects with completion status
+      ]);
+      const cats = categoriesRes.data?.categories || categoriesRes.data?.data || [];
+      setAssetCategories(cats);
+      // Handle response from se_ongoing_projects endpoint
+      const allProjects: ProjectOption[] = projectsRes.data?.projects || projectsRes.data?.data || projectsRes.data || [];
+      // Filter out projects that are pending approval or confirmed
+      const activeProjects = allProjects.filter((p: ProjectOption) =>
+        !p.my_completion_requested &&  // Not sent for approval
+        !p.my_work_confirmed           // Not confirmed by PM
+      );
+      setProjects(activeProjects);
+    } catch (err) {
+      // Silent fail - form will show empty dropdowns
+    }
+  };
+
+  // Open requisition modal
+  const openRequisitionModal = () => {
+    fetchRequisitionFormData();
+    setRequisitionForm({
+      project_id: 0,
+      category_id: 0,
+      quantity: 1,
+      required_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      urgency: 'normal',
+      purpose: '',
+      site_location: ''
+    });
+    setRequisitionItems([]); // Reset items list
+    setCategorySearch('');
+    setShowCategoryDropdown(false);
+    setShowRequisitionModal(true);
+  };
+
+  // Add item to requisition list (or update quantity if already exists)
+  const addItemToRequisition = () => {
+    if (!requisitionForm.category_id) {
+      showError('Please select a category');
+      return;
+    }
+    if (requisitionForm.quantity < 1) {
+      showError('Quantity must be at least 1');
+      return;
+    }
+
+    const category = assetCategories.find(c => c.category_id === requisitionForm.category_id);
+    if (!category) return;
+
+    const availableQty = category.available_quantity ?? 0;
+
+    // Check if category already in list - if so, update quantity
+    const existingItem = requisitionItems.find(item => item.category_id === requisitionForm.category_id);
+    if (existingItem) {
+      const newQty = existingItem.quantity + requisitionForm.quantity;
+      // Warn if exceeding available
+      if (newQty > availableQty && availableQty > 0) {
+        showSuccess(`Updated ${category.category_name} quantity to ${newQty} (${availableQty} available)`);
+      } else {
+        showSuccess(`Updated ${category.category_name} quantity to ${newQty}`);
+      }
+      setRequisitionItems(prev => prev.map(item =>
+        item.category_id === requisitionForm.category_id
+          ? { ...item, quantity: newQty }
+          : item
+      ));
+    } else {
+      // Validate quantity against available for new item
+      if (requisitionForm.quantity > availableQty && availableQty > 0) {
+        showError(`Only ${availableQty} available. You can still request more but approval may be delayed.`);
+      }
+
+      const newItem: RequisitionItem = {
+        id: Date.now(),
+        category_id: category.category_id,
+        category_code: category.category_code,
+        category_name: category.category_name,
+        quantity: requisitionForm.quantity,
+        available_quantity: availableQty
+      };
+      setRequisitionItems(prev => [...prev, newItem]);
+    }
+
+    // Reset category selection for next item
+    setRequisitionForm(prev => ({ ...prev, category_id: 0, quantity: 1 }));
+    setCategorySearch('');
+  };
+
+  // Check if category is already in list
+  const getCategoryInListQty = (categoryId: number): number | null => {
+    const item = requisitionItems.find(i => i.category_id === categoryId);
+    return item ? item.quantity : null;
+  };
+
+  // Remove item from requisition list
+  const removeItemFromRequisition = (itemId: number) => {
+    setRequisitionItems(prev => prev.filter(item => item.id !== itemId));
+  };
+
+  // Update item quantity in requisition list
+  const updateItemQuantity = (itemId: number, quantity: number) => {
+    if (quantity < 1) return;
+    setRequisitionItems(prev => prev.map(item =>
+      item.id === itemId ? { ...item, quantity } : item
+    ));
+  };
+
+  // Submit requisition (single request with multiple items)
+  const handleSubmitRequisition = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Check if we have items in the list OR a single item selected
+    const hasListItems = requisitionItems.length > 0;
+    const hasSingleItem = requisitionForm.category_id > 0;
+
+    if (!hasListItems && !hasSingleItem) {
+      showError('Please add at least one item to your request');
+      return;
+    }
+    if (!requisitionForm.project_id || !requisitionForm.purpose.trim() || !requisitionForm.site_location?.trim()) {
+      showError('Please fill all required fields (Project, Purpose, and Site Location)');
+      return;
+    }
+
+    setSubmittingRequisition(true);
+    try {
+      // Build items array for submission
+      let itemsToSubmit = [...requisitionItems];
+
+      // If there's a current selection but not added to list, add it now
+      if (hasSingleItem && !requisitionItems.some(item => item.category_id === requisitionForm.category_id)) {
+        const category = assetCategories.find(c => c.category_id === requisitionForm.category_id);
+        if (category) {
+          itemsToSubmit.push({
+            id: Date.now(),
+            category_id: category.category_id,
+            category_code: category.category_code,
+            category_name: category.category_name,
+            quantity: requisitionForm.quantity,
+            available_quantity: category.available_quantity ?? 0
+          });
+        }
+      }
+
+      // Convert to API payload format (items array)
+      const itemsPayload = itemsToSubmit.map(item => ({
+        category_id: item.category_id,
+        quantity: item.quantity
+      }));
+
+      // Submit single requisition with all items
+      await createAssetRequisition({
+        project_id: requisitionForm.project_id,
+        items: itemsPayload,
+        required_date: requisitionForm.required_date,
+        urgency: requisitionForm.urgency,
+        purpose: requisitionForm.purpose,
+        site_location: requisitionForm.site_location
+      });
+
+      const itemCount = itemsToSubmit.length;
+      const totalQty = itemsToSubmit.reduce((sum, item) => sum + item.quantity, 0);
+      showSuccess(`Requisition submitted with ${itemCount} item${itemCount > 1 ? 's' : ''} (${totalQty} total qty)`);
+
+      setShowRequisitionModal(false);
+      setRequisitionItems([]);
+      fetchRequisitions();
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Failed to submit requisition';
+      showError(errMsg);
+    } finally {
+      setSubmittingRequisition(false);
+    }
+  };
+
+  // Cancel requisition
+  const handleCancelRequisition = async (reqId: number) => {
+    if (!confirm('Are you sure you want to cancel this requisition?')) return;
+    try {
+      await cancelRequisition(reqId);
+      showSuccess('Requisition cancelled');
+      fetchRequisitions();
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Failed to cancel requisition';
+      showError(errMsg);
+    }
+  };
+
+  // Send requisition to PM for approval
+  const handleSendToPM = async (req: AssetRequisition) => {
+    if (!confirm('Send this requisition to PM for approval?')) return;
+    setSubmittingRequisition(true);
+    try {
+      await sendToPM(req.requisition_id);
+      showSuccess('Requisition sent to PM for approval');
+      fetchRequisitions();
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Failed to send to PM';
+      showError(errMsg);
+    } finally {
+      setSubmittingRequisition(false);
+    }
+  };
+
+  // Open edit requisition modal
+  const openEditReqModal = (req: AssetRequisition) => {
+    setEditRequisition(req);
+    setEditPurpose(req.purpose);
+    setEditRequiredDate(req.required_date?.split('T')[0] || '');
+    setEditUrgency(req.urgency);
+    setEditSiteLocation(req.site_location || '');
+    setShowEditReqModal(true);
+  };
+
+  // Close edit requisition modal
+  const closeEditReqModal = () => {
+    setShowEditReqModal(false);
+    setEditRequisition(null);
+    setEditPurpose('');
+    setEditRequiredDate('');
+    setEditUrgency('normal');
+    setEditSiteLocation('');
+  };
+
+  // Handle update requisition
+  const handleUpdateRequisition = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editRequisition) return;
+    if (!editPurpose.trim()) {
+      showError('Purpose is required');
+      return;
+    }
+    if (!editRequiredDate) {
+      showError('Required date is required');
+      return;
+    }
+    setSubmittingRequisition(true);
+    try {
+      await updateRequisition(editRequisition.requisition_id, {
+        purpose: editPurpose.trim(),
+        required_date: editRequiredDate,
+        urgency: editUrgency,
+        site_location: editSiteLocation.trim() || undefined,
+      });
+      showSuccess('Requisition updated successfully');
+      closeEditReqModal();
+      fetchRequisitions();
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Failed to update requisition';
+      showError(errMsg);
+    } finally {
+      setSubmittingRequisition(false);
+    }
+  };
+
+  // Confirm receipt of dispatched requisition
+  const handleConfirmReceipt = async () => {
+    if (!confirmReceiptReqId) return;
+    try {
+      await confirmRequisitionReceipt(confirmReceiptReqId, { notes: receiptNotes });
+      showSuccess('Receipt confirmed');
+      setConfirmReceiptReqId(null);
+      setReceiptNotes('');
+      fetchRequisitions();
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Failed to confirm receipt';
+      showError(errMsg);
+    }
+  };
+
   // Fetch return notes created by this SE
   const fetchMyReturnNotes = async () => {
     try {
+      setLoadingReturns(true);
       const response = await apiClient.get('/assets/return-notes', {
         params: { per_page: 50 }
       });
@@ -206,9 +610,12 @@ const SiteAssets: React.FC = () => {
           ['DRAFT', 'ISSUED', 'IN_TRANSIT', 'RECEIVED'].includes(rn.status)
         );
         setMyReturnNotes(notes);
+        setReturnsLoaded(true);
       }
     } catch (err) {
       console.error('Error fetching return notes:', err);
+    } finally {
+      setLoadingReturns(false);
     }
   };
 
@@ -306,6 +713,22 @@ const SiteAssets: React.FC = () => {
       showError('Failed to print return note');
     }
   };
+
+  // Filter categories based on search
+  const filteredCategories = useMemo(() => {
+    if (!categorySearch.trim()) return assetCategories;
+    const search = categorySearch.toLowerCase();
+    return assetCategories.filter(c =>
+      c.category_code.toLowerCase().includes(search) ||
+      c.category_name.toLowerCase().includes(search)
+    );
+  }, [assetCategories, categorySearch]);
+
+  // Get selected category name for display
+  const selectedCategoryName = useMemo(() => {
+    const cat = assetCategories.find(c => c.category_id === requisitionForm.category_id);
+    return cat ? `${cat.category_code} - ${cat.category_name}` : '';
+  }, [assetCategories, requisitionForm.category_id]);
 
   // Group pending items by ADN
   const groupedPendingADNs = useMemo((): GroupedADN[] => {
@@ -436,6 +859,27 @@ const SiteAssets: React.FC = () => {
   useEffect(() => {
     fetchAssets();
   }, [fetchAssets]);
+
+  // Auto-fetch requisitions when requisitions tab is selected
+  useEffect(() => {
+    if (activeTab === 'requisitions' && !requisitionsLoaded && !loadingRequisitions) {
+      fetchRequisitions();
+    }
+  }, [activeTab, requisitionsLoaded, loadingRequisitions]);
+
+  // Auto-fetch return notes when returns tab is selected
+  useEffect(() => {
+    if (activeTab === 'returns' && !returnsLoaded && !loadingReturns) {
+      fetchMyReturnNotes();
+    }
+  }, [activeTab, returnsLoaded, loadingReturns]);
+
+  // Auto-fetch history when history tab is selected
+  useEffect(() => {
+    if (activeTab === 'history' && history.length === 0 && !loadingHistory) {
+      fetchHistory();
+    }
+  }, [activeTab]);
 
   // Handle marking entire ADN as received (all items)
   const handleMarkAllReceived = async (adnId: number) => {
@@ -775,19 +1219,100 @@ const SiteAssets: React.FC = () => {
                 <p className="text-sm text-gray-600">Track dispatched assets at your project sites</p>
               </div>
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={openRequisitionModal}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <PlusIcon className="w-4 h-4" />
+                Request Asset
+              </button>
+              <button
+                onClick={fetchAssets}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <ArrowPathIcon className="w-4 h-4" />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {/* Tab Navigation */}
+          <div className="mt-6 flex gap-1 bg-gray-100 p-1 rounded-xl">
             <button
-              onClick={fetchAssets}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              onClick={() => setActiveTab('assets')}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                activeTab === 'assets'
+                  ? 'bg-white text-green-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
             >
-              <ArrowPathIcon className="w-4 h-4" />
-              Refresh
+              <CubeIcon className="w-4 h-4" />
+              <span>My Assets</span>
+              {(groupedPendingADNs.length > 0 || groupedReceivedADNs.length > 0) && (
+                <span className={`px-2 py-0.5 text-xs rounded-full ${
+                  activeTab === 'assets' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+                }`}>
+                  {groupedPendingADNs.length + groupedReceivedADNs.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('requisitions')}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                activeTab === 'requisitions'
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
+            >
+              <DocumentTextIcon className="w-4 h-4" />
+              <span>Requisitions</span>
+              {requisitions.length > 0 && (
+                <span className={`px-2 py-0.5 text-xs rounded-full ${
+                  activeTab === 'requisitions' ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
+                }`}>
+                  {requisitions.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('returns')}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                activeTab === 'returns'
+                  ? 'bg-white text-orange-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
+            >
+              <ArrowUturnLeftIcon className="w-4 h-4" />
+              <span>Returns</span>
+              {myReturnNotes.length > 0 && (
+                <span className={`px-2 py-0.5 text-xs rounded-full ${
+                  activeTab === 'returns' ? 'bg-orange-100 text-orange-700' : 'bg-gray-200 text-gray-600'
+                }`}>
+                  {myReturnNotes.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                activeTab === 'history'
+                  ? 'bg-white text-purple-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
+            >
+              <ClockIcon className="w-4 h-4" />
+              <span>History</span>
             </button>
           </div>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Pending Receipt Section - Grouped by ADN */}
+        {/* ==================== ASSETS TAB ==================== */}
+        {activeTab === 'assets' && (
+          <>
+            {/* Pending Receipt Section - Grouped by ADN */}
         {groupedPendingADNs.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -1209,9 +1734,21 @@ const SiteAssets: React.FC = () => {
             </div>
           </div>
         </div>
+          </>
+        )}
 
-        {/* My Return Notes Section */}
-        {myReturnNotes.length > 0 && (
+        {/* ==================== RETURNS TAB ==================== */}
+        {activeTab === 'returns' && (
+          <>
+            {/* Loading State */}
+            {loadingReturns && (
+              <div className="flex justify-center items-center py-12">
+                <ModernLoadingSpinners size="md" />
+              </div>
+            )}
+
+            {/* My Return Notes Section */}
+        {!loadingReturns && myReturnNotes.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1398,44 +1935,232 @@ const SiteAssets: React.FC = () => {
           </motion.div>
         )}
 
-        {/* History Section - Collapsible */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
-        >
-          <button
-            onClick={() => {
-              if (!showHistory) fetchHistory();
-              setShowHistory(!showHistory);
-            }}
-            className="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-100 rounded-lg">
-                <DocumentTextIcon className="w-5 h-5 text-indigo-600" />
-              </div>
-              <div className="text-left">
-                <h3 className="font-semibold text-gray-900">Asset Movement History</h3>
-                <p className="text-sm text-gray-500">View all dispatches and returns for your projects</p>
-              </div>
-            </div>
-            {showHistory ? (
-              <ChevronUpIcon className="w-5 h-5 text-gray-400" />
-            ) : (
-              <ChevronDownIcon className="w-5 h-5 text-gray-400" />
-            )}
-          </button>
-
-          <AnimatePresence>
-            {showHistory && (
+            {/* Empty State for Returns */}
+            {!loadingReturns && myReturnNotes.length === 0 && (
               <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="border-t border-gray-200"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center"
               >
-                {loadingHistory ? (
+                <div className="flex flex-col items-center">
+                  <div className="p-4 bg-orange-100 rounded-full mb-4">
+                    <ArrowUturnLeftIcon className="w-12 h-12 text-orange-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Return Notes</h3>
+                  <p className="text-gray-500 max-w-md">
+                    You haven't created any return notes yet. When you need to return assets, select items from the "My Assets" tab and create a return request.
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </>
+        )}
+
+        {/* ==================== REQUISITIONS TAB ==================== */}
+        {activeTab === 'requisitions' && (
+          <>
+            {/* Loading State */}
+            {loadingRequisitions && (
+              <div className="flex justify-center items-center py-12">
+                <ModernLoadingSpinners size="md" />
+              </div>
+            )}
+
+            {/* Asset Requisitions Section */}
+            {!loadingRequisitions && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-xl shadow-sm border border-blue-200 overflow-hidden"
+            >
+              {/* Sub-tabs for filtering */}
+              <div className="px-5 py-2 border-b border-gray-100 flex gap-2 overflow-x-auto">
+                {(['draft', 'pending', 'rejected', 'dispatched', 'completed'] as ReqSubTab[]).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setReqSubTab(tab)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                      reqSubTab === tab
+                        ? tab === 'rejected'
+                          ? 'bg-red-100 text-red-700'
+                          : tab === 'draft'
+                          ? 'bg-gray-200 text-gray-800'
+                          : 'bg-blue-100 text-blue-700'
+                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)} ({reqStatusCounts[tab]})
+                  </button>
+                ))}
+              </div>
+
+              {/* Content */}
+              {filteredRequisitions.length === 0 ? (
+                <div className="p-8 text-center">
+                  <div className="flex flex-col items-center">
+                    <div className="p-4 bg-blue-100 rounded-full mb-4">
+                      <DocumentTextIcon className="w-10 h-10 text-blue-400" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      No {reqSubTab} requisitions
+                    </h3>
+                    <p className="text-gray-500 max-w-md mb-4 text-sm">
+                      {reqSubTab === 'rejected'
+                        ? 'No rejected requisitions. Rejected requests will appear here for you to edit and resend.'
+                        : reqSubTab === 'draft'
+                        ? 'No draft requisitions. Create a new request to get started.'
+                        : reqSubTab === 'pending'
+                        ? 'No pending requisitions. Requests awaiting approval will appear here.'
+                        : `No requisitions in "${reqSubTab}" status.`}
+                    </p>
+                    {reqSubTab === 'draft' && (
+                      <button
+                        onClick={openRequisitionModal}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                      >
+                        <PlusIcon className="w-4 h-4" />
+                        Create New Request
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {filteredRequisitions.map(req => {
+                    // Get items - use items array if available, else fallback to single item
+                    const reqItems = req.items && req.items.length > 0 ? req.items : (
+                      req.category_id ? [{
+                        category_id: req.category_id,
+                        category_code: req.category_code,
+                        category_name: req.category_name,
+                        quantity: req.quantity ?? 1
+                      }] : []
+                    );
+                    const totalItems = req.total_items ?? reqItems.length;
+                    const totalQty = req.total_quantity ?? reqItems.reduce((sum, item) => sum + (item.quantity ?? 1), 0);
+
+                    return (
+                      <div key={req.requisition_id} className="p-4 hover:bg-gray-50">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-mono text-sm font-semibold text-blue-600">
+                                {req.requisition_code}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[req.status]}`}>
+                                {STATUS_LABELS[req.status]}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${URGENCY_COLORS[req.urgency]}`}>
+                                {URGENCY_LABELS[req.urgency]}
+                              </span>
+                              {totalItems > 1 && (
+                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                                  {totalItems} items
+                                </span>
+                              )}
+                            </div>
+                            {/* Multi-item display */}
+                            <div className="mt-2 space-y-1">
+                              {reqItems.map((item, idx) => (
+                                <div key={idx} className="flex items-center gap-2 text-sm">
+                                  <span className="text-gray-400">{idx + 1}.</span>
+                                  <span className="font-medium text-gray-900">{item.category_name || item.category_code}</span>
+                                  <span className="text-gray-500">×</span>
+                                  <span className="text-gray-700">{item.quantity}</span>
+                                </div>
+                              ))}
+                            </div>
+                            {totalItems > 1 && (
+                              <div className="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-500">
+                                Total: {totalQty} unit{totalQty !== 1 ? 's' : ''}
+                              </div>
+                            )}
+                            <p className="text-xs text-gray-500 mt-2">{req.project_name}</p>
+                            {req.site_location && (
+                              <p className="text-xs text-gray-400">Site: {req.site_location}</p>
+                            )}
+                            <p className="text-xs text-gray-400">Required: {new Date(req.required_date).toLocaleDateString()}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {/* Send to PM - for draft or pm_rejected */}
+                            {canSendToPM(req, currentUserId) && (
+                              <button
+                                onClick={() => handleSendToPM(req)}
+                                disabled={submittingRequisition}
+                                className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"
+                              >
+                                <PaperAirplaneIcon className="w-3 h-3" />
+                                {req.status === 'pm_rejected' ? 'Resend' : 'Send for Approval'}
+                              </button>
+                            )}
+                            {/* Edit - for draft or pm_rejected */}
+                            {canEditRequisition(req, currentUserId) && (
+                              <button
+                                onClick={() => openEditReqModal(req)}
+                                className="px-3 py-1.5 text-orange-600 text-xs hover:bg-orange-50 rounded-lg flex items-center gap-1"
+                              >
+                                <PencilIcon className="w-3 h-3" />
+                                Edit
+                              </button>
+                            )}
+                            {req.status === 'dispatched' && (
+                              <button
+                                onClick={() => setConfirmReceiptReqId(req.requisition_id)}
+                                className="px-3 py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700"
+                              >
+                                Confirm Receipt
+                              </button>
+                            )}
+                            {canCancelRequisition(req, currentUserId) && (
+                              <button
+                                onClick={() => handleCancelRequisition(req.requisition_id)}
+                                className="px-3 py-1.5 text-red-600 text-xs hover:bg-red-50 rounded-lg"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </motion.div>
+            )}
+          </>
+        )}
+
+        {/* ==================== HISTORY TAB ==================== */}
+        {activeTab === 'history' && (
+          <>
+            {/* History Section */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-xl shadow-sm border border-purple-200 overflow-hidden"
+            >
+              <div className="px-5 py-4 flex items-center justify-between bg-purple-50/50 border-b border-purple-200">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-100 rounded-lg">
+                    <ClockIcon className="w-5 h-5 text-purple-600" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-semibold text-gray-900">Asset Movement History</h3>
+                    <p className="text-sm text-gray-500">View all dispatches and returns for your projects</p>
+                  </div>
+                </div>
+                <button
+                  onClick={fetchHistory}
+                  className="px-3 py-1.5 text-purple-600 hover:bg-purple-100 rounded-lg text-sm font-medium flex items-center gap-1"
+                >
+                  <ArrowPathIcon className="w-4 h-4" />
+                  Refresh
+                </button>
+              </div>
+
+              {/* Content */}
+              {loadingHistory ? (
                   <div className="p-8 text-center">
                     <ModernLoadingSpinners size="sm" className="mx-auto" />
                     <p className="text-sm text-gray-500 mt-2">Loading history...</p>
@@ -1555,10 +2280,9 @@ const SiteAssets: React.FC = () => {
                     })}
                   </div>
                 )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
+            </motion.div>
+          </>
+        )}
       </div>
 
       {/* Bulk Return Request Modal */}
@@ -2000,6 +2724,534 @@ const SiteAssets: React.FC = () => {
                   )}
                 </button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Create Asset Requisition Modal - Multi-Item Support */}
+        {showRequisitionModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowRequisitionModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <form onSubmit={handleSubmitRequisition}>
+                {/* Modal Header */}
+                <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Request Assets</h3>
+                    <p className="text-sm text-gray-500">Add multiple items and submit for PM approval</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowRequisitionModal(false)}
+                    className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                  >
+                    <XMarkIcon className="w-5 h-5 text-gray-500" />
+                  </button>
+                </div>
+
+                {/* Modal Content */}
+                <div className="p-5 space-y-4">
+                  {/* Project Selection */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Project <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={requisitionForm.project_id}
+                      onChange={(e) => setRequisitionForm(prev => ({ ...prev, project_id: Number(e.target.value) }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      required
+                    >
+                      <option value={0}>Select project...</option>
+                      {projects.map(p => (
+                        <option key={p.project_id} value={p.project_id}>
+                          {p.project_code} - {p.project_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Items Section - Box */}
+                  <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                      <CubeIcon className="w-4 h-4" />
+                      Add Items to Request
+                    </h4>
+
+                    {/* Add Item Row */}
+                    <div className="flex gap-2 items-end mb-3">
+                      {/* Category Search */}
+                      <div className="flex-1 relative">
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
+                        {(() => {
+                          const selectedInListQty = requisitionForm.category_id > 0 ? getCategoryInListQty(requisitionForm.category_id) : null;
+                          const isAlreadyInList = selectedInListQty !== null;
+                          return (
+                            <>
+                              <input
+                                type="text"
+                                placeholder={assetCategories.length === 0 ? 'Loading...' : 'Search category...'}
+                                value={requisitionForm.category_id ? selectedCategoryName : categorySearch}
+                                onChange={(e) => {
+                                  setCategorySearch(e.target.value);
+                                  setShowCategoryDropdown(true);
+                                  if (requisitionForm.category_id) {
+                                    setRequisitionForm(prev => ({ ...prev, category_id: 0 }));
+                                  }
+                                }}
+                                onFocus={() => setShowCategoryDropdown(true)}
+                                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm ${
+                                  isAlreadyInList ? 'border-yellow-400 bg-yellow-50' : 'border-gray-300'
+                                }`}
+                              />
+                              {isAlreadyInList && (
+                                <p className="text-xs text-yellow-700 mt-1">
+                                  Already in list with qty {selectedInListQty}. Adding will update total.
+                                </p>
+                              )}
+                            </>
+                          );
+                        })()}
+                        {/* Dropdown */}
+                        {showCategoryDropdown && assetCategories.length > 0 && (
+                          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                            {filteredCategories.length === 0 ? (
+                              <div className="px-3 py-2 text-sm text-gray-500">No categories found</div>
+                            ) : (
+                              filteredCategories.map(c => {
+                                const inListQty = getCategoryInListQty(c.category_id);
+                                const isInList = inListQty !== null;
+                                const isOutOfStock = (c.available_quantity ?? 0) === 0;
+                                return (
+                                  <button
+                                    key={c.category_id}
+                                    type="button"
+                                    disabled={isOutOfStock}
+                                    onClick={() => {
+                                      if (isOutOfStock) return;
+                                      setRequisitionForm(prev => ({ ...prev, category_id: c.category_id }));
+                                      setCategorySearch('');
+                                      setShowCategoryDropdown(false);
+                                    }}
+                                    className={`w-full px-3 py-2 text-left text-sm flex justify-between items-center gap-2 ${
+                                      isOutOfStock
+                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-60'
+                                        : `hover:bg-blue-50 ${requisitionForm.category_id === c.category_id ? 'bg-blue-100' : ''} ${isInList ? 'bg-yellow-50 border-l-2 border-yellow-400' : ''}`
+                                    }`}
+                                  >
+                                    <div className="flex-1 min-w-0">
+                                      <span className={`font-medium ${isOutOfStock ? 'line-through' : ''}`}>
+                                        {c.category_code} - {c.category_name}
+                                      </span>
+                                      {isInList && !isOutOfStock && (
+                                        <span className="ml-2 text-xs text-yellow-700 bg-yellow-100 px-1.5 py-0.5 rounded">
+                                          In list: {inListQty}
+                                        </span>
+                                      )}
+                                      {isOutOfStock && (
+                                        <span className="ml-2 text-xs text-red-500">
+                                          Out of stock
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
+                                      isOutOfStock ? 'bg-red-100 text-red-500' : 'bg-green-100 text-green-700'
+                                    }`}>
+                                      {isOutOfStock ? 'Unavailable' : `Avail: ${c.available_quantity}`}
+                                    </span>
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                        )}
+                        {showCategoryDropdown && (
+                          <div className="fixed inset-0 z-40" onClick={() => setShowCategoryDropdown(false)} />
+                        )}
+                      </div>
+
+                      {/* Quantity */}
+                      <div className="w-24">
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Qty</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={requisitionForm.quantity}
+                          onChange={(e) => setRequisitionForm(prev => ({ ...prev, quantity: Number(e.target.value) }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        />
+                      </div>
+
+                      {/* Add/Update Button */}
+                      {(() => {
+                        const isUpdate = requisitionForm.category_id > 0 && getCategoryInListQty(requisitionForm.category_id) !== null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={addItemToRequisition}
+                            className={`px-3 py-2 text-white rounded-lg transition-colors flex items-center gap-1 ${
+                              isUpdate ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'
+                            }`}
+                            title={isUpdate ? 'Update quantity' : 'Add to list'}
+                          >
+                            <PlusIcon className="w-4 h-4" />
+                            <span className="hidden sm:inline">{isUpdate ? 'Update' : 'Add'}</span>
+                          </button>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Items List */}
+                    {requisitionItems.length > 0 && (
+                      <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+                        <div className="px-3 py-2 bg-blue-50 border-b border-gray-200 flex items-center justify-between">
+                          <span className="text-sm font-medium text-blue-700">
+                            {requisitionItems.length} item{requisitionItems.length > 1 ? 's' : ''} in request
+                          </span>
+                        </div>
+                        <div className="divide-y divide-gray-100 max-h-40 overflow-y-auto">
+                          {requisitionItems.map((item) => (
+                            <div key={item.id} className="px-3 py-2 flex items-center justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-900 truncate">
+                                  {item.category_code} - {item.category_name}
+                                </p>
+                                <p className="text-xs text-gray-500">Available: {item.available_quantity}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={item.quantity}
+                                  onChange={(e) => updateItemQuantity(item.id, Number(e.target.value))}
+                                  className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removeItemFromRequisition(item.id)}
+                                  className="p-1 text-red-500 hover:bg-red-50 rounded transition-colors"
+                                  title="Remove"
+                                >
+                                  <XMarkIcon className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {requisitionItems.length === 0 && !requisitionForm.category_id && (
+                      <p className="text-xs text-gray-500 text-center py-2">
+                        Search and add items above, or select one item and submit directly
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Common Fields for All Items */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Required Date */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Required Date <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={requisitionForm.required_date}
+                        min={new Date().toISOString().split('T')[0]}
+                        onChange={(e) => setRequisitionForm(prev => ({ ...prev, required_date: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        required
+                      />
+                    </div>
+
+                    {/* Urgency */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Urgency</label>
+                      <select
+                        value={requisitionForm.urgency}
+                        onChange={(e) => setRequisitionForm(prev => ({ ...prev, urgency: e.target.value as Urgency }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="low">Low</option>
+                        <option value="normal">Normal</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Purpose */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Purpose / Justification <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      value={requisitionForm.purpose}
+                      onChange={(e) => setRequisitionForm(prev => ({ ...prev, purpose: e.target.value }))}
+                      rows={2}
+                      placeholder="Why do you need these assets?"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      required
+                    />
+                  </div>
+
+                  {/* Site Location */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Site Location <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={requisitionForm.site_location || ''}
+                      onChange={(e) => setRequisitionForm(prev => ({ ...prev, site_location: e.target.value }))}
+                      placeholder="Specific location at site"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="px-5 py-4 border-t border-gray-200 flex items-center justify-between sticky bottom-0 bg-gray-50">
+                  <div className="text-sm text-gray-600">
+                    {requisitionItems.length > 0 ? (
+                      <span className="font-medium text-blue-600">
+                        {requisitionItems.length} item{requisitionItems.length > 1 ? 's' : ''} ready to submit
+                      </span>
+                    ) : requisitionForm.category_id ? (
+                      <span className="text-gray-500">1 item selected</span>
+                    ) : (
+                      <span className="text-gray-400">No items selected</span>
+                    )}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowRequisitionModal(false)}
+                      className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submittingRequisition || (requisitionItems.length === 0 && !requisitionForm.category_id)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    >
+                      {submittingRequisition ? (
+                        <>
+                          <ModernLoadingSpinners size="xs" />
+                          Submitting...
+                        </>
+                      ) : (
+                        <>
+                          <PaperAirplaneIcon className="w-4 h-4" />
+                          Submit Request {requisitionItems.length > 1 ? `(${requisitionItems.length} items)` : requisitionItems.length === 1 ? '(1 item)' : ''}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Confirm Receipt Modal */}
+        {confirmReceiptReqId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setConfirmReceiptReqId(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-xl max-w-md w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-5 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">Confirm Receipt</h3>
+                <p className="text-sm text-gray-500">Confirm that you have received the dispatched asset</p>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <p className="text-sm text-green-700">
+                    This confirms that the asset has been delivered to your site and is in your possession.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes (Optional)</label>
+                  <textarea
+                    value={receiptNotes}
+                    onChange={(e) => setReceiptNotes(e.target.value)}
+                    rows={2}
+                    placeholder="Any notes about the received asset..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                  />
+                </div>
+              </div>
+
+              <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setConfirmReceiptReqId(null);
+                    setReceiptNotes('');
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmReceipt}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                >
+                  <CheckCircleIcon className="w-4 h-4" />
+                  Confirm Receipt
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Edit Requisition Modal */}
+        {showEditReqModal && editRequisition && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={closeEditReqModal}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-5 py-4 border-b border-gray-200 bg-orange-50">
+                <h3 className="text-lg font-semibold text-orange-800">Edit Requisition</h3>
+                <p className="text-sm text-gray-500">{editRequisition.requisition_code}</p>
+              </div>
+
+              <form onSubmit={handleUpdateRequisition} className="p-5 space-y-4">
+                {/* Show rejection reason if pm_rejected */}
+                {editRequisition.status === 'pm_rejected' && editRequisition.pm_rejection_reason && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm font-medium text-red-700">PM Rejection Reason:</p>
+                    <p className="text-sm text-red-600 mt-1">{editRequisition.pm_rejection_reason}</p>
+                  </div>
+                )}
+
+                {/* Items display (read-only) */}
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-xs font-medium text-gray-500 mb-2">Items:</p>
+                  {(editRequisition.items && editRequisition.items.length > 0
+                    ? editRequisition.items
+                    : [{ category_name: editRequisition.category_name, quantity: editRequisition.quantity }]
+                  ).map((item, idx) => (
+                    <div key={idx} className="text-sm text-gray-700">
+                      {idx + 1}. {item.category_name} × {item.quantity}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Purpose */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Purpose <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={editPurpose}
+                    onChange={(e) => setEditPurpose(e.target.value)}
+                    rows={3}
+                    placeholder="Why do you need this asset?"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 resize-none"
+                    required
+                  />
+                </div>
+
+                {/* Required Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Required Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={editRequiredDate}
+                    onChange={(e) => setEditRequiredDate(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    required
+                  />
+                </div>
+
+                {/* Urgency */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Urgency</label>
+                  <select
+                    value={editUrgency}
+                    onChange={(e) => setEditUrgency(e.target.value as Urgency)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  >
+                    <option value="low">Low</option>
+                    <option value="normal">Normal</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+
+                {/* Site Location */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Site Location</label>
+                  <input
+                    type="text"
+                    value={editSiteLocation}
+                    onChange={(e) => setEditSiteLocation(e.target.value)}
+                    placeholder="Specific location at site (optional)"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={closeEditReqModal}
+                    className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingRequisition}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {submittingRequisition ? (
+                      <ModernLoadingSpinners size="sm" />
+                    ) : (
+                      <CheckCircleIcon className="w-4 h-4" />
+                    )}
+                    Save Changes
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </motion.div>
         )}

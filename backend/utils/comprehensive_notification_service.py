@@ -1303,6 +1303,234 @@ class ComprehensiveNotificationService:
         except Exception as e:
             log.error(f"Error sending maintenance complete notification: {e}")
 
+    # ==================== ASSET REQUISITION NOTIFICATIONS ====================
+
+    @staticmethod
+    def notify_asset_requisition_created(requisition_id, requisition_code, project_id, project_name,
+                                          asset_name, quantity, se_user_id, se_name, pm_user_ids):
+        """
+        Notify PM when SE creates an asset requisition
+        Trigger: Site Engineer creates asset requisition
+        Recipients: Project Managers assigned to the project
+        Priority: HIGH
+        """
+        try:
+            for pm_user_id in pm_user_ids:
+                # Check for duplicate
+                if check_duplicate_notification(pm_user_id, 'New Asset Requisition', 'requisition_id', requisition_id, minutes=5):
+                    continue
+
+                notification = NotificationManager.create_notification(
+                    user_id=pm_user_id,
+                    type='approval',
+                    title='New Asset Requisition',
+                    message=f'{se_name} requested {quantity}x {asset_name} for {project_name}',
+                    priority='high',
+                    category='asset_requisition',
+                    action_required=True,
+                    action_url=build_notification_action_url(pm_user_id, 'asset-requisition-approvals', {'tab': 'pending'}, 'project-manager'),
+                    action_label='Review Request',
+                    metadata={
+                        'requisition_id': requisition_id,
+                        'requisition_code': requisition_code,
+                        'project_id': project_id,
+                        'asset_name': asset_name,
+                        'workflow': 'asset_requisition'
+                    },
+                    sender_id=se_user_id,
+                    sender_name=se_name
+                )
+
+                send_notification_to_user(pm_user_id, notification.to_dict())
+                log.info(f"Sent asset requisition notification to PM {pm_user_id}")
+
+        except Exception as e:
+            log.error(f"Error sending asset requisition created notification: {e}")
+
+    @staticmethod
+    def notify_asset_requisition_pm_approved(requisition_id, requisition_code, project_name,
+                                              asset_name, pm_user_id, pm_name, prod_mgr_user_ids):
+        """
+        Notify Production Manager when PM approves requisition
+        Trigger: Project Manager approves asset requisition
+        Recipients: Production Managers
+        Priority: HIGH
+        """
+        try:
+            for prod_mgr_id in prod_mgr_user_ids:
+                # Check for duplicate
+                if check_duplicate_notification(prod_mgr_id, 'Asset Requisition Needs Approval', 'requisition_id', requisition_id, minutes=5):
+                    continue
+
+                notification = NotificationManager.create_notification(
+                    user_id=prod_mgr_id,
+                    type='approval',
+                    title='Asset Requisition Needs Approval',
+                    message=f'PM {pm_name} approved requisition for {asset_name} ({project_name}). Please review.',
+                    priority='high',
+                    category='asset_requisition',
+                    action_required=True,
+                    action_url=build_notification_action_url(prod_mgr_id, 'asset-requisitions', {'tab': 'pending'}, 'production-manager'),
+                    action_label='Review Request',
+                    metadata={
+                        'requisition_id': requisition_id,
+                        'requisition_code': requisition_code,
+                        'workflow': 'asset_requisition'
+                    },
+                    sender_id=pm_user_id,
+                    sender_name=pm_name
+                )
+
+                send_notification_to_user(prod_mgr_id, notification.to_dict())
+                log.info(f"Sent requisition PM approved notification to Prod Mgr {prod_mgr_id}")
+
+        except Exception as e:
+            log.error(f"Error sending PM approved notification: {e}")
+
+    @staticmethod
+    def notify_asset_requisition_pm_rejected(requisition_id, requisition_code, project_name,
+                                              asset_name, pm_user_id, pm_name, se_user_id, rejection_reason):
+        """
+        Notify SE when PM rejects their requisition
+        Trigger: Project Manager rejects asset requisition
+        Recipients: Site Engineer who created the requisition
+        Priority: HIGH
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=se_user_id,
+                type='error',
+                title='Asset Requisition Rejected',
+                message=f'Your request for {asset_name} was rejected by PM {pm_name}. Reason: {rejection_reason}',
+                priority='high',
+                category='asset_requisition',
+                action_required=False,
+                action_url=build_notification_action_url(se_user_id, 'asset-requisitions', {'status': 'rejected'}, 'site-engineer'),
+                action_label='View Details',
+                metadata={
+                    'requisition_id': requisition_id,
+                    'requisition_code': requisition_code,
+                    'rejection_reason': rejection_reason,
+                    'workflow': 'asset_requisition'
+                },
+                sender_id=pm_user_id,
+                sender_name=pm_name
+            )
+
+            send_notification_to_user(se_user_id, notification.to_dict())
+            log.info(f"Sent requisition PM rejected notification to SE {se_user_id}")
+
+        except Exception as e:
+            log.error(f"Error sending PM rejected notification: {e}")
+
+    @staticmethod
+    def notify_asset_requisition_prod_mgr_approved(requisition_id, requisition_code, project_name,
+                                                    asset_name, prod_mgr_user_id, prod_mgr_name, se_user_id):
+        """
+        Notify SE when Production Manager approves their requisition (ready for dispatch)
+        Trigger: Production Manager approves asset requisition
+        Recipients: Site Engineer who created the requisition
+        Priority: HIGH
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=se_user_id,
+                type='success',
+                title='Asset Requisition Approved',
+                message=f'Your request for {asset_name} has been approved and is ready for dispatch!',
+                priority='high',
+                category='asset_requisition',
+                action_required=False,
+                action_url=build_notification_action_url(se_user_id, 'asset-requisitions', {'status': 'approved'}, 'site-engineer'),
+                action_label='View Status',
+                metadata={
+                    'requisition_id': requisition_id,
+                    'requisition_code': requisition_code,
+                    'workflow': 'asset_requisition'
+                },
+                sender_id=prod_mgr_user_id,
+                sender_name=prod_mgr_name
+            )
+
+            send_notification_to_user(se_user_id, notification.to_dict())
+            log.info(f"Sent requisition approved notification to SE {se_user_id}")
+
+        except Exception as e:
+            log.error(f"Error sending Prod Mgr approved notification: {e}")
+
+    @staticmethod
+    def notify_asset_requisition_prod_mgr_rejected(requisition_id, requisition_code, project_name,
+                                                    asset_name, prod_mgr_user_id, prod_mgr_name,
+                                                    se_user_id, rejection_reason):
+        """
+        Notify SE when Production Manager rejects their requisition
+        Trigger: Production Manager rejects asset requisition
+        Recipients: Site Engineer who created the requisition
+        Priority: HIGH
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=se_user_id,
+                type='error',
+                title='Asset Requisition Rejected',
+                message=f'Your request for {asset_name} was rejected by Production Manager. Reason: {rejection_reason}',
+                priority='high',
+                category='asset_requisition',
+                action_required=False,
+                action_url=build_notification_action_url(se_user_id, 'asset-requisitions', {'status': 'rejected'}, 'site-engineer'),
+                action_label='View Details',
+                metadata={
+                    'requisition_id': requisition_id,
+                    'requisition_code': requisition_code,
+                    'rejection_reason': rejection_reason,
+                    'workflow': 'asset_requisition'
+                },
+                sender_id=prod_mgr_user_id,
+                sender_name=prod_mgr_name
+            )
+
+            send_notification_to_user(se_user_id, notification.to_dict())
+            log.info(f"Sent requisition Prod Mgr rejected notification to SE {se_user_id}")
+
+        except Exception as e:
+            log.error(f"Error sending Prod Mgr rejected notification: {e}")
+
+    @staticmethod
+    def notify_asset_requisition_dispatched(requisition_id, requisition_code, project_name,
+                                             asset_name, quantity, prod_mgr_user_id, prod_mgr_name, se_user_id):
+        """
+        Notify SE when Production Manager dispatches the asset
+        Trigger: Production Manager dispatches approved asset requisition
+        Recipients: Site Engineer who created the requisition
+        Priority: HIGH
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=se_user_id,
+                type='info',
+                title='Asset Dispatched',
+                message=f'{quantity}x {asset_name} has been dispatched to {project_name}. Please confirm upon receipt.',
+                priority='high',
+                category='asset_requisition',
+                action_required=True,
+                action_url=build_notification_action_url(se_user_id, 'asset-requisitions', {'status': 'dispatched'}, 'site-engineer'),
+                action_label='Confirm Receipt',
+                metadata={
+                    'requisition_id': requisition_id,
+                    'requisition_code': requisition_code,
+                    'quantity': quantity,
+                    'workflow': 'asset_requisition'
+                },
+                sender_id=prod_mgr_user_id,
+                sender_name=prod_mgr_name
+            )
+
+            send_notification_to_user(se_user_id, notification.to_dict())
+            log.info(f"Sent requisition dispatched notification to SE {se_user_id}")
+
+        except Exception as e:
+            log.error(f"Error sending dispatched notification: {e}")
+
     # ==================== INVENTORY BACKUP STOCK NOTIFICATIONS ====================
 
     @staticmethod

@@ -63,6 +63,7 @@ const PurchaseComparison = lazy(() => import('@/roles/technical-director/pages/P
 const MyProjects = lazy(() => import('@/roles/project-manager/pages/MyProjects'));
 const RecordMaterialPurchase = lazy(() => import('@/roles/project-manager/pages/RecordMaterialPurchase'));
 const RecordLabourHours = lazy(() => import('@/roles/project-manager/pages/RecordLabourHours'));
+const AssetRequisitionApprovals = lazy(() => import('@/roles/project-manager/pages/AssetRequisitionApprovals'));
 
 // Role-based Change Requests
 const RoleBasedChangeRequests = lazy(() => import('@/components/routing/RoleBasedChangeRequests'));
@@ -1017,6 +1018,11 @@ function App() {
             <Route path="record-labour" element={
               <ProjectManagerRoute>
                 <RecordLabourHours />
+              </ProjectManagerRoute>
+            } />
+            <Route path="asset-requisition-approvals" element={
+              <ProjectManagerRoute>
+                <AssetRequisitionApprovals />
               </ProjectManagerRoute>
             } />
 

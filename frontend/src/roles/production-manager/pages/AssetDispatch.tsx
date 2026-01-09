@@ -1,13 +1,16 @@
 /**
- * Asset Dispatch Page (Create Delivery Note - ADN)
- * Dispatch assets from store to project sites
+ * Asset Dispatch Page (Production Manager)
+ * Two sub-tabs like Stock Out page:
+ * 1. Requisitions - Approve/reject PM-approved requisitions
+ * 2. Delivery Notes (ADN) - Create and dispatch asset delivery notes
  */
 
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, Plus, Truck, Send, Package, RefreshCw,
-  Trash2, Check, X, Eye, ChevronDown, ChevronUp, Download, Printer
+  ArrowLeft, Plus, Truck, Send, Package, RefreshCw, FileText,
+  Trash2, Check, X, Eye, ChevronDown, ChevronUp, Download, Printer,
+  Clock, CheckCircle, XCircle, Search, AlertTriangle
 } from 'lucide-react';
 import { apiClient, API_BASE_URL } from '@/api/config';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -20,7 +23,22 @@ import {
   AssetDeliveryNote,
   AssetCondition
 } from '../services/assetDnService';
+import {
+  AssetRequisition,
+  getProdMgrPendingRequisitions,
+  getReadyForDispatch,
+  prodMgrApproveRequisition,
+  prodMgrRejectRequisition,
+  dispatchRequisition,
+  STATUS_LABELS,
+  STATUS_COLORS,
+  URGENCY_LABELS,
+  URGENCY_COLORS,
+} from '@/roles/site-engineer/services/assetRequisitionService';
 import { showSuccess, showError } from '@/utils/toastHelper';
+
+type SubTabType = 'requisitions' | 'delivery-notes';
+type RequisitionTabType = 'pending' | 'ready_dispatch' | 'dispatched' | 'rejected';
 
 interface SiteEngineer {
   user_id: number;
@@ -50,7 +68,7 @@ interface DispatchItem {
   notes: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
+const DN_STATUS_COLORS: Record<string, string> = {
   DRAFT: 'bg-gray-100 text-gray-700',
   ISSUED: 'bg-blue-100 text-blue-700',
   IN_TRANSIT: 'bg-yellow-100 text-yellow-700',
@@ -61,15 +79,44 @@ const STATUS_COLORS: Record<string, string> = {
 
 const AssetDispatch: React.FC = () => {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
+  const [searchParams] = useSearchParams();
+
+  // ==================== SUB-TAB STATE ====================
+  const [activeSubTab, setActiveSubTab] = useState<SubTabType>('requisitions');
+
+  // Handle URL parameters
+  useEffect(() => {
+    const subtab = searchParams.get('subtab');
+    if (subtab === 'requisitions') setActiveSubTab('requisitions');
+    else if (subtab === 'delivery-notes') setActiveSubTab('delivery-notes');
+  }, [searchParams]);
+
+  // ==================== DELIVERY NOTES STATE ====================
   const [projects, setProjects] = useState<Project[]>([]);
-  const [deliveryNotes, setDeliveryNotes] = useState<AssetDeliveryNote[]>([]);
   const [availableCategories, setAvailableCategories] = useState<AssetCategory[]>([]);
   const [availableItems, setAvailableItems] = useState<AssetItem[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [expandedDN, setExpandedDN] = useState<number | null>(null);
+  const [dnStatusFilter, setDnStatusFilter] = useState<string>('DRAFT');
 
-  // Form state
+  // Separate DN data by status (lazy loading)
+  const [draftDNs, setDraftDNs] = useState<AssetDeliveryNote[]>([]);
+  const [issuedDNs, setIssuedDNs] = useState<AssetDeliveryNote[]>([]);
+  const [deliveredDNs, setDeliveredDNs] = useState<AssetDeliveryNote[]>([]);
+
+  // Loading states for each DN tab
+  const [loadingDraft, setLoadingDraft] = useState(false);
+  const [loadingIssued, setLoadingIssued] = useState(false);
+  const [loadingDelivered, setLoadingDelivered] = useState(false);
+  const [loadingFormData, setLoadingFormData] = useState(false);
+
+  // Track which DN tabs have been loaded
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [issuedLoaded, setIssuedLoaded] = useState(false);
+  const [deliveredLoaded, setDeliveredLoaded] = useState(false);
+  const [formDataLoaded, setFormDataLoaded] = useState(false);
+
+  // DN Form state
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [siteLocation, setSiteLocation] = useState('');
   const [attentionTo, setAttentionTo] = useState('');
@@ -79,61 +126,436 @@ const AssetDispatch: React.FC = () => {
   const [driverContact, setDriverContact] = useState('');
   const [notes, setNotes] = useState('');
   const [dispatchItems, setDispatchItems] = useState<DispatchItem[]>([]);
-
-  // Collapsible sections state
   const [quantityExpanded, setQuantityExpanded] = useState(true);
   const [individualExpanded, setIndividualExpanded] = useState(true);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  // ==================== REQUISITIONS STATE ====================
+  const [pendingRequisitions, setPendingRequisitions] = useState<AssetRequisition[]>([]);
+  const [readyDispatchRequisitions, setReadyDispatchRequisitions] = useState<AssetRequisition[]>([]);
+  const [dispatchedRequisitions, setDispatchedRequisitions] = useState<AssetRequisition[]>([]);
+  const [rejectedRequisitions, setRejectedRequisitions] = useState<AssetRequisition[]>([]);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const [loadingPending, setLoadingPending] = useState(false);
+  const [loadingReadyDispatch, setLoadingReadyDispatch] = useState(false);
+  const [loadingDispatched, setLoadingDispatched] = useState(false);
+  const [loadingRejected, setLoadingRejected] = useState(false);
+
+  const [pendingLoaded, setPendingLoaded] = useState(false);
+  const [readyDispatchLoaded, setReadyDispatchLoaded] = useState(false);
+  const [dispatchedLoaded, setDispatchedLoaded] = useState(false);
+  const [rejectedLoaded, setRejectedLoaded] = useState(false);
+
+  const [activeReqTab, setActiveReqTab] = useState<RequisitionTabType>('pending');
+  const [reqSearchTerm, setReqSearchTerm] = useState('');
+
+  // Requisition Modal state
+  const [selectedRequisition, setSelectedRequisition] = useState<AssetRequisition | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showActionModal, setShowActionModal] = useState(false);
+  const [actionType, setActionType] = useState<'approve' | 'reject' | 'dispatch'>('approve');
+  const [actionNotes, setActionNotes] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  // ==================== FETCH FUNCTIONS ====================
+
+  // Fetch form data (projects and available assets) - only when needed
+  const fetchFormData = useCallback(async () => {
     try {
-      const [projectsRes, dnsData, availableData] = await Promise.all([
+      setLoadingFormData(true);
+      const [projectsRes, availableData] = await Promise.all([
         apiClient.get('/all_project', { params: { per_page: 100, has_se_assigned: 'true' } }),
-        getDeliveryNotes({ per_page: 50 }),
         getAvailableForDispatch()
       ]);
-
       setProjects(projectsRes.data?.projects || projectsRes.data?.data || []);
-      setDeliveryNotes(dnsData.data);
       setAvailableCategories(availableData.quantity_based);
       setAvailableItems(availableData.individual_items);
+      setFormDataLoaded(true);
     } catch (error) {
-      console.error('Error fetching data:', error);
-      showError('Failed to load data');
+      console.error('Error fetching form data:', error);
+      showError('Failed to load form data');
     } finally {
-      setLoading(false);
+      setLoadingFormData(false);
+    }
+  }, []);
+
+  // Fetch Draft DNs
+  const fetchDraftDNs = useCallback(async () => {
+    try {
+      setLoadingDraft(true);
+      const data = await getDeliveryNotes({ status: 'DRAFT', per_page: 50 });
+      setDraftDNs(data.data);
+      setDraftLoaded(true);
+    } catch (error) {
+      console.error('Error fetching draft DNs:', error);
+      showError('Failed to load draft delivery notes');
+    } finally {
+      setLoadingDraft(false);
+    }
+  }, []);
+
+  // Fetch Issued DNs (includes IN_TRANSIT)
+  const fetchIssuedDNs = useCallback(async () => {
+    try {
+      setLoadingIssued(true);
+      // Fetch all and filter client-side to include both ISSUED and IN_TRANSIT
+      const data = await getDeliveryNotes({ per_page: 100 });
+      const issued = data.data.filter((dn: AssetDeliveryNote) => dn.status === 'ISSUED' || dn.status === 'IN_TRANSIT');
+      setIssuedDNs(issued);
+      setIssuedLoaded(true);
+    } catch (error) {
+      console.error('Error fetching issued DNs:', error);
+      showError('Failed to load issued delivery notes');
+    } finally {
+      setLoadingIssued(false);
+    }
+  }, []);
+
+  // Fetch Delivered DNs
+  const fetchDeliveredDNs = useCallback(async () => {
+    try {
+      setLoadingDelivered(true);
+      const data = await getDeliveryNotes({ status: 'DELIVERED', per_page: 50 });
+      setDeliveredDNs(data.data);
+      setDeliveredLoaded(true);
+    } catch (error) {
+      console.error('Error fetching delivered DNs:', error);
+      showError('Failed to load delivered delivery notes');
+    } finally {
+      setLoadingDelivered(false);
+    }
+  }, []);
+
+  // Fetch pending requisitions
+  const fetchPending = useCallback(async () => {
+    try {
+      setLoadingPending(true);
+      const data = await getProdMgrPendingRequisitions({ status: 'pending' });
+      const pending = data.filter(r => r.status === 'pending_prod_mgr');
+      setPendingRequisitions(pending);
+      setPendingLoaded(true);
+    } catch (err) {
+      console.error('Error fetching pending requisitions:', err);
+      showError('Failed to load pending requisitions');
+    } finally {
+      setLoadingPending(false);
+    }
+  }, []);
+
+  // Fetch ready for dispatch requisitions
+  const fetchReadyDispatch = useCallback(async () => {
+    try {
+      setLoadingReadyDispatch(true);
+      const data = await getReadyForDispatch();
+      setReadyDispatchRequisitions(data);
+      setReadyDispatchLoaded(true);
+    } catch (err) {
+      console.error('Error fetching ready for dispatch:', err);
+      showError('Failed to load dispatch queue');
+    } finally {
+      setLoadingReadyDispatch(false);
+    }
+  }, []);
+
+  // Fetch dispatched requisitions
+  const fetchDispatched = useCallback(async () => {
+    try {
+      setLoadingDispatched(true);
+      const data = await getProdMgrPendingRequisitions({ status: 'all' });
+      const dispatched = data.filter(r => ['dispatched', 'completed'].includes(r.status));
+      setDispatchedRequisitions(dispatched);
+      setDispatchedLoaded(true);
+    } catch (err) {
+      console.error('Error fetching dispatched requisitions:', err);
+      showError('Failed to load dispatched requisitions');
+    } finally {
+      setLoadingDispatched(false);
+    }
+  }, []);
+
+  // Fetch rejected requisitions
+  const fetchRejected = useCallback(async () => {
+    try {
+      setLoadingRejected(true);
+      const data = await getProdMgrPendingRequisitions({ status: 'all' });
+      const rejected = data.filter(r => r.status === 'prod_mgr_rejected');
+      setRejectedRequisitions(rejected);
+      setRejectedLoaded(true);
+    } catch (err) {
+      console.error('Error fetching rejected requisitions:', err);
+      showError('Failed to load rejected requisitions');
+    } finally {
+      setLoadingRejected(false);
+    }
+  }, []);
+
+  // Initial load based on sub-tab
+  useEffect(() => {
+    if (activeSubTab === 'requisitions') {
+      if (!pendingLoaded && !loadingPending) {
+        fetchPending();
+      }
+    } else {
+      // For delivery-notes, load DRAFT by default
+      if (!draftLoaded && !loadingDraft) {
+        fetchDraftDNs();
+      }
+    }
+  }, [activeSubTab, pendingLoaded, loadingPending, draftLoaded, loadingDraft, fetchPending, fetchDraftDNs]);
+
+  // Lazy load requisition tabs
+  useEffect(() => {
+    if (activeSubTab !== 'requisitions') return;
+
+    if (activeReqTab === 'pending' && !pendingLoaded && !loadingPending) {
+      fetchPending();
+    } else if (activeReqTab === 'ready_dispatch' && !readyDispatchLoaded && !loadingReadyDispatch) {
+      fetchReadyDispatch();
+    } else if (activeReqTab === 'dispatched' && !dispatchedLoaded && !loadingDispatched) {
+      fetchDispatched();
+    } else if (activeReqTab === 'rejected' && !rejectedLoaded && !loadingRejected) {
+      fetchRejected();
+    }
+  }, [
+    activeSubTab, activeReqTab,
+    pendingLoaded, readyDispatchLoaded, dispatchedLoaded, rejectedLoaded,
+    loadingPending, loadingReadyDispatch, loadingDispatched, loadingRejected,
+    fetchPending, fetchReadyDispatch, fetchDispatched, fetchRejected
+  ]);
+
+  // Lazy load DN tabs
+  useEffect(() => {
+    if (activeSubTab !== 'delivery-notes') return;
+
+    if (dnStatusFilter === 'DRAFT' && !draftLoaded && !loadingDraft) {
+      fetchDraftDNs();
+    } else if (dnStatusFilter === 'ISSUED' && !issuedLoaded && !loadingIssued) {
+      fetchIssuedDNs();
+    } else if (dnStatusFilter === 'DELIVERED' && !deliveredLoaded && !loadingDelivered) {
+      fetchDeliveredDNs();
+    }
+  }, [
+    activeSubTab, dnStatusFilter,
+    draftLoaded, issuedLoaded, deliveredLoaded,
+    loadingDraft, loadingIssued, loadingDelivered,
+    fetchDraftDNs, fetchIssuedDNs, fetchDeliveredDNs
+  ]);
+
+  // Fetch form data when showing the form
+  useEffect(() => {
+    if (showForm && !formDataLoaded && !loadingFormData) {
+      fetchFormData();
+    }
+  }, [showForm, formDataLoaded, loadingFormData, fetchFormData]);
+
+  // ==================== REQUISITION HELPERS ====================
+
+  const currentRequisitions = useMemo(() => {
+    switch (activeReqTab) {
+      case 'pending': return pendingRequisitions;
+      case 'ready_dispatch': return readyDispatchRequisitions;
+      case 'dispatched': return dispatchedRequisitions;
+      case 'rejected': return rejectedRequisitions;
+      default: return pendingRequisitions;
+    }
+  }, [activeReqTab, pendingRequisitions, readyDispatchRequisitions, dispatchedRequisitions, rejectedRequisitions]);
+
+  const isReqLoading = useMemo(() => {
+    switch (activeReqTab) {
+      case 'pending': return loadingPending;
+      case 'ready_dispatch': return loadingReadyDispatch;
+      case 'dispatched': return loadingDispatched;
+      case 'rejected': return loadingRejected;
+      default: return false;
+    }
+  }, [activeReqTab, loadingPending, loadingReadyDispatch, loadingDispatched, loadingRejected]);
+
+  const filteredRequisitions = useMemo(() => {
+    if (!reqSearchTerm) return currentRequisitions;
+    const term = reqSearchTerm.toLowerCase();
+    return currentRequisitions.filter(r => {
+      if (
+        r.requisition_code.toLowerCase().includes(term) ||
+        r.project_name?.toLowerCase().includes(term) ||
+        r.category_name?.toLowerCase().includes(term) ||
+        r.requested_by_name.toLowerCase().includes(term)
+      ) return true;
+      if (r.items && r.items.length > 0) {
+        return r.items.some(item =>
+          item.category_name?.toLowerCase().includes(term) ||
+          item.category_code?.toLowerCase().includes(term)
+        );
+      }
+      return false;
+    });
+  }, [currentRequisitions, reqSearchTerm]);
+
+  const reqStatusCounts = useMemo(() => ({
+    pending: pendingRequisitions.length,
+    ready_dispatch: readyDispatchRequisitions.length,
+    dispatched: dispatchedRequisitions.length,
+    rejected: rejectedRequisitions.length,
+  }), [pendingRequisitions, readyDispatchRequisitions, dispatchedRequisitions, rejectedRequisitions]);
+
+  const refreshCurrentReqTab = useCallback(() => {
+    if (activeReqTab === 'pending') {
+      setPendingLoaded(false);
+      fetchPending();
+    } else if (activeReqTab === 'ready_dispatch') {
+      setReadyDispatchLoaded(false);
+      fetchReadyDispatch();
+    } else if (activeReqTab === 'dispatched') {
+      setDispatchedLoaded(false);
+      fetchDispatched();
+    } else if (activeReqTab === 'rejected') {
+      setRejectedLoaded(false);
+      fetchRejected();
+    }
+  }, [activeReqTab, fetchPending, fetchReadyDispatch, fetchDispatched, fetchRejected]);
+
+  // ==================== DN HELPERS ====================
+
+  const currentDNs = useMemo(() => {
+    switch (dnStatusFilter) {
+      case 'DRAFT': return draftDNs;
+      case 'ISSUED': return issuedDNs;
+      case 'DELIVERED': return deliveredDNs;
+      default: return draftDNs;
+    }
+  }, [dnStatusFilter, draftDNs, issuedDNs, deliveredDNs]);
+
+  const isDNLoading = useMemo(() => {
+    switch (dnStatusFilter) {
+      case 'DRAFT': return loadingDraft;
+      case 'ISSUED': return loadingIssued;
+      case 'DELIVERED': return loadingDelivered;
+      default: return false;
+    }
+  }, [dnStatusFilter, loadingDraft, loadingIssued, loadingDelivered]);
+
+  const dnStatusCounts = useMemo(() => ({
+    DRAFT: draftDNs.length,
+    ISSUED: issuedDNs.length,
+    DELIVERED: deliveredDNs.length,
+  }), [draftDNs, issuedDNs, deliveredDNs]);
+
+  const totalDNCount = useMemo(() => {
+    return draftDNs.length + issuedDNs.length + deliveredDNs.length;
+  }, [draftDNs, issuedDNs, deliveredDNs]);
+
+  const refreshCurrentDNTab = useCallback(() => {
+    if (dnStatusFilter === 'DRAFT') {
+      setDraftLoaded(false);
+      fetchDraftDNs();
+    } else if (dnStatusFilter === 'ISSUED') {
+      setIssuedLoaded(false);
+      fetchIssuedDNs();
+    } else if (dnStatusFilter === 'DELIVERED') {
+      setDeliveredLoaded(false);
+      fetchDeliveredDNs();
+    }
+    // Also refresh form data for available assets
+    setFormDataLoaded(false);
+  }, [dnStatusFilter, fetchDraftDNs, fetchIssuedDNs, fetchDeliveredDNs]);
+
+  const openActionModal = (requisition: AssetRequisition, action: 'approve' | 'reject' | 'dispatch') => {
+    setSelectedRequisition(requisition);
+    setActionType(action);
+    setActionNotes('');
+    setRejectionReason('');
+    setShowActionModal(true);
+  };
+
+  const openDetailModal = (requisition: AssetRequisition) => {
+    setSelectedRequisition(requisition);
+    setShowDetailModal(true);
+  };
+
+  const handleApprove = async () => {
+    if (!selectedRequisition) return;
+    setSubmitting(true);
+    try {
+      await prodMgrApproveRequisition(selectedRequisition.requisition_id, { notes: actionNotes || undefined });
+      showSuccess('Requisition approved successfully');
+      setShowActionModal(false);
+      setPendingLoaded(false);
+      setReadyDispatchLoaded(false);
+      fetchPending();
+    } catch (error: unknown) {
+      showError(error instanceof Error ? error.message : 'Failed to approve requisition');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  // Handle project selection - auto-populate site location and SE list
+  const handleReject = async () => {
+    if (!selectedRequisition) return;
+    if (!rejectionReason.trim()) {
+      showError('Please provide a rejection reason');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await prodMgrRejectRequisition(selectedRequisition.requisition_id, {
+        rejection_reason: rejectionReason,
+        notes: actionNotes || undefined
+      });
+      showSuccess('Requisition rejected');
+      setShowActionModal(false);
+      setPendingLoaded(false);
+      setRejectedLoaded(false);
+      fetchPending();
+    } catch (error: unknown) {
+      showError(error instanceof Error ? error.message : 'Failed to reject requisition');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReqDispatch = async () => {
+    if (!selectedRequisition) return;
+    setSubmitting(true);
+    try {
+      await dispatchRequisition(selectedRequisition.requisition_id, { notes: actionNotes || undefined });
+      showSuccess('Requisition dispatched successfully');
+      setShowActionModal(false);
+      setReadyDispatchLoaded(false);
+      setDispatchedLoaded(false);
+      fetchReadyDispatch();
+    } catch (error: unknown) {
+      showError(error instanceof Error ? error.message : 'Failed to dispatch requisition');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const formatDate = (dateStr: string | undefined) => {
+    if (!dateStr) return '-';
+    return new Date(dateStr).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  const formatDateTime = (dateStr: string | undefined) => {
+    if (!dateStr) return '-';
+    return new Date(dateStr).toLocaleString('en-IN', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  // ==================== DELIVERY NOTE HANDLERS ====================
+
   const handleProjectSelect = (projectId: number | null) => {
     setSelectedProjectId(projectId);
-
     if (projectId) {
       const selectedProject = projects.find(p => p.project_id === projectId);
       if (selectedProject) {
-        // Auto-populate site location from project
         setSiteLocation(selectedProject.location || '');
-
-        // Set available Site Engineers for dropdown
         const ses = selectedProject.site_supervisors || [];
         setAvailableSEs(ses);
-
-        // Auto-select first SE if only one, otherwise let user choose
         if (ses.length === 1) {
           setAttentionTo(ses[0].full_name || '');
-        } else if (ses.length > 1) {
-          setAttentionTo(''); // Let user select from dropdown
         } else {
           setAttentionTo('');
         }
       }
     } else {
-      // Clear fields if no project selected
       setSiteLocation('');
       setAttentionTo('');
       setAvailableSEs([]);
@@ -142,7 +564,6 @@ const AssetDispatch: React.FC = () => {
 
   const addDispatchItem = (category: AssetCategory) => {
     if (category.tracking_mode === 'quantity') {
-      // Check if already added
       if (dispatchItems.some(i => i.category_id === category.category_id && !i.asset_item_id)) {
         showError('This category is already added');
         return;
@@ -161,7 +582,6 @@ const AssetDispatch: React.FC = () => {
   };
 
   const addIndividualItem = (item: AssetItem) => {
-    // Check if already added
     if (dispatchItems.some(i => i.asset_item_id === item.item_id)) {
       showError('This item is already added');
       return;
@@ -194,28 +614,25 @@ const AssetDispatch: React.FC = () => {
     setDispatchItems(newItems);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const [creatingDN, setCreatingDN] = useState(false);
 
+  const handleSubmitDN = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!selectedProjectId) {
       showError('Please select a project');
       return;
     }
-
     if (dispatchItems.length === 0) {
       showError('Please add at least one item to dispatch');
       return;
     }
-
-    // Validate quantities
     for (const item of dispatchItems) {
       if (item.quantity > item.available) {
         showError(`Quantity exceeds available stock for ${item.category_name}`);
         return;
       }
     }
-
-    setLoading(true);
+    setCreatingDN(true);
     try {
       const result = await createDeliveryNote({
         project_id: selectedProjectId,
@@ -234,37 +651,47 @@ const AssetDispatch: React.FC = () => {
           notes: item.notes || undefined
         }))
       });
-
       showSuccess(`Delivery Note created: ${result.adn_number}`);
-      resetForm();
-      fetchData();
+      resetDNForm();
+      // Refresh draft tab since new DN starts as DRAFT
+      setDraftLoaded(false);
+      setFormDataLoaded(false);
+      fetchDraftDNs();
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Failed to create delivery note';
-      showError(message);
+      showError(error instanceof Error ? error.message : 'Failed to create delivery note');
     } finally {
-      setLoading(false);
+      setCreatingDN(false);
     }
   };
 
-  const handleDispatch = async (adnId: number) => {
+  const [dispatchingDN, setDispatchingDN] = useState(false);
+
+  const handleDispatchDN = async (adnId: number) => {
     if (!confirm('Are you sure you want to dispatch this delivery note? Stock will be deducted.')) {
       return;
     }
-
-    setLoading(true);
+    setDispatchingDN(true);
     try {
       const result = await dispatchDeliveryNote(adnId);
       showSuccess(`Delivery Note ${result.adn_number} dispatched successfully`);
-      fetchData();
+      // Refresh DRAFT and ISSUED tabs since DN moved from DRAFT to ISSUED
+      setDraftLoaded(false);
+      setIssuedLoaded(false);
+      setFormDataLoaded(false);
+      // Re-fetch current tab
+      if (dnStatusFilter === 'DRAFT') {
+        fetchDraftDNs();
+      } else if (dnStatusFilter === 'ISSUED') {
+        fetchIssuedDNs();
+      }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Failed to dispatch';
-      showError(message);
+      showError(error instanceof Error ? error.message : 'Failed to dispatch');
     } finally {
-      setLoading(false);
+      setDispatchingDN(false);
     }
   };
 
-  const resetForm = () => {
+  const resetDNForm = () => {
     setSelectedProjectId(null);
     setSiteLocation('');
     setAttentionTo('');
@@ -277,7 +704,6 @@ const AssetDispatch: React.FC = () => {
     setShowForm(false);
   };
 
-  // Download Asset DN PDF
   const handleDownloadDN = async (dn: AssetDeliveryNote) => {
     try {
       const token = localStorage.getItem('access_token');
@@ -285,18 +711,13 @@ const AssetDispatch: React.FC = () => {
         showError('Please log in to download delivery notes');
         return;
       }
-
       const response = await fetch(`${API_BASE_URL}/assets/delivery-notes/${dn.adn_id}/download`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || 'Failed to download delivery note');
       }
-
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -307,13 +728,10 @@ const AssetDispatch: React.FC = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
-      console.error('Error downloading ADN:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to download delivery note PDF';
-      showError(errorMessage);
+      showError(error instanceof Error ? error.message : 'Failed to download delivery note PDF');
     }
   };
 
-  // Print Asset DN PDF
   const handlePrintDN = async (dn: AssetDeliveryNote) => {
     try {
       const token = localStorage.getItem('access_token');
@@ -321,40 +739,33 @@ const AssetDispatch: React.FC = () => {
         showError('Please log in to print delivery notes');
         return;
       }
-
       const response = await fetch(`${API_BASE_URL}/assets/delivery-notes/${dn.adn_id}/download`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || 'Failed to load delivery note for printing');
       }
-
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const printWindow = window.open(url, '_blank');
       if (printWindow) {
-        printWindow.onload = () => {
-          printWindow.print();
-        };
+        printWindow.onload = () => printWindow.print();
       }
     } catch (error) {
-      console.error('Error printing ADN:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to print delivery note';
-      showError(errorMessage);
+      showError(error instanceof Error ? error.message : 'Failed to print delivery note');
     }
   };
 
-  if (loading && deliveryNotes.length === 0) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <ModernLoadingSpinners size="sm" />
-      </div>
-    );
-  }
+  // Requisition Tab configuration
+  const reqTabs: { key: RequisitionTabType; label: string; icon: React.ReactNode; color: string }[] = [
+    { key: 'pending', label: 'Pending Approval', icon: <Clock className="h-4 w-4" />, color: 'yellow' },
+    { key: 'ready_dispatch', label: 'Ready to Dispatch', icon: <Truck className="h-4 w-4" />, color: 'blue' },
+    { key: 'dispatched', label: 'Dispatched', icon: <CheckCircle className="h-4 w-4" />, color: 'green' },
+    { key: 'rejected', label: 'Rejected', icon: <XCircle className="h-4 w-4" />, color: 'red' }
+  ];
+
+  // ==================== RENDER ====================
 
   return (
     <div className="p-6 space-y-6">
@@ -362,597 +773,983 @@ const AssetDispatch: React.FC = () => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => {
-              if (showForm) {
-                setShowForm(false);
-              } else {
-                navigate('/production-manager/returnable-assets');
-              }
-            }}
+            onClick={() => navigate(-1)}
             className="p-2 hover:bg-gray-100 rounded-lg"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
             <h1 className="text-2xl font-bold text-gray-800">Asset Dispatch</h1>
-            <p className="text-gray-500">Create delivery notes to dispatch assets to sites</p>
+            <p className="text-gray-500">Manage requisitions and dispatch assets to sites</p>
           </div>
         </div>
-        {!showForm && (
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-          >
-            <Plus className="w-4 h-4" />
-            Create DN
-          </button>
-        )}
+        <button
+          onClick={() => activeSubTab === 'requisitions' ? refreshCurrentReqTab() : refreshCurrentDNTab()}
+          className="p-2 hover:bg-gray-100 rounded-lg"
+          disabled={isReqLoading || isDNLoading}
+        >
+          <RefreshCw className={`w-5 h-5 ${(isReqLoading || isDNLoading) ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
-      {/* Create DN Form */}
-      {showForm && (
-        <div className="bg-white rounded-xl shadow-sm border p-6">
-          <h2 className="text-lg font-semibold mb-4">New Delivery Note (ADN)</h2>
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Project Selection */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Project *
-                </label>
-                <select
-                  value={selectedProjectId || ''}
-                  onChange={(e) => handleProjectSelect(Number(e.target.value) || null)}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
+      {/* Sub-tabs (like Stock Out) */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setActiveSubTab('requisitions')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+            activeSubTab === 'requisitions'
+              ? 'bg-orange-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          <Package className="w-4 h-4" />
+          Requisitions
+          <span className={`px-2 py-0.5 rounded-full text-xs ${
+            activeSubTab === 'requisitions' ? 'bg-orange-500' : 'bg-yellow-100 text-yellow-700'
+          }`}>
+            {reqStatusCounts.pending}
+          </span>
+        </button>
+        <button
+          onClick={() => setActiveSubTab('delivery-notes')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+            activeSubTab === 'delivery-notes'
+              ? 'bg-orange-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          Delivery Notes (ADN)
+          <span className={`px-2 py-0.5 rounded-full text-xs ${
+            activeSubTab === 'delivery-notes' ? 'bg-orange-500' : 'bg-blue-100 text-blue-700'
+          }`}>
+            {dnStatusCounts.DRAFT}
+          </span>
+        </button>
+      </div>
+
+      {/* ==================== REQUISITIONS SUB-TAB ==================== */}
+      {activeSubTab === 'requisitions' && (
+        <>
+          {/* Requisition Status Tabs */}
+          <div className="flex gap-2 flex-wrap">
+            {reqTabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveReqTab(tab.key)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeReqTab === tab.key
+                    ? tab.color === 'yellow' ? 'bg-yellow-100 text-yellow-700'
+                    : tab.color === 'blue' ? 'bg-blue-100 text-blue-700'
+                    : tab.color === 'green' ? 'bg-green-100 text-green-700'
+                    : 'bg-red-100 text-red-700'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {tab.icon}
+                {tab.label} ({reqStatusCounts[tab.key]})
+              </button>
+            ))}
+          </div>
+
+          {/* Search */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by code, project, category, or requester..."
+                value={reqSearchTerm}
+                onChange={(e) => setReqSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+              />
+            </div>
+          </div>
+
+          {/* Loading */}
+          {isReqLoading && (
+            <div className="flex justify-center py-12">
+              <ModernLoadingSpinners variant="pulse" size="md" />
+            </div>
+          )}
+
+          {/* Requisitions List */}
+          {!isReqLoading && filteredRequisitions.length === 0 ? (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+              <Package className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No requisitions found</h3>
+              <p className="text-sm text-gray-500">
+                {activeReqTab === 'pending' ? 'No requisitions waiting for your approval'
+                  : activeReqTab === 'ready_dispatch' ? 'No approved requisitions ready for dispatch'
+                  : activeReqTab === 'dispatched' ? 'No dispatched requisitions'
+                  : 'No rejected requisitions'}
+              </p>
+            </div>
+          ) : !isReqLoading && (
+            <div className="space-y-4">
+              {filteredRequisitions.map(requisition => (
+                <div
+                  key={requisition.requisition_id}
+                  className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow"
                 >
-                  <option value="">Select Project</option>
-                  {projects.map(p => (
-                    <option key={p.project_id} value={p.project_id}>
-                      {p.project_name} ({p.project_code})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Site Location
-                  {siteLocation && <span className="text-xs text-green-600 ml-2">(Auto-filled)</span>}
-                </label>
-                <input
-                  type="text"
-                  value={siteLocation}
-                  onChange={(e) => setSiteLocation(e.target.value)}
-                  placeholder="Auto-populated from project"
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${siteLocation ? 'bg-green-50' : ''}`}
-                />
-              </div>
-            </div>
-
-            {/* Delivery Details */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Attention To (Site Engineer) *
-                  {availableSEs.length > 1 && <span className="text-xs text-blue-600 ml-2">({availableSEs.length} SEs available)</span>}
-                  {availableSEs.length === 1 && attentionTo && <span className="text-xs text-green-600 ml-2">(Auto-filled)</span>}
-                </label>
-                {availableSEs.length > 1 ? (
-                  <select
-                    value={attentionTo}
-                    onChange={(e) => setAttentionTo(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
-                      attentionTo ? 'bg-green-50 border-green-300' : 'border-orange-300 bg-orange-50'
-                    }`}
-                    required
-                  >
-                    <option value="">-- Select Site Engineer --</option>
-                    {availableSEs.map(se => (
-                      <option key={se.user_id} value={se.full_name}>
-                        {se.full_name}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={attentionTo}
-                    onChange={(e) => setAttentionTo(e.target.value)}
-                    placeholder={availableSEs.length === 0 ? "Select a project first" : "Auto-populated from project"}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${attentionTo ? 'bg-green-50' : ''}`}
-                    readOnly={availableSEs.length === 1}
-                    required={availableSEs.length === 0}
-                  />
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Vehicle Number
-                </label>
-                <input
-                  type="text"
-                  value={vehicleNumber}
-                  onChange={(e) => setVehicleNumber(e.target.value)}
-                  placeholder="e.g., ABC-1234"
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Driver Name
-                </label>
-                <input
-                  type="text"
-                  value={driverName}
-                  onChange={(e) => setDriverName(e.target.value)}
-                  placeholder="Driver name"
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            {/* Asset Selection */}
-            <div className="border rounded-lg overflow-hidden">
-              <div className="bg-gray-50 px-4 py-3 border-b">
-                <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-                  <Package className="w-5 h-5 text-blue-600" />
-                  Select Assets to Dispatch
-                </h3>
-              </div>
-
-              <div className="p-4 space-y-4">
-                {/* Quantity-based Assets Section - Collapsible */}
-                {availableCategories.length > 0 && (
-                  <div className="bg-blue-50 rounded-lg overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setQuantityExpanded(!quantityExpanded)}
-                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-blue-100 transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
-                        <span className="text-sm font-semibold text-blue-800">Quantity-based Assets</span>
-                        <span className="px-2 py-0.5 bg-blue-200 text-blue-700 text-xs font-bold rounded-full">
-                          {availableCategories.length}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="font-mono font-semibold text-blue-600">
+                          {requisition.requisition_code}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[requisition.status]}`}>
+                          {STATUS_LABELS[requisition.status]}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${URGENCY_COLORS[requisition.urgency]}`}>
+                          {URGENCY_LABELS[requisition.urgency]}
                         </span>
                       </div>
-                      {quantityExpanded ? (
-                        <ChevronUp className="w-5 h-5 text-blue-600" />
-                      ) : (
-                        <ChevronDown className="w-5 h-5 text-blue-600" />
-                      )}
-                    </button>
-                    {quantityExpanded && (
-                      <div
-                        className={`px-4 pb-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 ${
-                          availableCategories.length > 9 ? 'max-h-56 overflow-y-auto' : ''
-                        }`}
-                        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                        <div>
+                          <span className="text-gray-500">Project:</span>
+                          <span className="ml-1 font-medium">{requisition.project_name}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Items:</span>
+                          {requisition.items && requisition.items.length > 0 ? (
+                            <span className="ml-1 font-medium">
+                              {requisition.total_items || requisition.items.length} item{(requisition.total_items || requisition.items.length) > 1 ? 's' : ''}
+                            </span>
+                          ) : (
+                            <span className="ml-1 font-medium">{requisition.category_name}</span>
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Qty:</span>
+                          <span className="ml-1 font-medium">
+                            {requisition.items && requisition.items.length > 0
+                              ? requisition.total_quantity || requisition.items.reduce((s, i) => s + (i.quantity ?? 1), 0)
+                              : requisition.quantity}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Required:</span>
+                          <span className="ml-1 font-medium">{formatDate(requisition.required_date)}</span>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-sm text-gray-600">
+                        <span className="text-gray-500">Requested by:</span>
+                        <span className="ml-1">{requisition.requested_by_name}</span>
+                        <span className="text-gray-400 ml-2">|</span>
+                        <span className="ml-2 text-gray-500">PM Approved by:</span>
+                        <span className="ml-1">{requisition.pm_reviewed_by_name || '-'}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => openDetailModal(requisition)}
+                        className="px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-1"
                       >
-                        <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; }`}</style>
-                        {availableCategories.map(cat => {
-                          const isSelected = dispatchItems.some(i => i.category_id === cat.category_id && !i.asset_item_id);
-                          return (
-                            <button
-                              key={cat.category_id}
-                              type="button"
-                              onClick={() => addDispatchItem(cat)}
-                              className={`flex items-center justify-between px-3 py-2 border rounded-lg transition-all text-left group relative ${
-                                isSelected
-                                  ? 'bg-green-100 border-green-500 ring-2 ring-green-300'
-                                  : 'bg-white border-blue-200 hover:border-blue-400 hover:bg-blue-50'
-                              }`}
-                            >
-                              {isSelected && (
-                                <span className="absolute -top-2 -right-2 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
-                                  <Check className="w-3 h-3 text-white" />
-                                </span>
+                        <Eye className="h-4 w-4" />
+                        <span className="hidden md:inline">Details</span>
+                      </button>
+                      {requisition.status === 'pending_prod_mgr' && (
+                        <>
+                          <button
+                            onClick={() => openActionModal(requisition, 'approve')}
+                            className="px-3 py-2 bg-green-600 text-white hover:bg-green-700 rounded-lg transition-colors flex items-center gap-1"
+                          >
+                            <Check className="h-4 w-4" />
+                            <span className="hidden md:inline">Approve</span>
+                          </button>
+                          <button
+                            onClick={() => openActionModal(requisition, 'reject')}
+                            className="px-3 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors flex items-center gap-1"
+                          >
+                            <X className="h-4 w-4" />
+                            <span className="hidden md:inline">Reject</span>
+                          </button>
+                        </>
+                      )}
+                      {requisition.status === 'prod_mgr_approved' && (
+                        <button
+                          onClick={() => openActionModal(requisition, 'dispatch')}
+                          className="px-3 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <Truck className="h-4 w-4" />
+                          <span className="hidden md:inline">Dispatch</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ==================== DELIVERY NOTES SUB-TAB ==================== */}
+      {activeSubTab === 'delivery-notes' && (
+        <>
+          {/* DN Status Filter & Create Button */}
+          <div className="flex justify-between items-center">
+            <div className="flex gap-2">
+              {(['DRAFT', 'ISSUED', 'DELIVERED'] as const).map(status => (
+                <button
+                  key={status}
+                  onClick={() => setDnStatusFilter(status)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                    dnStatusFilter === status
+                      ? status === 'DRAFT' ? 'bg-gray-700 text-white'
+                        : status === 'ISSUED' ? 'bg-blue-600 text-white'
+                        : 'bg-green-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {status === 'DRAFT' ? <FileText className="h-4 w-4" /> :
+                   status === 'ISSUED' ? <Truck className="h-4 w-4" /> :
+                   <CheckCircle className="h-4 w-4" />}
+                  {status}
+                  <span className={`px-2 py-0.5 rounded-full text-xs ${
+                    dnStatusFilter === status
+                      ? 'bg-white/20'
+                      : status === 'DRAFT' ? 'bg-gray-200 text-gray-700'
+                        : status === 'ISSUED' ? 'bg-blue-100 text-blue-700'
+                        : 'bg-green-100 text-green-700'
+                  }`}>
+                    {dnStatusCounts[status]}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowForm(true)}
+              disabled={loadingFormData}
+              className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
+            >
+              <Plus className="w-4 h-4" />
+              Create ADN
+            </button>
+          </div>
+
+          {/* Create DN Form */}
+          {showForm && (
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <h2 className="text-lg font-semibold mb-4">New Asset Delivery Note (ADN)</h2>
+              {loadingFormData ? (
+                <div className="flex items-center justify-center py-12">
+                  <ModernLoadingSpinners size="md" />
+                </div>
+              ) : (
+              <form onSubmit={handleSubmitDN} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Project *</label>
+                    <select
+                      value={selectedProjectId || ''}
+                      onChange={(e) => handleProjectSelect(Number(e.target.value) || null)}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                      required
+                    >
+                      <option value="">Select Project</option>
+                      {projects.map(p => (
+                        <option key={p.project_id} value={p.project_id}>
+                          {p.project_name} ({p.project_code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Site Location</label>
+                    <input
+                      type="text"
+                      value={siteLocation}
+                      onChange={(e) => setSiteLocation(e.target.value)}
+                      placeholder="Auto-populated from project"
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 ${siteLocation ? 'bg-green-50' : ''}`}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Attention To (Site Engineer) *</label>
+                    {availableSEs.length > 1 ? (
+                      <select
+                        value={attentionTo}
+                        onChange={(e) => setAttentionTo(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                        required
+                      >
+                        <option value="">-- Select Site Engineer --</option>
+                        {availableSEs.map(se => (
+                          <option key={se.user_id} value={se.full_name}>{se.full_name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={attentionTo}
+                        onChange={(e) => setAttentionTo(e.target.value)}
+                        placeholder={availableSEs.length === 0 ? "Select a project first" : "Auto-populated"}
+                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 ${attentionTo ? 'bg-green-50' : ''}`}
+                        readOnly={availableSEs.length === 1}
+                        required={availableSEs.length === 0}
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number</label>
+                    <input
+                      type="text"
+                      value={vehicleNumber}
+                      onChange={(e) => setVehicleNumber(e.target.value)}
+                      placeholder="e.g., ABC-1234"
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
+                    <input
+                      type="text"
+                      value={driverName}
+                      onChange={(e) => setDriverName(e.target.value)}
+                      placeholder="Driver name"
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Asset Selection */}
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-3 border-b">
+                    <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                      <Package className="w-5 h-5 text-orange-600" />
+                      Select Assets to Dispatch
+                    </h3>
+                  </div>
+                  <div className="p-4 space-y-4">
+                    {/* Quantity-based Assets */}
+                    {availableCategories.length > 0 && (
+                      <div className="bg-blue-50 rounded-lg overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setQuantityExpanded(!quantityExpanded)}
+                          className="w-full flex items-center justify-between px-4 py-3 hover:bg-blue-100 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
+                            <span className="text-sm font-semibold text-blue-800">Quantity-based Assets</span>
+                            <span className="px-2 py-0.5 bg-blue-200 text-blue-700 text-xs font-bold rounded-full">
+                              {availableCategories.length}
+                            </span>
+                          </div>
+                          {quantityExpanded ? <ChevronUp className="w-5 h-5 text-blue-600" /> : <ChevronDown className="w-5 h-5 text-blue-600" />}
+                        </button>
+                        {quantityExpanded && (
+                          <div className="px-4 pb-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-56 overflow-y-auto">
+                            {availableCategories.map(cat => {
+                              const isSelected = dispatchItems.some(i => i.category_id === cat.category_id && !i.asset_item_id);
+                              return (
+                                <button
+                                  key={cat.category_id}
+                                  type="button"
+                                  onClick={() => addDispatchItem(cat)}
+                                  className={`flex items-center justify-between px-3 py-2 border rounded-lg transition-all text-left relative ${
+                                    isSelected
+                                      ? 'bg-green-100 border-green-500 ring-2 ring-green-300'
+                                      : 'bg-white border-blue-200 hover:border-blue-400 hover:bg-blue-50'
+                                  }`}
+                                >
+                                  {isSelected && (
+                                    <span className="absolute -top-2 -right-2 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
+                                      <Check className="w-3 h-3 text-white" />
+                                    </span>
+                                  )}
+                                  <span className={`font-medium text-sm truncate ${isSelected ? 'text-green-800' : 'text-gray-800'}`}>
+                                    {cat.category_name}
+                                  </span>
+                                  <span className={`ml-2 px-2 py-0.5 text-xs font-semibold rounded-full ${isSelected ? 'bg-green-200 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                                    {cat.available_quantity}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Individual Items */}
+                    {availableItems.length > 0 && (
+                      <div className="bg-purple-50 rounded-lg overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setIndividualExpanded(!individualExpanded)}
+                          className="w-full flex items-center justify-between px-4 py-3 hover:bg-purple-100 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 bg-purple-600 rounded-full"></span>
+                            <span className="text-sm font-semibold text-purple-800">Individual Items</span>
+                            <span className="text-xs text-purple-600">(Tracked by Serial Number)</span>
+                            <span className="px-2 py-0.5 bg-purple-200 text-purple-700 text-xs font-bold rounded-full">
+                              {availableItems.length}
+                            </span>
+                          </div>
+                          {individualExpanded ? <ChevronUp className="w-5 h-5 text-purple-600" /> : <ChevronDown className="w-5 h-5 text-purple-600" />}
+                        </button>
+                        {individualExpanded && (
+                          <div className="px-4 pb-3 max-h-72 overflow-y-auto">
+                            {Object.entries(
+                              availableItems.reduce((groups, item) => {
+                                const category = item.category_name || 'Other';
+                                if (!groups[category]) groups[category] = [];
+                                groups[category].push(item);
+                                return groups;
+                              }, {} as Record<string, typeof availableItems>)
+                            ).map(([categoryName, items]) => (
+                              <div key={categoryName} className="mb-3 last:mb-0">
+                                <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-1.5">{categoryName}</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                  {items.map(item => {
+                                    const isSelected = dispatchItems.some(i => i.asset_item_id === item.item_id);
+                                    return (
+                                      <button
+                                        key={item.item_id}
+                                        type="button"
+                                        onClick={() => addIndividualItem(item)}
+                                        className={`flex items-center gap-2 px-3 py-2 border rounded-lg transition-all text-left relative ${
+                                          isSelected
+                                            ? 'bg-green-100 border-green-500 ring-2 ring-green-300'
+                                            : 'bg-white border-purple-200 hover:border-purple-400 hover:bg-purple-50'
+                                        }`}
+                                      >
+                                        {isSelected ? (
+                                          <span className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0">
+                                            <Check className="w-3 h-3 text-white" />
+                                          </span>
+                                        ) : (
+                                          <Plus className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                          <span className={`text-sm font-medium block truncate ${isSelected ? 'text-green-800' : 'text-gray-800'}`}>
+                                            {item.serial_number || item.item_code}
+                                          </span>
+                                          <span className={`text-xs ${isSelected ? 'text-green-600' : 'text-gray-500'}`}>{item.item_code}</span>
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Selected Items */}
+                    {dispatchItems.length > 0 && (
+                      <div className="bg-green-50 rounded-lg p-3">
+                        <p className="text-sm font-medium text-green-800 mb-2 flex items-center gap-2">
+                          <Check className="w-4 h-4" />
+                          Items to Dispatch ({dispatchItems.length})
+                        </p>
+                        <div className="space-y-2">
+                          {dispatchItems.map((item, index) => (
+                            <div key={index} className="flex items-center gap-3 p-3 bg-white border border-green-200 rounded-lg">
+                              <div className={`p-2 rounded-lg ${item.tracking_mode === 'individual' ? 'bg-purple-100' : 'bg-blue-100'}`}>
+                                <Package className={`w-4 h-4 ${item.tracking_mode === 'individual' ? 'text-purple-600' : 'text-blue-600'}`} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <span className="font-semibold text-gray-900 block">{item.category_name}</span>
+                                {item.tracking_mode === 'individual' && (
+                                  <span className="text-xs text-gray-500">
+                                    {item.serial_number ? `SN: ${item.serial_number}` : item.item_code}
+                                  </span>
+                                )}
+                              </div>
+                              {item.tracking_mode === 'quantity' && (
+                                <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg">
+                                  <label className="text-xs text-gray-600 font-medium">Qty:</label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max={item.available}
+                                    value={item.quantity}
+                                    onChange={(e) => updateDispatchItem(index, 'quantity', parseInt(e.target.value) || 1)}
+                                    className="w-14 px-2 py-1 text-sm border rounded text-center font-semibold"
+                                  />
+                                  <span className="text-xs text-gray-400">/ {item.available}</span>
+                                </div>
                               )}
-                              <span className={`font-medium text-sm truncate ${isSelected ? 'text-green-800' : 'text-gray-800'}`}>
-                                {cat.category_name}
-                              </span>
-                              <span className={`ml-2 px-2 py-0.5 text-xs font-semibold rounded-full whitespace-nowrap ${
-                                isSelected ? 'bg-green-200 text-green-700' : 'bg-blue-100 text-blue-700'
-                              }`}>
-                                {cat.available_quantity}
-                              </span>
-                            </button>
-                          );
-                        })}
+                              <button
+                                type="button"
+                                onClick={() => removeDispatchItem(index)}
+                                className="p-2 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {dispatchItems.length === 0 && availableCategories.length === 0 && availableItems.length === 0 && (
+                      <div className="text-center py-8 text-gray-400">
+                        <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                        <p>No assets available for dispatch</p>
                       </div>
                     )}
                   </div>
-                )}
+                </div>
 
-                {/* Individual Items Section - Collapsible, Grouped by Category */}
-                {availableItems.length > 0 && (
-                  <div className="bg-purple-50 rounded-lg overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setIndividualExpanded(!individualExpanded)}
-                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-purple-100 transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-purple-600 rounded-full"></span>
-                        <span className="text-sm font-semibold text-purple-800">Individual Items</span>
-                        <span className="text-xs text-purple-600">(Tracked by Serial Number)</span>
-                        <span className="px-2 py-0.5 bg-purple-200 text-purple-700 text-xs font-bold rounded-full">
-                          {availableItems.length}
-                        </span>
-                      </div>
-                      {individualExpanded ? (
-                        <ChevronUp className="w-5 h-5 text-purple-600" />
-                      ) : (
-                        <ChevronDown className="w-5 h-5 text-purple-600" />
-                      )}
-                    </button>
-                    {individualExpanded && (
-                      <div
-                        className={`px-4 pb-3 ${
-                          availableItems.length > 9 ? 'max-h-72 overflow-y-auto' : ''
-                        }`}
-                        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-                      >
-                        {/* Group items by category */}
-                        {Object.entries(
-                          availableItems.reduce((groups, item) => {
-                            const category = item.category_name || 'Other';
-                            if (!groups[category]) groups[category] = [];
-                            groups[category].push(item);
-                            return groups;
-                          }, {} as Record<string, typeof availableItems>)
-                        ).map(([categoryName, items]) => (
-                          <div key={categoryName} className="mb-3 last:mb-0">
-                            <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-1.5">{categoryName}</p>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                              {items.map(item => {
-                                const isSelected = dispatchItems.some(i => i.asset_item_id === item.item_id);
-                                return (
+                {/* Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Any additional notes..."
+                    rows={2}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+
+                {/* Actions */}
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={resetDNForm}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingDN || dispatchItems.length === 0}
+                    className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
+                  >
+                    {creatingDN ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+                    Create Delivery Note
+                  </button>
+                </div>
+              </form>
+              )}
+            </div>
+          )}
+
+          {/* DN Loading */}
+          {isDNLoading && currentDNs.length === 0 && (
+            <div className="flex items-center justify-center min-h-[200px]">
+              <ModernLoadingSpinners size="sm" />
+            </div>
+          )}
+
+          {/* Delivery Notes Table */}
+          {!isDNLoading && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
+                <h2 className="font-semibold flex items-center gap-2 text-gray-800">
+                  <Truck className="w-5 h-5 text-orange-500" />
+                  {dnStatusFilter} Delivery Notes
+                </h2>
+                <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm font-medium">
+                  {currentDNs.length} Notes
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ADN Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Site Engineer</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Vehicle</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {currentDNs.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-6 py-12 text-center">
+                          <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                          <p className="text-gray-500">No {dnStatusFilter.toLowerCase()} delivery notes found</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      currentDNs.map(dn => (
+                          <React.Fragment key={dn.adn_id}>
+                            <tr className="hover:bg-gray-50">
+                              <td className="px-4 py-4">
+                                <div className="flex items-center gap-2">
                                   <button
-                                    key={item.item_id}
-                                    type="button"
-                                    onClick={() => addIndividualItem(item)}
-                                    className={`flex items-center gap-2 px-3 py-2 border rounded-lg transition-all text-left relative ${
-                                      isSelected
-                                        ? 'bg-green-100 border-green-500 ring-2 ring-green-300'
-                                        : 'bg-white border-purple-200 hover:border-purple-400 hover:bg-purple-50'
-                                    }`}
+                                    onClick={() => setExpandedDN(expandedDN === dn.adn_id ? null : dn.adn_id)}
+                                    className="p-1 hover:bg-gray-100 rounded transition-colors"
                                   >
-                                    {isSelected ? (
-                                      <span className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0">
-                                        <Check className="w-3 h-3 text-white" />
-                                      </span>
-                                    ) : (
-                                      <Plus className="w-4 h-4 text-purple-500 flex-shrink-0" />
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                      <span className={`text-sm font-medium block truncate ${isSelected ? 'text-green-800' : 'text-gray-800'}`}>
-                                        {item.serial_number || item.item_code}
-                                      </span>
-                                      <span className={`text-xs ${isSelected ? 'text-green-600' : 'text-gray-500'}`}>{item.item_code}</span>
-                                    </div>
+                                    {expandedDN === dn.adn_id ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                                   </button>
-                                );
-                              })}
+                                  <span className="font-semibold text-orange-600">{dn.adn_number}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <div className="font-medium text-gray-900">{dn.project_name || '-'}</div>
+                                <div className="text-xs text-gray-500">{dn.site_location || ''}</div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm font-medium">
+                                  {dn.items?.length || 0} items
+                                </span>
+                              </td>
+                              <td className="px-4 py-4 text-sm text-gray-900">{dn.attention_to || '-'}</td>
+                              <td className="px-4 py-4 text-sm">
+                                <div className="text-gray-900">{dn.vehicle_number || '-'}</div>
+                                {dn.driver_name && <div className="text-xs text-gray-500">{dn.driver_name}</div>}
+                              </td>
+                              <td className="px-4 py-4">
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${DN_STATUS_COLORS[dn.status]}`}>
+                                  {dn.status?.replace('_', ' ')}
+                                </span>
+                              </td>
+                              <td className="px-4 py-4 text-sm text-gray-500">
+                                {new Date(dn.delivery_date).toLocaleDateString()}
+                              </td>
+                              <td className="px-4 py-4">
+                                <div className="flex items-center gap-1">
+                                  <button onClick={() => handleDownloadDN(dn)} className="p-1.5 text-green-600 hover:bg-green-100 rounded-lg" title="Download PDF">
+                                    <Download className="w-4 h-4" />
+                                  </button>
+                                  <button onClick={() => handlePrintDN(dn)} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg" title="Print">
+                                    <Printer className="w-4 h-4" />
+                                  </button>
+                                  {dn.status === 'DRAFT' && (
+                                    <button
+                                      onClick={() => handleDispatchDN(dn.adn_id)}
+                                      className="px-3 py-1.5 text-xs bg-green-100 text-green-700 rounded-lg hover:bg-green-200 font-medium flex items-center gap-1 ml-1"
+                                    >
+                                      <Send className="w-3 h-3" />
+                                      Dispatch
+                                    </button>
+                                  )}
+                                  {dn.status === 'IN_TRANSIT' && (
+                                    <span className="px-3 py-1.5 text-xs bg-yellow-100 text-yellow-700 rounded-lg font-medium flex items-center gap-1 ml-1">
+                                      <Truck className="w-3 h-3" />
+                                      In Transit
+                                    </span>
+                                  )}
+                                  {dn.status === 'DELIVERED' && (
+                                    <span className="px-3 py-1.5 text-xs bg-green-100 text-green-700 rounded-lg font-medium flex items-center gap-1 ml-1">
+                                      <Check className="w-3 h-3" />
+                                      Delivered
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                            {expandedDN === dn.adn_id && (
+                              <tr>
+                                <td colSpan={8} className="bg-gray-50 px-6 py-4">
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+                                    <div>
+                                      <span className="text-gray-500 text-xs uppercase">Delivery Date</span>
+                                      <p className="font-medium">{new Date(dn.delivery_date).toLocaleDateString()}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500 text-xs uppercase">Attention To</span>
+                                      <p className="font-medium">{dn.attention_to || '-'}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500 text-xs uppercase">Driver</span>
+                                      <p className="font-medium">{dn.driver_name || '-'}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500 text-xs uppercase">Vehicle</span>
+                                      <p className="font-medium">{dn.vehicle_number || '-'}</p>
+                                    </div>
+                                  </div>
+                                  <div className="border rounded-lg overflow-hidden bg-white">
+                                    <table className="w-full text-sm">
+                                      <thead className="bg-gray-100">
+                                        <tr>
+                                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase">Asset</th>
+                                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase">Item Code</th>
+                                          <th className="px-3 py-2 text-center text-xs font-medium text-gray-600 uppercase">Qty</th>
+                                          <th className="px-3 py-2 text-center text-xs font-medium text-gray-600 uppercase">Received</th>
+                                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-gray-100">
+                                        {dn.items.map(item => (
+                                          <tr key={item.item_id} className="hover:bg-gray-50">
+                                            <td className="px-3 py-2 font-medium text-gray-900">{item.category_name}</td>
+                                            <td className="px-3 py-2 text-gray-500">{item.item_code || '-'}</td>
+                                            <td className="px-3 py-2 text-center font-semibold text-blue-600">{item.quantity}</td>
+                                            <td className="px-3 py-2 text-center">
+                                              {item.is_received ? (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                                  <Check className="w-3 h-3" /> Yes
+                                                </span>
+                                              ) : (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                                                  <X className="w-3 h-3" /> No
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                                item.status === 'fully_returned' ? 'bg-green-100 text-green-700' :
+                                                item.status === 'partial_return' ? 'bg-yellow-100 text-yellow-700' :
+                                                'bg-blue-100 text-blue-700'
+                                              }`}>
+                                                {item.status?.replace('_', ' ')}
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ==================== MODALS ==================== */}
+
+      {/* Detail Modal */}
+      {showDetailModal && selectedRequisition && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Requisition Details - {selectedRequisition.requisition_code}
+              </h2>
+              <button onClick={() => setShowDetailModal(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              <div className="flex items-center gap-3">
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLORS[selectedRequisition.status]}`}>
+                  {STATUS_LABELS[selectedRequisition.status]}
+                </span>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${URGENCY_COLORS[selectedRequisition.urgency]}`}>
+                  {URGENCY_LABELS[selectedRequisition.urgency]}
+                </span>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Request Details</h3>
+                <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-xs text-gray-500">Project</span>
+                      <p className="font-medium">{selectedRequisition.project_name}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500">Required Date</span>
+                      <p className="font-medium">{formatDate(selectedRequisition.required_date)}</p>
+                    </div>
+                  </div>
+                  {selectedRequisition.site_location && (
+                    <div className="mt-2">
+                      <span className="text-xs text-gray-500">Site Location</span>
+                      <p className="font-medium">{selectedRequisition.site_location}</p>
+                    </div>
+                  )}
+                  <div className="mt-3">
+                    <span className="text-xs text-gray-500 uppercase font-medium">Requested Items</span>
+                    {selectedRequisition.items && selectedRequisition.items.length > 0 ? (
+                      <div className="mt-2 space-y-2">
+                        {selectedRequisition.items.map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between bg-white p-2 rounded border">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-400 w-5">{idx + 1}.</span>
+                              <span className="font-medium">{item.category_name || item.category_code}</span>
                             </div>
+                            <span className="text-gray-600">× {item.quantity}</span>
                           </div>
                         ))}
                       </div>
+                    ) : (
+                      <div className="mt-2 bg-white p-2 rounded border">
+                        <p className="font-medium">{selectedRequisition.category_name}</p>
+                        <p className="text-sm text-gray-600 mt-1">Quantity: {selectedRequisition.quantity}</p>
+                      </div>
                     )}
                   </div>
-                )}
-
-                {/* Selected Items */}
-                {dispatchItems.length > 0 && (
-                  <div className="bg-green-50 rounded-lg p-3">
-                    <p className="text-sm font-medium text-green-800 mb-2 flex items-center gap-2">
-                      <Check className="w-4 h-4" />
-                      Items to Dispatch ({dispatchItems.length})
-                    </p>
-                    <div className="space-y-2">
-                      {dispatchItems.map((item, index) => (
-                        <div key={index} className="flex items-center gap-3 p-3 bg-white border border-green-200 rounded-lg">
-                          <div className={`p-2 rounded-lg ${item.tracking_mode === 'individual' ? 'bg-purple-100' : 'bg-blue-100'}`}>
-                            <Package className={`w-4 h-4 ${item.tracking_mode === 'individual' ? 'text-purple-600' : 'text-blue-600'}`} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="font-semibold text-gray-900 block">{item.category_name}</span>
-                            {item.tracking_mode === 'individual' && (
-                              <span className="text-xs text-gray-500">
-                                {item.serial_number ? `SN: ${item.serial_number}` : item.item_code}
-                              </span>
-                            )}
-                          </div>
-                          {item.tracking_mode === 'quantity' && (
-                            <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg">
-                              <label className="text-xs text-gray-600 font-medium">Qty:</label>
-                              <input
-                                type="number"
-                                min="1"
-                                max={item.available}
-                                value={item.quantity}
-                                onChange={(e) => updateDispatchItem(index, 'quantity', parseInt(e.target.value) || 1)}
-                                className="w-14 px-2 py-1 text-sm border rounded text-center font-semibold"
-                              />
-                              <span className="text-xs text-gray-400">/ {item.available}</span>
-                            </div>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => removeDispatchItem(index)}
-                            className="p-2 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
-                            title="Remove item"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
+                  <div>
+                    <span className="text-xs text-gray-500">Purpose</span>
+                    <p className="font-medium">{selectedRequisition.purpose}</p>
                   </div>
-                )}
-
-                {dispatchItems.length === 0 && availableCategories.length === 0 && availableItems.length === 0 && (
-                  <div className="text-center py-8 text-gray-400">
-                    <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>No assets available for dispatch</p>
-                  </div>
-                )}
-
-                {dispatchItems.length === 0 && (availableCategories.length > 0 || availableItems.length > 0) && (
-                  <div className="text-center py-4 text-gray-500 border-t border-dashed">
-                    Click on assets above to add them to this delivery note
-                  </div>
-                )}
+                </div>
               </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Requester</h3>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="font-medium">{selectedRequisition.requested_by_name}</p>
+                  <p className="text-sm text-gray-500">Requested: {formatDateTime(selectedRequisition.requested_at)}</p>
+                </div>
+              </div>
+              {selectedRequisition.pm_reviewed_at && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-2">PM Review</h3>
+                  <div className={`rounded-lg p-4 ${selectedRequisition.pm_decision === 'approved' ? 'bg-green-50' : 'bg-red-50'}`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      {selectedRequisition.pm_decision === 'approved' ? (
+                        <CheckCircle className="h-5 w-5 text-green-600" />
+                      ) : (
+                        <XCircle className="h-5 w-5 text-red-600" />
+                      )}
+                      <span className={`font-medium ${selectedRequisition.pm_decision === 'approved' ? 'text-green-700' : 'text-red-700'}`}>
+                        {selectedRequisition.pm_decision === 'approved' ? 'Approved' : 'Rejected'}
+                      </span>
+                    </div>
+                    <p className="text-sm">By: {selectedRequisition.pm_reviewed_by_name}</p>
+                    <p className="text-sm text-gray-600">On: {formatDateTime(selectedRequisition.pm_reviewed_at)}</p>
+                  </div>
+                </div>
+              )}
+              {selectedRequisition.dispatched_at && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-2">Dispatch Details</h3>
+                  <div className="bg-blue-50 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Truck className="h-5 w-5 text-blue-600" />
+                      <span className="font-medium text-blue-700">Dispatched</span>
+                    </div>
+                    <p className="text-sm">By: {selectedRequisition.dispatched_by_name}</p>
+                    <p className="text-sm text-gray-600">On: {formatDateTime(selectedRequisition.dispatched_at)}</p>
+                  </div>
+                </div>
+              )}
             </div>
-
-            {/* Notes */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Notes
-              </label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Any additional notes..."
-                rows={2}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            {/* Actions */}
-            <div className="flex justify-end gap-3 pt-4 border-t">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={loading || dispatchItems.length === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
-              >
-                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
-                Create Delivery Note
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
       )}
 
-      {/* Delivery Notes List - Table Style like Material DN */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
-          <h2 className="font-semibold flex items-center gap-2 text-gray-800">
-            <Truck className="w-5 h-5 text-blue-500" />
-            Asset Delivery Notes (ADN)
-          </h2>
-          <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
-            {deliveryNotes.length} Notes
-          </span>
-        </div>
-
-        {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ADN Number</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Site Engineer</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {deliveryNotes.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center">
-                    <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                    <p className="text-gray-500">No delivery notes yet</p>
-                    <p className="text-sm text-gray-400 mt-1">Create a new DN to dispatch assets to sites</p>
-                  </td>
-                </tr>
-              ) : (
-                deliveryNotes.map(dn => (
-                  <React.Fragment key={dn.adn_id}>
-                  <tr className="hover:bg-gray-50">
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setExpandedDN(expandedDN === dn.adn_id ? null : dn.adn_id)}
-                          className="p-1 hover:bg-gray-100 rounded transition-colors"
-                        >
-                          {expandedDN === dn.adn_id ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-                        </button>
-                        <span className="font-semibold text-blue-600">{dn.adn_number}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="font-medium text-gray-900">{dn.project_name || '-'}</div>
-                      <div className="text-xs text-gray-500">{dn.site_location || ''}</div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm font-medium">
-                        {dn.items?.length || 0} items
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-sm text-gray-900">
-                      {dn.attention_to || '-'}
-                    </td>
-                    <td className="px-4 py-4 text-sm">
-                      <div className="text-gray-900">{dn.vehicle_number || '-'}</div>
-                      {dn.driver_name && <div className="text-xs text-gray-500">{dn.driver_name}</div>}
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[dn.status]}`}>
-                        {dn.status?.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-sm text-gray-500">
-                      {new Date(dn.delivery_date).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-1">
-                        {/* Download & Print Buttons - Always available */}
-                        <button
-                          onClick={() => handleDownloadDN(dn)}
-                          className="p-1.5 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
-                          title="Download PDF"
-                        >
-                          <Download className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handlePrintDN(dn)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
-                          title="Print"
-                        >
-                          <Printer className="w-4 h-4" />
-                        </button>
-
-                        {/* Status-based Actions */}
-                        {dn.status === 'DRAFT' && (
-                          <button
-                            onClick={() => handleDispatch(dn.adn_id)}
-                            className="px-3 py-1.5 text-xs bg-green-100 text-green-700 rounded-lg hover:bg-green-200 font-medium flex items-center gap-1 ml-1"
-                          >
-                            <Send className="w-3 h-3" />
-                            Dispatch
-                          </button>
-                        )}
-                        {dn.status === 'ISSUED' && (
-                          <span className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg font-medium ml-1">
-                            Issued
-                          </span>
-                        )}
-                        {dn.status === 'IN_TRANSIT' && (
-                          <span className="px-3 py-1.5 text-xs bg-yellow-100 text-yellow-700 rounded-lg font-medium flex items-center gap-1 ml-1">
-                            <Truck className="w-3 h-3" />
-                            In Transit
-                          </span>
-                        )}
-                        {dn.status === 'DELIVERED' && (
-                          <span className="px-3 py-1.5 text-xs bg-green-100 text-green-700 rounded-lg font-medium flex items-center gap-1 ml-1">
-                            <Check className="w-3 h-3" />
-                            Delivered
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                  {/* Expanded Details Row - Inline with each DN */}
-                  {expandedDN === dn.adn_id && (
-                    <tr>
-                      <td colSpan={8} className="bg-gray-50 px-6 py-4">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
-                          <div>
-                            <span className="text-gray-500 text-xs uppercase">Delivery Date</span>
-                            <p className="font-medium">{new Date(dn.delivery_date).toLocaleDateString()}</p>
-                          </div>
-                          <div>
-                            <span className="text-gray-500 text-xs uppercase">Attention To</span>
-                            <p className="font-medium">{dn.attention_to || '-'}</p>
-                          </div>
-                          <div>
-                            <span className="text-gray-500 text-xs uppercase">Driver</span>
-                            <p className="font-medium">{dn.driver_name || '-'}</p>
-                          </div>
-                          <div>
-                            <span className="text-gray-500 text-xs uppercase">Vehicle</span>
-                            <p className="font-medium">{dn.vehicle_number || '-'}</p>
-                          </div>
-                        </div>
-
-                        {/* Receiver Notes - Show when PARTIAL status */}
-                        {dn.status === 'PARTIAL' && dn.receiver_notes && (
-                          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
-                            <p className="text-xs font-medium text-orange-800 uppercase mb-1">
-                              Why Some Items Not Received (SE Notes)
-                            </p>
-                            <p className="text-sm text-orange-700">{dn.receiver_notes}</p>
-                          </div>
-                        )}
-
-                        {/* Items Table */}
-                        <div className="border rounded-lg overflow-hidden bg-white">
-                          <table className="w-full text-sm">
-                            <thead className="bg-gray-100">
-                              <tr>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase">Asset</th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase">Item Code</th>
-                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-600 uppercase">Qty</th>
-                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-600 uppercase">Received</th>
-                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-600 uppercase">Returned</th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                              {dn.items.map(item => (
-                                <tr key={item.item_id} className={`hover:bg-gray-50 ${!item.is_received ? 'bg-yellow-50/50' : ''}`}>
-                                  <td className="px-3 py-2 font-medium text-gray-900">{item.category_name}</td>
-                                  <td className="px-3 py-2 text-gray-500">{item.item_code || '-'}</td>
-                                  <td className="px-3 py-2 text-center font-semibold text-blue-600">{item.quantity}</td>
-                                  <td className="px-3 py-2 text-center">
-                                    {item.is_received ? (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                                        <Check className="w-3 h-3" /> Yes
-                                      </span>
-                                    ) : (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
-                                        <X className="w-3 h-3" /> No
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="px-3 py-2 text-center font-semibold text-orange-600">{item.quantity_returned}</td>
-                                  <td className="px-3 py-2">
-                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                      item.status === 'fully_returned' ? 'bg-green-100 text-green-700' :
-                                      item.status === 'partial_return' ? 'bg-yellow-100 text-yellow-700' :
-                                      'bg-blue-100 text-blue-700'
-                                    }`}>
-                                      {item.status?.replace('_', ' ')}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                  </React.Fragment>
-                ))
+      {/* Action Modal */}
+      {showActionModal && selectedRequisition && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="border-b border-gray-200 px-6 py-4">
+              <h2 className="text-lg font-semibold text-gray-900">
+                {actionType === 'approve' && 'Approve Requisition'}
+                {actionType === 'reject' && 'Reject Requisition'}
+                {actionType === 'dispatch' && 'Dispatch Requisition'}
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                {selectedRequisition.requisition_code} - {selectedRequisition.items && selectedRequisition.items.length > 0
+                  ? `${selectedRequisition.total_items || selectedRequisition.items.length} item(s)`
+                  : selectedRequisition.category_name}
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              {actionType === 'reject' && (
+                <div className="flex items-start gap-3 p-3 bg-red-50 rounded-lg">
+                  <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5" />
+                  <p className="text-sm text-red-700">
+                    This action cannot be undone. The requester will be notified of the rejection.
+                  </p>
+                </div>
               )}
-            </tbody>
-          </table>
+              {actionType === 'dispatch' && (
+                <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
+                  <Truck className="h-5 w-5 text-blue-500 mt-0.5" />
+                  <div className="text-sm text-blue-700">
+                    <p className="font-medium">Dispatch Details</p>
+                    {selectedRequisition.items && selectedRequisition.items.length > 0 ? (
+                      <div className="space-y-1 mt-1">
+                        {selectedRequisition.items.map((item, idx) => (
+                          <p key={idx}>{item.quantity}× {item.category_name || item.category_code}</p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p>Quantity: {selectedRequisition.quantity} {selectedRequisition.category_name}</p>
+                    )}
+                    <p className="mt-2">To: {selectedRequisition.project_name}</p>
+                  </div>
+                </div>
+              )}
+              {actionType === 'reject' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Rejection Reason <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={rejectionReason}
+                    onChange={(e) => setRejectionReason(e.target.value)}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+                    placeholder="Please provide a reason for rejection..."
+                    required
+                  />
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {actionType === 'reject' ? 'Additional Notes' : 'Notes'} (Optional)
+                </label>
+                <textarea
+                  value={actionNotes}
+                  onChange={(e) => setActionNotes(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Add any notes..."
+                />
+              </div>
+            </div>
+            <div className="border-t border-gray-200 px-6 py-4 flex justify-end gap-3">
+              <button
+                onClick={() => setShowActionModal(false)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              {actionType === 'approve' && (
+                <button
+                  onClick={handleApprove}
+                  disabled={submitting}
+                  className="px-4 py-2 bg-green-600 text-white hover:bg-green-700 rounded-lg flex items-center gap-2 disabled:opacity-50"
+                >
+                  {submitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Approve
+                </button>
+              )}
+              {actionType === 'reject' && (
+                <button
+                  onClick={handleReject}
+                  disabled={submitting || !rejectionReason.trim()}
+                  className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg flex items-center gap-2 disabled:opacity-50"
+                >
+                  {submitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                  Reject
+                </button>
+              )}
+              {actionType === 'dispatch' && (
+                <button
+                  onClick={handleReqDispatch}
+                  disabled={submitting}
+                  className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg flex items-center gap-2 disabled:opacity-50"
+                >
+                  {submitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />}
+                  Dispatch
+                </button>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
