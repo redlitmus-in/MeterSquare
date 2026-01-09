@@ -144,22 +144,22 @@ interface ProjectOption {
   my_work_confirmed?: boolean;
 }
 
-// Constants for colors
+// Constants for colors - Simplified professional neutral palette
 const CONDITION_COLORS: Record<string, string> = {
-  good: 'bg-green-100 text-green-700 border-green-200',
-  fair: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  poor: 'bg-orange-100 text-orange-700 border-orange-200',
-  damaged: 'bg-red-100 text-red-700 border-red-200',
-  default: 'bg-gray-100 text-gray-700 border-gray-200'
+  good: 'bg-gray-100 text-gray-800 border-gray-300',
+  fair: 'bg-gray-100 text-gray-800 border-gray-300',
+  poor: 'bg-gray-100 text-gray-800 border-gray-300',
+  damaged: 'bg-gray-100 text-gray-800 border-gray-300',
+  default: 'bg-gray-100 text-gray-800 border-gray-300'
 };
 
 const ARDN_STATUS_COLORS: Record<string, string> = {
-  DRAFT: 'bg-gray-100 text-gray-700',
-  ISSUED: 'bg-blue-100 text-blue-700',
-  IN_TRANSIT: 'bg-yellow-100 text-yellow-700',
-  RECEIVED: 'bg-green-100 text-green-700',
-  PROCESSED: 'bg-purple-100 text-purple-700',
-  CANCELLED: 'bg-red-100 text-red-700'
+  DRAFT: 'bg-gray-100 text-gray-800',
+  ISSUED: 'bg-gray-200 text-gray-800',
+  IN_TRANSIT: 'bg-gray-200 text-gray-800',
+  RECEIVED: 'bg-gray-300 text-gray-900',
+  PROCESSED: 'bg-gray-300 text-gray-900',
+  CANCELLED: 'bg-gray-100 text-gray-600'
 };
 
 const getConditionColor = (condition: string): string => {
@@ -1272,12 +1272,12 @@ const SiteAssets: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {/* Header */}
-      <div className="bg-gradient-to-r from-green-500/10 to-emerald-500/10 shadow-sm">
+      <div className="bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-green-50 to-green-100 rounded-lg">
-                <CubeIcon className="w-6 h-6 text-green-600" />
+              <div className="p-2 bg-gray-100 rounded-lg">
+                <CubeIcon className="w-6 h-6 text-gray-700" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">Site Assets</h1>
@@ -1287,7 +1287,7 @@ const SiteAssets: React.FC = () => {
             <div className="flex items-center gap-2">
               <button
                 onClick={openRequisitionModal}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
               >
                 <PlusIcon className="w-4 h-4" />
                 Request Asset
@@ -1308,7 +1308,7 @@ const SiteAssets: React.FC = () => {
               onClick={() => setActiveTab('assets')}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
                 activeTab === 'assets'
-                  ? 'bg-white text-green-700 shadow-sm'
+                  ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
               }`}
             >
@@ -1316,7 +1316,7 @@ const SiteAssets: React.FC = () => {
               <span>My Assets</span>
               {(groupedPendingADNs.length > 0 || groupedReceivedADNs.length > 0) && (
                 <span className={`px-2 py-0.5 text-xs rounded-full ${
-                  activeTab === 'assets' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+                  activeTab === 'assets' ? 'bg-gray-200 text-gray-800' : 'bg-gray-200 text-gray-600'
                 }`}>
                   {groupedPendingADNs.length + groupedReceivedADNs.length}
                 </span>
@@ -1326,7 +1326,7 @@ const SiteAssets: React.FC = () => {
               onClick={() => setActiveTab('requisitions')}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
                 activeTab === 'requisitions'
-                  ? 'bg-white text-blue-700 shadow-sm'
+                  ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
               }`}
             >
@@ -1334,7 +1334,7 @@ const SiteAssets: React.FC = () => {
               <span>Requisitions</span>
               {requisitions.length > 0 && (
                 <span className={`px-2 py-0.5 text-xs rounded-full ${
-                  activeTab === 'requisitions' ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
+                  activeTab === 'requisitions' ? 'bg-gray-200 text-gray-800' : 'bg-gray-200 text-gray-600'
                 }`}>
                   {requisitions.length}
                 </span>
@@ -1344,7 +1344,7 @@ const SiteAssets: React.FC = () => {
               onClick={() => setActiveTab('returns')}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
                 activeTab === 'returns'
-                  ? 'bg-white text-orange-700 shadow-sm'
+                  ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
               }`}
             >
@@ -1352,7 +1352,7 @@ const SiteAssets: React.FC = () => {
               <span>Returns</span>
               {myReturnNotes.length > 0 && (
                 <span className={`px-2 py-0.5 text-xs rounded-full ${
-                  activeTab === 'returns' ? 'bg-orange-100 text-orange-700' : 'bg-gray-200 text-gray-600'
+                  activeTab === 'returns' ? 'bg-gray-200 text-gray-800' : 'bg-gray-200 text-gray-600'
                 }`}>
                   {myReturnNotes.length}
                 </span>
@@ -1362,7 +1362,7 @@ const SiteAssets: React.FC = () => {
               onClick={() => setActiveTab('history')}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
                 activeTab === 'history'
-                  ? 'bg-white text-purple-700 shadow-sm'
+                  ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
               }`}
             >
@@ -1382,14 +1382,14 @@ const SiteAssets: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-xl shadow-sm border-2 border-yellow-300 overflow-hidden"
+            className="bg-white rounded-xl shadow-sm border-2 border-gray-300 overflow-hidden"
           >
-            <div className="px-5 py-4 border-b border-yellow-200 bg-yellow-50">
-              <h3 className="font-semibold text-yellow-800 flex items-center gap-2">
+            <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
                 <TruckIcon className="w-5 h-5" />
                 Dispatched - Pending Your Receipt
               </h3>
-              <p className="text-sm text-yellow-600 mt-1">
+              <p className="text-sm text-gray-700 mt-1">
                 Review items and mark delivery notes as received. All items in a delivery note will be marked received together.
               </p>
             </div>
@@ -1403,7 +1403,7 @@ const SiteAssets: React.FC = () => {
                 return (
                   <div key={adn.adn_id} className="bg-white">
                     {/* ADN Header */}
-                    <div className="px-5 py-4 bg-yellow-50/50">
+                    <div className="px-5 py-4 bg-gray-50/50">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           {/* Select All Checkbox */}
@@ -1414,20 +1414,20 @@ const SiteAssets: React.FC = () => {
                             onClick={() => toggleAllInADN(adn)}
                             className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
                               allChecked
-                                ? 'bg-green-500 border-green-500'
+                                ? 'bg-gray-500 border-gray-500'
                                 : someChecked
-                                  ? 'bg-yellow-200 border-yellow-500'
-                                  : 'bg-white border-gray-300 hover:border-yellow-500'
+                                  ? 'bg-gray-200 border-gray-500'
+                                  : 'bg-white border-gray-300 hover:border-gray-500'
                             }`}
                           >
                             {(allChecked || someChecked) && (
-                              <CheckIcon className={`w-3 h-3 ${allChecked ? 'text-white' : 'text-yellow-700'}`} />
+                              <CheckIcon className={`w-3 h-3 ${allChecked ? 'text-white' : 'text-gray-800'}`} />
                             )}
                           </button>
 
                           <button
                             onClick={() => toggleADNExpansion(adn.adn_id)}
-                            className="flex items-center gap-2 hover:bg-yellow-100 rounded-lg px-2 py-1 -ml-2 transition-colors"
+                            className="flex items-center gap-2 hover:bg-gray-100 rounded-lg px-2 py-1 -ml-2 transition-colors"
                           >
                             {isExpanded ? (
                               <ChevronUpIcon className="w-4 h-4 text-gray-500" />
@@ -1436,12 +1436,12 @@ const SiteAssets: React.FC = () => {
                             )}
                             <div className="text-left">
                               <div className="flex items-center gap-2">
-                                <span className="font-mono text-sm font-semibold text-yellow-700">{adn.adn_number}</span>
-                                <span className="px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded-full text-xs font-medium">
+                                <span className="font-mono text-sm font-semibold text-gray-800">{adn.adn_number}</span>
+                                <span className="px-2 py-0.5 bg-gray-200 text-gray-900 rounded-full text-xs font-medium">
                                   {adn.items.length} item{adn.items.length !== 1 ? 's' : ''}
                                 </span>
                                 {adn.adn_status === 'PARTIAL' && (
-                                  <span className="px-2 py-0.5 bg-orange-200 text-orange-800 rounded-full text-xs font-medium">
+                                  <span className="px-2 py-0.5 bg-gray-200 text-gray-900 rounded-full text-xs font-medium">
                                     Partial
                                   </span>
                                 )}
@@ -1463,7 +1463,7 @@ const SiteAssets: React.FC = () => {
                             <button
                               onClick={() => handleMarkSelectedReceived(adn)}
                               disabled={markingReceived === adn.adn_id}
-                              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium shadow-sm"
+                              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors font-medium shadow-sm"
                             >
                               {markingReceived === adn.adn_id ? (
                                 <>
@@ -1515,11 +1515,11 @@ const SiteAssets: React.FC = () => {
                           <div className="px-5 py-2 bg-gray-50 border-t border-gray-200">
                             {/* Show partial receive notes at top of items if ADN is PARTIAL */}
                             {adn.adn_status === 'PARTIAL' && adn.receiver_notes && (
-                              <div className="mb-3 bg-orange-50 border border-orange-200 rounded-lg p-3">
-                                <p className="text-xs font-medium text-orange-800 uppercase mb-1">
+                              <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                <p className="text-xs font-medium text-gray-900 uppercase mb-1">
                                   Why these items are pending
                                 </p>
-                                <p className="text-sm text-orange-700">{adn.receiver_notes}</p>
+                                <p className="text-sm text-gray-800">{adn.receiver_notes}</p>
                               </div>
                             )}
                             <div className="divide-y divide-gray-100">
@@ -1528,7 +1528,7 @@ const SiteAssets: React.FC = () => {
                                   key={item.adn_item_id}
                                   onClick={() => toggleItemCheck(item.adn_item_id)}
                                   className={`py-3 px-2 flex items-center gap-3 transition-colors cursor-pointer hover:bg-gray-100 rounded-lg ${
-                                    checkedItems.has(item.adn_item_id) ? 'bg-green-50/50 hover:bg-green-100/50' : ''
+                                    checkedItems.has(item.adn_item_id) ? 'bg-gray-50/50 hover:bg-gray-100/50' : ''
                                   }`}
                                 >
                                   {/* Item Checkbox */}
@@ -1538,7 +1538,7 @@ const SiteAssets: React.FC = () => {
                                     aria-label={`Select ${item.category_name}`}
                                     className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all flex-shrink-0 ${
                                       checkedItems.has(item.adn_item_id)
-                                        ? 'bg-green-500 border-green-500'
+                                        ? 'bg-gray-500 border-gray-500'
                                         : 'bg-white border-gray-300'
                                     }`}
                                   >
@@ -1547,8 +1547,8 @@ const SiteAssets: React.FC = () => {
                                     )}
                                   </div>
 
-                                  <div className="p-2 bg-yellow-100 rounded-lg flex-shrink-0">
-                                    <CubeIcon className="w-4 h-4 text-yellow-600" />
+                                  <div className="p-2 bg-gray-100 rounded-lg flex-shrink-0">
+                                    <CubeIcon className="w-4 h-4 text-gray-700" />
                                   </div>
 
                                   <div className="flex-1 min-w-0">
@@ -1577,14 +1577,14 @@ const SiteAssets: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-xl shadow-sm border-2 border-green-300 overflow-hidden"
+            className="bg-white rounded-xl shadow-sm border-2 border-gray-300 overflow-hidden"
           >
-            <div className="px-5 py-4 border-b border-green-200 bg-green-50">
-              <h3 className="font-semibold text-green-800 flex items-center gap-2">
+            <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
                 <CheckCircleIcon className="w-5 h-5" />
                 Received at Your Sites
               </h3>
-              <p className="text-sm text-green-600 mt-1">Select items to create a Return Delivery Note (RDN). You can return multiple items at once.</p>
+              <p className="text-sm text-gray-700 mt-1">Select items to create a Return Delivery Note (RDN). You can return multiple items at once.</p>
             </div>
 
             <div className="divide-y divide-gray-200">
@@ -1597,7 +1597,7 @@ const SiteAssets: React.FC = () => {
                 return (
                   <div key={adn.adn_id} className="bg-white">
                     {/* ADN Header */}
-                    <div className="px-5 py-4 bg-green-50/50">
+                    <div className="px-5 py-4 bg-gray-50/50">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           {/* Select All Checkbox for Return */}
@@ -1613,20 +1613,20 @@ const SiteAssets: React.FC = () => {
                             }}
                             className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
                               allReturnChecked
-                                ? 'bg-indigo-500 border-indigo-500'
+                                ? 'bg-gray-500 border-gray-500'
                                 : someReturnChecked
-                                  ? 'bg-indigo-200 border-indigo-500'
-                                  : 'bg-white border-gray-300 hover:border-indigo-500'
+                                  ? 'bg-gray-200 border-gray-500'
+                                  : 'bg-white border-gray-300 hover:border-gray-500'
                             }`}
                           >
                             {(allReturnChecked || someReturnChecked) && (
-                              <CheckIcon className={`w-3 h-3 ${allReturnChecked ? 'text-white' : 'text-indigo-700'}`} />
+                              <CheckIcon className={`w-3 h-3 ${allReturnChecked ? 'text-white' : 'text-gray-800'}`} />
                             )}
                           </button>
 
                           <button
                             onClick={() => toggleADNExpansion(adn.adn_id)}
-                            className="flex items-center gap-2 hover:bg-green-100 rounded-lg px-2 py-1 -ml-2 transition-colors"
+                            className="flex items-center gap-2 hover:bg-gray-100 rounded-lg px-2 py-1 -ml-2 transition-colors"
                           >
                             {isExpanded ? (
                               <ChevronUpIcon className="w-4 h-4 text-gray-500" />
@@ -1635,12 +1635,12 @@ const SiteAssets: React.FC = () => {
                             )}
                             <div className="text-left">
                               <div className="flex items-center gap-2">
-                                <span className="font-mono text-sm font-semibold text-green-700">{adn.adn_number}</span>
-                                <span className="px-2 py-0.5 bg-green-200 text-green-800 rounded-full text-xs font-medium">
+                                <span className="font-mono text-sm font-semibold text-gray-800">{adn.adn_number}</span>
+                                <span className="px-2 py-0.5 bg-gray-200 text-gray-900 rounded-full text-xs font-medium">
                                   {adn.items.length} item{adn.items.length !== 1 ? 's' : ''}
                                 </span>
                                 {adn.adn_status === 'PARTIAL' && (
-                                  <span className="px-2 py-0.5 bg-orange-200 text-orange-800 rounded-full text-xs font-medium">
+                                  <span className="px-2 py-0.5 bg-gray-200 text-gray-900 rounded-full text-xs font-medium">
                                     Partial DN
                                   </span>
                                 )}
@@ -1662,7 +1662,7 @@ const SiteAssets: React.FC = () => {
                                 e.stopPropagation();
                                 openBulkReturnModal(adn);
                               }}
-                              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm"
+                              className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors font-medium shadow-sm"
                             >
                               <ArrowUturnLeftIcon className="w-4 h-4" />
                               Return Selected ({checkedReturnCount})
@@ -1685,11 +1685,11 @@ const SiteAssets: React.FC = () => {
                           <div className="px-5 py-2 bg-gray-50 border-t border-gray-200">
                             {/* Show partial receive notes if ADN had partial receive */}
                             {adn.adn_status === 'PARTIAL' && adn.receiver_notes && (
-                              <div className="mb-3 bg-orange-50 border border-orange-200 rounded-lg p-3">
-                                <p className="text-xs font-medium text-orange-800 uppercase mb-1">
+                              <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                <p className="text-xs font-medium text-gray-900 uppercase mb-1">
                                   Partial Receive Notes (some items still pending)
                                 </p>
-                                <p className="text-sm text-orange-700">{adn.receiver_notes}</p>
+                                <p className="text-sm text-gray-800">{adn.receiver_notes}</p>
                               </div>
                             )}
                             <div className="divide-y divide-gray-100">
@@ -1698,7 +1698,7 @@ const SiteAssets: React.FC = () => {
                                   key={item.adn_item_id}
                                   onClick={() => toggleReturnItemCheck(item.adn_item_id)}
                                   className={`py-3 px-2 flex items-center gap-3 transition-colors cursor-pointer hover:bg-gray-100 rounded-lg ${
-                                    checkedReturnItems.has(item.adn_item_id) ? 'bg-indigo-50/50 hover:bg-indigo-100/50' : ''
+                                    checkedReturnItems.has(item.adn_item_id) ? 'bg-gray-50/50 hover:bg-gray-100/50' : ''
                                   }`}
                                 >
                                   {/* Item Checkbox */}
@@ -1708,7 +1708,7 @@ const SiteAssets: React.FC = () => {
                                     aria-label={`Select ${item.category_name} for return`}
                                     className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all flex-shrink-0 ${
                                       checkedReturnItems.has(item.adn_item_id)
-                                        ? 'bg-indigo-500 border-indigo-500'
+                                        ? 'bg-gray-500 border-gray-500'
                                         : 'bg-white border-gray-300'
                                     }`}
                                   >
@@ -1717,8 +1717,8 @@ const SiteAssets: React.FC = () => {
                                     )}
                                   </div>
 
-                                  <div className="p-2 bg-green-100 rounded-lg flex-shrink-0">
-                                    <CubeIcon className="w-4 h-4 text-green-600" />
+                                  <div className="p-2 bg-gray-100 rounded-lg flex-shrink-0">
+                                    <CubeIcon className="w-4 h-4 text-gray-700" />
                                   </div>
 
                                   <div className="flex-1 min-w-0">
@@ -1727,7 +1727,7 @@ const SiteAssets: React.FC = () => {
                                       {item.quantity} unit(s) • {item.item_code || item.serial_number || item.category_code}
                                     </p>
                                     {item.received_at && (
-                                      <p className="text-xs text-green-600 mt-0.5">
+                                      <p className="text-xs text-gray-700 mt-0.5">
                                         Received: {new Date(item.received_at).toLocaleDateString()}
                                         {item.received_by && ` by ${item.received_by}`}
                                       </p>
@@ -1743,7 +1743,7 @@ const SiteAssets: React.FC = () => {
                                         e.stopPropagation();
                                         openSingleReturnModal(adn, item);
                                       }}
-                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors text-sm font-medium"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
                                     >
                                       <ArrowUturnLeftIcon className="w-3.5 h-3.5" />
                                       Return
@@ -1784,14 +1784,14 @@ const SiteAssets: React.FC = () => {
         )}
 
         {/* Info Note */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
           <div className="flex items-start gap-3">
-            <div className="p-1 bg-blue-100 rounded-full">
-              <CubeIcon className="w-4 h-4 text-blue-600" />
+            <div className="p-1 bg-gray-100 rounded-full">
+              <CubeIcon className="w-4 h-4 text-gray-600" />
             </div>
             <div>
-              <p className="text-sm text-blue-800 font-medium">Asset Flow</p>
-              <p className="text-sm text-blue-600 mt-1">
+              <p className="text-sm text-gray-900 font-medium">Asset Flow</p>
+              <p className="text-sm text-gray-700 mt-1">
                 <span className="font-medium">1. Dispatched</span> → PM dispatches asset, you see it in yellow section<br/>
                 <span className="font-medium">2. Received</span> → Select items with checkboxes, then click "Receive Selected" or "Receive All"<br/>
                 <span className="font-medium">3. Return</span> → Request return for individual items when done
@@ -1817,20 +1817,20 @@ const SiteAssets: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-xl shadow-sm border-2 border-orange-200 overflow-hidden"
+            className="bg-white rounded-xl shadow-sm border-2 border-gray-200 overflow-hidden"
           >
-            <div className="px-5 py-4 bg-orange-50 border-b border-orange-200">
+            <div className="px-5 py-4 bg-gray-50 border-b border-gray-200">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-orange-100 rounded-lg">
-                    <ArrowUturnLeftIcon className="w-5 h-5 text-orange-600" />
+                  <div className="p-2 bg-gray-100 rounded-lg">
+                    <ArrowUturnLeftIcon className="w-5 h-5 text-gray-700" />
                   </div>
                   <div>
                     <h2 className="font-semibold text-gray-900">My Return Notes</h2>
                     <p className="text-sm text-gray-500">Track your return requests - Issue → Dispatch → Store Receives</p>
                   </div>
                 </div>
-                <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-sm font-medium">
+                <span className="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">
                   {myReturnNotes.length} pending
                 </span>
               </div>
@@ -1860,7 +1860,7 @@ const SiteAssets: React.FC = () => {
                           </button>
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-orange-600">{ardn.ardn_number}</span>
+                              <span className="font-medium text-gray-700">{ardn.ardn_number}</span>
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${ARDN_STATUS_COLORS[ardn.status]}`}>
                                 {ardn.status}
                               </span>
@@ -1878,7 +1878,7 @@ const SiteAssets: React.FC = () => {
                             <button
                               onClick={() => handleIssueARDN(ardn)}
                               disabled={isProcessing}
-                              className="flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm font-medium"
+                              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium shadow-sm"
                             >
                               {isProcessing ? <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" /> : <CheckCircleIcon className="w-3.5 h-3.5" />}
                               Issue
@@ -1890,7 +1890,7 @@ const SiteAssets: React.FC = () => {
                             <button
                               onClick={() => openDispatchModal(ardn)}
                               disabled={isProcessing}
-                              className="flex items-center gap-1 px-3 py-1.5 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 text-sm font-medium"
+                              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium shadow-sm"
                             >
                               {isProcessing ? <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" /> : <TruckIcon className="w-3.5 h-3.5" />}
                               Dispatch
@@ -1899,7 +1899,7 @@ const SiteAssets: React.FC = () => {
 
                           {/* IN_TRANSIT → Waiting indicator */}
                           {ardn.status === 'IN_TRANSIT' && (
-                            <span className="flex items-center gap-1 px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg text-sm font-medium">
+                            <span className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 text-gray-800 rounded-lg text-sm font-medium">
                               <ClockIcon className="w-3.5 h-3.5" />
                               In Transit to Store
                             </span>
@@ -1907,7 +1907,7 @@ const SiteAssets: React.FC = () => {
 
                           {/* RECEIVED → Success indicator */}
                           {ardn.status === 'RECEIVED' && (
-                            <span className="flex items-center gap-1 px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-sm font-medium">
+                            <span className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 text-gray-800 rounded-lg text-sm font-medium">
                               <CheckCircleIcon className="w-3.5 h-3.5" />
                               Received at Store
                             </span>
@@ -1916,7 +1916,7 @@ const SiteAssets: React.FC = () => {
                           {/* Download PDF */}
                           <button
                             onClick={() => handleDownloadARDN(ardn)}
-                            className="p-1.5 text-green-600 hover:bg-green-100 rounded-lg"
+                            className="p-1.5 text-gray-700 hover:bg-gray-100 rounded-lg"
                             title="Download PDF"
                           >
                             <ArrowDownTrayIcon className="w-4 h-4" />
@@ -1925,7 +1925,7 @@ const SiteAssets: React.FC = () => {
                           {/* Print PDF */}
                           <button
                             onClick={() => handlePrintARDN(ardn)}
-                            className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg"
+                            className="p-1.5 text-gray-700 hover:bg-gray-100 rounded-lg"
                             title="Print"
                           >
                             <PrinterIcon className="w-4 h-4" />
@@ -1969,8 +1969,8 @@ const SiteAssets: React.FC = () => {
                                   key={item.return_item_id}
                                   className="flex items-center gap-3 p-2 bg-white rounded-lg border border-gray-200"
                                 >
-                                  <div className="p-1.5 bg-orange-100 rounded">
-                                    <CubeIcon className="w-4 h-4 text-orange-600" />
+                                  <div className="p-1.5 bg-gray-100 rounded">
+                                    <CubeIcon className="w-4 h-4 text-gray-700" />
                                   </div>
                                   <div className="flex-1">
                                     <p className="font-medium text-sm">{item.category_name}</p>
@@ -1982,7 +1982,7 @@ const SiteAssets: React.FC = () => {
                                     {item.reported_condition}
                                   </span>
                                   {item.damage_description && (
-                                    <span className="text-xs text-red-600 max-w-[150px] truncate" title={item.damage_description}>
+                                    <span className="text-xs text-gray-700 max-w-[150px] truncate" title={item.damage_description}>
                                       {item.damage_description}
                                     </span>
                                   )}
@@ -2008,8 +2008,8 @@ const SiteAssets: React.FC = () => {
                 className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center"
               >
                 <div className="flex flex-col items-center">
-                  <div className="p-4 bg-orange-100 rounded-full mb-4">
-                    <ArrowUturnLeftIcon className="w-12 h-12 text-orange-400" />
+                  <div className="p-4 bg-gray-100 rounded-full mb-4">
+                    <ArrowUturnLeftIcon className="w-12 h-12 text-gray-500" />
                   </div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">No Return Notes</h3>
                   <p className="text-gray-500 max-w-md">
@@ -2036,7 +2036,7 @@ const SiteAssets: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-xl shadow-sm border border-blue-200 overflow-hidden"
+              className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
             >
               {/* Sub-tabs for filtering */}
               <div className="px-5 py-2 border-b border-gray-100 flex gap-2 overflow-x-auto">
@@ -2047,10 +2047,10 @@ const SiteAssets: React.FC = () => {
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
                       reqSubTab === tab
                         ? tab === 'rejected'
-                          ? 'bg-red-100 text-red-700'
+                          ? 'bg-gray-100 text-gray-800'
                           : tab === 'draft'
                           ? 'bg-gray-200 text-gray-800'
-                          : 'bg-blue-100 text-blue-700'
+                          : 'bg-gray-100 text-gray-800'
                         : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                     }`}
                   >
@@ -2063,8 +2063,8 @@ const SiteAssets: React.FC = () => {
               {filteredRequisitions.length === 0 ? (
                 <div className="p-8 text-center">
                   <div className="flex flex-col items-center">
-                    <div className="p-4 bg-blue-100 rounded-full mb-4">
-                      <DocumentTextIcon className="w-10 h-10 text-blue-400" />
+                    <div className="p-4 bg-gray-100 rounded-full mb-4">
+                      <DocumentTextIcon className="w-10 h-10 text-gray-500" />
                     </div>
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">
                       No {reqSubTab} requisitions
@@ -2081,7 +2081,7 @@ const SiteAssets: React.FC = () => {
                     {reqSubTab === 'draft' && (
                       <button
                         onClick={openRequisitionModal}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm"
                       >
                         <PlusIcon className="w-4 h-4" />
                         Create New Request
@@ -2109,7 +2109,7 @@ const SiteAssets: React.FC = () => {
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
-                              <span className="font-mono text-sm font-semibold text-blue-600">
+                              <span className="font-mono text-sm font-semibold text-gray-700">
                                 {req.requisition_code}
                               </span>
                               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[req.status]}`}>
@@ -2119,7 +2119,7 @@ const SiteAssets: React.FC = () => {
                                 {URGENCY_LABELS[req.urgency]}
                               </span>
                               {totalItems > 1 && (
-                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                                   {totalItems} items
                                 </span>
                               )}
@@ -2152,7 +2152,7 @@ const SiteAssets: React.FC = () => {
                               <button
                                 onClick={() => handleSendToPM(req)}
                                 disabled={submittingRequisition}
-                                className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"
+                                className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1 shadow-sm"
                               >
                                 <PaperAirplaneIcon className="w-3 h-3" />
                                 {req.status === 'pm_rejected' ? 'Resend' : 'Send for Approval'}
@@ -2162,7 +2162,7 @@ const SiteAssets: React.FC = () => {
                             {canEditRequisition(req, currentUserId) && (
                               <button
                                 onClick={() => openEditReqModal(req)}
-                                className="px-3 py-1.5 text-orange-600 text-xs hover:bg-orange-50 rounded-lg flex items-center gap-1"
+                                className="px-3 py-1.5 text-gray-700 text-xs hover:bg-gray-100 rounded-lg flex items-center gap-1 border border-gray-200"
                               >
                                 <PencilIcon className="w-3 h-3" />
                                 Edit
@@ -2171,7 +2171,7 @@ const SiteAssets: React.FC = () => {
                             {req.status === 'dispatched' && (
                               <button
                                 onClick={() => setConfirmReceiptReqId(req.requisition_id)}
-                                className="px-3 py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700"
+                                className="px-3 py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700 shadow-sm"
                               >
                                 Confirm Receipt
                               </button>
@@ -2179,7 +2179,7 @@ const SiteAssets: React.FC = () => {
                             {canCancelRequisition(req, currentUserId) && (
                               <button
                                 onClick={() => handleCancelRequisition(req.requisition_id)}
-                                className="px-3 py-1.5 text-red-600 text-xs hover:bg-red-50 rounded-lg"
+                                className="px-3 py-1.5 text-red-600 text-xs hover:bg-red-50 rounded-lg border border-red-200"
                               >
                                 Cancel
                               </button>
@@ -2203,12 +2203,12 @@ const SiteAssets: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-xl shadow-sm border border-purple-200 overflow-hidden"
+              className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
             >
-              <div className="px-5 py-4 flex items-center justify-between bg-purple-50/50 border-b border-purple-200">
+              <div className="px-5 py-4 flex items-center justify-between bg-gray-50/50 border-b border-gray-200">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <ClockIcon className="w-5 h-5 text-purple-600" />
+                  <div className="p-2 bg-gray-100 rounded-lg">
+                    <ClockIcon className="w-5 h-5 text-gray-700" />
                   </div>
                   <div className="text-left">
                     <h3 className="font-semibold text-gray-900">Asset Movement History</h3>
@@ -2217,7 +2217,7 @@ const SiteAssets: React.FC = () => {
                 </div>
                 <button
                   onClick={fetchHistory}
-                  className="px-3 py-1.5 text-purple-600 hover:bg-purple-100 rounded-lg text-sm font-medium flex items-center gap-1"
+                  className="px-3 py-1.5 text-gray-700 hover:bg-gray-100 rounded-lg text-sm font-medium flex items-center gap-1"
                 >
                   <ArrowPathIcon className="w-4 h-4" />
                   Refresh
@@ -2263,7 +2263,7 @@ const SiteAssets: React.FC = () => {
                             className="w-full px-5 py-3 bg-gray-50 hover:bg-gray-100 transition-colors flex items-center justify-between"
                           >
                             <div className="flex items-center gap-2">
-                              <BuildingOfficeIcon className="w-5 h-5 text-indigo-600" />
+                              <BuildingOfficeIcon className="w-5 h-5 text-gray-700" />
                               <h4 className="font-semibold text-gray-900">{group.project_name}</h4>
                               <span className="text-xs text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">
                                 {group.movements.length} movement(s)
@@ -2289,17 +2289,17 @@ const SiteAssets: React.FC = () => {
                                   {group.movements.map((h) => (
                                     <div key={h.movement_id} className="px-5 py-3 hover:bg-gray-50">
                                       <div className="flex items-start gap-3">
-                                        <div className={`p-1.5 rounded-lg ${h.movement_type === 'DISPATCH' ? 'bg-orange-100' : 'bg-green-100'}`}>
+                                        <div className={`p-1.5 rounded-lg ${h.movement_type === 'DISPATCH' ? 'bg-gray-100' : 'bg-gray-100'}`}>
                                           {h.movement_type === 'DISPATCH' ? (
-                                            <TruckIcon className="w-4 h-4 text-orange-600" />
+                                            <TruckIcon className="w-4 h-4 text-gray-700" />
                                           ) : (
-                                            <ArrowUturnLeftIcon className="w-4 h-4 text-green-600" />
+                                            <ArrowUturnLeftIcon className="w-4 h-4 text-gray-700" />
                                           )}
                                         </div>
                                         <div className="flex-1 min-w-0">
                                           <div className="flex items-center gap-2 flex-wrap">
                                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                              h.movement_type === 'DISPATCH' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                                              h.movement_type === 'DISPATCH' ? 'bg-gray-100 text-gray-800' : 'bg-gray-100 text-gray-800'
                                             }`}>
                                               {h.movement_type === 'DISPATCH' ? 'Dispatched' : 'Returned'}
                                             </span>
@@ -2368,7 +2368,7 @@ const SiteAssets: React.FC = () => {
               onClick={e => e.stopPropagation()}
             >
               {/* Modal Header */}
-              <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-5 py-4 rounded-t-xl flex-shrink-0">
+              <div className="bg-gray-800 px-5 py-4 rounded-t-xl flex-shrink-0">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-white/20 rounded-lg">
@@ -2393,16 +2393,16 @@ const SiteAssets: React.FC = () => {
               {/* Modal Body - Scrollable */}
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 {/* DN Info */}
-                <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
+                <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-indigo-600 font-medium">Returning from</p>
-                      <p className="font-semibold text-indigo-900">{returnADN.project_name}</p>
-                      <p className="text-xs text-indigo-600 font-mono mt-1">Original DN: {returnADN.adn_number}</p>
+                      <p className="text-sm text-gray-700 font-medium">Returning from</p>
+                      <p className="font-semibold text-gray-900">{returnADN.project_name}</p>
+                      <p className="text-xs text-gray-700 font-mono mt-1">Original DN: {returnADN.adn_number}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-2xl font-bold text-indigo-600">{returnItems.length}</p>
-                      <p className="text-xs text-indigo-500">Items</p>
+                      <p className="text-2xl font-bold text-gray-700">{returnItems.length}</p>
+                      <p className="text-xs text-gray-600">Items</p>
                     </div>
                   </div>
                 </div>
@@ -2418,8 +2418,8 @@ const SiteAssets: React.FC = () => {
                       return (
                         <div key={item.adn_item_id} className="bg-white rounded-lg p-3 border border-gray-200">
                           <div className="flex items-start gap-3">
-                            <div className="p-2 bg-indigo-100 rounded-lg flex-shrink-0">
-                              <CubeIcon className="w-4 h-4 text-indigo-600" />
+                            <div className="p-2 bg-gray-100 rounded-lg flex-shrink-0">
+                              <CubeIcon className="w-4 h-4 text-gray-700" />
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-gray-900 text-sm">{item.category_name}</p>
@@ -2439,13 +2439,13 @@ const SiteAssets: React.FC = () => {
                                     onChange={(e) => updateItemCondition(item.adn_item_id, 'quantity', parseInt(e.target.value) || 1)}
                                     className={`w-24 px-2 py-1 text-sm border rounded focus:ring-1 ${
                                       cond.quantity <= 0 || cond.quantity > item.quantity
-                                        ? 'border-red-500 focus:ring-red-500 focus:border-red-500 bg-red-50'
-                                        : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'
+                                        ? 'border-gray-500 focus:ring-gray-500 focus:border-gray-500 bg-gray-50'
+                                        : 'border-gray-300 focus:ring-gray-500 focus:border-gray-500'
                                     }`}
                                   />
                                   <span className="ml-2 text-xs text-gray-500">of {item.quantity} available</span>
                                   {(cond.quantity <= 0 || cond.quantity > item.quantity) && (
-                                    <p className="text-xs text-red-600 mt-1 font-medium">
+                                    <p className="text-xs text-gray-700 mt-1 font-medium">
                                       {cond.quantity <= 0 ? '* Quantity must be at least 1' : `* Cannot exceed ${item.quantity} available`}
                                     </p>
                                   )}
@@ -2460,10 +2460,10 @@ const SiteAssets: React.FC = () => {
                                     onClick={() => updateItemCondition(item.adn_item_id, 'condition', condition)}
                                     className={`px-2 py-1 rounded text-xs font-medium border transition-all ${
                                       cond.condition === condition
-                                        ? condition === 'good' ? 'bg-green-100 border-green-500 text-green-700'
-                                          : condition === 'fair' ? 'bg-yellow-100 border-yellow-500 text-yellow-700'
-                                          : condition === 'poor' ? 'bg-orange-100 border-orange-500 text-orange-700'
-                                          : 'bg-red-100 border-red-500 text-red-700'
+                                        ? condition === 'good' ? 'bg-gray-100 border-gray-500 text-gray-800'
+                                          : condition === 'fair' ? 'bg-gray-100 border-gray-500 text-gray-800'
+                                          : condition === 'poor' ? 'bg-gray-100 border-gray-500 text-gray-800'
+                                          : 'bg-gray-100 border-gray-500 text-gray-800'
                                         : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'
                                     }`}
                                   >
@@ -2480,10 +2480,10 @@ const SiteAssets: React.FC = () => {
                                     value={cond.damage_description}
                                     onChange={(e) => updateItemCondition(item.adn_item_id, 'damage_description', e.target.value)}
                                     placeholder={cond.condition === 'damaged' ? 'Describe damage...' : 'Describe condition...'}
-                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 resize-none"
                                   />
                                   {!cond.damage_description.trim() && (
-                                    <p className="text-xs text-red-500 mt-1">* Required for non-good condition</p>
+                                    <p className="text-xs text-gray-600 mt-1">* Required for non-good condition</p>
                                   )}
                                 </div>
                               )}
@@ -2505,7 +2505,7 @@ const SiteAssets: React.FC = () => {
                     onChange={(e) => setReturnNotes(e.target.value)}
                     rows={2}
                     placeholder="Reason for return, any additional information..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
               </div>
@@ -2531,7 +2531,7 @@ const SiteAssets: React.FC = () => {
                         return !cond || cond.quantity <= 0 || cond.quantity > item.quantity;
                       })
                     }
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
                   >
                     {submitting ? (
                       <>
@@ -2586,14 +2586,14 @@ const SiteAssets: React.FC = () => {
               {/* Modal Content */}
               <div className="px-5 py-4 space-y-4">
                 {/* Items being received */}
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                  <p className="text-sm font-medium text-yellow-800 mb-2">Items to receive:</p>
-                  <ul className="text-sm text-yellow-700 space-y-1">
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                  <p className="text-sm font-medium text-gray-900 mb-2">Items to receive:</p>
+                  <ul className="text-sm text-gray-800 space-y-1">
                     {partialReceiveADN.items
                       .filter(item => checkedItems.has(item.adn_item_id))
                       .map(item => (
                         <li key={item.adn_item_id} className="flex items-center gap-2">
-                          <CheckCircleIcon className="w-4 h-4 text-green-500" />
+                          <CheckCircleIcon className="w-4 h-4 text-gray-600" />
                           {item.category_name} ({item.quantity} unit{item.quantity > 1 ? 's' : ''})
                         </li>
                       ))
@@ -2609,7 +2609,7 @@ const SiteAssets: React.FC = () => {
                       .filter(item => !checkedItems.has(item.adn_item_id))
                       .map(item => (
                         <li key={item.adn_item_id} className="flex items-center gap-2">
-                          <ClockIcon className="w-4 h-4 text-yellow-500" />
+                          <ClockIcon className="w-4 h-4 text-gray-600" />
                           {item.category_name} ({item.quantity} unit{item.quantity > 1 ? 's' : ''})
                         </li>
                       ))
@@ -2620,14 +2620,14 @@ const SiteAssets: React.FC = () => {
                 {/* Mandatory Notes */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Reason for Partial Receive <span className="text-red-500">*</span>
+                    Reason for Partial Receive <span className="text-gray-600">*</span>
                   </label>
                   <textarea
                     value={partialReceiveNotes}
                     onChange={(e) => setPartialReceiveNotes(e.target.value)}
                     rows={3}
                     placeholder="Why are you not receiving all items? (e.g., items missing, wrong items, damaged items not in delivery...)"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                     required
                   />
                   <p className="text-xs text-gray-500 mt-1">This is required for partial receives</p>
@@ -2645,7 +2645,7 @@ const SiteAssets: React.FC = () => {
                 <button
                   onClick={handleConfirmPartialReceive}
                   disabled={markingReceived === partialReceiveADN.adn_id || !partialReceiveNotes.trim()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
                 >
                   {markingReceived === partialReceiveADN.adn_id ? (
                     <>
@@ -2681,11 +2681,11 @@ const SiteAssets: React.FC = () => {
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
-              <div className="px-5 py-4 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-amber-50">
+              <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
-                      <TruckIcon className="w-5 h-5 text-orange-600" />
+                    <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                      <TruckIcon className="w-5 h-5 text-gray-700" />
                     </div>
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900">Dispatch Return Note</h3>
@@ -2717,7 +2717,7 @@ const SiteAssets: React.FC = () => {
                     value={dispatchDriverName}
                     onChange={(e) => setDispatchDriverName(e.target.value)}
                     placeholder="Enter driver name"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
 
@@ -2731,7 +2731,7 @@ const SiteAssets: React.FC = () => {
                     value={dispatchVehicleNumber}
                     onChange={(e) => setDispatchVehicleNumber(e.target.value)}
                     placeholder="Enter vehicle number (e.g., KA-01-AB-1234)"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
 
@@ -2745,7 +2745,7 @@ const SiteAssets: React.FC = () => {
                     value={dispatchDriverContact}
                     onChange={(e) => setDispatchDriverContact(e.target.value)}
                     placeholder="Enter driver phone number"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
 
@@ -2755,7 +2755,7 @@ const SiteAssets: React.FC = () => {
                   <ul className="text-sm text-gray-600 space-y-1">
                     {dispatchARDN.items.map((item, idx) => (
                       <li key={idx} className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
                         {item.category_name} ({item.quantity} unit{item.quantity > 1 ? 's' : ''})
                       </li>
                     ))}
@@ -2774,7 +2774,7 @@ const SiteAssets: React.FC = () => {
                 <button
                   onClick={handleDispatchARDN}
                   disabled={processingARDN === dispatchARDN.ardn_id}
-                  className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
                 >
                   {processingARDN === dispatchARDN.ardn_id ? (
                     <>
@@ -2830,7 +2830,7 @@ const SiteAssets: React.FC = () => {
                   {/* Project Selection */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Project <span className="text-red-500">*</span>
+                      Project <span className="text-gray-600">*</span>
                     </label>
                     <select
                       value={requisitionForm.project_id}
@@ -2843,7 +2843,7 @@ const SiteAssets: React.FC = () => {
                           site_location: selectedProject?.location || ''
                         }));
                       }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                       required
                     >
                       <option value={0}>Select project...</option>
@@ -2884,12 +2884,12 @@ const SiteAssets: React.FC = () => {
                                   }
                                 }}
                                 onFocus={() => setShowCategoryDropdown(true)}
-                                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm ${
-                                  isAlreadyInList ? 'border-yellow-400 bg-yellow-50' : 'border-gray-300'
+                                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 text-sm ${
+                                  isAlreadyInList ? 'border-gray-400 bg-gray-50' : 'border-gray-300'
                                 }`}
                               />
                               {isAlreadyInList && (
-                                <p className="text-xs text-yellow-700 mt-1">
+                                <p className="text-xs text-gray-800 mt-1">
                                   Already in list with qty {selectedInListQty}. Adding will update total.
                                 </p>
                               )}
@@ -2958,10 +2958,10 @@ const SiteAssets: React.FC = () => {
                                       isOutOfStock
                                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-60'
                                         : isMaxedOut
-                                        ? 'bg-red-50 opacity-60 cursor-not-allowed'
+                                        ? 'bg-gray-50 opacity-60 cursor-not-allowed'
                                         : isInList
-                                        ? 'bg-yellow-50 border-l-2 border-yellow-400 hover:bg-yellow-100'
-                                        : 'hover:bg-blue-50'
+                                        ? 'bg-gray-50 border-l-2 border-gray-400 hover:bg-gray-100'
+                                        : 'hover:bg-gray-50'
                                     }`}
                                   >
                                     <div className="flex-1 min-w-0">
@@ -2970,19 +2970,19 @@ const SiteAssets: React.FC = () => {
                                       </span>
                                       {isInList && !isOutOfStock && (
                                         <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
-                                          isMaxedOut ? 'text-red-700 bg-red-100' : 'text-yellow-700 bg-yellow-100'
+                                          isMaxedOut ? 'text-gray-800 bg-gray-100' : 'text-gray-800 bg-gray-100'
                                         }`}>
                                           {currentQty} / {availableQty} {isMaxedOut ? '(Max)' : ''}
                                         </span>
                                       )}
                                       {isOutOfStock && (
-                                        <span className="ml-2 text-xs text-red-500">
+                                        <span className="ml-2 text-xs text-gray-600">
                                           Out of stock
                                         </span>
                                       )}
                                     </div>
                                     <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
-                                      isOutOfStock ? 'bg-red-100 text-red-500' : 'bg-green-100 text-green-700'
+                                      isOutOfStock ? 'bg-gray-100 text-gray-600' : 'bg-gray-100 text-gray-800'
                                     }`}>
                                       {isOutOfStock ? 'Unavailable' : `Avail: ${availableQty}`}
                                     </span>
@@ -3005,7 +3005,7 @@ const SiteAssets: React.FC = () => {
                           min={1}
                           value={requisitionForm.quantity}
                           onChange={(e) => setRequisitionForm(prev => ({ ...prev, quantity: Number(e.target.value) }))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 text-sm"
                         />
                       </div>
 
@@ -3016,8 +3016,8 @@ const SiteAssets: React.FC = () => {
                           <button
                             type="button"
                             onClick={addItemToRequisition}
-                            className={`px-3 py-2 text-white rounded-lg transition-colors flex items-center gap-1 ${
-                              isUpdate ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'
+                            className={`px-3 py-2 text-white rounded-lg transition-colors flex items-center gap-1 shadow-sm ${
+                              isUpdate ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'
                             }`}
                             title={isUpdate ? 'Update quantity' : 'Add to list'}
                           >
@@ -3031,8 +3031,8 @@ const SiteAssets: React.FC = () => {
                     {/* Items List */}
                     {requisitionItems.length > 0 && (
                       <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
-                        <div className="px-3 py-2 bg-blue-50 border-b border-gray-200 flex items-center justify-between">
-                          <span className="text-sm font-medium text-blue-700">
+                        <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-800">
                             {requisitionItems.length} item{requisitionItems.length > 1 ? 's' : ''} in request
                           </span>
                         </div>
@@ -3056,7 +3056,7 @@ const SiteAssets: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => removeItemFromRequisition(item.id)}
-                                  className="p-1 text-red-500 hover:bg-red-50 rounded transition-colors"
+                                  className="p-1 text-gray-600 hover:bg-gray-50 rounded transition-colors"
                                   title="Remove"
                                 >
                                   <XMarkIcon className="w-4 h-4" />
@@ -3080,14 +3080,14 @@ const SiteAssets: React.FC = () => {
                     {/* Required Date */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Required Date <span className="text-red-500">*</span>
+                        Required Date <span className="text-gray-600">*</span>
                       </label>
                       <input
                         type="date"
                         value={requisitionForm.required_date}
                         min={new Date().toISOString().split('T')[0]}
                         onChange={(e) => setRequisitionForm(prev => ({ ...prev, required_date: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                         required
                       />
                     </div>
@@ -3098,7 +3098,7 @@ const SiteAssets: React.FC = () => {
                       <select
                         value={requisitionForm.urgency}
                         onChange={(e) => setRequisitionForm(prev => ({ ...prev, urgency: e.target.value as Urgency }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                       >
                         <option value="low">Low</option>
                         <option value="normal">Normal</option>
@@ -3111,14 +3111,14 @@ const SiteAssets: React.FC = () => {
                   {/* Purpose */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Purpose / Justification <span className="text-red-500">*</span>
+                      Purpose / Justification <span className="text-gray-600">*</span>
                     </label>
                     <textarea
                       value={requisitionForm.purpose}
                       onChange={(e) => setRequisitionForm(prev => ({ ...prev, purpose: e.target.value }))}
                       rows={2}
                       placeholder="Why do you need these assets?"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                       required
                     />
                   </div>
@@ -3126,14 +3126,14 @@ const SiteAssets: React.FC = () => {
                   {/* Site Location */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Site Location <span className="text-red-500">*</span>
+                      Site Location <span className="text-gray-600">*</span>
                     </label>
                     <input
                       type="text"
                       value={requisitionForm.site_location || ''}
                       onChange={(e) => setRequisitionForm(prev => ({ ...prev, site_location: e.target.value }))}
                       placeholder="Specific location at site"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                       required
                     />
                   </div>
@@ -3143,7 +3143,7 @@ const SiteAssets: React.FC = () => {
                 <div className="px-5 py-4 border-t border-gray-200 flex items-center justify-between sticky bottom-0 bg-gray-50">
                   <div className="text-sm text-gray-600">
                     {requisitionItems.length > 0 ? (
-                      <span className="font-medium text-blue-600">
+                      <span className="font-medium text-gray-700">
                         {requisitionItems.length} item{requisitionItems.length > 1 ? 's' : ''} ready to submit
                       </span>
                     ) : requisitionForm.category_id ? (
@@ -3163,7 +3163,7 @@ const SiteAssets: React.FC = () => {
                     <button
                       type="submit"
                       disabled={submittingRequisition || (requisitionItems.length === 0 && !requisitionForm.category_id)}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
                     >
                       {submittingRequisition ? (
                         <>
@@ -3206,8 +3206,8 @@ const SiteAssets: React.FC = () => {
               </div>
 
               <div className="p-5 space-y-4">
-                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                  <p className="text-sm text-green-700">
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                  <p className="text-sm text-gray-800">
                     This confirms that the asset has been delivered to your site and is in your possession.
                   </p>
                 </div>
@@ -3219,7 +3219,7 @@ const SiteAssets: React.FC = () => {
                     onChange={(e) => setReceiptNotes(e.target.value)}
                     rows={2}
                     placeholder="Any notes about the received asset..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
               </div>
@@ -3236,7 +3236,7 @@ const SiteAssets: React.FC = () => {
                 </button>
                 <button
                   onClick={handleConfirmReceipt}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 shadow-sm"
                 >
                   <CheckCircleIcon className="w-4 h-4" />
                   Confirm Receipt
@@ -3262,8 +3262,8 @@ const SiteAssets: React.FC = () => {
               className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="px-5 py-4 border-b border-gray-200 bg-orange-50">
-                <h3 className="text-lg font-semibold text-orange-800">Edit Requisition</h3>
+              <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
+                <h3 className="text-lg font-semibold text-gray-900">Edit Requisition</h3>
                 <p className="text-sm text-gray-500">{editRequisition.requisition_code}</p>
               </div>
 
@@ -3271,7 +3271,7 @@ const SiteAssets: React.FC = () => {
                 {/* Project Selection - Same as Create Modal */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Project <span className="text-red-500">*</span>
+                    Project <span className="text-gray-600">*</span>
                   </label>
                   <select
                     value={editProjectId}
@@ -3282,7 +3282,7 @@ const SiteAssets: React.FC = () => {
                       // Auto-fetch location from project
                       setEditSiteLocation(selectedProject?.location || '');
                     }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                     required
                   >
                     <option value={0}>Select project...</option>
@@ -3296,9 +3296,9 @@ const SiteAssets: React.FC = () => {
 
                 {/* Show rejection reason if pm_rejected */}
                 {editRequisition.status === 'pm_rejected' && editRequisition.pm_rejection_reason && (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                    <p className="text-sm font-medium text-red-700">PM Rejection Reason:</p>
-                    <p className="text-sm text-red-600 mt-1">{editRequisition.pm_rejection_reason}</p>
+                  <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                    <p className="text-sm font-medium text-gray-800">PM Rejection Reason:</p>
+                    <p className="text-sm text-gray-700 mt-1">{editRequisition.pm_rejection_reason}</p>
                   </div>
                 )}
 
@@ -3325,7 +3325,7 @@ const SiteAssets: React.FC = () => {
                           }}
                           onFocus={() => setShowCategoryDropdown(true)}
                           onBlur={() => setTimeout(() => setShowCategoryDropdown(false), 200)}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                         />
                         {showCategoryDropdown && (
                           <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
@@ -3380,7 +3380,7 @@ const SiteAssets: React.FC = () => {
                                       setShowCategoryDropdown(false);
                                     }}
                                     className={`px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 ${
-                                      isMaxedOut ? 'bg-red-50 opacity-60 cursor-not-allowed' : isAlreadyAdded ? 'bg-yellow-50' : ''
+                                      isMaxedOut ? 'bg-gray-50 opacity-60 cursor-not-allowed' : isAlreadyAdded ? 'bg-gray-50' : ''
                                     }`}
                                   >
                                     <div className="flex items-center justify-between">
@@ -3388,12 +3388,12 @@ const SiteAssets: React.FC = () => {
                                       <div className="flex items-center gap-2">
                                         {isAlreadyAdded && (
                                           <span className={`text-xs px-1.5 py-0.5 rounded ${
-                                            isMaxedOut ? 'text-red-700 bg-red-100' : 'text-yellow-700 bg-yellow-100'
+                                            isMaxedOut ? 'text-gray-800 bg-gray-100' : 'text-gray-800 bg-gray-100'
                                           }`}>
                                             {currentQty} / {availableQty} {isMaxedOut ? '(Max)' : ''}
                                           </span>
                                         )}
-                                        <span className="text-xs text-green-600">Avail: {availableQty}</span>
+                                        <span className="text-xs text-gray-700">Avail: {availableQty}</span>
                                       </div>
                                     </div>
                                     <p className="text-xs text-gray-500">{cat.category_code}</p>
@@ -3419,7 +3419,7 @@ const SiteAssets: React.FC = () => {
                   {/* Items List */}
                   {editItems.length > 0 ? (
                     <div className="space-y-2">
-                      <p className="text-xs font-medium text-blue-600">{editItems.length} {editItems.length === 1 ? 'item' : 'items'} in request</p>
+                      <p className="text-xs font-medium text-gray-700">{editItems.length} {editItems.length === 1 ? 'item' : 'items'} in request</p>
                       {editItems.map((item, idx) => (
                         <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200">
                           <div className="flex-1">
@@ -3449,7 +3449,7 @@ const SiteAssets: React.FC = () => {
                                   return newItems;
                                 });
                               }}
-                              className="w-16 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                              className="w-16 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                             />
                             <button
                               type="button"
@@ -3460,7 +3460,7 @@ const SiteAssets: React.FC = () => {
                                   showError('At least one item is required');
                                 }
                               }}
-                              className="text-red-600 hover:text-red-800 p-1"
+                              className="text-gray-700 hover:text-gray-900 p-1"
                               title="Remove item"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3479,14 +3479,14 @@ const SiteAssets: React.FC = () => {
                 {/* Purpose */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Purpose <span className="text-red-500">*</span>
+                    Purpose <span className="text-gray-600">*</span>
                   </label>
                   <textarea
                     value={editPurpose}
                     onChange={(e) => setEditPurpose(e.target.value)}
                     rows={3}
                     placeholder="Why do you need this asset?"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 resize-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 resize-none"
                     required
                   />
                 </div>
@@ -3494,14 +3494,14 @@ const SiteAssets: React.FC = () => {
                 {/* Required Date */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Required Date <span className="text-red-500">*</span>
+                    Required Date <span className="text-gray-600">*</span>
                   </label>
                   <input
                     type="date"
                     value={editRequiredDate}
                     onChange={(e) => setEditRequiredDate(e.target.value)}
                     min={new Date().toISOString().split('T')[0]}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                     required
                   />
                 </div>
@@ -3512,7 +3512,7 @@ const SiteAssets: React.FC = () => {
                   <select
                     value={editUrgency}
                     onChange={(e) => setEditUrgency(e.target.value as Urgency)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   >
                     <option value="low">Low</option>
                     <option value="normal">Normal</option>
@@ -3529,7 +3529,7 @@ const SiteAssets: React.FC = () => {
                     value={editSiteLocation}
                     onChange={(e) => setEditSiteLocation(e.target.value)}
                     placeholder="Specific location at site (optional)"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
 
@@ -3544,7 +3544,7 @@ const SiteAssets: React.FC = () => {
                   <button
                     type="submit"
                     disabled={submittingRequisition}
-                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 shadow-sm"
                   >
                     {submittingRequisition ? (
                       <ModernLoadingSpinners size="sm" />
@@ -3582,7 +3582,7 @@ const SiteAssets: React.FC = () => {
             >
               {/* Icon and Header */}
               <div className="flex flex-col items-center mb-4">
-                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mb-3">
+                <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mb-3">
                   <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                   </svg>
@@ -3628,7 +3628,7 @@ const SiteAssets: React.FC = () => {
                   type="button"
                   onClick={confirmSendToPM}
                   disabled={submittingRequisition}
-                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all font-medium shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-medium shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {submittingRequisition ? (
                     <>

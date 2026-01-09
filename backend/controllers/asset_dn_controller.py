@@ -11,10 +11,9 @@ Flow:
 
 import logging
 from datetime import datetime
-from flask import Blueprint, request, jsonify
+from flask import request, jsonify
 from config.db import db
 from sqlalchemy import func, and_
-from utils.authentication import jwt_required
 
 logger = logging.getLogger(__name__)
 from models.returnable_assets import (
@@ -31,8 +30,6 @@ from models.returnable_assets import (
 )
 from models.project import Project
 from models.user import User
-
-asset_dn_bp = Blueprint('asset_dn', __name__)
 
 
 # ============================================================================
@@ -185,8 +182,6 @@ def validate_positive_int(value, field_name):
         return None, f'{field_name} must be a valid number'
 
 
-@asset_dn_bp.route('/api/assets/stock-in', methods=['POST'])
-@jwt_required
 def create_stock_in():
     """Create a stock in record for new assets"""
     try:
@@ -286,7 +281,6 @@ def create_stock_in():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/stock-in', methods=['GET'])
 def get_stock_in_list():
     """Get list of stock in records"""
     try:
@@ -322,8 +316,6 @@ def get_stock_in_list():
 # ASSET DELIVERY NOTE (ADN) ENDPOINTS
 # ============================================================================
 
-@asset_dn_bp.route('/api/assets/delivery-notes', methods=['POST'])
-@jwt_required
 def create_delivery_note():
     """Create a new Asset Delivery Note (ADN) - Dispatch assets to site"""
     try:
@@ -434,7 +426,6 @@ def create_delivery_note():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/delivery-notes', methods=['GET'])
 def get_delivery_notes():
     """Get list of Asset Delivery Notes"""
     try:
@@ -480,7 +471,6 @@ def get_delivery_notes():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/delivery-notes/<int:adn_id>', methods=['GET'])
 def get_delivery_note(adn_id):
     """Get single Asset Delivery Note with details"""
     try:
@@ -503,8 +493,6 @@ def get_delivery_note(adn_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/delivery-notes/<int:adn_id>/dispatch', methods=['PUT'])
-@jwt_required
 def dispatch_delivery_note(adn_id):
     """Dispatch the delivery note - deduct from inventory and mark as dispatched"""
     try:
@@ -558,8 +546,6 @@ def dispatch_delivery_note(adn_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/delivery-notes/<int:adn_id>/receive', methods=['PUT'])
-@jwt_required
 def receive_delivery_note(adn_id):
     """Mark delivery note as received at site"""
     try:
@@ -599,8 +585,6 @@ def receive_delivery_note(adn_id):
 # ASSET RETURN DELIVERY NOTE (ARDN) ENDPOINTS
 # ============================================================================
 
-@asset_dn_bp.route('/api/assets/return-notes', methods=['POST'])
-@jwt_required
 def create_return_note():
     """Create a new Asset Return Delivery Note (ARDN)"""
     try:
@@ -682,7 +666,6 @@ def create_return_note():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/return-notes', methods=['GET'])
 def get_return_notes():
     """Get list of Asset Return Delivery Notes"""
     try:
@@ -753,7 +736,6 @@ def get_return_notes():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/return-notes/<int:ardn_id>', methods=['GET'])
 def get_return_note(ardn_id):
     """Get single Asset Return Delivery Note with details"""
     try:
@@ -780,8 +762,6 @@ def get_return_note(ardn_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/return-notes/<int:ardn_id>/issue', methods=['PUT'])
-@jwt_required
 def issue_return_note(ardn_id):
     """Issue return note - formally prepare it for dispatch"""
     try:
@@ -813,8 +793,6 @@ def issue_return_note(ardn_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/return-notes/<int:ardn_id>/update', methods=['PUT'])
-@jwt_required
 def update_return_note(ardn_id):
     """Update return note details (driver info, notes, etc.) - only for DRAFT/ISSUED status"""
     try:
@@ -860,8 +838,6 @@ def update_return_note(ardn_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/return-notes/<int:ardn_id>/dispatch', methods=['PUT'])
-@jwt_required
 def dispatch_return_note(ardn_id):
     """Mark return note as dispatched from site - can also update driver details"""
     try:
@@ -902,8 +878,6 @@ def dispatch_return_note(ardn_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/return-notes/<int:ardn_id>/receive', methods=['PUT'])
-@jwt_required
 def receive_return_note(ardn_id):
     """Mark return note as received at store"""
     try:
@@ -939,8 +913,6 @@ def receive_return_note(ardn_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/return-notes/<int:ardn_id>/process', methods=['PUT'])
-@jwt_required
 def process_return_note(ardn_id):
     """Process return note - verify each item and decide fate"""
     try:
@@ -1098,7 +1070,6 @@ def process_return_note(ardn_id):
 # DASHBOARD & UTILITY ENDPOINTS
 # ============================================================================
 
-@asset_dn_bp.route('/api/assets/dn-dashboard', methods=['GET'])
 def get_dn_dashboard():
     """Get dashboard stats for asset DN/RDN flow"""
     try:
@@ -1152,7 +1123,6 @@ def get_dn_dashboard():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/available-for-dispatch', methods=['GET'])
 def get_available_for_dispatch():
     """Get assets available for dispatch"""
     try:
@@ -1187,7 +1157,6 @@ def get_available_for_dispatch():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/project/<int:project_id>/dispatched', methods=['GET'])
 def get_project_dispatched_assets(project_id):
     """Get assets dispatched to a specific project (for creating return notes)"""
     try:
@@ -1223,7 +1192,6 @@ def get_project_dispatched_assets(project_id):
 # STOCK IN DOCUMENT UPLOAD ENDPOINTS
 # ============================================================================
 
-@asset_dn_bp.route('/api/assets/stock-in/<int:stock_in_id>/upload', methods=['POST'])
 def upload_stock_in_document(stock_in_id):
     """Upload a document (DN/invoice/receipt) for a stock in record to inventory-files bucket"""
     try:
@@ -1327,7 +1295,6 @@ def upload_stock_in_document(stock_in_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/stock-in/<int:stock_in_id>/document', methods=['GET'])
 def get_stock_in_document(stock_in_id):
     """Get document URL for a stock in record"""
     try:
@@ -1349,7 +1316,6 @@ def get_stock_in_document(stock_in_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/stock-in/<int:stock_in_id>/document', methods=['DELETE'])
 def delete_stock_in_document(stock_in_id):
     """Delete document for a stock in record"""
     try:
@@ -1383,7 +1349,6 @@ def delete_stock_in_document(stock_in_id):
 # PDF DOWNLOAD ENDPOINTS
 # ============================================================================
 
-@asset_dn_bp.route('/api/assets/delivery-notes/<int:adn_id>/download', methods=['GET'])
 def download_asset_delivery_note(adn_id):
     """Generate and download Asset Delivery Note PDF"""
     try:
@@ -1465,7 +1430,6 @@ def download_asset_delivery_note(adn_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/return-notes/<int:ardn_id>/download', methods=['GET'])
 def download_asset_return_note(ardn_id):
     """Generate and download Asset Return Delivery Note (ARDN) PDF"""
     try:
@@ -1568,8 +1532,6 @@ def download_asset_return_note(ardn_id):
 # SITE ENGINEER ENDPOINTS - View dispatched assets from ADN
 # ============================================================================
 
-@asset_dn_bp.route('/api/assets/se/dispatched-assets', methods=['GET'])
-@jwt_required
 def get_se_dispatched_assets():
     """Get all dispatched assets for the Site Engineer's projects from ADN flow"""
     try:
@@ -1704,8 +1666,6 @@ def get_se_dispatched_assets():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/se/receive-adn/<int:adn_id>', methods=['PUT'])
-@jwt_required
 def se_receive_adn(adn_id):
     """SE marks an entire ADN as received (all items)"""
     try:
@@ -1752,8 +1712,6 @@ def se_receive_adn(adn_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/se/receive-items', methods=['PUT'])
-@jwt_required
 def se_receive_selected_items():
     """SE marks selected ADN items as received (selective receive)"""
     try:
@@ -1831,8 +1789,6 @@ def se_receive_selected_items():
 # ASSET REPAIR MANAGEMENT ENDPOINTS
 # ============================================================================
 
-@asset_dn_bp.route('/api/assets/repairs', methods=['GET'])
-@jwt_required
 def get_asset_repair_items():
     """Get all asset items sent for repair from ARDNs
 
@@ -1943,8 +1899,6 @@ def get_asset_repair_items():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/repairs/<int:return_item_id>/complete', methods=['PUT'])
-@jwt_required
 def complete_asset_repair(return_item_id):
     """Mark asset repair as complete and return to stock"""
     try:
@@ -1981,8 +1935,6 @@ def complete_asset_repair(return_item_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_dn_bp.route('/api/assets/repairs/<int:return_item_id>/dispose', methods=['PUT'])
-@jwt_required
 def dispose_unrepairable_asset(return_item_id):
     """Mark unrepairable asset for disposal - creates disposal request for TD approval"""
     try:
