@@ -11,8 +11,7 @@ Flow:
 
 import logging
 from datetime import datetime
-from flask import request, jsonify
-from flask import request, jsonify
+from flask import request, jsonify, g
 from config.db import db
 from sqlalchemy import func, and_
 
@@ -1996,7 +1995,6 @@ def dispose_unrepairable_asset(return_item_id):
         db.session.rollback()
         logger.error(f"Error creating disposal request: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
-<<<<<<< HEAD
 
 
 def get_se_movement_history():
@@ -2176,5 +2174,3 @@ def get_se_movement_history():
         logger.error(f"Error fetching SE movement history: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
-=======
->>>>>>> c20d523a999ccdda92f4a434cf0bb521caa683fb

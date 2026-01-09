@@ -38,6 +38,7 @@ from controllers.asset_dn_controller import (
     get_se_dispatched_assets,
     se_receive_adn,
     se_receive_selected_items,
+    get_se_movement_history,
     # Asset Repairs
     get_asset_repair_items,
     complete_asset_repair,
