@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { labourService, DailyAttendance } from '@/services/labourService';
 import { showSuccess, showError } from '@/utils/toastHelper';
+import { apiClient } from '@/api/config';
 import {
   LockClosedIcon,
   ClockIcon,
@@ -68,10 +69,9 @@ const AttendanceLock: React.FC = () => {
     // Fetch projects for dropdown
     const fetchProjects = async () => {
       try {
-        const response = await fetch('/api/projects');
-        const data = await response.json();
-        if (data.success) {
-          setProjects(data.projects || []);
+        const response = await apiClient.get('/labour/projects');
+        if (response.data.success) {
+          setProjects(response.data.projects || []);
         }
       } catch (error) {
         console.error('Failed to fetch projects:', error);

@@ -2449,3 +2449,110 @@ def get_labour_dashboard():
     except Exception as e:
         log.error(f"Error getting dashboard: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+# =============================================================================
+# UTILITY: Get Projects for User
+# =============================================================================
+
+def get_user_projects():
+    """
+    Get projects accessible to current user for dropdowns/filters.
+    Used by Attendance Lock and other labour features.
+    Returns projects based on user's primary role:
+    - Admin/TD: All non-completed projects
+    - PM: Projects where they are PM (user_id contains their ID)
+    - SE: Projects where they are SE (site_supervisor_id)
+    - Other roles: Their specific role assignment
+    """
+    try:
+        current_user = g.get('user')
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+
+        user_id = current_user.get('user_id')
+        user_role = normalize_role(current_user.get('role', ''))
+
+        from models.project import Project
+
+        # Admin/TD can see all non-completed projects
+        if user_role in SUPER_ADMIN_ROLES:
+            projects_query = Project.query.filter(
+                Project.is_deleted == False,
+                func.lower(Project.status) != 'completed'
+            ).order_by(Project.project_name)
+        # Project Manager - only projects where they are PM AND (has approved BOQ OR has SE assignments)
+        # This matches the "My Projects" page logic (Pending + Assigned tabs)
+        elif user_role == 'projectmanager':
+            from models.boq import BOQ
+            from models.pm_assign_ss import PMAssignSS
+
+            # Get projects with approved BOQs OR with SE assignments
+            projects_query = db.session.query(Project).filter(
+                Project.is_deleted == False,
+                func.lower(Project.status) != 'completed',
+                Project.user_id.contains([user_id])
+            ).join(
+                BOQ, Project.project_id == BOQ.project_id
+            ).filter(
+                BOQ.is_deleted == False,
+                or_(
+                    # Has approved BOQ (Pending tab)
+                    BOQ.status.in_(['approved', 'Approved']),
+                    # Has SE assignments (Assigned tab)
+                    # Must be assignments made BY this PM
+                    BOQ.boq_id.in_(
+                        db.session.query(PMAssignSS.boq_id).filter(
+                            PMAssignSS.is_deleted == False,
+                            PMAssignSS.assigned_by_pm_id == user_id
+                        )
+                    )
+                )
+            ).distinct().order_by(Project.project_name)
+        # Site Engineer/Supervisor - only projects where they are SE
+        elif user_role in ['siteengineer', 'sitesupervisor', 'ss']:
+            projects_query = Project.query.filter(
+                Project.is_deleted == False,
+                func.lower(Project.status) != 'completed',
+                Project.site_supervisor_id == user_id
+            ).order_by(Project.project_name)
+        # MEP Supervisor - only projects where they are MEP
+        elif user_role in ['mepsupervisor', 'mep']:
+            projects_query = Project.query.filter(
+                Project.is_deleted == False,
+                func.lower(Project.status) != 'completed',
+                Project.mep_supervisor_id.contains([user_id])
+            ).order_by(Project.project_name)
+        # Other roles: Check all possible assignments
+        else:
+            projects_query = Project.query.filter(
+                Project.is_deleted == False,
+                func.lower(Project.status) != 'completed',
+                or_(
+                    Project.user_id.contains([user_id]),
+                    Project.site_supervisor_id == user_id,
+                    Project.mep_supervisor_id.contains([user_id]),
+                    Project.estimator_id == user_id,
+                    Project.buyer_id == user_id
+                )
+            ).order_by(Project.project_name)
+
+        projects = projects_query.all()
+
+        projects_list = [{
+            'project_id': p.project_id,
+            'project_code': p.project_code or f'P{p.project_id}',
+            'project_name': p.project_name,
+            'client': p.client,
+            'location': p.location,
+            'status': p.status
+        } for p in projects]
+
+        return jsonify({
+            'success': True,
+            'projects': projects_list
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching user projects: {str(e)}")
+        return jsonify({'error': str(e)}), 500
