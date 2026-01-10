@@ -855,6 +855,7 @@ def get_pending_requisitions():
         project_id = request.args.get('project_id', type=int)
         status = request.args.get('status', 'pending')  # Default to pending
 
+        # Query labour requisitions
         query = LabourRequisition.query.options(
             joinedload(LabourRequisition.project)
         ).filter(
@@ -1560,6 +1561,7 @@ def mark_departure():
                     clock_out_time=clock_out_dt,
                     hourly_rate=worker.hourly_rate,
                     attendance_status='completed',
+                    approval_status='pending',  # Ready for PM review
                     entered_by_user_id=current_user.get('user_id'),
                     entered_by_role=current_user.get('role', 'SE'),
                     created_by=current_user.get('full_name', 'System')
@@ -1628,6 +1630,7 @@ def clock_in_worker():
                 project_id=project_id,
                 attendance_date=target_date,
                 hourly_rate=worker.hourly_rate,
+                approval_status='pending',  # Will be reviewed by PM after completion
                 entered_by_user_id=current_user.get('user_id'),
                 entered_by_role=current_user.get('role', 'SE'),
                 created_by=current_user.get('full_name', 'System')
@@ -1714,6 +1717,7 @@ def clock_out_worker():
 
         attendance.break_duration_minutes = break_minutes
         attendance.attendance_status = 'completed'
+        attendance.approval_status = 'pending'  # Ready for PM review
 
         # Calculate hours and cost
         attendance.calculate_hours_and_cost()
@@ -1843,21 +1847,23 @@ def get_attendance_to_lock():
         date_str = request.args.get('date')
         approval_status = request.args.get('approval_status', 'pending')  # 'pending' or 'locked'
 
-        # Get PM's assigned projects from pm_assign_ss table
-        from models.pm_assign_ss import PMAssignSS
+        # Get PM's assigned projects from Project.user_id array
+        from models.project import Project
+        from models.labour_arrival import LabourArrival
+        from models.worker import Worker
 
-        pm_project_ids = []
-        pm_assignments = PMAssignSS.query.filter(
-            or_(
-                PMAssignSS.pm_ids == user_id,
-                PMAssignSS.assigned_by_pm_id == user_id
-            ),
-            PMAssignSS.is_deleted == False
+        # Get all projects and find which ones this PM is assigned to
+        all_projects = Project.query.filter(
+            Project.is_deleted == False,
+            Project.user_id.isnot(None)
         ).all()
 
-        for assignment in pm_assignments:
-            if assignment.project_id and assignment.project_id not in pm_project_ids:
-                pm_project_ids.append(assignment.project_id)
+        pm_project_ids = []
+        for proj in all_projects:
+            if proj.user_id and isinstance(proj.user_id, list) and user_id in proj.user_id:
+                pm_project_ids.append(proj.project_id)
+
+        log.info(f"PM {user_id} assigned to projects for attendance: {pm_project_ids}")
 
         # If no projects assigned, return empty list
         if not pm_project_ids:
@@ -1867,6 +1873,67 @@ def get_attendance_to_lock():
                 "total_records": 0
             }), 200
 
+        # STEP 1: Check for departed arrivals that need attendance records created
+        # Auto-create missing attendance records for departed arrivals (works for all queries)
+
+        # Build query for departed arrivals
+        departed_query = LabourArrival.query.filter(
+            LabourArrival.arrival_status == 'departed',
+            LabourArrival.project_id.in_(pm_project_ids),
+            LabourArrival.is_deleted == False
+        )
+
+        # Add date filter if provided
+        if date_str:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            departed_query = departed_query.filter(LabourArrival.arrival_date == target_date)
+
+        departed_arrivals = departed_query.all()
+
+        # Auto-create missing attendance records for departed workers
+        if departed_arrivals:
+            for arrival in departed_arrivals:
+                # Check if attendance already exists
+                existing = DailyAttendance.query.filter_by(
+                    worker_id=arrival.worker_id,
+                    project_id=arrival.project_id,
+                    attendance_date=arrival.arrival_date,
+                    is_deleted=False
+                ).first()
+
+                if not existing and arrival.arrival_time and arrival.departure_time:
+                    # Create attendance record
+                    worker = Worker.query.get(arrival.worker_id)
+                    if worker:
+                        clock_in_dt = datetime.combine(
+                            arrival.arrival_date,
+                            datetime.strptime(arrival.arrival_time, '%H:%M').time()
+                        )
+                        clock_out_dt = datetime.combine(
+                            arrival.arrival_date,
+                            datetime.strptime(arrival.departure_time, '%H:%M').time()
+                        )
+
+                        attendance = DailyAttendance(
+                            worker_id=arrival.worker_id,
+                            project_id=arrival.project_id,
+                            attendance_date=arrival.arrival_date,
+                            clock_in_time=clock_in_dt,
+                            clock_out_time=clock_out_dt,
+                            hourly_rate=worker.hourly_rate,
+                            attendance_status='completed',
+                            approval_status='pending',
+                            entered_by_user_id=user_id,
+                            entered_by_role='System',
+                            created_by='System Auto-Create'
+                        )
+                        attendance.calculate_hours_and_cost()
+                        db.session.add(attendance)
+                        log.info(f"Auto-created attendance for departed worker {arrival.worker_id}")
+
+            db.session.commit()
+
+        # STEP 2: Query attendance records
         query = DailyAttendance.query.options(
             joinedload(DailyAttendance.worker),
             joinedload(DailyAttendance.project)
@@ -1876,8 +1943,20 @@ def get_attendance_to_lock():
         )
 
         # Filter by approval status
-        if approval_status in ['pending', 'locked']:
-            query = query.filter(DailyAttendance.approval_status == approval_status)
+        if approval_status == 'pending':
+            # Include records with approval_status='pending' OR (approval_status is NULL and attendance is completed)
+            query = query.filter(
+                or_(
+                    DailyAttendance.approval_status == 'pending',
+                    and_(
+                        DailyAttendance.approval_status.is_(None),
+                        DailyAttendance.attendance_status == 'completed',
+                        DailyAttendance.clock_out_time.isnot(None)
+                    )
+                )
+            )
+        elif approval_status == 'locked':
+            query = query.filter(DailyAttendance.approval_status == 'locked')
 
         if project_id:
             # Additional filter if specific project requested
