@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { labourService, DailyAttendance } from '@/services/labourService';
 import { showSuccess, showError } from '@/utils/toastHelper';
+import { apiClient } from '@/api/config';
 import {
   LockClosedIcon,
   ClockIcon,
@@ -42,6 +43,7 @@ const AttendanceLock: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('pending');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedAttendance, setSelectedAttendance] = useState<DailyAttendance | null>(null);
+  const [projects, setProjects] = useState<Array<{ project_id: number; project_code: string; project_name: string }>>([]);
 
   const fetchAttendance = async () => {
     setLoading(true);
@@ -62,6 +64,21 @@ const AttendanceLock: React.FC = () => {
   useEffect(() => {
     fetchAttendance();
   }, [projectId, selectedDate, activeTab]);
+
+  useEffect(() => {
+    // Fetch projects for dropdown
+    const fetchProjects = async () => {
+      try {
+        const response = await apiClient.get('/labour/projects');
+        if (response.data.success) {
+          setProjects(response.data.projects || []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch projects:', error);
+      }
+    };
+    fetchProjects();
+  }, []);
 
   const handleLock = async (attendanceId: number) => {
     setProcessing(attendanceId);
@@ -163,23 +180,42 @@ const AttendanceLock: React.FC = () => {
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Project ID</label>
-          <input
-            type="number"
+        <div className="flex-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            <span className="inline-flex items-center gap-1">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Select Project
+            </span>
+          </label>
+          <select
             value={projectId || ''}
-            onChange={(e) => setProjectId(parseInt(e.target.value) || undefined)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
-            placeholder="All Projects"
-          />
+            onChange={(e) => setProjectId(e.target.value ? parseInt(e.target.value) : undefined)}
+            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-gray-900"
+          >
+            <option value="">All Projects</option>
+            {projects.map((project) => (
+              <option key={project.project_id} value={project.project_id}>
+                {project.project_code} - {project.project_name}
+              </option>
+            ))}
+          </select>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+        <div className="flex-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            <span className="inline-flex items-center gap-1">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              Date
+            </span>
+          </label>
           <input
             type="date"
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900"
           />
         </div>
         <div className="flex-1" />

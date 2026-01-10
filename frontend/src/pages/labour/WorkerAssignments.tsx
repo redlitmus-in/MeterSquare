@@ -341,15 +341,26 @@ const WorkerAssignments: React.FC = () => {
               key={req.requisition_id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-lg border border-gray-200 px-6 py-6 hover:shadow-sm transition-shadow"
+              className="bg-white rounded-lg border border-gray-200 px-6 py-4 hover:shadow-sm transition-shadow"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
                   <span className="font-semibold text-gray-900 text-sm">{req.requisition_code}</span>
                   {getStatusBadge(req)}
                   <span className="text-xs text-gray-400 hidden sm:inline">|</span>
-                  <span className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 font-medium">{req.skill_required}</span>
-                  <span className="text-xs text-gray-600"><UsersIcon className="w-3 h-3 inline mr-0.5" />{req.workers_count}</span>
+                  {/* Display actual skills from labour_items */}
+                  {req.labour_items && req.labour_items.length > 0 ? (
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {Array.from(new Set(req.labour_items.map((item: any) => item.skill_required))).map((skill: string, idx: number) => (
+                        <span key={idx} className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 font-medium">
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 font-medium">{req.skill_required}</span>
+                  )}
+                  <span className="text-xs text-gray-600"><UsersIcon className="w-3 h-3 inline mr-0.5" />{req.total_workers_count || req.workers_count}</span>
                   <span className="text-xs text-gray-500 hidden md:inline">
                     <CalendarIcon className="w-3 h-3 inline mr-0.5" />
                     {new Date(req.required_date).toLocaleDateString()}
@@ -417,23 +428,57 @@ const WorkerAssignments: React.FC = () => {
                 <div className="mb-6">
                   <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Labour Items ({detailsRequisition.labour_items.length} {detailsRequisition.labour_items.length === 1 ? 'item' : 'items'})</h3>
                   <div className="space-y-3">
-                    {detailsRequisition.labour_items.map((item: any, index: number) => (
-                      <div key={index} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                        <div className="flex items-start justify-between mb-2">
-                          <h4 className="text-sm font-medium text-gray-900">{item.work_description || item.item_name || `Item ${index + 1}`}</h4>
-                          <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800 font-medium flex items-center gap-1">
-                            <UsersIcon className="w-3 h-3" />
-                            {item.workers_count} worker{item.workers_count !== 1 ? 's' : ''}
-                          </span>
+                    {(() => {
+                      // Distribute workers among labour items based on worker count
+                      let workerIndex = 0;
+                      const allWorkers = detailsRequisition.assigned_workers || [];
+
+                      return detailsRequisition.labour_items.map((item: any, index: number) => {
+                        // Get the exact number of workers for this labour item
+                        const workersForThisItem = allWorkers.slice(workerIndex, workerIndex + item.workers_count);
+                        workerIndex += item.workers_count;
+
+                        return (
+                        <div key={index} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                          <div className="flex items-start justify-between mb-2">
+                            <h4 className="text-sm font-medium text-gray-900">{item.work_description || item.item_name || `Item ${index + 1}`}</h4>
+                            <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800 font-medium flex items-center gap-1">
+                              <UsersIcon className="w-3 h-3" />
+                              {item.workers_count} worker{item.workers_count !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-600 mb-3">
+                            <p className="flex items-center gap-1.5">
+                              <WrenchScrewdriverIcon className="w-4 h-4 text-gray-400" />
+                              <span className="font-medium">Skill:</span> {item.skill_required || item.skill_lab01}
+                            </p>
+                          </div>
+
+                          {/* Show assigned workers for this labour item */}
+                          {detailsRequisition.assignment_status === 'assigned' && workersForThisItem.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-gray-200">
+                              <p className="text-xs font-medium text-gray-500 uppercase mb-2">Assigned Workers ({workersForThisItem.length})</p>
+                              <div className="space-y-2">
+                                {workersForThisItem.map((worker: any) => (
+                                  <div key={worker.worker_id} className="bg-green-50 rounded-lg p-2 border border-green-200">
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <UserIcon className="w-3.5 h-3.5 text-green-600" />
+                                        <span className="text-sm font-medium text-gray-900">{worker.full_name}</span>
+                                      </div>
+                                      <span className="px-2 py-0.5 text-xs rounded bg-green-100 text-green-700 font-medium">
+                                        {worker.worker_code}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="text-sm text-gray-600">
-                          <p className="flex items-center gap-1.5">
-                            <WrenchScrewdriverIcon className="w-4 h-4 text-gray-400" />
-                            <span className="font-medium">Skill:</span> {item.skill_required || item.skill_lab01}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
+                        );
+                      });
+                    })()}
                   </div>
                 </div>
               ) : (

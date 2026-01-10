@@ -427,6 +427,9 @@ const LabourRequisition: React.FC = () => {
       // Additional filtering for assigned tab
       if (activeTab === 'assigned') {
         data = data.filter((req: RequisitionType) => req.assignment_status === 'assigned');
+      } else if (activeTab === 'approved') {
+        // For approved tab, exclude requisitions that have been assigned workers
+        data = data.filter((req: RequisitionType) => req.assignment_status !== 'assigned');
       }
       setRequisitions(data);
       setPagination(result.pagination);
@@ -439,11 +442,12 @@ const LabourRequisition: React.FC = () => {
   // Fetch counts for all tabs
   const fetchTabCounts = async () => {
     try {
+      // Fetch all requisitions (use large perPage to get complete counts)
       const results = await Promise.all([
-        labourService.getMyRequisitions('pending,send_to_pm'),
-        labourService.getMyRequisitions('approved'),
-        labourService.getMyRequisitions('rejected'),
-        labourService.getMyRequisitions('approved')
+        labourService.getMyRequisitions('pending,send_to_pm', 1, 1000),
+        labourService.getMyRequisitions('approved', 1, 1000),
+        labourService.getMyRequisitions('rejected', 1, 1000),
+        labourService.getMyRequisitions('approved', 1, 1000)
       ]);
 
       // Count assigned requisitions (approved with assignment_status = 'assigned')
@@ -451,9 +455,14 @@ const LabourRequisition: React.FC = () => {
         ? results[3].data.filter((req: RequisitionType) => req.assignment_status === 'assigned').length
         : 0;
 
+      // Count approved requisitions (approved but NOT assigned)
+      const approvedCount = results[1].success
+        ? results[1].data.filter((req: RequisitionType) => req.assignment_status !== 'assigned').length
+        : 0;
+
       setTabCounts({
         pending: results[0].success ? results[0].data.length : 0,
-        approved: results[1].success ? results[1].data.length : 0,
+        approved: approvedCount,
         rejected: results[2].success ? results[2].data.length : 0,
         assigned: assignedCount
       });
@@ -770,10 +779,8 @@ const LabourRequisition: React.FC = () => {
 
   // Check if labour item is already assigned or completed
   const isLabourItemProcessed = (labour: LabourItem): boolean => {
-    const status = getLabourItemStatus(labour);
-    if (!status) return false;
-    // Item is processed if it has a requisition that's approved/assigned or completed
-    return status.status === 'approved' || status.work_status === 'assigned' || status.work_status === 'completed';
+    // Allow all labour items to be selectable regardless of status
+    return false;
   };
 
   // Get status badge for labour item
@@ -919,8 +926,18 @@ const LabourRequisition: React.FC = () => {
                   {getStatusBadge(req.status)}
                   {req.status === 'approved' && getAssignmentBadge(req.assignment_status)}
                   <span className="text-xs text-gray-400 hidden sm:inline">|</span>
-                  <span className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 font-medium">{req.skill_required}</span>
-                  <span className="text-xs text-gray-600"><UsersIcon className="w-3 h-3 inline mr-0.5" />{req.workers_count}</span>
+                  {req.labour_items && req.labour_items.length > 0 ? (
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {Array.from(new Set(req.labour_items.map((item: any) => item.skill_required))).map((skill: string, idx: number) => (
+                        <span key={idx} className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 font-medium">
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 font-medium">{req.skill_required}</span>
+                  )}
+                  <span className="text-xs text-gray-600"><UsersIcon className="w-3 h-3 inline mr-0.5" />{req.workers_count || req.total_workers_count}</span>
                   <span className="text-xs text-gray-500 hidden md:inline">
                     <CalendarIcon className="w-3 h-3 inline mr-0.5" />
                     {new Date(req.required_date).toLocaleDateString()}
@@ -1507,19 +1524,48 @@ const LabourRequisition: React.FC = () => {
                         <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Labour Items</h4>
                         <div className="space-y-3">
                           {requisition.labour_items && requisition.labour_items.length > 0 ? (
-                            requisition.labour_items.map((item: any, idx: number) => (
-                              <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                                <div className="flex items-start justify-between mb-2">
-                                  <p className="text-sm font-medium text-gray-900">{item.work_description}</p>
-                                  <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
-                                    {item.workers_count} worker{item.workers_count !== 1 ? 's' : ''}
-                                  </span>
-                                </div>
-                                <p className="text-xs text-gray-600">
-                                  <span className="font-medium">Skill:</span> {item.skill_required}
-                                </p>
-                              </div>
-                            ))
+                            (() => {
+                              // Distribute workers among labour items based on worker count
+                              let workerIndex = 0;
+                              const allWorkers = requisition.assigned_workers || [];
+
+                              return requisition.labour_items.map((item: any, idx: number) => {
+                                // Get the exact number of workers for this labour item
+                                const workersForThisItem = allWorkers.slice(workerIndex, workerIndex + item.workers_count);
+                                workerIndex += item.workers_count;
+
+                                return (
+                                  <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                                    <div className="flex items-start justify-between mb-2">
+                                      <p className="text-sm font-medium text-gray-900">{item.work_description}</p>
+                                      <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
+                                        {item.workers_count} worker{item.workers_count !== 1 ? 's' : ''}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-gray-600 mb-2">
+                                      <span className="font-medium">Skill:</span> {item.skill_required}
+                                    </p>
+
+                                    {/* Show assigned workers for this labour item */}
+                                    {requisition.assignment_status === 'assigned' && workersForThisItem.length > 0 && (
+                                      <div className="mt-2 pt-2 border-t border-gray-200">
+                                        <p className="text-xs font-medium text-gray-500 uppercase mb-1.5">Assigned Workers ({workersForThisItem.length})</p>
+                                        <div className="space-y-1.5">
+                                          {workersForThisItem.map((worker: any) => (
+                                            <div key={worker.worker_id} className="bg-green-50 rounded p-2 border border-green-200 flex items-center justify-between">
+                                              <span className="text-xs font-medium text-gray-900">{worker.full_name}</span>
+                                              <span className="px-1.5 py-0.5 text-xs rounded bg-green-100 text-green-700 font-medium">
+                                                {worker.worker_code}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              });
+                            })()
                           ) : (
                             <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                               <p className="text-sm text-gray-900">{requisition.work_description}</p>

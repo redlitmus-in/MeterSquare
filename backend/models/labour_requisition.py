@@ -76,6 +76,18 @@ class LabourRequisition(db.Model):
         # Calculate total workers count from labour_items
         total_workers = sum(item.get('workers_count', 0) for item in (self.labour_items or []))
 
+        # Get assigned worker names from Worker model
+        assigned_workers = []
+        if self.assigned_worker_ids:
+            from models.worker import Worker
+            worker_ids = self.assigned_worker_ids if isinstance(self.assigned_worker_ids, list) else []
+            if worker_ids:
+                workers = Worker.query.filter(
+                    Worker.worker_id.in_(worker_ids),
+                    Worker.is_deleted == False
+                ).all()
+                assigned_workers = [{'worker_id': w.worker_id, 'full_name': w.full_name, 'worker_code': w.worker_code} for w in workers]
+
         return {
             'requisition_id': self.requisition_id,
             'requisition_code': self.requisition_code,
@@ -103,6 +115,7 @@ class LabourRequisition(db.Model):
             'rejection_reason': self.rejection_reason,
             'assignment_status': self.assignment_status,
             'assigned_worker_ids': self.assigned_worker_ids or [],
+            'assigned_workers': assigned_workers,  # NEW: Include worker names
             'assigned_by_user_id': self.assigned_by_user_id,
             'assigned_by_name': self.assigned_by_name,
             'assignment_date': self.assignment_date.isoformat() if self.assignment_date else None,

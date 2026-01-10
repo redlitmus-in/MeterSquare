@@ -91,6 +91,11 @@ export interface LabourRequisition {
   rejection_reason?: string;
   assignment_status: 'unassigned' | 'assigned';
   assigned_worker_ids?: number[];
+  assigned_workers?: Array<{
+    worker_id: number;
+    full_name: string;
+    worker_code: string;
+  }>;
   assigned_by_user_id?: number;
   assigned_by_name?: string;
   assignment_date?: string;

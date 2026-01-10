@@ -519,7 +519,21 @@ def get_requisitions_by_project(project_id):
         # Build a lookup map by labour_id for quick status checking
         labour_status_map = {}
         for req in requisitions:
-            if req.labour_id:
+            # Handle both old single labour_id and new labour_items array
+            if req.labour_items and isinstance(req.labour_items, list):
+                # Modern requisitions with multiple labour items
+                for item in req.labour_items:
+                    labour_id = item.get('labour_id')
+                    if labour_id:
+                        labour_status_map[str(labour_id)] = {
+                            'requisition_id': req.requisition_id,
+                            'requisition_code': req.requisition_code,
+                            'status': req.status,
+                            'work_status': req.work_status,
+                            'assignment_status': req.assignment_status
+                        }
+            elif req.labour_id:
+                # Legacy single labour item (backward compatibility)
                 labour_status_map[req.labour_id] = {
                     'requisition_id': req.requisition_id,
                     'requisition_code': req.requisition_code,
@@ -841,6 +855,7 @@ def get_pending_requisitions():
         project_id = request.args.get('project_id', type=int)
         status = request.args.get('status', 'pending')  # Default to pending
 
+        # Query labour requisitions
         query = LabourRequisition.query.options(
             joinedload(LabourRequisition.project)
         ).filter(
@@ -1546,6 +1561,7 @@ def mark_departure():
                     clock_out_time=clock_out_dt,
                     hourly_rate=worker.hourly_rate,
                     attendance_status='completed',
+                    approval_status='pending',  # Ready for PM review
                     entered_by_user_id=current_user.get('user_id'),
                     entered_by_role=current_user.get('role', 'SE'),
                     created_by=current_user.get('full_name', 'System')
@@ -1614,6 +1630,7 @@ def clock_in_worker():
                 project_id=project_id,
                 attendance_date=target_date,
                 hourly_rate=worker.hourly_rate,
+                approval_status='pending',  # Will be reviewed by PM after completion
                 entered_by_user_id=current_user.get('user_id'),
                 entered_by_role=current_user.get('role', 'SE'),
                 created_by=current_user.get('full_name', 'System')
@@ -1700,6 +1717,7 @@ def clock_out_worker():
 
         attendance.break_duration_minutes = break_minutes
         attendance.attendance_status = 'completed'
+        attendance.approval_status = 'pending'  # Ready for PM review
 
         # Calculate hours and cost
         attendance.calculate_hours_and_cost()
@@ -1819,25 +1837,138 @@ def update_attendance(attendance_id):
 # =============================================================================
 
 def get_attendance_to_lock():
-    """Get attendance records with optional status filter"""
+    """Get attendance records with optional status filter - only for PM's assigned projects"""
     try:
+        user_id = g.user.get('user_id')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'User not authenticated'}), 401
+
         project_id = request.args.get('project_id', type=int)
         date_str = request.args.get('date')
         approval_status = request.args.get('approval_status', 'pending')  # 'pending' or 'locked'
 
+        # Get PM's assigned projects from Project.user_id array
+        from models.project import Project
+        from models.labour_arrival import LabourArrival
+        from models.worker import Worker
+
+        # Get all projects and find which ones this PM is assigned to
+        all_projects = Project.query.filter(
+            Project.is_deleted == False,
+            Project.user_id.isnot(None)
+        ).all()
+
+        pm_project_ids = []
+        for proj in all_projects:
+            if proj.user_id and isinstance(proj.user_id, list) and user_id in proj.user_id:
+                pm_project_ids.append(proj.project_id)
+
+        log.info(f"PM {user_id} assigned to projects for attendance: {pm_project_ids}")
+
+        # If no projects assigned, return empty list
+        if not pm_project_ids:
+            return jsonify({
+                "success": True,
+                "attendance": [],
+                "total_records": 0
+            }), 200
+
+        # STEP 1: Check for departed arrivals that need attendance records created
+        # Auto-create missing attendance records for departed arrivals (works for all queries)
+
+        # Build query for departed arrivals
+        departed_query = LabourArrival.query.filter(
+            LabourArrival.arrival_status == 'departed',
+            LabourArrival.project_id.in_(pm_project_ids),
+            LabourArrival.is_deleted == False
+        )
+
+        # Add date filter if provided
+        if date_str:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            departed_query = departed_query.filter(LabourArrival.arrival_date == target_date)
+
+        departed_arrivals = departed_query.all()
+
+        # Auto-create missing attendance records for departed workers
+        if departed_arrivals:
+            for arrival in departed_arrivals:
+                # Check if attendance already exists
+                existing = DailyAttendance.query.filter_by(
+                    worker_id=arrival.worker_id,
+                    project_id=arrival.project_id,
+                    attendance_date=arrival.arrival_date,
+                    is_deleted=False
+                ).first()
+
+                if not existing and arrival.arrival_time and arrival.departure_time:
+                    # Create attendance record
+                    worker = Worker.query.get(arrival.worker_id)
+                    if worker:
+                        clock_in_dt = datetime.combine(
+                            arrival.arrival_date,
+                            datetime.strptime(arrival.arrival_time, '%H:%M').time()
+                        )
+                        clock_out_dt = datetime.combine(
+                            arrival.arrival_date,
+                            datetime.strptime(arrival.departure_time, '%H:%M').time()
+                        )
+
+                        attendance = DailyAttendance(
+                            worker_id=arrival.worker_id,
+                            project_id=arrival.project_id,
+                            attendance_date=arrival.arrival_date,
+                            clock_in_time=clock_in_dt,
+                            clock_out_time=clock_out_dt,
+                            hourly_rate=worker.hourly_rate,
+                            attendance_status='completed',
+                            approval_status='pending',
+                            entered_by_user_id=user_id,
+                            entered_by_role='System',
+                            created_by='System Auto-Create'
+                        )
+                        attendance.calculate_hours_and_cost()
+                        db.session.add(attendance)
+                        log.info(f"Auto-created attendance for departed worker {arrival.worker_id}")
+
+            db.session.commit()
+
+        # STEP 2: Query attendance records
         query = DailyAttendance.query.options(
             joinedload(DailyAttendance.worker),
             joinedload(DailyAttendance.project)
         ).filter(
-            DailyAttendance.is_deleted == False
+            DailyAttendance.is_deleted == False,
+            DailyAttendance.project_id.in_(pm_project_ids)  # CRITICAL: Filter by PM's projects
         )
 
         # Filter by approval status
-        if approval_status in ['pending', 'locked']:
-            query = query.filter(DailyAttendance.approval_status == approval_status)
+        if approval_status == 'pending':
+            # Include records with approval_status='pending' OR (approval_status is NULL and attendance is completed)
+            query = query.filter(
+                or_(
+                    DailyAttendance.approval_status == 'pending',
+                    and_(
+                        DailyAttendance.approval_status.is_(None),
+                        DailyAttendance.attendance_status == 'completed',
+                        DailyAttendance.clock_out_time.isnot(None)
+                    )
+                )
+            )
+        elif approval_status == 'locked':
+            query = query.filter(DailyAttendance.approval_status == 'locked')
 
         if project_id:
-            query = query.filter(DailyAttendance.project_id == project_id)
+            # Additional filter if specific project requested
+            if project_id in pm_project_ids:
+                query = query.filter(DailyAttendance.project_id == project_id)
+            else:
+                # Requested project not assigned to this PM
+                return jsonify({
+                    "success": True,
+                    "attendance": [],
+                    "total_records": 0
+                }), 200
 
         if date_str:
             target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -2318,3 +2449,110 @@ def get_labour_dashboard():
     except Exception as e:
         log.error(f"Error getting dashboard: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+# =============================================================================
+# UTILITY: Get Projects for User
+# =============================================================================
+
+def get_user_projects():
+    """
+    Get projects accessible to current user for dropdowns/filters.
+    Used by Attendance Lock and other labour features.
+    Returns projects based on user's primary role:
+    - Admin/TD: All non-completed projects
+    - PM: Projects where they are PM (user_id contains their ID)
+    - SE: Projects where they are SE (site_supervisor_id)
+    - Other roles: Their specific role assignment
+    """
+    try:
+        current_user = g.get('user')
+        if not current_user:
+            return jsonify({'error': 'Authentication required'}), 401
+
+        user_id = current_user.get('user_id')
+        user_role = normalize_role(current_user.get('role', ''))
+
+        from models.project import Project
+
+        # Admin/TD can see all non-completed projects
+        if user_role in SUPER_ADMIN_ROLES:
+            projects_query = Project.query.filter(
+                Project.is_deleted == False,
+                func.lower(Project.status) != 'completed'
+            ).order_by(Project.project_name)
+        # Project Manager - only projects where they are PM AND (has approved BOQ OR has SE assignments)
+        # This matches the "My Projects" page logic (Pending + Assigned tabs)
+        elif user_role == 'projectmanager':
+            from models.boq import BOQ
+            from models.pm_assign_ss import PMAssignSS
+
+            # Get projects with approved BOQs OR with SE assignments
+            projects_query = db.session.query(Project).filter(
+                Project.is_deleted == False,
+                func.lower(Project.status) != 'completed',
+                Project.user_id.contains([user_id])
+            ).join(
+                BOQ, Project.project_id == BOQ.project_id
+            ).filter(
+                BOQ.is_deleted == False,
+                or_(
+                    # Has approved BOQ (Pending tab)
+                    BOQ.status.in_(['approved', 'Approved']),
+                    # Has SE assignments (Assigned tab)
+                    # Must be assignments made BY this PM
+                    BOQ.boq_id.in_(
+                        db.session.query(PMAssignSS.boq_id).filter(
+                            PMAssignSS.is_deleted == False,
+                            PMAssignSS.assigned_by_pm_id == user_id
+                        )
+                    )
+                )
+            ).distinct().order_by(Project.project_name)
+        # Site Engineer/Supervisor - only projects where they are SE
+        elif user_role in ['siteengineer', 'sitesupervisor', 'ss']:
+            projects_query = Project.query.filter(
+                Project.is_deleted == False,
+                func.lower(Project.status) != 'completed',
+                Project.site_supervisor_id == user_id
+            ).order_by(Project.project_name)
+        # MEP Supervisor - only projects where they are MEP
+        elif user_role in ['mepsupervisor', 'mep']:
+            projects_query = Project.query.filter(
+                Project.is_deleted == False,
+                func.lower(Project.status) != 'completed',
+                Project.mep_supervisor_id.contains([user_id])
+            ).order_by(Project.project_name)
+        # Other roles: Check all possible assignments
+        else:
+            projects_query = Project.query.filter(
+                Project.is_deleted == False,
+                func.lower(Project.status) != 'completed',
+                or_(
+                    Project.user_id.contains([user_id]),
+                    Project.site_supervisor_id == user_id,
+                    Project.mep_supervisor_id.contains([user_id]),
+                    Project.estimator_id == user_id,
+                    Project.buyer_id == user_id
+                )
+            ).order_by(Project.project_name)
+
+        projects = projects_query.all()
+
+        projects_list = [{
+            'project_id': p.project_id,
+            'project_code': p.project_code or f'P{p.project_id}',
+            'project_name': p.project_name,
+            'client': p.client,
+            'location': p.location,
+            'status': p.status
+        } for p in projects]
+
+        return jsonify({
+            'success': True,
+            'projects': projects_list
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching user projects: {str(e)}")
+        return jsonify({'error': str(e)}), 500

@@ -54,7 +54,9 @@ from controllers.labour_controller import (
     get_locked_for_payroll,
     get_payroll_summary,
     # Dashboard
-    get_labour_dashboard
+    get_labour_dashboard,
+    # Utilities
+    get_user_projects
 )
 from utils.authentication import jwt_required
 
@@ -339,3 +341,14 @@ def payroll_summary():
 def dashboard():
     """Get labour dashboard statistics"""
     return get_labour_dashboard()
+
+
+# ============================================================================
+# Utility Routes
+# ============================================================================
+
+@labour_routes.route('/projects', methods=['GET'])
+@jwt_required
+def list_projects():
+    """Get projects accessible to current user (for dropdowns/filters)"""
+    return get_user_projects()

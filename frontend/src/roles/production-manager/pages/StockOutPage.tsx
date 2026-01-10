@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Package, CheckCircle, X, Save, FileText,
@@ -35,8 +35,22 @@ const StockOutPage: React.FC = () => {
     else if (subtab === 'delivery-notes') setActiveSubTab('delivery-notes');
   }, [searchParams]);
 
-  // Data states
-  const [allRequests, setAllRequests] = useState<InternalMaterialRequest[]>([]);
+  // Data states - Lazy loading pattern for Material Requests
+  const [pendingRequests, setPendingRequests] = useState<InternalMaterialRequest[]>([]);
+  const [approvedRequests, setApprovedRequests] = useState<InternalMaterialRequest[]>([]);
+  const [completedRequests, setCompletedRequests] = useState<InternalMaterialRequest[]>([]);
+  const [rejectedRequests, setRejectedRequests] = useState<InternalMaterialRequest[]>([]);
+
+  const [loadingPending, setLoadingPending] = useState(false);
+  const [loadingApproved, setLoadingApproved] = useState(false);
+  const [loadingCompleted, setLoadingCompleted] = useState(false);
+  const [loadingRejected, setLoadingRejected] = useState(false);
+
+  const [pendingLoaded, setPendingLoaded] = useState(false);
+  const [approvedLoaded, setApprovedLoaded] = useState(false);
+  const [completedLoaded, setCompletedLoaded] = useState(false);
+  const [rejectedLoaded, setRejectedLoaded] = useState(false);
+
   const [deliveryNotes, setDeliveryNotes] = useState<MaterialDeliveryNote[]>([]);
   const [projects, setProjects] = useState<ProjectWithManagers[]>([]);
   const [materials, setMaterials] = useState<InventoryMaterial[]>([]);
@@ -48,7 +62,7 @@ const StockOutPage: React.FC = () => {
   });
 
   // UI states
-  const [loading, setLoading] = useState(true);
+  const [loadingInitialData, setLoadingInitialData] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('PENDING');
   const [dnStatusFilter, setDnStatusFilter] = useState<string>('DRAFT');
@@ -123,37 +137,148 @@ const StockOutPage: React.FC = () => {
     is_vendor_delivery?: boolean;
   }>>([]);
 
-  // Fetch all data
-  const fetchData = async () => {
-    setLoading(true);
+  // Fetch initial data (projects, materials, config) - not requests
+  const fetchInitialData = useCallback(async () => {
+    setLoadingInitialData(true);
     try {
-      // Use getSentInternalRequests() to get ALL requests with request_send=True
-      // This includes requests from Buyers, not just the current user's requests
-      const [requestsData, deliveryNotesResult, projectsData, materialsData, configData] = await Promise.all([
-        inventoryService.getSentInternalRequests(),
-        inventoryService.getAllDeliveryNotes(),
+      const [projectsData, materialsData, configData] = await Promise.all([
         inventoryService.getAllProjects(),
         inventoryService.getAllInventoryItems(),
         inventoryService.getInventoryConfig()
       ]);
 
-      setAllRequests(requestsData);
-      setDeliveryNotes(deliveryNotesResult.delivery_notes || []);
       setProjects(projectsData || []);
       setMaterials(materialsData);
       setInventoryConfig(configData);
       setDnFormData(prev => ({ ...prev, delivery_from: configData.store_name }));
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch data';
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch initial data';
       showError(errorMessage);
     } finally {
-      setLoading(false);
+      setLoadingInitialData(false);
     }
-  };
-
-  useEffect(() => {
-    fetchData();
   }, []);
+
+  // Fetch pending requests
+  const fetchPendingRequests = useCallback(async () => {
+    setLoadingPending(true);
+    try {
+      const requestsData = await inventoryService.getSentInternalRequests();
+      const pending = requestsData.filter(req => normalizeStatus(req.status) === 'PENDING');
+      setPendingRequests(pending);
+      setPendingLoaded(true);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch pending requests';
+      showError(errorMessage);
+    } finally {
+      setLoadingPending(false);
+    }
+  }, []);
+
+  // Fetch approved requests (including DN_PENDING)
+  const fetchApprovedRequests = useCallback(async () => {
+    setLoadingApproved(true);
+    try {
+      const requestsData = await inventoryService.getSentInternalRequests();
+      const approved = requestsData.filter(req => {
+        const status = normalizeStatus(req.status);
+        return status === 'APPROVED' || status === 'DN_PENDING';
+      });
+      setApprovedRequests(approved);
+      setApprovedLoaded(true);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch approved requests';
+      showError(errorMessage);
+    } finally {
+      setLoadingApproved(false);
+    }
+  }, []);
+
+  // Fetch completed requests (dispatched and fulfilled)
+  const fetchCompletedRequests = useCallback(async () => {
+    setLoadingCompleted(true);
+    try {
+      const requestsData = await inventoryService.getSentInternalRequests();
+      const completed = requestsData.filter(req => {
+        const status = normalizeStatus(req.status);
+        return status === 'DISPATCHED' || status === 'FULFILLED';
+      });
+      setCompletedRequests(completed);
+      setCompletedLoaded(true);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch completed requests';
+      showError(errorMessage);
+    } finally {
+      setLoadingCompleted(false);
+    }
+  }, []);
+
+  // Fetch rejected requests
+  const fetchRejectedRequests = useCallback(async () => {
+    setLoadingRejected(true);
+    try {
+      const requestsData = await inventoryService.getSentInternalRequests();
+      const rejected = requestsData.filter(req => normalizeStatus(req.status) === 'REJECTED');
+      setRejectedRequests(rejected);
+      setRejectedLoaded(true);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch rejected requests';
+      showError(errorMessage);
+    } finally {
+      setLoadingRejected(false);
+    }
+  }, []);
+
+  // Fetch delivery notes for delivery-notes tab
+  const fetchDeliveryNotes = useCallback(async () => {
+    try {
+      const deliveryNotesResult = await inventoryService.getAllDeliveryNotes();
+      setDeliveryNotes(deliveryNotesResult.delivery_notes || []);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch delivery notes';
+      showError(errorMessage);
+    }
+  }, []);
+
+  // Load initial data on mount
+  useEffect(() => {
+    fetchInitialData();
+  }, [fetchInitialData]);
+
+  // Lazy load based on active sub-tab
+  useEffect(() => {
+    if (activeSubTab === 'requests') {
+      // For requests tab, load based on statusFilter
+      if (statusFilter === 'PENDING' && !pendingLoaded && !loadingPending) {
+        fetchPendingRequests();
+      } else if (statusFilter === 'APPROVED' && !approvedLoaded && !loadingApproved) {
+        fetchApprovedRequests();
+      } else if (statusFilter === 'COMPLETED' && !completedLoaded && !loadingCompleted) {
+        fetchCompletedRequests();
+      } else if (statusFilter === 'REJECTED' && !rejectedLoaded && !loadingRejected) {
+        fetchRejectedRequests();
+      }
+    } else if (activeSubTab === 'delivery-notes') {
+      // Load delivery notes when switching to delivery-notes tab
+      fetchDeliveryNotes();
+    }
+  }, [
+    activeSubTab,
+    statusFilter,
+    pendingLoaded,
+    approvedLoaded,
+    completedLoaded,
+    rejectedLoaded,
+    loadingPending,
+    loadingApproved,
+    loadingCompleted,
+    loadingRejected,
+    fetchPendingRequests,
+    fetchApprovedRequests,
+    fetchCompletedRequests,
+    fetchRejectedRequests,
+    fetchDeliveryNotes
+  ]);
 
   // Helper functions
   const showConfirmation = (
@@ -192,18 +317,23 @@ const StockOutPage: React.FC = () => {
   const handleApproveRequest = async (requestId: number) => {
     try {
       const response = await inventoryService.approveInternalRequest(requestId);
-      // Update local state with response data including material_details
-      setAllRequests(prev => prev.map(req =>
-        req.request_id === requestId
-          ? {
-              ...req,
-              status: 'APPROVED' as const,
-              // Update material_details from response if available
-              material_details: (response as any).material_details || req.material_details
-            }
-          : req
-      ));
-      // Also refresh materials list to get updated stock values
+
+      // Remove from pending list
+      setPendingRequests(prev => prev.filter(req => req.request_id !== requestId));
+
+      // Add to approved list if it's loaded
+      if (approvedLoaded) {
+        const updatedRequest = pendingRequests.find(req => req.request_id === requestId);
+        if (updatedRequest) {
+          setApprovedRequests(prev => [{
+            ...updatedRequest,
+            status: 'APPROVED' as const,
+            material_details: (response as any).material_details || updatedRequest.material_details
+          }, ...prev]);
+        }
+      }
+
+      // Refresh materials list to get updated stock values
       const materialsData = await inventoryService.getAllInventoryItems();
       setMaterials(materialsData);
       showSuccess('Request approved successfully');
@@ -231,12 +361,22 @@ const StockOutPage: React.FC = () => {
 
     try {
       await inventoryService.rejectInternalRequest(rejectionModal.requestId, rejectionModal.reason);
-      // Update local state smoothly instead of full page reload
-      setAllRequests(prev => prev.map(req =>
-        req.request_id === rejectionModal.requestId
-          ? { ...req, status: 'REJECTED' as const, rejection_reason: rejectionModal.reason }
-          : req
-      ));
+
+      // Remove from pending list
+      setPendingRequests(prev => prev.filter(req => req.request_id !== rejectionModal.requestId));
+
+      // Add to rejected list if it's loaded
+      if (rejectedLoaded) {
+        const rejectedRequest = pendingRequests.find(req => req.request_id === rejectionModal.requestId);
+        if (rejectedRequest) {
+          setRejectedRequests(prev => [{
+            ...rejectedRequest,
+            status: 'REJECTED' as const,
+            rejection_reason: rejectionModal.reason
+          }, ...prev]);
+        }
+      }
+
       showSuccess('Request rejected');
       setRejectionModal({ show: false, requestId: null, reason: '' });
     } catch (error) {
@@ -408,7 +548,13 @@ const StockOutPage: React.FC = () => {
 
       setShowDeliveryNoteModal(false);
       resetDeliveryNoteForm();
-      fetchData();
+
+      // Refresh the appropriate request list and delivery notes
+      if (statusFilter === 'APPROVED' && approvedLoaded) {
+        fetchApprovedRequests();
+      }
+      fetchDeliveryNotes();
+
       showSuccess('Delivery note created successfully');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to create delivery note';
@@ -448,7 +594,7 @@ const StockOutPage: React.FC = () => {
         closeConfirmation();
         try {
           await inventoryService.issueDeliveryNote(noteId);
-          fetchData();
+          fetchDeliveryNotes();
           showSuccess('Delivery note issued successfully');
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Failed to issue delivery note';
@@ -472,7 +618,7 @@ const StockOutPage: React.FC = () => {
         closeConfirmation();
         try {
           await inventoryService.dispatchDeliveryNote(noteId);
-          fetchData();
+          fetchDeliveryNotes();
           showSuccess('Delivery note dispatched successfully');
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Failed to dispatch delivery note';
@@ -492,7 +638,7 @@ const StockOutPage: React.FC = () => {
         closeConfirmation();
         try {
           await inventoryService.cancelDeliveryNote(noteId);
-          fetchData();
+          fetchDeliveryNotes();
           showSuccess('Delivery note cancelled');
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Failed to cancel delivery note';
@@ -576,35 +722,41 @@ const StockOutPage: React.FC = () => {
     }
   };
 
-  // Memoized filtered data
+  // Get current requests based on status filter
+  const currentRequests = useMemo(() => {
+    if (statusFilter === 'PENDING') return pendingRequests;
+    if (statusFilter === 'APPROVED') return approvedRequests;
+    if (statusFilter === 'COMPLETED') return completedRequests;
+    if (statusFilter === 'REJECTED') return rejectedRequests;
+    return [];
+  }, [statusFilter, pendingRequests, approvedRequests, completedRequests, rejectedRequests]);
+
+  // Memoized filtered data with search
   const filteredRequests = useMemo(() => {
-    return allRequests.filter(req => {
-      const normalized = normalizeStatus(req.status);
+    if (searchTerm === '') return currentRequests;
 
-      // Map status filter to actual statuses
-      let matchesStatus = false;
-      if (statusFilter === 'PENDING') {
-        matchesStatus = normalized === 'PENDING';
-      } else if (statusFilter === 'APPROVED') {
-        matchesStatus = normalized === 'APPROVED' || normalized === 'DN_PENDING';
-      } else if (statusFilter === 'COMPLETED') {
-        matchesStatus = normalized === 'DISPATCHED' || normalized === 'FULFILLED';
-      } else if (statusFilter === 'REJECTED') {
-        matchesStatus = normalized === 'REJECTED' || req.status?.toLowerCase() === 'rejected';
-      }
-
-      const matchesSearch = searchTerm === '' ||
+    return currentRequests.filter(req => {
+      const matchesSearch =
         req.material_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         req.project_details?.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         req.requester_details?.full_name?.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesStatus && matchesSearch;
+      return matchesSearch;
     });
-  }, [allRequests, statusFilter, searchTerm]);
+  }, [currentRequests, searchTerm]);
+
+  // Get loading state for current tab
+  const isCurrentTabLoading = useMemo(() => {
+    if (statusFilter === 'PENDING') return loadingPending;
+    if (statusFilter === 'APPROVED') return loadingApproved;
+    if (statusFilter === 'COMPLETED') return loadingCompleted;
+    if (statusFilter === 'REJECTED') return loadingRejected;
+    return false;
+  }, [statusFilter, loadingPending, loadingApproved, loadingCompleted, loadingRejected]);
 
   const stockOutStats = useMemo(() => {
-    const pending = allRequests.filter(r => normalizeStatus(r.status) === 'PENDING').length;
+    const pending = pendingLoaded ? pendingRequests.length : 0;
     return { pending };
-  }, [allRequests]);
+  }, [pendingRequests, pendingLoaded]);
 
   // Memoized recipients list for performance (avoids recalculation on every render)
   const availableRecipients = useMemo(() => {
@@ -634,7 +786,7 @@ const StockOutPage: React.FC = () => {
     return recipients;
   }, [selectedRequestForDN, projects, dnFormData.project_id]);
 
-  if (loading) {
+  if (loadingInitialData) {
     return (
       <div className="flex items-center justify-center h-64">
         <ModernLoadingSpinners size="lg" />
@@ -747,28 +899,33 @@ const StockOutPage: React.FC = () => {
 
           {/* Requests Table */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Request #</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Requester</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock / Destination</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredRequests.length === 0 ? (
+            {isCurrentTabLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <ModernLoadingSpinners size="md" />
+              </div>
+            ) : (
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
                   <tr>
-                    <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
-                      No material requests found
-                    </td>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Request #</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Requester</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock / Destination</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
-                ) : (
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredRequests.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
+                        No material requests found
+                      </td>
+                    </tr>
+                  ) : (
                   filteredRequests.map((req) => (
                     <tr key={req.request_id} className="hover:bg-gray-50">
                       <td className="px-4 py-4 text-sm font-medium text-gray-900">
@@ -1001,6 +1158,7 @@ const StockOutPage: React.FC = () => {
                 )}
               </tbody>
             </table>
+            )}
           </div>
         </>
       )}
