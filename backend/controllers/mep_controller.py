@@ -65,9 +65,13 @@ def get_mep_approval_boq():
         )
 
         # Filter by BOQ.last_pm_user_id (the PM this BOQ was sent to)
-        # Admin sees all BOQs with Pending_PM_Approval status
+        # Admin viewing MEP role sees only projects with MEP assigned
         if user_role == 'admin':
-            pass  # No additional filter for admin - sees all
+            # Admin sees only projects where mep_supervisor_id is not null (MEP assigned projects)
+            query = query.filter(
+                Project.mep_supervisor_id.isnot(None),
+                Project.mep_supervisor_id != []
+            )
         elif user_role in ['projectmanager', 'project_manager']:
             # PM sees only BOQs assigned to them via last_pm_user_id
             query = query.filter(BOQ.last_pm_user_id == user_id)
@@ -307,7 +311,10 @@ def get_mep_assign_project():
                     BOQ.is_deleted == False,
                     PMAssignSS.is_deleted == False,
                     # FILTER: Only show ongoing (non-completed) projects
-                    ~Project.status.in_(['completed', 'Completed'])
+                    ~Project.status.in_(['completed', 'Completed']),
+                    # Admin sees only MEP-assigned projects
+                    Project.mep_supervisor_id.isnot(None),
+                    Project.mep_supervisor_id != []
                 )
                 .group_by(
                     Project.project_id,
@@ -472,7 +479,11 @@ def get_mep_approved_boq():
 
         # Filter by role - PM sees their BOQs via last_pm_user_id, MEP sees via mep_supervisor_id
         if user_role == 'admin':
-            pass  # Admin sees all
+            # Admin sees only MEP-assigned projects
+            query = query.filter(
+                Project.mep_supervisor_id.isnot(None),
+                Project.mep_supervisor_id != []
+            )
         elif user_role == 'mep':
             # MEP sees only projects where their user_id is in mep_supervisor_id JSONB array
             mep_user_id = int(user_id) if user_id else None
@@ -584,8 +595,12 @@ def get_mep_pending_boq():
 
         # Filter by current user based on Project.mep_supervisor_id (JSONB array)
         if user_role == 'admin':
-            # Admin sees all pending projects (approved status only)
-            query = query.filter(BOQ.status.in_(['approved', 'Approved']))
+            # Admin sees only MEP-assigned pending projects (approved status only)
+            query = query.filter(
+                BOQ.status.in_(['approved', 'Approved']),
+                Project.mep_supervisor_id.isnot(None),
+                Project.mep_supervisor_id != []
+            )
         elif user_role in ['projectmanager', 'project_manager']:
             # PM sees only projects where their user_id is in Project.user_id JSONB array
             pm_user_id = int(user_id) if user_id else None
@@ -722,7 +737,7 @@ def get_mep_rejected_boq():
                 Project.floor_name,
                 Project.start_date,
                 Project.end_date,
-                Project.status,
+                Project.status.label('project_status'),
                 Project.working_hours,
                 Project.user_id,
                 User.full_name.label('last_pm_name')
@@ -737,7 +752,11 @@ def get_mep_rejected_boq():
 
         # Filter by role - PM sees their rejected BOQs, MEP sees via mep_supervisor_id
         if user_role == 'admin':
-            pass  # Admin sees all rejected BOQs
+            # Admin viewing MEP role sees only projects with MEP assigned
+            query = query.filter(
+                Project.mep_supervisor_id.isnot(None),
+                Project.mep_supervisor_id != []
+            )
         elif user_role == 'mep':
             # MEP sees only rejected BOQs for projects where their user_id is in mep_supervisor_id
             mep_user_id = int(user_id) if user_id else None
@@ -764,7 +783,7 @@ def get_mep_rejected_boq():
                 "project_id": row.project_id,
                 "project_name": row.project_name,
                 "project_code": row.project_code,
-                "project_status": row.project.status,
+                "project_status": row.project_status,
                 "client": row.client,
                 "location": row.location,
                 "floor": row.floor_name,
@@ -864,7 +883,11 @@ def get_mep_completed_project():
 
         # Filter by current user based on Project.user_id (JSONB array)
         if user_role == 'admin':
-            pass  # Admin sees all completed projects
+            # Admin sees only MEP-assigned completed projects
+            query = query.filter(
+                Project.mep_supervisor_id.isnot(None),
+                Project.mep_supervisor_id != []
+            )
         elif user_role in ['projectmanager', 'project_manager']:
             # PM sees only completed projects where their user_id is in Project.user_id JSONB array
             query = query.filter(Project.user_id.contains([user_id]))
@@ -965,8 +988,12 @@ def get_mep_dashboard():
 
         # Get projects assigned to this PM or MEP
         if user_role == 'admin':
-            # Admin sees all projects
-            assigned_projects = Project.query.filter(Project.is_deleted == False).all()
+            # Admin viewing MEP dashboard sees only projects with MEP assigned
+            assigned_projects = Project.query.filter(
+                Project.is_deleted == False,
+                Project.mep_supervisor_id.isnot(None),
+                Project.mep_supervisor_id != []
+            ).all()
         elif user_role == 'mep':
             # MEP sees only their assigned projects via mep_supervisor_id
             # IMPORTANT: Convert user_id to integer for JSONB array comparison
@@ -1089,23 +1116,34 @@ def get_mep_dashboard():
             status = boq.status.lower() if boq.status else ''
             project = Project.query.get(boq.project_id)
 
-            # Check if MEP has made assignments for this BOQ
-            mep_has_assignment = PMAssignSS.query.filter(
-                PMAssignSS.boq_id == boq.boq_id,
-                PMAssignSS.assigned_by_pm_id == mep_user_id_int,
-                PMAssignSS.is_deleted == False
-            ).first() if user_role == 'mep' else None
+            # Check if there are assignments for this BOQ
+            if user_role == 'mep':
+                # MEP: Check if THIS MEP has made assignments
+                has_assignment = PMAssignSS.query.filter(
+                    PMAssignSS.boq_id == boq.boq_id,
+                    PMAssignSS.assigned_by_pm_id == mep_user_id_int,
+                    PMAssignSS.is_deleted == False
+                ).first() is not None
+            elif user_role == 'admin':
+                # Admin: Check if ANY assignments exist for this BOQ
+                has_assignment = PMAssignSS.query.filter(
+                    PMAssignSS.boq_id == boq.boq_id,
+                    PMAssignSS.is_deleted == False
+                ).first() is not None
+            else:
+                # Other roles: No assignment check
+                has_assignment = False
 
             # 1. FOR APPROVAL TAB: BOQs with 'Pending_PM_Approval' status
             if 'pending_pm_approval' in status:
                 tab_counts["for_approval"] += 1
 
-            # 2. PENDING TAB: BOQs with 'approved' OR 'items_assigned' where MEP hasn't made assignments
-            elif status in ['approved'] or (status == 'items_assigned' and not mep_has_assignment):
+            # 2. PENDING TAB: BOQs with 'approved' status (any case) OR 'items_assigned' where NO assignments exist
+            elif 'approved' in status or (status == 'items_assigned' and not has_assignment):
                 tab_counts["pending"] += 1
 
-            # 3. ASSIGNED TAB: BOQs with 'items_assigned' where MEP HAS made assignments
-            elif status == 'items_assigned' and mep_has_assignment:
+            # 3. ASSIGNED TAB: BOQs with 'items_assigned' where assignments exist
+            elif status == 'items_assigned' and has_assignment:
                 tab_counts["assigned"] += 1
 
             # 4. APPROVED TAB: Same as Pending + Assigned (all approved BOQs including items_assigned)
@@ -1125,22 +1163,40 @@ def get_mep_dashboard():
         # Get item assignments to Site Engineers made BY THIS MEP
         boq_ids = [b.boq_id for b in boqs]
 
-        # Filter assignments to show only those made by current MEP user
-        if user_role == 'mep':
-            mep_user_id_int = int(user_id) if user_id else None
-            item_assignments = PMAssignSS.query.filter(
-                PMAssignSS.boq_id.in_(boq_ids),
-                PMAssignSS.assigned_by_pm_id == mep_user_id_int,
-                PMAssignSS.is_deleted == False
-            ).all()
-        else:
-            # Admin or PM - show all assignments
-            item_assignments = PMAssignSS.query.filter(
-                PMAssignSS.boq_id.in_(boq_ids),
-                PMAssignSS.is_deleted == False
-            ).all()
+        # Get all assignments for MEP-assigned projects
+        # Don't filter by assigned_by_pm_id because MEP should see all assignments in their projects
+        item_assignments = PMAssignSS.query.filter(
+            PMAssignSS.boq_id.in_(boq_ids),
+            PMAssignSS.is_deleted == False
+        ).all()
 
-        items_assigned = len(item_assignments)
+        # Debug logging
+        print(f"\n=== MEP Dashboard Item Assignment Debug ===")
+        print(f"Total assignment records found: {len(item_assignments)}")
+
+        # Count actual items assigned (not just assignment records)
+        # Each assignment record can have multiple items in item_indices array
+        items_assigned_count = 0
+        for idx, assignment in enumerate(item_assignments):
+            print(f"\nAssignment {idx + 1}:")
+            print(f"  - pm_assign_id: {assignment.pm_assign_id}")
+            print(f"  - boq_id: {assignment.boq_id}")
+            print(f"  - assigned_to_se_id: {assignment.assigned_to_se_id}")
+            print(f"  - assigned_by_pm_id: {assignment.assigned_by_pm_id}")
+            print(f"  - item_indices: {assignment.item_indices}")
+
+            if assignment.item_indices and isinstance(assignment.item_indices, list):
+                count = len(assignment.item_indices)
+                items_assigned_count += count
+                print(f"  - Counting {count} items from item_indices")
+            else:
+                items_assigned_count += 1
+                print(f"  - Counting 1 item (no item_indices array)")
+
+        print(f"\nTotal items_assigned_count: {items_assigned_count}")
+        print(f"===========================================\n")
+
+        items_assigned = items_assigned_count
         pending_assignment = total_boq_items - items_assigned
 
         # Get recent activities (last 10 BOQs)
@@ -1183,12 +1239,13 @@ def get_mep_dashboard():
         return jsonify({
             "success": True,
             "stats": {
-                "total_boq_items": len(boqs),  # Total BOQ count
-                "items_assigned": tab_counts["assigned"],  # Changed: Assigned tab count
-                "pending_assignment": tab_counts["pending"],  # Changed: Pending tab count
-                "total_project_value": round(total_project_value, 2)
+                "total_boq_items": total_boq_items,  # Total LINE ITEMS count across all BOQs
+                "items_assigned": items_assigned,  # Count of ITEMS assigned (from item_indices)
+                "pending_assignment": pending_assignment,  # Count of ITEMS not yet assigned
+                "total_projects": len(project_ids),  # Total PROJECT count (plain number)
+                "total_project_value": len(project_ids)  # Deprecated: kept for backward compatibility
             },
-            "tab_counts": tab_counts,  # New: Tab counts matching My Projects page
+            "tab_counts": tab_counts,  # Tab counts matching My Projects page
             "boq_status": {
                 "for_approval": tab_counts["for_approval"],
                 "pending": tab_counts["pending"],

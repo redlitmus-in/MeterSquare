@@ -144,10 +144,16 @@ interface Buyer {
 const MyProjects: React.FC = () => {
   const { user } = useAuthStore();
 
-  // ROLE-AWARE: Determine page title based on user role
+  // ROLE-AWARE: Determine page title based on URL path (for admin viewing different roles) or user role
+  const currentPath = window.location.pathname;
+  const isMEPRoute = currentPath.includes('/mep/');
+
   const userRole = (user as any)?.role || '';
   const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
-  const isMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+  const isUserMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+
+  // Use route to determine page type (allows admin to view MEP projects page)
+  const isMEP = isMEPRoute || isUserMEP;
   const pageTitle = isMEP ? 'My Projects (MEP Manager)' : 'My Projects';
 
   // Modal states - declared first to use in auto-refresh condition
@@ -185,8 +191,11 @@ const MyProjects: React.FC = () => {
       let response: any;
       let dataList: any[] = [];
 
-      // ROLE-AWARE: Use MEP service for MEP role, PM service for PM role
-      const isMEP = userRole.toLowerCase() === 'mep';
+      // ROLE-AWARE: Use MEP service for MEP route or MEP role, PM service for PM route/role
+      // Check URL path to handle admin viewing MEP routes
+      const currentPath = window.location.pathname;
+      const isMEPRoute = currentPath.includes('/mep/');
+      const isMEP = isMEPRoute || userRole.toLowerCase() === 'mep';
 
       // Call specific API based on active tab
       switch (filterStatus) {
@@ -228,25 +237,13 @@ const MyProjects: React.FC = () => {
 
       dataList = response.data || [];
 
-      // Fetch counts from all tabs in parallel
-      const [forApprovalRes, pendingRes, assignedRes, approvedRes, rejectedRes, completedRes] = await Promise.all([
-        isMEP ? mepService.getMEPApprovalBOQs() : projectManagerService.getPMApprovalBOQs(),
-        isMEP ? mepService.getMEPPendingBOQs() : projectManagerService.getPMPendingBOQs(),
-        isMEP ? mepService.getMEPAssignedProjects() : projectManagerService.getPMAssignedProjects(),
-        isMEP ? mepService.getMEPApprovedBOQs() : projectManagerService.getPMApprovedBOQs(),
-        isMEP ? mepService.getMEPRejectedBOQs() : projectManagerService.getPMRejectedBOQs(),
-        isMEP ? mepService.getMEPCompletedProjects() : projectManagerService.getPMCompletedProjects(),
-      ]);
-
-      // Update tab counts from API responses
-      setTabCounts({
-        for_approval: (forApprovalRes.data || []).length,
-        pending: (pendingRes.data || []).length,
-        assigned: (assignedRes.data || []).length,
-        approved: (approvedRes.data || []).length,
-        rejected: (rejectedRes.data || []).length,
-        completed: (completedRes.data || []).length,
-      });
+      // Update tab count for the current tab only (not all tabs)
+      // The response should contain count information
+      const currentCount = (response.data || []).length;
+      setTabCounts(prevCounts => ({
+        ...prevCounts,
+        [filterStatus]: currentCount
+      }));
 
       // Map ALL projects with unified data structure
       const enrichedProjects = dataList.map((item: any) => {
@@ -380,6 +377,41 @@ const MyProjects: React.FC = () => {
     // Refetch data whenever the tab changes
     refetch().catch(err => console.error('Tab change refetch error:', err));
   }, [filterStatus, refetch]);
+
+  // Fetch all tab counts once on component mount (not on every tab change)
+  useEffect(() => {
+    const fetchTabCounts = async () => {
+      try {
+        const currentPath = window.location.pathname;
+        const isMEPRoute = currentPath.includes('/mep/');
+        const isMEP = isMEPRoute || userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+
+        // Fetch counts from all tabs in parallel (only once on mount)
+        const [forApprovalRes, pendingRes, assignedRes, approvedRes, rejectedRes, completedRes] = await Promise.all([
+          isMEP ? mepService.getMEPApprovalBOQs() : projectManagerService.getPMApprovalBOQs(),
+          isMEP ? mepService.getMEPPendingBOQs() : projectManagerService.getPMPendingBOQs(),
+          isMEP ? mepService.getMEPAssignedProjects() : projectManagerService.getPMAssignedProjects(),
+          isMEP ? mepService.getMEPApprovedBOQs() : projectManagerService.getPMApprovedBOQs(),
+          isMEP ? mepService.getMEPRejectedBOQs() : projectManagerService.getPMRejectedBOQs(),
+          isMEP ? mepService.getMEPCompletedProjects() : projectManagerService.getPMCompletedProjects(),
+        ]);
+
+        // Update all tab counts at once
+        setTabCounts({
+          for_approval: (forApprovalRes.data || []).length,
+          pending: (pendingRes.data || []).length,
+          assigned: (assignedRes.data || []).length,
+          approved: (approvedRes.data || []).length,
+          rejected: (rejectedRes.data || []).length,
+          completed: (completedRes.data || []).length,
+        });
+      } catch (error) {
+        console.error('Error fetching tab counts:', error);
+      }
+    };
+
+    fetchTabCounts();
+  }, []); // Empty dependency array - run only once on mount
 
   const loadAvailableSEs = async () => {
     try {

@@ -46,6 +46,7 @@ const CreativeErrorPage = lazy(() => import('@/components/ui/CreativeErrorPage')
 
 // Lazy load role hubs - Direct import for better code splitting
 const ProjectManagerHub = lazy(() => import('@/roles/project-manager/pages/ProjectManagerHub'));
+const MEPDashboard = lazy(() => import('@/roles/mep/pages/MEPDashboard'));
 // const EstimationHub = lazy(() => import('@/roles/estimation/pages/EstimationHub'));
 const EstimatorHub = lazy(() => import('@/roles/estimator/pages/EstimatorHub'));
 const TechnicalDirectorHub = lazy(() => import('@/roles/technical-director/pages/TechnicalDirectorHub'));
@@ -159,9 +160,13 @@ const RoleSpecificProcurementHub: React.FC = () => {
 
   const userRoleLower = userRole.toLowerCase();
 
-  // Check if user is Project Manager OR MEP Supervisor (both share same procurement hub)
-  if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' || userRoleLower === 'projectmanager' ||
-      userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor') {
+  // Check if user is MEP Supervisor - use separate MEP dashboard
+  if (userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor') {
+    return <MEPDashboard />;
+  }
+
+  // Check if user is Project Manager
+  if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' || userRoleLower === 'projectmanager') {
     return <ProjectManagerHub />;
   }
 

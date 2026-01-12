@@ -10,6 +10,7 @@ const AdminDashboard = lazy(() => import('@/pages/dashboards/AdminDashboard'));
 const TechnicalDirectorDashboard = lazy(() => import('@/roles/technical-director/pages/TechnicalDirectorHub'));
 const EstimatorDashboard = lazy(() => import('@/roles/estimator/pages/EstimatorDashboard'));
 const ProjectManagerDashboard = lazy(() => import('@/roles/project-manager/pages/ProjectManagerHub'));
+const MEPDashboard = lazy(() => import('@/roles/mep/pages/MEPDashboard'));
 const SiteEngineerDashboard = lazy(() => import('@/roles/site-engineer/pages/Dashboard'));
 const BuyerDashboard = lazy(() => import('@/roles/buyer/pages/Dashboard'));
 const ProductionManagerDashboard = lazy(() => import('@/roles/production-manager/pages/M2StoreDashboard'));
@@ -83,14 +84,14 @@ const RoleDashboard: React.FC = () => {
       DashboardComponent = ProjectManagerDashboard;
       break;
 
-    // MEP Supervisor (management level) - SHARED with PM dashboard
+    // MEP Supervisor (management level) - Use separate MEP dashboard
     case 'mep':
     case 'MEP':
     case 'mep supervisor':
     case 'MEP Supervisor':
     case 'mep_supervisor':
     case UserRole.MEP:
-      DashboardComponent = ProjectManagerDashboard;  // Use SAME dashboard as PM
+      DashboardComponent = MEPDashboard;  // Use separate MEP dashboard
       break;
 
     case 'siteengineer':

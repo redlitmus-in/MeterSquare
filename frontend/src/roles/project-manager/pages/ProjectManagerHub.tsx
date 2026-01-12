@@ -12,10 +12,16 @@ import { useDashboardMetricsAutoSync } from '@/hooks/useAutoSync';
 const ProjectManagerHub: React.FC = () => {
   const { user } = useAuthStore();
 
-  // ROLE-AWARE: Determine dashboard title based on user role
+  // ROLE-AWARE: Determine dashboard type based on URL path (for admin viewing different roles) or user role
+  const currentPath = window.location.pathname;
+  const isMEPRoute = currentPath.includes('/mep/');
+
   const userRole = (user as any)?.role || '';
   const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
-  const isMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+  const isUserMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+
+  // Use route to determine dashboard type (allows admin to view MEP dashboard)
+  const isMEP = isMEPRoute || isUserMEP;
   const dashboardTitle = isMEP ? 'MEP Supervisor Dashboard' : 'Project Manager Dashboard';
 
   // Real-time auto-sync for dashboard data
@@ -42,7 +48,7 @@ const ProjectManagerHub: React.FC = () => {
           total_items: stats.stats.total_boq_items,
           items_assigned: stats.stats.items_assigned,
           items_pending: stats.stats.pending_assignment,
-          total_cost: stats.stats.total_project_value
+          total_cost: stats.stats.total_projects || stats.stats.total_project_value  // Use total_projects (count)
         }
       };
     }
