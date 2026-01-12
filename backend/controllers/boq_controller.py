@@ -5243,7 +5243,7 @@ def get_rejected_boq():
             .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
             .filter(BOQ.is_deleted == False)
             .filter(Project.is_deleted == False)
-            .filter(BOQ.status.in_(['rejected', 'Rejected', 'PM_Rejected']))
+            .filter(BOQ.status.in_(['rejected', 'Rejected', 'PM_Rejected', 'TD_Rejected', 'Client_Rejected', 'Internal_Revision_Pending']))
             .order_by(BOQ.created_at.desc())
         )
 

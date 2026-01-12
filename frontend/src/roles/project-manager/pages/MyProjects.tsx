@@ -375,6 +375,12 @@ const MyProjects: React.FC = () => {
     refetch().catch(err => console.error('Refetch error (non-critical):', err));
   }, [boqUpdateTimestamp, refetch]);
 
+  // ✅ TRIGGER API CALL when tab (filterStatus) changes
+  useEffect(() => {
+    // Refetch data whenever the tab changes
+    refetch().catch(err => console.error('Tab change refetch error:', err));
+  }, [filterStatus, refetch]);
+
   const loadAvailableSEs = async () => {
     try {
       setLoadingSEs(true);

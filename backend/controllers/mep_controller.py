@@ -340,7 +340,9 @@ def get_mep_assign_project():
         elif user_role == 'mep':
             # MEP sees only projects where their user_id is in mep_supervisor_id JSONB array
             # Same query as PM but filter by mep_supervisor_id
-            query = query.filter(Project.mep_supervisor_id.contains([user_id]))
+            mep_user_id = int(user_id) if user_id else None
+            if mep_user_id:
+                query = query.filter(Project.mep_supervisor_id.contains([mep_user_id]))
 
         # Pagination
         if page is not None:
@@ -473,7 +475,9 @@ def get_mep_approved_boq():
             pass  # Admin sees all
         elif user_role == 'mep':
             # MEP sees only projects where their user_id is in mep_supervisor_id JSONB array
-            query = query.filter(Project.mep_supervisor_id.contains([user_id]))
+            mep_user_id = int(user_id) if user_id else None
+            if mep_user_id:
+                query = query.filter(Project.mep_supervisor_id.contains([mep_user_id]))
         else:
             # PM sees only BOQs where they are the last PM
             query = query.filter(BOQ.last_pm_user_id == user_id)
@@ -546,8 +550,11 @@ def get_mep_approved_boq():
         }), 500
 
 def get_mep_pending_boq():
-    """Get pending projects assigned to the current MEP - projects with approved BOQs that are not yet completed"""
+    """Get pending projects assigned to the current MEP - projects with approved BOQs not yet completed + items_assigned projects where MEP hasn't made assignments"""
     try:
+        from sqlalchemy import func, or_, and_, exists
+        from models.pm_assign_ss import PMAssignSS
+
         # PERFORMANCE: Optional pagination support (backward compatible)
         page = request.args.get('page', type=int)
         page_size = request.args.get('page_size', default=20, type=int)
@@ -560,7 +567,7 @@ def get_mep_pending_boq():
         user_id = current_user.get('user_id')
         user_role = current_user.get('role', '').lower() if current_user else ''
 
-        # Query projects with approved BOQs that are pending PM work
+        # Query projects with approved BOQs that are pending MEP work
         # We join with BOQ to ensure the project has an approved BOQ and get BOQ status
         query = (
             db.session.query(
@@ -572,23 +579,48 @@ def get_mep_pending_boq():
             .join(BOQ, Project.project_id == BOQ.project_id)
             .filter(Project.is_deleted == False)
             .filter(BOQ.is_deleted == False)
-            .filter(BOQ.status.in_(['approved', 'Approved']))
             .filter(Project.status.notin_(['completed', 'Completed']))
-            .order_by(Project.created_at.desc())
         )
 
-        # Filter by current user based on Project.user_id (JSONB array)
+        # Filter by current user based on Project.mep_supervisor_id (JSONB array)
         if user_role == 'admin':
-            pass  # Admin sees all pending projects
+            # Admin sees all pending projects (approved status only)
+            query = query.filter(BOQ.status.in_(['approved', 'Approved']))
         elif user_role in ['projectmanager', 'project_manager']:
             # PM sees only projects where their user_id is in Project.user_id JSONB array
-            query = query.filter(Project.user_id.contains([user_id]))
+            pm_user_id = int(user_id) if user_id else None
+            if pm_user_id:
+                query = query.filter(Project.user_id.contains([pm_user_id]))
+                query = query.filter(BOQ.status.in_(['approved', 'Approved']))
         elif user_role == 'mep':
             # MEP sees only projects where their user_id is in mep_supervisor_id JSONB array
-            query = query.filter(Project.mep_supervisor_id.contains([user_id]))
+            mep_user_id = int(user_id) if user_id else None
+            if mep_user_id:
+                query = query.filter(Project.mep_supervisor_id.contains([mep_user_id]))
+
+                # Create a subquery to check if MEP has made ANY assignments for this BOQ
+                mep_has_assignments = exists().where(
+                    and_(
+                        PMAssignSS.boq_id == BOQ.boq_id,
+                        PMAssignSS.assigned_by_pm_id == mep_user_id,
+                        PMAssignSS.is_deleted == False
+                    )
+                )
+
+                # Add condition: Show projects with status 'approved' OR
+                # projects with status 'items_assigned' where MEP hasn't made ANY assignments
+                query = query.filter(
+                    or_(
+                        BOQ.status.in_(['approved', 'Approved']),
+                        and_(
+                            BOQ.status == 'items_assigned',
+                            ~mep_has_assignments  # NOT EXISTS - MEP has no assignments for this BOQ
+                        )
+                    )
+                )
 
         # Use distinct to avoid duplicate projects if multiple BOQs exist
-        query = query.distinct()
+        query = query.distinct().order_by(Project.created_at.desc())
 
         # Pagination
         if page is not None:
@@ -708,7 +740,9 @@ def get_mep_rejected_boq():
             pass  # Admin sees all rejected BOQs
         elif user_role == 'mep':
             # MEP sees only rejected BOQs for projects where their user_id is in mep_supervisor_id
-            query = query.filter(Project.mep_supervisor_id.contains([user_id]))
+            mep_user_id = int(user_id) if user_id else None
+            if mep_user_id:
+                query = query.filter(Project.mep_supervisor_id.contains([mep_user_id]))
         else:
             # PM sees only rejected BOQs where they are the last PM
             query = query.filter(BOQ.last_pm_user_id == user_id)
@@ -836,7 +870,9 @@ def get_mep_completed_project():
             query = query.filter(Project.user_id.contains([user_id]))
         elif user_role == 'mep':
             # MEP sees only completed projects where their user_id is in mep_supervisor_id JSONB array
-            query = query.filter(Project.mep_supervisor_id.contains([user_id]))
+            mep_user_id = int(user_id) if user_id else None
+            if mep_user_id:
+                query = query.filter(Project.mep_supervisor_id.contains([mep_user_id]))
 
         # Pagination
         if page is not None:
@@ -933,24 +969,26 @@ def get_mep_dashboard():
             assigned_projects = Project.query.filter(Project.is_deleted == False).all()
         elif user_role == 'mep':
             # MEP sees only their assigned projects via mep_supervisor_id
-            from sqlalchemy import cast
-            from sqlalchemy.dialects.postgresql import JSONB
-
-            assigned_projects = Project.query.filter(
-                Project.is_deleted == False,
-                Project.mep_supervisor_id.op('@>')(cast([user_id], JSONB))
-            ).all()
+            # IMPORTANT: Convert user_id to integer for JSONB array comparison
+            mep_user_id = int(user_id) if user_id else None
+            if mep_user_id:
+                assigned_projects = Project.query.filter(
+                    Project.is_deleted == False,
+                    Project.mep_supervisor_id.contains([mep_user_id])
+                ).all()
+            else:
+                assigned_projects = []
         else:
             # PM sees only their assigned projects
-            # Use PostgreSQL JSONB @> operator to check if array contains the user_id
-            # The @> operator checks if the left JSONB contains the right JSONB
-            from sqlalchemy import cast
-            from sqlalchemy.dialects.postgresql import JSONB
-
-            assigned_projects = Project.query.filter(
-                Project.is_deleted == False,
-                Project.user_id.op('@>')(cast([user_id], JSONB))
-            ).all()
+            # IMPORTANT: Convert user_id to integer for JSONB array comparison
+            pm_user_id = int(user_id) if user_id else None
+            if pm_user_id:
+                assigned_projects = Project.query.filter(
+                    Project.is_deleted == False,
+                    Project.user_id.contains([pm_user_id])
+                ).all()
+            else:
+                assigned_projects = []
 
         project_ids = [p.project_id for p in assigned_projects]
 
@@ -964,9 +1002,19 @@ def get_mep_dashboard():
                     "pending_assignment": 0,
                     "total_project_value": 0
                 },
-                "boq_status": {
-                    "approved": 0,
+                "tab_counts": {
+                    "for_approval": 0,
                     "pending": 0,
+                    "assigned": 0,
+                    "approved": 0,
+                    "rejected": 0,
+                    "completed": 0
+                },
+                "boq_status": {
+                    "for_approval": 0,
+                    "pending": 0,
+                    "assigned": 0,
+                    "approved": 0,
                     "rejected": 0,
                     "completed": 0
                 },
@@ -974,7 +1022,8 @@ def get_mep_dashboard():
                     "materials": 0,
                     "labour": 0
                 },
-                "recent_activities": []
+                "recent_activities": [],
+                "projects": []
             }), 200
 
         # Get all BOQs for these projects
@@ -989,9 +1038,19 @@ def get_mep_dashboard():
         total_labour = 0
         total_project_value = 0
 
-        boq_status_counts = {
-            "approved": 0,
+        # Track individual BOQ costs for debugging
+        boq_cost_breakdown = []
+
+        # Check MEP assignments for categorizing 'items_assigned' status
+        mep_user_id_int = int(user_id) if user_id else None
+
+        # COUNT PROJECTS PER TAB (not BOQ statuses)
+        # These counts should match the tab counts in My Projects page
+        tab_counts = {
+            "for_approval": 0,
             "pending": 0,
+            "assigned": 0,
+            "approved": 0,
             "rejected": 0,
             "completed": 0
         }
@@ -1004,28 +1063,82 @@ def get_mep_dashboard():
             ).first()
 
             if boq_details:
+                boq_cost = float(boq_details.total_cost or 0)
                 total_boq_items += boq_details.total_items or 0
                 total_materials += boq_details.total_materials or 0
                 total_labour += boq_details.total_labour or 0
-                total_project_value += float(boq_details.total_cost or 0)
+                total_project_value += boq_cost
 
-            # Count by status
+                # Track for debugging
+                boq_cost_breakdown.append({
+                    'boq_id': boq.boq_id,
+                    'boq_name': boq.boq_name,
+                    'cost': boq_cost,
+                    'items': boq_details.total_items or 0
+                })
+            else:
+                boq_cost_breakdown.append({
+                    'boq_id': boq.boq_id,
+                    'boq_name': boq.boq_name,
+                    'cost': 0,
+                    'items': 0,
+                    'note': 'No BOQ details found'
+                })
+
+            # Categorize BOQ into tabs (MUST MATCH the tab endpoint logic)
             status = boq.status.lower() if boq.status else ''
-            if 'approved' in status or status == 'sent_for_confirmation':
-                boq_status_counts["approved"] += 1
-            elif 'pending' in status:
-                boq_status_counts["pending"] += 1
-            elif 'rejected' in status:
-                boq_status_counts["rejected"] += 1
-            elif 'completed' in status:
-                boq_status_counts["completed"] += 1
+            project = Project.query.get(boq.project_id)
 
-        # Get item assignments to Site Engineers
+            # Check if MEP has made assignments for this BOQ
+            mep_has_assignment = PMAssignSS.query.filter(
+                PMAssignSS.boq_id == boq.boq_id,
+                PMAssignSS.assigned_by_pm_id == mep_user_id_int,
+                PMAssignSS.is_deleted == False
+            ).first() if user_role == 'mep' else None
+
+            # 1. FOR APPROVAL TAB: BOQs with 'Pending_PM_Approval' status
+            if 'pending_pm_approval' in status:
+                tab_counts["for_approval"] += 1
+
+            # 2. PENDING TAB: BOQs with 'approved' OR 'items_assigned' where MEP hasn't made assignments
+            elif status in ['approved'] or (status == 'items_assigned' and not mep_has_assignment):
+                tab_counts["pending"] += 1
+
+            # 3. ASSIGNED TAB: BOQs with 'items_assigned' where MEP HAS made assignments
+            elif status == 'items_assigned' and mep_has_assignment:
+                tab_counts["assigned"] += 1
+
+            # 4. APPROVED TAB: Same as Pending + Assigned (all approved BOQs including items_assigned)
+            # Note: We'll calculate this after the loop
+
+            # 5. REJECTED TAB: BOQs with rejected statuses
+            elif 'rejected' in status:
+                tab_counts["rejected"] += 1
+
+            # 6. COMPLETED TAB: Projects with 'Completed' status
+            elif project and project.status and 'completed' in project.status.lower():
+                tab_counts["completed"] += 1
+
+        # Calculate APPROVED count: Pending + Assigned
+        tab_counts["approved"] = tab_counts["pending"] + tab_counts["assigned"]
+
+        # Get item assignments to Site Engineers made BY THIS MEP
         boq_ids = [b.boq_id for b in boqs]
-        item_assignments = PMAssignSS.query.filter(
-            PMAssignSS.boq_id.in_(boq_ids),
-            PMAssignSS.is_deleted == False
-        ).all()
+
+        # Filter assignments to show only those made by current MEP user
+        if user_role == 'mep':
+            mep_user_id_int = int(user_id) if user_id else None
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.boq_id.in_(boq_ids),
+                PMAssignSS.assigned_by_pm_id == mep_user_id_int,
+                PMAssignSS.is_deleted == False
+            ).all()
+        else:
+            # Admin or PM - show all assignments
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.boq_id.in_(boq_ids),
+                PMAssignSS.is_deleted == False
+            ).all()
 
         items_assigned = len(item_assignments)
         pending_assignment = total_boq_items - items_assigned
@@ -1047,20 +1160,49 @@ def get_mep_dashboard():
                 "last_modified": boq.last_modified_at.isoformat() if boq.last_modified_at else None
             })
 
+        # Get project progress information
+        projects_with_progress = []
+        for project in assigned_projects:
+            # Calculate project progress based on BOQ completion
+            project_boqs = [b for b in boqs if b.project_id == project.project_id]
+            total_project_boqs = len(project_boqs)
+
+            if total_project_boqs > 0:
+                completed_boqs = sum(1 for b in project_boqs if b.status and 'completed' in b.status.lower())
+                progress_percentage = int((completed_boqs / total_project_boqs) * 100)
+            else:
+                progress_percentage = 0
+
+            projects_with_progress.append({
+                "project_id": project.project_id,
+                "project_name": project.project_name,
+                "status": project.status,
+                "progress": progress_percentage
+            })
+
         return jsonify({
             "success": True,
             "stats": {
-                "total_boq_items": total_boq_items,
-                "items_assigned": items_assigned,
-                "pending_assignment": max(0, pending_assignment),  # Don't show negative
+                "total_boq_items": len(boqs),  # Total BOQ count
+                "items_assigned": tab_counts["assigned"],  # Changed: Assigned tab count
+                "pending_assignment": tab_counts["pending"],  # Changed: Pending tab count
                 "total_project_value": round(total_project_value, 2)
             },
-            "boq_status": boq_status_counts,
+            "tab_counts": tab_counts,  # New: Tab counts matching My Projects page
+            "boq_status": {
+                "for_approval": tab_counts["for_approval"],
+                "pending": tab_counts["pending"],
+                "assigned": tab_counts["assigned"],
+                "approved": tab_counts["approved"],
+                "rejected": tab_counts["rejected"],
+                "completed": tab_counts["completed"]
+            },
             "items_breakdown": {
                 "materials": total_materials,
                 "labour": total_labour
             },
-            "recent_activities": recent_activities
+            "recent_activities": recent_activities,
+            "projects": projects_with_progress
         }), 200
 
     except Exception as e:

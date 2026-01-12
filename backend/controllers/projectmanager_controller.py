@@ -1926,7 +1926,7 @@ def get_pm_assign_project():
     """Get BOQs that the current PM has assigned to Site Supervisors - ONGOING (non-completed) - OPTIMIZED FOR SPEED"""
     try:
         from models.pm_assign_ss import PMAssignSS
-        from sqlalchemy import func, case
+        from sqlalchemy import func, case, and_
         from models.boq import BOQDetails
 
         page = request.args.get('page', type=int)
@@ -1973,7 +1973,10 @@ def get_pm_assign_project():
                     )
                 )).label('pending_se_requests')
             )
-            .filter(PMAssignSS.is_deleted == False)
+            .filter(
+                PMAssignSS.is_deleted == False,
+                PMAssignSS.boq_id.isnot(None)  # Ensure PMAssignSS record exists
+            )
             .group_by(PMAssignSS.boq_id)
             .subquery()
         )
@@ -2020,12 +2023,13 @@ def get_pm_assign_project():
                 Project.completion_requested
             )
             .join(BOQ, Project.project_id == BOQ.project_id)
-            .join(PMAssignSS, BOQ.boq_id == PMAssignSS.boq_id)
+            .join(PMAssignSS, BOQ.boq_id == PMAssignSS.boq_id)  # INNER JOIN - only show if PM has assignments
             .outerjoin(boq_items_count_subquery, BOQ.boq_id == boq_items_count_subquery.c.boq_id)
             .outerjoin(assignment_counts, BOQ.boq_id == assignment_counts.c.boq_id)
             .filter(
                 Project.is_deleted == False,
                 BOQ.is_deleted == False,
+                BOQ.status == 'items_assigned',  # Only show projects with items_assigned status
                 PMAssignSS.is_deleted == False,
                 # FILTER: Only show ongoing (non-completed) projects
                 ~Project.status.in_(['completed', 'Completed'])
@@ -2034,7 +2038,15 @@ def get_pm_assign_project():
 
         # PERFORMANCE: Apply role filter conditionally (no query duplication)
         if user_role != 'admin':
-            query = query.filter(PMAssignSS.assigned_by_pm_id == user_id)
+            # Filter to show only projects where current PM has made assignments in PMAssignSS table
+            pm_user_id = int(user_id) if user_id else None
+            if pm_user_id:
+                query = query.filter(
+                    and_(
+                        Project.user_id.contains([pm_user_id]),  # PM must be assigned to project
+                        PMAssignSS.assigned_by_pm_id == pm_user_id  # PM must have made assignments
+                    )
+                )
 
         query = query.group_by(
             Project.project_id, Project.project_code, Project.project_name, Project.client,
@@ -2263,9 +2275,10 @@ def get_pm_approved_boq():
         return jsonify({'error': 'Failed to retrieve PM Approval BOQs', 'details': str(e)}), 500
 
 def get_pm_pending_boq():
-    """Get pending projects - projects with approved BOQs not yet completed - OPTIMIZED FOR SPEED"""
+    """Get pending projects - projects with approved BOQs not yet completed + items_assigned projects where PM hasn't made assignments - OPTIMIZED FOR SPEED"""
     try:
-        from sqlalchemy import func
+        from sqlalchemy import func, or_, and_, exists
+        from models.pm_assign_ss import PMAssignSS
 
         page = request.args.get('page', type=int)
         page_size = request.args.get('page_size', default=20, type=int)
@@ -2305,14 +2318,42 @@ def get_pm_pending_boq():
             .filter(
                 Project.is_deleted == False,
                 BOQ.is_deleted == False,
-                BOQ.status.in_(['approved', 'Approved']),
                 Project.status.notin_(['completed', 'Completed'])
             )
         )
 
         # PERFORMANCE: Apply role filter early
-        if user_role in ['projectmanager', 'project_manager']:
-            query = query.filter(Project.user_id.contains([user_id]))
+        # Filter projects where current PM's user_id is in the project's user_id array
+        pm_user_id = None
+        if user_role in ['projectmanager', 'project_manager', 'pm']:
+            # Ensure user_id is integer for JSONB array comparison
+            pm_user_id = int(user_id) if user_id else None
+            if pm_user_id:
+                query = query.filter(Project.user_id.contains([pm_user_id]))
+
+                # Create a subquery to check if PM has made ANY assignments for this BOQ
+                pm_has_assignments = exists().where(
+                    and_(
+                        PMAssignSS.boq_id == BOQ.boq_id,
+                        PMAssignSS.assigned_by_pm_id == pm_user_id,
+                        PMAssignSS.is_deleted == False
+                    )
+                )
+
+                # Add condition: Show projects with status 'approved' OR
+                # projects with status 'items_assigned' where PM hasn't made ANY assignments
+                query = query.filter(
+                    or_(
+                        BOQ.status.in_(['approved', 'Approved']),
+                        and_(
+                            BOQ.status == 'items_assigned',
+                            ~pm_has_assignments  # NOT EXISTS - PM has no assignments for this BOQ
+                        )
+                    )
+                )
+        else:
+            # Admin sees all approved projects
+            query = query.filter(BOQ.status.in_(['approved', 'Approved']))
 
         query = query.distinct().order_by(Project.created_at.desc())
 
