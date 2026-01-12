@@ -1170,31 +1170,15 @@ def get_mep_dashboard():
             PMAssignSS.is_deleted == False
         ).all()
 
-        # Debug logging
-        print(f"\n=== MEP Dashboard Item Assignment Debug ===")
-        print(f"Total assignment records found: {len(item_assignments)}")
-
         # Count actual items assigned (not just assignment records)
         # Each assignment record can have multiple items in item_indices array
         items_assigned_count = 0
-        for idx, assignment in enumerate(item_assignments):
-            print(f"\nAssignment {idx + 1}:")
-            print(f"  - pm_assign_id: {assignment.pm_assign_id}")
-            print(f"  - boq_id: {assignment.boq_id}")
-            print(f"  - assigned_to_se_id: {assignment.assigned_to_se_id}")
-            print(f"  - assigned_by_pm_id: {assignment.assigned_by_pm_id}")
-            print(f"  - item_indices: {assignment.item_indices}")
-
+        for assignment in item_assignments:
             if assignment.item_indices and isinstance(assignment.item_indices, list):
-                count = len(assignment.item_indices)
-                items_assigned_count += count
-                print(f"  - Counting {count} items from item_indices")
+                items_assigned_count += len(assignment.item_indices)
             else:
+                # If no item_indices, count as 1 item
                 items_assigned_count += 1
-                print(f"  - Counting 1 item (no item_indices array)")
-
-        print(f"\nTotal items_assigned_count: {items_assigned_count}")
-        print(f"===========================================\n")
 
         items_assigned = items_assigned_count
         pending_assignment = total_boq_items - items_assigned
