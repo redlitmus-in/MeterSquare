@@ -213,9 +213,12 @@ const ExtraMaterialPage: React.FC = () => {
         };
       });
 
-      // Transform completed materials (purchase completed by buyer - status is 'purchase_completed')
+      // Transform completed materials (purchase completed by buyer - status is 'purchase_completed' or 'routed_to_store')
       const filteredCompleted = seRequests
-        .filter((cr: any) => cr.status?.trim() === 'purchase_completed');
+        .filter((cr: any) => {
+          const status = cr.status?.trim();
+          return status === 'purchase_completed' || status === 'routed_to_store';
+        });
 
       const transformedCompleted = filteredCompleted.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -263,9 +266,11 @@ const ExtraMaterialPage: React.FC = () => {
   const rejectedMaterials = useMemo(() => materialsData?.rejected || [], [materialsData]);
   const completedMaterials = useMemo(() => materialsData?.completed || [], [materialsData]);
 
-  useEffect(() => {
-    refetch();
-  }, [activeTab]);
+  // REMOVED: Unnecessary refetch on tab change - data is already cached and fresh
+  // The auto-sync hook handles refetching when needed
+  // useEffect(() => {
+  //   refetch();
+  // }, [activeTab]);
 
   const handleSubmitExtraMaterial = async (data: any) => {
     try {
@@ -364,6 +369,16 @@ const ExtraMaterialPage: React.FC = () => {
         color: 'bg-purple-100 text-purple-700 border-purple-300',
         icon: <CheckCircleIcon className="w-4 h-4" />,
         label: 'Split to Vendors'
+      },
+      purchase_completed: {
+        color: 'bg-green-100 text-green-700 border-green-300',
+        icon: <CheckBadgeIcon className="w-4 h-4" />,
+        label: 'Purchase Complete'
+      },
+      routed_to_store: {
+        color: 'bg-green-100 text-green-700 border-green-300',
+        icon: <CheckBadgeIcon className="w-4 h-4" />,
+        label: 'Sent to M2 Store'
       }
     };
 
@@ -468,11 +483,11 @@ const ExtraMaterialPage: React.FC = () => {
       // Switch to Request tab immediately to show the moved item
       setActiveTab('request');
 
-      // Remove cache and refetch fresh data
+      // Invalidate cache - auto-sync will handle refetch automatically
+      // No need for manual refetch() - prevents duplicate API calls
       removeQueries(['change-requests']);
       removeQueries(['extra-materials']);
       removeQueries(['se-change-requests']);
-      await refetch();
     } catch (error: any) {
       console.error('Error sending request:', error);
       showError(error.response?.data?.error || 'Failed to send request');
@@ -498,11 +513,11 @@ const ExtraMaterialPage: React.FC = () => {
       setShowDeleteModal(false);
       setDeleteRequestId(null);
 
-      // Remove cache and refetch fresh data
+      // Invalidate cache - auto-sync will handle refetch automatically
+      // No need for manual refetch() - prevents duplicate API calls
       removeQueries(['change-requests']);
       removeQueries(['extra-materials']);
       removeQueries(['se-change-requests']);
-      await refetch();
     } catch (error: any) {
       console.error('Error deleting request:', error);
       showError(error.response?.data?.error || 'Failed to delete request');

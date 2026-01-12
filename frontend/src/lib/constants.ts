@@ -379,13 +379,29 @@ export const CHANGE_REQUEST_STATUSES = {
 
 /**
  * Statuses that consume/reserve material quantities
- * Includes pending to prevent over-allocation when multiple users request same materials
+ * Includes ALL workflow statuses where materials are "in the pipeline" for purchase
+ * This prevents over-allocation when multiple users request the same materials
+ *
+ * CRITICAL: Once a material request enters ANY workflow stage, it should be counted
+ * as consuming BOQ allocation until it's either rejected or purchased.
  */
 export const MATERIAL_CONSUMING_STATUSES = [
-  'pending',
-  'approved',
-  'purchase_completed',
-  'assigned_to_buyer',
+  'pending',              // SE created, not sent yet
+  'send_to_pm',          // SE sent to PM - CRITICAL: Must be included!
+  'under_review',        // PM reviewing
+  'approved_by_pm',      // PM approved
+  'send_to_est',         // Sent to estimator
+  'send_to_mep',         // Sent to MEP
+  'send_to_buyer',       // Sent to buyer
+  'pending_td_approval', // Pending TD approval for vendor selection
+  'approved_by_td',      // TD approved vendor selection
+  'approved',            // Final approval
+  'assigned_to_buyer',   // Assigned to buyer for purchase
+  'purchase_completed',  // Purchased and completed (old direct-to-site flow)
+  'routed_to_store',     // Purchased and routed to M2 Store (new flow)
+  'vendor_approved',     // Vendor approved by TD
+  'split_to_po_children', // Split into multiple vendor POs
+  // Note: 'rejected' is NOT included - rejected materials don't consume BOQ allocation
 ] as const;
 
 /**
@@ -396,6 +412,7 @@ export const APPROVED_WORKFLOW_STATUSES = [
   'approved_by_td',
   'assigned_to_buyer',
   'purchase_completed',
+  'routed_to_store',
   'rejected',
   'under_review',
   'send_to_est',
@@ -411,6 +428,7 @@ export const MEP_APPROVED_STATUSES = [
   'approved_by_td',
   'assigned_to_buyer',
   'purchase_completed',
+  'routed_to_store',
   'rejected',
   'under_review',
   'send_to_est',

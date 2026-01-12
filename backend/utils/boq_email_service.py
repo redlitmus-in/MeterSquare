@@ -6,6 +6,7 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
+from email.mime.image import MIMEImage
 from email import encoders
 from email.header import Header
 from email.utils import formataddr
@@ -88,6 +89,31 @@ class BOQEmailService:
             # Attach HTML body
             html_part = MIMEText(html_content, "html", "utf-8")
             message.attach(html_part)
+
+            # Attach logo as CID embedded image for better email client compatibility
+            try:
+                logo_paths = [
+                    os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logo.png'),  # backend/logo.png
+                    os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'logo.png'),  # backend/static/logo.png
+                ]
+
+                logo_attached = False
+                for logo_path in logo_paths:
+                    if os.path.exists(logo_path):
+                        with open(logo_path, 'rb') as f:
+                            logo_data = f.read()
+                            logo_image = MIMEImage(logo_data, _subtype='png')
+                            logo_image.add_header('Content-ID', '<logo>')
+                            logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
+                            message.attach(logo_image)
+                            logo_attached = True
+                            log.info(f"Logo attached as CID from: {logo_path}")
+                            break
+
+                if not logo_attached:
+                    log.warning("Logo file not found, email will display without embedded logo")
+            except Exception as e:
+                log.warning(f"Could not attach logo as CID: {e}")
 
             # Attach files if provided
             if attachments:
@@ -669,7 +695,7 @@ class BOQEmailService:
         <div class="email-container">
             <!-- Header with Logo -->
             <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); text-align: center;">
-                <img src="{LOGO_URL}" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
+                <img src="cid:logo" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
                 <h1>Bill of Quantities</h1>
                 <h2>{project_name}</h2>
             </div>
@@ -745,7 +771,7 @@ class BOQEmailService:
         <div class="email-container" style="background: #ffffff;">
             <!-- Header with Logo -->
             <div style="background: #ffffff; text-align: center; padding: 25px; border-bottom: 2px solid #e5e7eb;">
-                <img src="{LOGO_URL}" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
+                <img src="cid:logo" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
             </div>
 
             <!-- Content -->
@@ -1936,19 +1962,8 @@ class BOQEmailService:
         materials = purchase_data.get('materials', [])
         total_cost = purchase_data.get('total_cost') or 0
 
-        # Convert logo to base64 for inline embedding
-        logo_data_uri = LOGO_URL  # Default to URL
-        try:
-            import base64
-            logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logo.png')
-            if os.path.exists(logo_path):
-                with open(logo_path, 'rb') as f:
-                    logo_bytes = f.read()
-                    logo_base64 = base64.b64encode(logo_bytes).decode('utf-8')
-                    logo_data_uri = f"data:image/png;base64,{logo_base64}"
-                    log.info(f"Logo converted to base64 for email embedding")
-        except Exception as e:
-            log.warning(f"Could not convert logo to base64, using URL fallback: {e}")
+        # Use CID reference for logo (attached in send_email method)
+        logo_src = "cid:logo"
 
         # Build materials table
         materials_table_rows = ""
@@ -1991,7 +2006,7 @@ class BOQEmailService:
                         <!-- Header with Logo -->
                         <tr>
                             <td style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); padding: 30px 25px; text-align: center;">
-                                <img src="{logo_data_uri}" alt="MeterSquare Logo" style="max-width: 180px; height: auto; margin: 0 auto 20px; display: block;">
+                                <img src="{logo_src}" alt="MeterSquare Logo" style="max-width: 180px; height: auto; margin: 0 auto 20px; display: block;">
                                 <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px;">PURCHASE ORDER</h1>
                                 <h2 style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; font-weight: normal;">Material Request for Project</h2>
                             </td>

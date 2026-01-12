@@ -872,7 +872,7 @@ def get_buyer_dashboard():
         # Vendor Approved: ready to complete purchase
         ordered_statuses = ['vendor_approved']
         # Completed
-        completed_statuses = ['purchase_completed']
+        completed_statuses = ['purchase_completed', 'routed_to_store']
 
         buyer_id_int = int(buyer_id)
 
@@ -1003,7 +1003,7 @@ def get_buyer_dashboard():
                 workflow_stats['vendor_approved'] += 1
                 cost_breakdown['ordered_cost'] += cr_total
                 materials_breakdown['ordered_materials'] += materials_count
-            elif cr_status == 'purchase_completed':
+            elif cr_status in ['purchase_completed', 'routed_to_store']:
                 # Purchase completed
                 stats['delivered'] += 1
                 workflow_stats['purchase_completed'] += 1
@@ -1084,7 +1084,7 @@ def get_buyer_dashboard():
                 stats['ordered'] += 1
                 cost_breakdown['ordered_cost'] += po_child_total
                 materials_breakdown['ordered_materials'] += po_child_materials_count
-            elif po_child_status == 'purchase_completed':
+            elif po_child_status in ['purchase_completed', 'routed_to_store']:
                 workflow_stats['purchase_completed'] += 1
                 stats['delivered'] += 1
                 cost_breakdown['completed_cost'] += po_child_total
@@ -1116,7 +1116,7 @@ def get_buyer_dashboard():
                         project_data[project_id]['total_orders'] += 1
                         project_data[project_id]['total_cost'] += po_child_total
 
-                        if po_child_status == 'purchase_completed':
+                        if po_child_status in ['purchase_completed', 'routed_to_store']:
                             project_data[project_id]['completed'] += 1
                         elif po_child_status not in ['vendor_approved', 'pending_td_approval']:
                             project_data[project_id]['pending'] += 1
@@ -1633,7 +1633,7 @@ def get_buyer_completed_purchases():
                 joinedload(ChangeRequest.vendor),
                 selectinload(ChangeRequest.po_children)
             ).filter(
-                ChangeRequest.status == 'purchase_completed',
+                ChangeRequest.status.in_(['purchase_completed', 'routed_to_store']),
                 ChangeRequest.is_deleted == False
             ).order_by(
                 ChangeRequest.updated_at.desc().nulls_last(),
@@ -1650,7 +1650,7 @@ def get_buyer_completed_purchases():
                 joinedload(ChangeRequest.vendor),
                 selectinload(ChangeRequest.po_children)
             ).filter(
-                ChangeRequest.status == 'purchase_completed',
+                ChangeRequest.status.in_(['purchase_completed', 'routed_to_store']),
                 ChangeRequest.assigned_to_buyer_user_id == buyer_id,
                 ChangeRequest.is_deleted == False
             ).order_by(
@@ -1686,7 +1686,7 @@ def get_buyer_completed_purchases():
             if po_children_for_cr:
                 # Parent has children - check if all are completed
                 all_children_completed = all(
-                    pc.status == 'purchase_completed' for pc in po_children_for_cr
+                    pc.status in ['purchase_completed', 'routed_to_store'] for pc in po_children_for_cr
                 )
                 if all_children_completed:
                     # Skip this parent CR - children will be shown separately
@@ -2308,8 +2308,15 @@ def complete_purchase():
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Verify it's in the correct status
-        if cr.status != 'assigned_to_buyer':
+        # Allow: assigned_to_buyer, vendor_approved, or pending_td_approval (if vendor already approved)
+        allowed_statuses = ['assigned_to_buyer', 'vendor_approved', 'pending_td_approval']
+        if cr.status not in allowed_statuses:
             return jsonify({"error": f"Purchase cannot be completed. Current status: {cr.status}"}), 400
+
+        # If still showing pending_td_approval, verify vendor is actually approved
+        if cr.status == 'pending_td_approval':
+            if cr.vendor_selection_status != 'approved' or not cr.vendor_approved_by_td_id:
+                return jsonify({"error": "Vendor selection must be approved by TD before completing purchase"}), 400
 
         # ========================================
         # NEW FEATURE: Route materials through Production Manager (M2 Store)
@@ -2440,47 +2447,93 @@ def complete_purchase():
         # Check if this CR has POChildren - if so, skip individual request creation
         # POChildren have their own completion flow via complete_po_child_purchase() which creates GROUPED requests
         po_children_exist = POChild.query.filter_by(parent_cr_id=cr.cr_id, is_deleted=False).first() is not None
+
+        # SAFETY CHECK: Check if IMR records already exist for this CR (prevent duplicates)
+        existing_imr_count = InternalMaterialRequest.query.filter_by(cr_id=cr.cr_id).count()
+
         if po_children_exist:
             log.info(f"CR-{cr_id} has POChildren - skipping individual request creation (handled by POChild completion)")
+        elif existing_imr_count > 0:
+            log.warning(f"⚠️ CR-{cr_id} already has {existing_imr_count} Internal Material Request(s) - skipping creation to prevent duplicates")
+            created_imr_count = existing_imr_count  # Use existing count for notification
         else:
             try:
                 # Get project details for final destination
                 project = Project.query.get(cr.project_id)
                 final_destination = project.project_name if project else f"Project {cr.project_id}"
 
-                # Create Internal Material Request for each material in the CR
-                for sub_item in sub_items_data:
+                # ========================================
+                # GROUPED IMR CREATION (like POChild pattern)
+                # Create ONE IMR with all materials grouped together
+                # ========================================
+
+                # Prepare grouped materials list for single request
+                grouped_materials = []
+                primary_material_name = None
+
+                for idx, sub_item in enumerate(sub_items_data):
                     if isinstance(sub_item, dict):
-                        imr = InternalMaterialRequest(
-                            cr_id=cr.cr_id,
-                            project_id=cr.project_id,
-                            request_buyer_id=buyer_id,
-                            material_name=sub_item.get('sub_item_name') or sub_item.get('material_name', 'Unknown'),
-                            quantity=sub_item.get('quantity', 0),
-                            brand=sub_item.get('brand', ''),
-                            size=sub_item.get('size', ''),
-                            unit=sub_item.get('unit', 'pcs'),
-                            unit_price=sub_item.get('unit_price', 0),
-                            total_cost=sub_item.get('total_price', 0),
+                        material_name = sub_item.get('sub_item_name') or sub_item.get('material_name', 'Unknown')
+                        quantity = sub_item.get('quantity', 0)
 
-                            # NEW FIELDS for vendor delivery tracking
-                            source_type='from_vendor_delivery',
-                            status='awaiting_vendor_delivery',
-                            vendor_delivery_confirmed=False,
-                            final_destination_site=final_destination,
-                            routed_by_buyer_id=buyer_id,
-                            routed_to_store_at=datetime.utcnow(),
-                            request_send=True,  # Mark as sent to PM
+                        grouped_materials.append({
+                            'material_name': material_name,
+                            'quantity': quantity,
+                            'brand': sub_item.get('brand'),
+                            'size': sub_item.get('size'),
+                            'unit': sub_item.get('unit', 'pcs'),
+                            'unit_price': sub_item.get('unit_price', 0),
+                            'total_price': sub_item.get('total_price', 0)
+                        })
 
-                            created_at=datetime.utcnow()
-                        )
-                        db.session.add(imr)
-                        created_imr_count += 1
+                        if not primary_material_name:
+                            primary_material_name = material_name
+                    else:
+                        log.warning(f"Skipping material {idx+1}: not a dict, type={type(sub_item)}")
 
-                log.info(f"✅ Created {created_imr_count} Internal Material Requests for CR-{cr_id}")
+                # Create ONE grouped Internal Material Request (not multiple)
+                if grouped_materials:
+                    # Display name shows item category + count
+                    display_name = cr.item_name or primary_material_name
+                    if len(grouped_materials) > 1:
+                        display_name = f"{display_name} (+{len(grouped_materials)-1} more)"
+
+                    imr = InternalMaterialRequest(
+                        cr_id=cr.cr_id,
+                        project_id=cr.project_id,
+                        request_buyer_id=buyer_id,
+                        material_name=display_name,  # Shows "Item Name (+2 more)"
+                        quantity=len(grouped_materials),  # Number of materials
+                        brand=None,
+                        size=None,
+                        notes=f"CR-{cr.cr_id} - {len(grouped_materials)} material(s) - Vendor delivery expected",
+
+                        # Vendor delivery tracking
+                        source_type='from_vendor_delivery',
+                        status='awaiting_vendor_delivery',
+                        vendor_delivery_confirmed=False,
+                        final_destination_site=final_destination,
+                        routed_by_buyer_id=buyer_id,
+                        routed_to_store_at=datetime.utcnow(),
+                        request_send=True,
+
+                        # GROUPED DATA - All materials in JSONB
+                        materials_data=grouped_materials,  # All materials in JSONB
+                        materials_count=len(grouped_materials),
+
+                        created_at=datetime.utcnow(),
+                        created_by=buyer_name,
+                        last_modified_by=buyer_name
+                    )
+                    db.session.add(imr)
+                    created_imr_count = 1
+
+                    log.info(f"✅ Created 1 grouped Internal Material Request for CR-{cr_id} with {len(grouped_materials)} materials")
+                else:
+                    log.warning(f"No valid materials found for CR-{cr_id}")
 
             except Exception as imr_error:
-                log.error(f"❌ Error creating Internal Material Requests: {imr_error}")
+                log.error(f"❌ Error creating grouped Internal Material Request: {imr_error}")
                 # Don't fail the whole request, but log the error
 
         db.session.commit()
@@ -4625,6 +4678,10 @@ def td_approve_vendor(cr_id):
         cr.vendor_approved_by_td_id = td_id
         cr.vendor_approved_by_td_name = td_name
         cr.vendor_approval_date = datetime.utcnow()
+
+        # ✅ FIX: Update CR status to vendor_approved so buyer can complete purchase
+        cr.status = 'vendor_approved'
+
         cr.updated_at = datetime.utcnow()
 
         # Add to BOQ History - TD Vendor Approval

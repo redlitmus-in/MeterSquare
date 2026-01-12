@@ -156,18 +156,27 @@ def get_item_overhead_route(boq_id, item_id):
     return get_item_overhead(boq_id, item_id)
 
 
-# Complete purchase (Buyer completes purchase and merges to BOQ)
-@change_request_routes.route('/change-request/<int:cr_id>/complete-purchase', methods=['POST'])
-@jwt_required
-def complete_purchase_route(cr_id):
-    """
-    Buyer completes purchase and materials are merged into BOQ
-    Request body:
-    {
-        "purchase_notes": "Materials purchased from Supplier XYZ on 2025-10-18"
-    }
-    """
-    return complete_purchase_and_merge_to_boq(cr_id)
+# ============================================================================
+# DEPRECATED ENDPOINT - REMOVED
+# ============================================================================
+# This endpoint has been PERMANENTLY DISABLED to prevent duplicate code paths.
+#
+# OLD ENDPOINT: POST /api/change-request/<cr_id>/complete-purchase
+# - Set status='purchase_completed' (direct to site, bypassed M2 Store)
+# - Merged materials directly to BOQ
+# - No InternalMaterialRequest created
+#
+# CORRECT ENDPOINT: POST /api/buyer/complete-purchase
+# - Set status='routed_to_store' (routes through Production Manager)
+# - Creates InternalMaterialRequest for PM
+# - Proper inventory tracking via M2 Store
+# ============================================================================
+
+# @change_request_routes.route('/change-request/<int:cr_id>/complete-purchase', methods=['POST'])
+# @jwt_required
+# def complete_purchase_route(cr_id):
+#     """DEPRECATED - DO NOT USE"""
+#     return jsonify({"error": "This endpoint is deprecated. Use POST /api/buyer/complete-purchase instead."}), 410
 
 
 # Get all buyers (for Estimator/TD to select when approving)

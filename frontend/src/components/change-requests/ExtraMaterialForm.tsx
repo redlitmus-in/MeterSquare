@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   PlusIcon,
@@ -485,13 +485,65 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     }
   }, [initialData, projects]);
 
+  // PERFORMANCE FIX: Memoize with useCallback to prevent unnecessary re-creation on every render
+  // This prevents the useEffect below from firing multiple times unnecessarily
+  const fetchItemOverhead = useCallback(async () => {
+    if (!selectedBoq || !selectedItem || !selectedItem.item_id) return;
+
+    // Use the overhead values from the selectedItem
+    // These come from the /api/projects/assigned-to-me endpoint
+    if (selectedItem) {
+      setItemOverhead({
+        allocated: selectedItem.overhead_allocated || 0,
+        consumed: selectedItem.overhead_consumed || 0,
+        available: selectedItem.overhead_available || 0
+      });
+    }
+  }, [selectedBoq, selectedItem]);
+
+  // PERFORMANCE FIX: Memoize with useCallback to prevent unnecessary re-creation on every render
+  const fetchExistingRequests = useCallback(async () => {
+    if (!selectedBoq || !selectedItem) return;
+
+    try {
+      setLoadingRequests(true);
+      // Fetch ALL change requests for this BOQ across ALL roles and items
+      // This ensures cross-role visibility for material tracking
+      const response = await changeRequestService.getBOQChangeRequests(selectedBoq.boq_id);
+
+      if (response.success && response.data) {
+        const allBoqRequests = response.data || [];
+
+        console.log('Fetched BOQ change requests for cross-role tracking:', {
+          total: allBoqRequests.length,
+          boqId: selectedBoq.boq_id,
+          itemId: selectedItem.item_id,
+          note: 'Including ALL items and roles for material allocation tracking'
+        });
+
+        // Store ALL requests for this BOQ (not filtered by item)
+        // This allows SE and PM to see each other's purchases for BOQ materials
+        setExistingRequests(allBoqRequests);
+      } else {
+        setExistingRequests([]);
+      }
+    } catch (error) {
+      console.error('Error fetching existing requests:', error);
+      // Don't show error toast - this is optional information
+      setExistingRequests([]);
+    } finally {
+      setLoadingRequests(false);
+    }
+  }, [selectedBoq, selectedItem]);
+
   // Fetch item overhead and existing requests when item is selected
+  // PERFORMANCE FIX: Now uses memoized functions to prevent duplicate calls
   useEffect(() => {
     if (selectedBoq && selectedItem) {
       fetchItemOverhead();
       fetchExistingRequests();
     }
-  }, [selectedBoq, selectedItem]);
+  }, [selectedBoq, selectedItem, fetchItemOverhead, fetchExistingRequests]);
 
   const fetchAssignedProjects = async () => {
     try {
@@ -565,54 +617,6 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     }
   };
 
-  const fetchItemOverhead = async () => {
-    if (!selectedBoq || !selectedItem || !selectedItem.item_id) return;
-
-    // Use the overhead values from the selectedItem
-    // These come from the /api/projects/assigned-to-me endpoint
-    if (selectedItem) {
-      setItemOverhead({
-        allocated: selectedItem.overhead_allocated || 0,
-        consumed: selectedItem.overhead_consumed || 0,
-        available: selectedItem.overhead_available || 0
-      });
-    }
-  };
-
-  const fetchExistingRequests = async () => {
-    if (!selectedBoq || !selectedItem) return;
-
-    try {
-      setLoadingRequests(true);
-      // Fetch ALL change requests for this BOQ across ALL roles and items
-      // This ensures cross-role visibility for material tracking
-      const response = await changeRequestService.getBOQChangeRequests(selectedBoq.boq_id);
-
-      if (response.success && response.data) {
-        const allBoqRequests = response.data || [];
-
-        console.log('Fetched BOQ change requests for cross-role tracking:', {
-          total: allBoqRequests.length,
-          boqId: selectedBoq.boq_id,
-          itemId: selectedItem.item_id,
-          note: 'Including ALL items and roles for material allocation tracking'
-        });
-
-        // Store ALL requests for this BOQ (not filtered by item)
-        // This allows SE and PM to see each other's purchases for BOQ materials
-        setExistingRequests(allBoqRequests);
-      } else {
-        setExistingRequests([]);
-      }
-    } catch (error) {
-      console.error('Error fetching existing requests:', error);
-      // Don't show error toast - this is optional information
-      setExistingRequests([]);
-    } finally {
-      setLoadingRequests(false);
-    }
-  };
-
   // Add material functions
   // These functions are now handled inline in the UI since we support multiple sub-items
 
@@ -675,9 +679,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     const set = new Set<string>();
     materials.forEach(m => {
       if (!m.isNew) {
-        // Create composite key: use materialId OR materialName as fallback + subItemId
-        // Backend sometimes doesn't return material_id, so use name as fallback
-        const materialKey = m.materialId || m.materialName;
+        // IMPORTANT: Always use materialName for consistency with dropdown checks
+        // This ensures materials are properly disabled even when backend doesn't provide consistent material_id
+        const materialKey = m.materialName;
         const key = `${materialKey}_${m.subItemId}`;
         console.log('🔑 Adding to set:', {
           materialName: m.materialName,
@@ -1784,11 +1788,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
                           // Use functional update to check duplicates and add material with current state
                           setMaterials(currentMaterials => {
-                            // Check for duplicates using composite key (handles missing material_id)
-                            const materialKey = material.material_id || material.material_name;
+                            // Check for duplicates using material_name for consistency
+                            // IMPORTANT: Use material_name to ensure duplicates are caught even when material_id varies
                             const isDuplicate = currentMaterials.some(
                               m => !m.isNew &&
-                                   m.materialId === materialKey &&
+                                   m.materialName === material.material_name &&
                                    m.subItemId === subItem.sub_item_id
                             );
 
@@ -1871,8 +1875,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           })
                           .map(material => {
                           // Check if this material is already added using memoized set (fixes closure stale state bug)
-                          // Use material_id OR material_name as fallback (backend sometimes doesn't return material_id)
-                          const materialKey = material.material_id || material.material_name;
+                          // IMPORTANT: Always use material_name for consistency with addedMaterialsSet
+                          const materialKey = material.material_name;
                           const compositeKey = `${materialKey}_${subItem.sub_item_id}`;
                           const isAlreadyAdded = addedMaterialsSet.has(compositeKey);
 

@@ -545,18 +545,18 @@ class BuyerService {
     }
   }
 
-  // Mark purchase as complete and merge to BOQ
+  // Mark purchase as complete and route via M2 Store
   async completePurchase(data: CompletePurchaseRequest): Promise<CompletePurchaseResponse> {
     try {
-      // Use the change-request endpoint that properly merges materials to BOQ
+      // Use the buyer endpoint that routes materials via Production Manager (M2 Store)
       // This endpoint:
-      // 1. Changes status to 'purchase_completed'
-      // 2. Merges materials to BOQ with 'planned_quantity: 0' marker
-      // 3. Preserves original BOQ totals
-      // 4. Creates MaterialPurchaseTracking entries
+      // 1. Changes status to 'routed_to_store'
+      // 2. Creates InternalMaterialRequest records for Production Manager
+      // 3. Notifies PM about incoming vendor delivery
+      // 4. Merges materials to BOQ with 'planned_quantity: 0' marker
       const response = await apiClient.post<CompletePurchaseResponse>(
-        `/change-request/${data.cr_id}/complete-purchase`,
-        { purchase_notes: data.notes || '' }
+        `/buyer/complete-purchase`,
+        { cr_id: data.cr_id, notes: data.notes || '' }
       );
 
       if (response.data.success) {

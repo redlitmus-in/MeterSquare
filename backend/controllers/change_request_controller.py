@@ -1303,6 +1303,7 @@ def get_all_change_requests():
                         ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_EST,  # Sent to estimator
                         ChangeRequest.approved_by_user_id.isnot(None),  # Approved by any estimator
                         ChangeRequest.status == 'purchase_completed',  # Completed purchases
+                        ChangeRequest.status == 'routed_to_store',  # Materials sent to M2 Store
                         ChangeRequest.status == 'send_to_buyer',  # Sent to buyer after estimator approval
                         ChangeRequest.status == 'pending_td_approval',  # Pending TD approval
                         ChangeRequest.status == 'rejected',  # Rejected requests
@@ -1326,7 +1327,7 @@ def get_all_change_requests():
                             ),
                             ChangeRequest.approved_by_user_id == user_id,
                             and_(
-                                ChangeRequest.status == 'purchase_completed',
+                                ChangeRequest.status.in_(['purchase_completed', 'routed_to_store']),
                                 ChangeRequest.project_id.in_(estimator_project_ids)
                             ),
                             and_(
@@ -1362,6 +1363,7 @@ def get_all_change_requests():
                     ChangeRequest.approval_required_from == 'technical_director',  # Pending requests
                     ChangeRequest.td_approved_by_user_id.isnot(None),  # Approved by TD
                     ChangeRequest.status == 'purchase_completed',  # All completed purchases (actual DB value)
+                    ChangeRequest.status == 'routed_to_store',  # Materials sent to M2 Store
                     ChangeRequest.status == 'send_to_buyer',  # Send to buyer status
                     ChangeRequest.status == 'rejected',  # Rejected requests
                     ChangeRequest.vendor_selection_status == 'pending_td_approval',  # Vendor approval pending
@@ -2333,464 +2335,52 @@ def approve_change_request(cr_id):
         return jsonify({"error": str(e)}), 500
 
 
+# ============================================================================
+# DEPRECATED FUNCTION - DISABLED
+# ============================================================================
+# This function has been replaced by complete_purchase() in buyer_controller.py
+#
+# REASON FOR DEPRECATION:
+# - Set status='purchase_completed' (direct to site, bypassed M2 Store)
+# - Merged materials directly to BOQ without InternalMaterialRequest
+# - Did NOT create inventory tracking records for Production Manager
+# - Caused duplicate code paths and confusion
+#
+# CORRECT FUNCTION: complete_purchase() in buyer_controller.py (line ~2276)
+# - Set status='routed_to_store' (routes through Production Manager)
+# - Creates InternalMaterialRequest records for PM Stock Out page
+# - Proper M2 Store inventory tracking flow
+# - Single source of truth for purchase completion
+# ============================================================================
+
 def complete_purchase_and_merge_to_boq(cr_id):
     """
-    Buyer completes purchase and merges materials to BOQ
-    POST /api/change-request/{cr_id}/complete-purchase
-    {
-        "purchase_notes": "Materials purchased from Supplier XYZ"
-    }
+    ⚠️ DEPRECATED - DO NOT USE
+
+    This function is deprecated and disabled.
+    Use complete_purchase() in buyer_controller.py instead.
+
+    Old behavior:
+    - Buyer completes purchase and merges materials to BOQ
+    - POST /api/change-request/{cr_id}/complete-purchase
+    - Status set to 'purchase_completed' (bypasses M2 Store)
+
+    New behavior (use POST /api/buyer/complete-purchase instead):
+    - Status set to 'routed_to_store'
+    - Creates InternalMaterialRequest for Production Manager
+    - Routes through M2 Store for proper inventory tracking
     """
-    try:
-        current_user = getattr(g, 'user', None)
-        if not current_user:
-            return jsonify({"error": "User not authenticated"}), 401
+    return jsonify({
+        "error": "This endpoint is deprecated",
+        "message": "Use POST /api/buyer/complete-purchase instead",
+        "deprecated_endpoint": f"/api/change-request/{cr_id}/complete-purchase",
+        "correct_endpoint": "/api/buyer/complete-purchase",
+        "reason": "This old flow bypasses M2 Store and doesn't create proper inventory tracking"
+    }), 410  # 410 Gone - indicates the resource is no longer available
 
-        buyer_id = current_user.get('user_id')
-        buyer_name = current_user.get('full_name') or current_user.get('username') or 'User'
-        buyer_role = current_user.get('role_name', '').lower()
-
-        # Get effective user context for admin viewing as buyer
-        user_context = get_effective_user_context()
-        effective_role = user_context.get('effective_role', buyer_role)
-        is_admin_viewing = user_context.get('is_admin_viewing', False)
-
-        # When admin is viewing as buyer, use the effective role
-        if is_admin_viewing:
-            buyer_role = effective_role
-
-        # Get change request
-        change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
-        if not change_request:
-            return jsonify({"error": "Change request not found"}), 404
-
-        # Check if assigned to buyer or send to buyer
-        if change_request.status not in [CR_CONFIG.STATUS_ASSIGNED_TO_BUYER, CR_CONFIG.STATUS_SEND_TO_BUYER, CR_CONFIG.STATUS_PENDING_TD_APPROVAL]:
-            return jsonify({"error": f"Purchase can only be completed for requests assigned to buyer or send to buyer. Current status: {change_request.status}"}), 400
-
-        # Check if user is a buyer or admin viewing as buyer
-        is_admin = current_user.get('role_name', '').lower() == 'admin'
-        if buyer_role != 'buyer' and not is_admin:
-            return jsonify({"error": "Only buyers can complete purchases"}), 403
-
-        # Get request data
-        data = request.get_json() or {}
-        purchase_notes = data.get('purchase_notes', '')
-
-        # Update purchase completion fields
-        change_request.purchase_completed_by_user_id = buyer_id
-        change_request.purchase_completed_by_name = buyer_name
-        change_request.purchase_completion_date = datetime.utcnow()
-        change_request.purchase_notes = purchase_notes
-
-        # Set status to purchase_completed
-        change_request.status = 'purchase_completed'
-        change_request.updated_at = datetime.utcnow()
-
-        log.info(f"Buyer {buyer_name} marked purchase complete for CR {cr_id} - Merging materials to BOQ")
-
-
-        # Now merge materials into BOQ
-        boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
-        if not boq_details:
-            db.session.rollback()
-            return jsonify({"error": "BOQ details not found"}), 404
-
-        # Get existing items
-        boq_json = boq_details.boq_details or {}
-        existing_items = boq_json.get('items', [])
-
-        # Add materials as sub-items to the existing item (not as new item)
-        materials = change_request.materials_data or []
-
-        # Find the item to add materials to
-        target_item = None
-        item_id_str = str(change_request.item_id) if change_request.item_id else None
-
-        if item_id_str:
-            # Try to find the item by master_item_id or generated ID
-            for idx, item in enumerate(existing_items):
-                # Check master_item_id
-                if str(item.get('master_item_id', '')) == item_id_str:
-                    target_item = item
-                    break
-                # Check generated ID format (item_boqid_index)
-                generated_id = f"item_{change_request.boq_id}_{idx + 1}"
-                if generated_id == item_id_str:
-                    target_item = item
-                    break
-
-        # If no target item found, create new item (fallback)
-        if not target_item:
-            new_item = {
-                'item_name': f'Extra Materials - CR #{change_request.cr_id}',
-                'description': change_request.justification,
-                'work_type': 'extra_materials',
-                'materials': [],
-                'labour': [],
-                'totalMaterialCost': 0,
-                'totalLabourCost': 0,
-                'base_cost': 0,
-                'profit_margin_percentage': CR_CONFIG.DEFAULT_PROFIT_PERCENTAGE,  # Use default (removed column)
-                'profit_margin_amount': 0,
-                'total_cost': 0,
-                'selling_price': 0
-            }
-            existing_items.append(new_item)
-            target_item = new_item
-            log.info(f"CR #{cr_id}: No target item found, created new item")
-        else:
-            log.info(f"CR #{cr_id}: Adding materials to existing item '{target_item.get('item_name')}'")
-
-        # Add each material as a sub-item with special marking
-        # IMPORTANT: Only add materials that are truly NEW, not updates to existing materials
-        existing_materials = target_item.get('materials', [])
-
-        # Create a set of existing material identifiers (by ID and name)
-        # Check both direct materials and materials inside sub_items
-        existing_material_ids = set()
-        existing_material_names = set()
-
-        # Check direct materials array
-        for existing_mat in existing_materials:
-            # Track by ID if available
-            mat_id = existing_mat.get('master_material_id')
-            if mat_id:
-                existing_material_ids.add(mat_id)
-
-            # Track by name (case-insensitive)
-            mat_name = existing_mat.get('material_name', '').lower().strip()
-            if mat_name:
-                existing_material_names.add(mat_name)
-
-        # Also check materials inside sub_items structure
-        for sub_item in target_item.get('sub_items', []):
-            for existing_mat in sub_item.get('materials', []):
-                # Track by ID if available
-                mat_id = existing_mat.get('master_material_id')
-                if mat_id:
-                    existing_material_ids.add(mat_id)
-
-                # Track by name (case-insensitive)
-                mat_name = existing_mat.get('material_name', '').lower().strip()
-                if mat_name:
-                    existing_material_names.add(mat_name)
-
-        # Get sub_items_data if available (preferred), otherwise use materials_data
-        materials_to_merge = change_request.sub_items_data or change_request.materials_data or []
-
-        log.info(f"CR #{cr_id}: Found {len(existing_material_names)} existing materials by name: {existing_material_names}")
-        log.info(f"CR #{cr_id}: Found {len(existing_material_ids)} existing materials by ID: {existing_material_ids}")
-        log.info(f"CR #{cr_id}: Processing {len(materials_to_merge)} materials to merge")
-
-        for material in materials_to_merge:
-            # Check if this material already exists in the BOQ
-            mat_id = material.get('master_material_id')
-            mat_name = material.get('material_name', '').lower().strip()
-
-            log.info(f"CR #{cr_id}: Checking material '{material.get('material_name')}' (normalized: '{mat_name}', ID: {mat_id})")
-
-            is_existing_material = False
-
-            # Check by ID first
-            if mat_id and mat_id in existing_material_ids:
-                is_existing_material = True
-                log.info(f"CR #{cr_id}: Material '{material.get('material_name')}' (ID: {mat_id}) already exists in BOQ - skipping merge")
-
-            # Check by name if no ID match (ALWAYS check name for materials without IDs)
-            if not is_existing_material and mat_name and mat_name in existing_material_names:
-                is_existing_material = True
-                log.info(f"CR #{cr_id}: Material '{material.get('material_name')}' already exists in BOQ by name '{mat_name}' - skipping merge")
-
-            # Only add truly NEW materials (not updates to existing ones)
-            if not is_existing_material:
-                # Mark this material as from change request with planned_quantity = 0
-                new_material = {
-                    'material_name': material.get('material_name'),  # Actual material name like "Bubble Wrap"
-                    'sub_item_name': material.get('sub_item_name'),  # Sub-item name like "Protection"
-                    'master_material_id': material.get('master_material_id'),
-                    'quantity': material.get('quantity', 0),
-                    'unit': material.get('unit', 'nos'),
-                    'unit_price': material.get('unit_price', 0),
-                    'total_price': material.get('total_price', 0),
-                    'is_from_change_request': True,
-                    'change_request_id': change_request.cr_id,
-                    'planned_quantity': 0,  # KEY: This marks it as unplanned
-                    'planned_unit_price': 0,
-                    'planned_total_price': 0,
-                    'justification': material.get('justification', change_request.justification)  # Use per-material justification, fallback to overall
-                }
-                existing_materials.append(new_material)
-                log.info(f"CR #{cr_id}: Added NEW material '{material.get('material_name')}' to BOQ")
-            else:
-                log.info(f"CR #{cr_id}: Skipped material '{material.get('material_name')}' - already exists in original BOQ")
-
-        target_item['materials'] = existing_materials
-
-        # DON'T recalculate totals - keep original planned amounts
-        # The comparison view will show the variance
-        # Only flag that this item has change request materials
-        target_item['has_change_request_materials'] = True
-
-        # Update BOQ details
-        boq_json['items'] = existing_items
-
-        # DON'T recalculate summary totals - keep original planned amounts
-        # The BOQ comparison view will calculate actual costs dynamically
-        # Just update metadata
-        boq_details.boq_details = boq_json
-        boq_details.last_modified_by = buyer_name
-        boq_details.last_modified_at = datetime.utcnow()
-
-        flag_modified(boq_details, 'boq_details')
-
-        # First, update or create materials in boq_material (MasterMaterial) table
-        from models.boq import MasterMaterial, MasterSubItem
-
-        # Extract numeric item_id from change_request.item_id
-        # change_request.item_id can be a string like "233" or need extraction from target_item
-        item_id_for_materials = None
-        if target_item and target_item.get('master_item_id'):
-            try:
-                item_id_for_materials = int(target_item.get('master_item_id'))
-                log.info(f"Using master_item_id {item_id_for_materials} from target item")
-            except (ValueError, TypeError):
-                log.warning(f"Could not convert master_item_id to int: {target_item.get('master_item_id')}")
-
-        # Fallback: try to extract from change_request.item_id string
-        if not item_id_for_materials and change_request.item_id:
-            try:
-                # Try direct conversion first
-                item_id_for_materials = int(change_request.item_id)
-                log.info(f"Converted change_request.item_id '{change_request.item_id}' to integer: {item_id_for_materials}")
-            except (ValueError, TypeError):
-                # If it's a string like "item_233_1", extract the number
-                if isinstance(change_request.item_id, str):
-                    parts = change_request.item_id.replace('item_', '').split('_')
-                    if parts and parts[0].isdigit():
-                        item_id_for_materials = int(parts[0])
-                        log.info(f"Extracted item_id {item_id_for_materials} from '{change_request.item_id}'")
-
-        # Look up sub_item_id from the database using sub_item_name and item_id
-        sub_item_id_int = None
-        if materials and len(materials) > 0:
-            # Get sub_item_name from the first material (all materials in CR should belong to same sub-item)
-            sub_item_name = materials[0].get('sub_item_name')
-
-            if sub_item_name and item_id_for_materials:
-                master_sub_item = MasterSubItem.query.filter_by(
-                    sub_item_name=sub_item_name,
-                    item_id=item_id_for_materials,
-                    is_deleted=False
-                ).first()
-
-                if master_sub_item:
-                    sub_item_id_int = master_sub_item.sub_item_id
-                    log.info(f"Found sub_item_id {sub_item_id_int} for sub_item_name '{sub_item_name}' and item_id {item_id_for_materials}")
-                else:
-                    log.warning(f"Could not find sub_item_id for sub_item_name '{sub_item_name}' and item_id {item_id_for_materials}")
-
-        for material in materials:
-            material_name = material.get('material_name')
-            unit_price = material.get('unit_price', 0)
-            unit = material.get('unit', 'nos')
-
-            # Check if material exists in boq_material table
-            existing_master_material = MasterMaterial.query.filter_by(
-                material_name=material_name
-            ).first()
-
-            if existing_master_material:
-                # Update existing material's price, unit, item_id, and sub_item_id
-                existing_master_material.current_market_price = unit_price
-                existing_master_material.default_unit = unit
-                if item_id_for_materials:
-                    existing_master_material.item_id = item_id_for_materials
-                if sub_item_id_int:
-                    existing_master_material.sub_item_id = sub_item_id_int
-                log.info(f"Updated MasterMaterial '{material_name}' (ID: {existing_master_material.material_id}) with price AED {unit_price}, item_id: {item_id_for_materials}, sub_item_id: {sub_item_id_int}")
-
-                # Update material dict with the actual integer material_id
-                material['master_material_id'] = existing_master_material.material_id
-            else:
-                # Create new material in boq_material table
-                # Add description to mark it as from change request
-                material_justification = material.get('justification', '') or material.get('reason', '') or change_request.justification or ''
-                description_text = f"[From Change Request CR#{cr_id}] {material_justification}".strip()
-
-                new_master_material = MasterMaterial(
-                    material_name=material_name,
-                    item_id=item_id_for_materials,  # Store the extracted item_id
-                    sub_item_id=sub_item_id_int,  # Store the sub_item_id
-                    default_unit=unit,
-                    current_market_price=unit_price,
-                    description=description_text,  # Mark as from change request
-                    brand=material.get('brand'),
-                    size=material.get('size'),
-                    specification=material.get('specification'),
-                    quantity=material.get('quantity', 0),
-                    is_active=True,
-                    created_at=datetime.utcnow(),
-                    created_by=buyer_name
-                )
-                db.session.add(new_master_material)
-                db.session.flush()  # Get the new material_id
-                log.info(f"Created new MasterMaterial '{material_name}' with ID {new_master_material.material_id}, item_id: {item_id_for_materials}, sub_item_id: {sub_item_id_int}, marked as from CR#{cr_id}")
-
-                # Update material dict with the new integer master_material_id
-                material['master_material_id'] = new_master_material.material_id
-
-        # Create MaterialPurchaseTracking entries for each material in the change request
-        # This marks them as "from change request" in the production management
-        item_name = change_request.item_name or f'Extra Materials - CR #{change_request.cr_id}'
-
-        for material in materials:
-            # Get master_material_id and convert to int if possible, otherwise None
-            master_mat_id = material.get('master_material_id')
-            if master_mat_id:
-                try:
-                    master_mat_id = int(master_mat_id)
-                except (ValueError, TypeError):
-                    # If it's a string like "mat_233_2_3" (generated ID), set to None
-                    master_mat_id = None
-
-            # Check if tracking entry already exists
-            # For new materials (master_mat_id = None), only match by name
-            if master_mat_id:
-                existing_tracking = MaterialPurchaseTracking.query.filter_by(
-                    boq_id=change_request.boq_id,
-                    material_name=material.get('material_name'),
-                    master_material_id=master_mat_id,
-                    is_from_change_request=True,
-                    change_request_id=change_request.cr_id,
-                    is_deleted=False
-                ).first()
-            else:
-                existing_tracking = MaterialPurchaseTracking.query.filter_by(
-                    boq_id=change_request.boq_id,
-                    material_name=material.get('material_name'),
-                    is_from_change_request=True,
-                    change_request_id=change_request.cr_id,
-                    is_deleted=False
-                ).first()
-
-            if not existing_tracking:
-                # Create new tracking entry marked as from change request
-                tracking_entry = MaterialPurchaseTracking(
-                    boq_id=change_request.boq_id,
-                    project_id=change_request.project_id,
-                    master_item_id=item_id_for_materials,  # Use extracted integer item_id
-                    item_name=item_name,
-                    master_material_id=master_mat_id,  # Use converted/validated ID
-                    material_name=material.get('material_name'),
-                    unit=material.get('unit', 'nos'),
-                    purchase_history=[],
-                    total_quantity_purchased=0.0,
-                    total_quantity_used=0.0,
-                    remaining_quantity=0.0,
-                    is_from_change_request=True,
-                    change_request_id=change_request.cr_id,
-                    created_by=buyer_name,
-                    created_at=datetime.utcnow()
-                )
-                db.session.add(tracking_entry)
-                log.info(f"Created MaterialPurchaseTracking for CR #{cr_id} material: {material.get('material_name')}")
-
-        # Add to BOQ History - Purchase Completion
-        existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
-
-        if existing_history:
-            if existing_history.action is None:
-                current_actions = []
-            elif isinstance(existing_history.action, list):
-                current_actions = existing_history.action
-            elif isinstance(existing_history.action, dict):
-                current_actions = [existing_history.action]
-            else:
-                current_actions = []
-        else:
-            current_actions = []
-
-        new_action = {
-            "role": "buyer",
-            "type": "change_request_purchase_completed",
-            "sender": buyer_name,
-            "receiver": "BOQ System",
-            "sender_role": "buyer",
-            "receiver_role": "system",
-            "status": CR_CONFIG.STATUS_PURCHASE_COMPLETE,
-            "cr_id": cr_id,
-            "item_name": change_request.item_name or f"CR #{cr_id}",
-            "materials_count": len(materials),
-            "total_cost": change_request.materials_total_cost,
-            "vendor_name": change_request.selected_vendor_name if change_request.selected_vendor_name else None,
-            "comments": f"Purchase completed and {len(materials)} material(s) merged to BOQ. {purchase_notes if purchase_notes else ''}".strip(),
-            "timestamp": datetime.utcnow().isoformat(),
-            "sender_name": buyer_name,
-            "sender_user_id": buyer_id,
-            "project_name": change_request.project.project_name if change_request.project else None,
-            "project_id": change_request.project_id,
-            "purchase_notes": purchase_notes
-        }
-
-        current_actions.append(new_action)
-        log.info(f"Appending change_request_purchase_completed action to BOQ {change_request.boq_id} history")
-
-        if existing_history:
-            existing_history.action = current_actions
-            flag_modified(existing_history, "action")
-            existing_history.action_by = buyer_name
-            existing_history.sender = buyer_name
-            existing_history.receiver = "BOQ System"
-            existing_history.comments = f"CR #{cr_id} purchase completed, materials merged"
-            existing_history.action_date = datetime.utcnow()
-            existing_history.last_modified_by = buyer_name
-            existing_history.last_modified_at = datetime.utcnow()
-        else:
-            boq_history = BOQHistory(
-                boq_id=change_request.boq_id,
-                action=current_actions,
-                action_by=buyer_name,
-                boq_status=change_request.boq.status if change_request.boq else 'unknown',
-                sender=buyer_name,
-                receiver="BOQ System",
-                comments=f"CR #{cr_id} purchase completed, materials merged",
-                sender_role='buyer',
-                receiver_role='system',
-                action_date=datetime.utcnow(),
-                created_by=buyer_name
-            )
-            db.session.add(boq_history)
-
-        db.session.commit()
-
-        log.info(f"Buyer {buyer_name} completed purchase for CR {cr_id} and merged materials to BOQ")
-
-        # Return success response
-        return jsonify({
-            "success": True,
-            "message": "Purchase completed and materials merged to BOQ",
-            "cr_id": cr_id,
-            "status": 'purchase_completed',
-            "purchase_completed_by": buyer_name,
-            "purchase_completion_date": change_request.purchase_completion_date.isoformat() if change_request.purchase_completion_date else None,
-            "boq_updated": True
-        }), 200
-
-    except SQLAlchemyError as e:
-        db.session.rollback()
-        log.error(f"Database error approving change request {cr_id}: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"error": f"Database error: {str(e)}"}), 500
-    except Exception as e:
-        db.session.rollback()
-        log.error(f"Error approving change request {cr_id}: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-
+# OLD FUNCTION BODY REMOVED - See git history if needed (456 lines deleted)
+# The old implementation merged materials directly to BOQ without creating
+# InternalMaterialRequest records, causing Production Manager to not see purchases.
 def get_boq_change_requests(boq_id):
     """
     Get all change requests for a specific BOQ

@@ -53,6 +53,7 @@ class ChangeRequestConfig:
     # Statuses that indicate a Change Request is complete (terminal states)
     COMPLETION_STATUSES = [
         'purchase_completed',
+        'routed_to_store',  # Materials sent to M2 Store via Production Manager
         'rejected',
         'cancelled'
     ]
@@ -64,6 +65,7 @@ class ChangeRequestConfig:
         'pending',
         'approved',
         'purchase_completed',
+        'routed_to_store',  # Materials sent to M2 Store
         'assigned_to_buyer'
     ]
 
@@ -73,6 +75,7 @@ class ChangeRequestConfig:
         'approved_by_td',
         'assigned_to_buyer',
         'purchase_completed',
+        'routed_to_store',  # Materials sent to M2 Store via Production Manager
         'rejected',
         'under_review',
         'send_to_est',
@@ -86,6 +89,7 @@ class ChangeRequestConfig:
         'approved_by_td',
         'assigned_to_buyer',
         'purchase_completed',
+        'routed_to_store',  # Materials sent to M2 Store
         'rejected',
         'under_review',
         'send_to_est',

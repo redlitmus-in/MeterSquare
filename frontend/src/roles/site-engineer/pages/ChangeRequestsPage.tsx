@@ -25,7 +25,7 @@ interface POChildInfo {
   suffix: string;
   vendor_id: number | null;
   vendor_name: string | null;
-  status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'rejected';
+  status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'routed_to_store' | 'rejected';
   vendor_selection_status: 'pending_td_approval' | 'approved' | 'rejected';
   materials_count: number;
   materials_total_cost: number;
@@ -332,12 +332,12 @@ const ChangeRequestsPage: React.FC = () => {
                                   <span className="text-gray-400">→</span>
                                   <span className="text-gray-600 truncate max-w-[80px]">{child.vendor_name || 'No vendor'}</span>
                                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                    child.status === 'purchase_completed' ? 'bg-green-100 text-green-700' :
+                                    child.status === 'purchase_completed' || child.status === 'routed_to_store' ? 'bg-green-100 text-green-700' :
                                     child.status === 'vendor_approved' ? 'bg-blue-100 text-blue-700' :
                                     child.status === 'pending_td_approval' ? 'bg-yellow-100 text-yellow-700' :
                                     'bg-red-100 text-red-700'
                                   }`}>
-                                    {child.status === 'purchase_completed' ? 'Done' :
+                                    {child.status === 'purchase_completed' || child.status === 'routed_to_store' ? 'Done' :
                                      child.status === 'vendor_approved' ? 'Approved' :
                                      child.status === 'pending_td_approval' ? 'Pending' : 'Rejected'}
                                   </span>

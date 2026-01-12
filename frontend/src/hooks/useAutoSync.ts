@@ -99,7 +99,7 @@ export function useAutoSync<TData = any>({
     // ✅ Smart refetch strategies (NO polling!)
     refetchOnWindowFocus: true,  // Refetch when user returns to tab
     refetchOnReconnect: true,    // Refetch when internet reconnects
-    refetchOnMount: 'always',    // Always get fresh data on mount
+    refetchOnMount: true,        // Only refetch on mount if data is stale (prevents duplicate calls)
 
     // ❌ NO POLLING! Real-time handles updates
     refetchInterval: false,

@@ -33,7 +33,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 }) => {
   const { user } = useAuthStore();
   const [showEditModal, setShowEditModal] = useState(false);
-  const [expandedDescriptions, setExpandedDescriptions] = useState<Set<number>>(new Set());
   const [expandedSpecs, setExpandedSpecs] = useState<Set<number>>(new Set());
   const [lpoData, setLpoData] = useState<any>(null);
   const [loadingLPO, setLoadingLPO] = useState(false);
@@ -52,19 +51,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const [showVendorComparisonModal, setShowVendorComparisonModal] = useState(false);
   const [competitorVendors, setCompetitorVendors] = useState<Vendor[]>([]);
   const [loadingCompetitors, setLoadingCompetitors] = useState(false);
-
-  // Toggle description expansion
-  const toggleDescription = (idx: number) => {
-    setExpandedDescriptions(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(idx)) {
-        newSet.delete(idx);
-      } else {
-        newSet.add(idx);
-      }
-      return newSet;
-    });
-  };
 
   // Toggle specification expansion
   const toggleSpec = (idx: number) => {
@@ -108,8 +94,24 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
           return;
         }
 
+        // PERFORMANCE FIX: Only fetch buyer data for roles that need it
+        // Site Engineers and Project Managers don't need vendor selection data
+        const userRole = (user?.role || user?.role_name || '').toLowerCase().replace(/[_\s]/g, '');
+        const needsVendorData = userRole.includes('buyer') ||
+                                userRole.includes('estimator') ||
+                                userRole.includes('technical') ||
+                                userRole.includes('admin');
+
+        if (!needsVendorData) {
+          // User doesn't need vendor selection data - use prop data directly
+          // Prevents unnecessary 403 errors for Site Engineers/PMs
+          setLatestChangeRequest(changeRequest);
+          return;
+        }
+
         try {
           // This is a parent CR - fetch latest material_vendor_selections with supplier_notes
+          // Only called for Buyer, Estimator, TD, and Admin roles
           const response = await buyerService.getPurchaseById(changeRequest.cr_id);
           // Merge the fresh data with the prop data
           setLatestChangeRequest({
@@ -125,7 +127,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     };
 
     fetchFreshData();
-  }, [isOpen, changeRequest?.cr_id]);
+  }, [isOpen, changeRequest?.cr_id, user]);
 
   // Initialize edited materials when modal opens or changeRequest changes
   // Use isOpen and latestChangeRequest as dependencies to ensure fresh data on every open
@@ -187,6 +189,16 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     const fetchLPOData = async () => {
       if (!isOpen || !latestChangeRequest || lpoData) return;
 
+      // PERFORMANCE FIX: Only fetch LPO data for roles that can view it
+      const userRole = (user?.role || user?.role_name || '').toLowerCase().replace(/[_\s]/g, '');
+      const canViewLPO = userRole.includes('buyer') ||
+                         userRole.includes('estimator') ||
+                         userRole.includes('technical') ||
+                         userRole.includes('admin');
+
+      // Site Engineers and Project Managers don't need LPO data
+      if (!canViewLPO) return;
+
       // Always fetch LPO data when vendor is selected (to get VAT and prices)
       if (latestChangeRequest.selected_vendor_name) {
         try {
@@ -202,7 +214,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     };
 
     fetchLPOData();
-  }, [isOpen, latestChangeRequest, lpoData]);
+  }, [isOpen, latestChangeRequest, lpoData, user]);
 
   // Memoize material data for vendor comparison to avoid recalculation on every render
   // MUST be before early return to avoid "Rendered more hooks than during the previous render" error
@@ -260,6 +272,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       rejected: 'REJECTED',
       assigned_to_buyer: 'ASSIGNED TO BUYER',
       purchase_completed: 'PURCHASE COMPLETED',
+      routed_to_store: 'ROUTED TO M2 STORE',
       pending_td_approval: 'PENDING TD APPROVAL',
       vendor_approved: 'VENDOR APPROVED',
       split_to_po_children: 'SPLIT TO VENDORS'
@@ -479,7 +492,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
   // Final statuses where no actions should be allowed (except for vendor approval pending TD)
   // Note: vendor_selection_status === 'pending_td_approval' is allowed to show buttons for vendor approval
-  const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'purchase_completed', 'approved', 'rejected', 'vendor_approved'].includes(changeRequest.status);
+  const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'purchase_completed', 'routed_to_store', 'approved', 'rejected', 'vendor_approved'].includes(changeRequest.status);
 
   // Check if this is a vendor approval pending TD - these should show approve/reject buttons
   const isVendorApprovalPending = changeRequest.vendor_selection_status === 'pending_td_approval';
@@ -1253,37 +1266,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
                           {/* Details Grid */}
                           <div className="space-y-2 text-xs">
-                            {/* Description */}
-                            {material.description && material.description.trim() && (
-                              <div>
-                                <span className="text-gray-500">Description:</span>
-                                <div className="ml-1 text-gray-900">
-                                  {material.description.length > 80 && !expandedDescriptions.has(idx) ? (
-                                    <>
-                                      <span>{material.description.substring(0, 80)}...</span>
-                                      <button
-                                        onClick={() => toggleDescription(idx)}
-                                        className="ml-1 text-purple-600 hover:text-purple-800 font-medium"
-                                      >
-                                        See More
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span>{material.description}</span>
-                                      {material.description.length > 80 && (
-                                        <button
-                                          onClick={() => toggleDescription(idx)}
-                                          className="ml-1 text-purple-600 hover:text-purple-800 font-medium"
-                                        >
-                                          See Less
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            )}
                             <div className="grid grid-cols-2 gap-2">
                               <div className="truncate">
                                 <span className="text-gray-500">Brand:</span>
@@ -1440,7 +1422,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                     <thead className="bg-gray-100 border-b border-gray-200">
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Material</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Description</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Brand</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Size</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Specification</th>
@@ -1476,38 +1457,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                                   </span>
                                 )}
                               </div>
-                            </td>
-                            {/* Description */}
-                            <td className="px-4 py-3 text-sm text-gray-600" style={{ maxWidth: '250px' }}>
-                              {material.description && material.description.trim() ? (
-                                <div>
-                                  {material.description.length > 100 && !expandedDescriptions.has(idx) ? (
-                                    <div>
-                                      <span>{material.description.substring(0, 100)}...</span>
-                                      <button
-                                        onClick={() => toggleDescription(idx)}
-                                        className="ml-1 text-purple-600 hover:text-purple-800 font-medium text-xs whitespace-nowrap"
-                                      >
-                                        See More
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div>
-                                      <span>{material.description}</span>
-                                      {material.description.length > 100 && (
-                                        <button
-                                          onClick={() => toggleDescription(idx)}
-                                          className="ml-1 text-purple-600 hover:text-purple-800 font-medium text-xs whitespace-nowrap"
-                                        >
-                                          See Less
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-gray-400">-</span>
-                              )}
                             </td>
                             {/* Brand */}
                             <td className="px-4 py-3 text-sm text-gray-600" title={material.brand || ''}>

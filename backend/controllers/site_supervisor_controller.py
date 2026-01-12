@@ -372,7 +372,7 @@ def get_sitesupervisor_dashboard():
             elif status in ['rejected', 'cancelled', 'vendor_rejected', 'denied']:
                 cr_rejected += 1
             # Completed statuses
-            elif status in ['purchase_completed', 'completed', 'done', 'closed', 'delivered']:
+            elif status in ['purchase_completed', 'routed_to_store', 'completed', 'done', 'closed', 'delivered']:
                 cr_purchase_completed += 1
             else:
                 # Count any other status as pending for visibility
