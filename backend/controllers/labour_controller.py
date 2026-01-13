@@ -1556,6 +1556,7 @@ def mark_departure():
                 attendance = DailyAttendance(
                     worker_id=arrival.worker_id,
                     project_id=arrival.project_id,
+                    requisition_id=arrival.requisition_id,  # CRITICAL: Link to requisition for PM filtering
                     attendance_date=arrival.arrival_date,
                     clock_in_time=clock_in_dt,
                     clock_out_time=clock_out_dt,
@@ -1917,6 +1918,7 @@ def get_attendance_to_lock():
                         attendance = DailyAttendance(
                             worker_id=arrival.worker_id,
                             project_id=arrival.project_id,
+                            requisition_id=arrival.requisition_id,  # CRITICAL: Link to requisition for PM filtering
                             attendance_date=arrival.arrival_date,
                             clock_in_time=clock_in_dt,
                             clock_out_time=clock_out_dt,
@@ -1934,12 +1936,18 @@ def get_attendance_to_lock():
             db.session.commit()
 
         # STEP 2: Query attendance records
+        # Join with requisition to filter by PM who approved the requisition
+        # This ensures each PM only sees attendance from their approved requisitions
         query = DailyAttendance.query.options(
             joinedload(DailyAttendance.worker),
             joinedload(DailyAttendance.project)
+        ).join(
+            LabourRequisition,
+            DailyAttendance.requisition_id == LabourRequisition.requisition_id
         ).filter(
             DailyAttendance.is_deleted == False,
-            DailyAttendance.project_id.in_(pm_project_ids)  # CRITICAL: Filter by PM's projects
+            DailyAttendance.project_id.in_(pm_project_ids),  # Still filter by PM's projects
+            LabourRequisition.approved_by_user_id == user_id  # CRITICAL: Only requisitions approved by this PM
         )
 
         # Filter by approval status
@@ -2060,12 +2068,18 @@ def lock_day_attendance():
             return jsonify({"error": "project_id and date are required"}), 400
 
         target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        user_id = current_user.get('user_id')
 
-        records = DailyAttendance.query.filter(
+        # Join with requisition to only lock attendance from requisitions approved by this PM
+        records = DailyAttendance.query.join(
+            LabourRequisition,
+            DailyAttendance.requisition_id == LabourRequisition.requisition_id
+        ).filter(
             DailyAttendance.project_id == project_id,
             DailyAttendance.attendance_date == target_date,
             DailyAttendance.approval_status == 'pending',
-            DailyAttendance.is_deleted == False
+            DailyAttendance.is_deleted == False,
+            LabourRequisition.approved_by_user_id == user_id  # CRITICAL: Only lock attendance from this PM's requisitions
         ).all()
 
         locked_count = 0

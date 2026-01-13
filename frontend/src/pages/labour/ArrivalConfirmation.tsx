@@ -23,6 +23,7 @@ import {
   MapPinIcon,
   InformationCircleIcon,
   ChevronDownIcon,
+  ChevronUpIcon,
   BuildingOfficeIcon,
   ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline';
@@ -52,6 +53,26 @@ const ArrivalConfirmation: React.FC = () => {
   }>({ isOpen: false, arrivalId: null, workerName: '' });
   const [clockOutLoading, setClockOutLoading] = useState(false);
 
+  // Multi-select state
+  const [selectedArrivalIds, setSelectedArrivalIds] = useState<number[]>([]);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+
+  // Collapse state for requisition groups
+  const [collapsedRequisitions, setCollapsedRequisitions] = useState<Set<number>>(new Set());
+
+  // Toggle collapse for a requisition group
+  const toggleRequisitionCollapse = (reqId: number) => {
+    setCollapsedRequisitions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(reqId)) {
+        newSet.delete(reqId);
+      } else {
+        newSet.add(reqId);
+      }
+      return newSet;
+    });
+  };
+
   // Fetch SE's assigned projects
   const fetchProjects = async () => {
     setLoadingProjects(true);
@@ -76,7 +97,9 @@ const ArrivalConfirmation: React.FC = () => {
     setLoading(true);
     const result = await labourService.getArrivalsForDate(selectedProject.project_id, selectedDate);
     if (result.success) {
-      setArrivals(result.data);
+      // Filter out departed workers - they should only appear in attendance log
+      const activeArrivals = result.data.filter((arrival: LabourArrival) => arrival.arrival_status !== 'departed');
+      setArrivals(activeArrivals);
     } else {
       // Don't show error for empty results
       if (!result.message?.includes('No arrivals')) {
@@ -96,6 +119,11 @@ const ArrivalConfirmation: React.FC = () => {
       fetchArrivals();
     }
   }, [selectedProject, selectedDate]);
+
+  // Clear selections when arrivals change
+  useEffect(() => {
+    setSelectedArrivalIds([]);
+  }, [arrivals]);
 
   const handleConfirm = async (arrivalId: number, workerName: string) => {
     setProcessing(arrivalId);
@@ -151,17 +179,149 @@ const ArrivalConfirmation: React.FC = () => {
 
     if (result.success) {
       setClockOutModal({ isOpen: false, arrivalId: null, workerName: '' });
-      showSuccess(`${workerName} clocked out at ${now}`);
-      // Optimistic UI update - update state directly without refreshing
-      setArrivals(prev => prev.map(arrival =>
-        arrival.arrival_id === arrivalId
-          ? { ...arrival, arrival_status: 'departed', departure_time: now }
-          : arrival
-      ));
+      showSuccess(`${workerName} clocked out at ${now} - moved to attendance log`);
+      // Remove departed worker from the arrival list - they should only appear in attendance log
+      setArrivals(prev => prev.filter(arrival => arrival.arrival_id !== arrivalId));
     } else {
       showError(result.message || 'Failed to clock out');
       // Keep modal open on failure so user can retry
     }
+  };
+
+  // Bulk actions
+  const handleBulkConfirm = async () => {
+    if (selectedArrivalIds.length === 0) return;
+
+    // Filter to only process workers with 'assigned' status (pending)
+    const eligibleIds = selectedArrivalIds.filter(id => {
+      const arrival = arrivals.find(a => a.arrival_id === id);
+      return arrival && arrival.arrival_status === 'assigned';
+    });
+
+    if (eligibleIds.length === 0) {
+      showError('No pending workers selected. Only pending workers can be marked as arrived.');
+      return;
+    }
+
+    setBulkProcessing(true);
+    const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+    let successCount = 0;
+    for (const arrivalId of eligibleIds) {
+      const result = await labourService.confirmArrival(arrivalId, now);
+      if (result.success) {
+        successCount++;
+        setArrivals(prev => prev.map(arrival =>
+          arrival.arrival_id === arrivalId
+            ? { ...arrival, arrival_status: 'confirmed', arrival_time: now }
+            : arrival
+        ));
+      }
+    }
+
+    setBulkProcessing(false);
+    setSelectedArrivalIds([]);
+
+    if (successCount > 0) {
+      showSuccess(`Marked ${successCount} worker(s) as arrived`);
+    }
+  };
+
+  const handleBulkNoShow = async () => {
+    if (selectedArrivalIds.length === 0) return;
+
+    // Filter to only process workers with 'assigned' status (pending)
+    const eligibleIds = selectedArrivalIds.filter(id => {
+      const arrival = arrivals.find(a => a.arrival_id === id);
+      return arrival && arrival.arrival_status === 'assigned';
+    });
+
+    if (eligibleIds.length === 0) {
+      showError('No pending workers selected. Only pending workers can be marked as no-show.');
+      return;
+    }
+
+    setBulkProcessing(true);
+
+    let successCount = 0;
+    for (const arrivalId of eligibleIds) {
+      const result = await labourService.markNoShow(arrivalId);
+      if (result.success) {
+        successCount++;
+        setArrivals(prev => prev.map(arrival =>
+          arrival.arrival_id === arrivalId
+            ? { ...arrival, arrival_status: 'no_show' }
+            : arrival
+        ));
+      }
+    }
+
+    setBulkProcessing(false);
+    setSelectedArrivalIds([]);
+
+    if (successCount > 0) {
+      showSuccess(`Marked ${successCount} worker(s) as no-show`);
+    }
+  };
+
+  const handleBulkClockOut = async () => {
+    if (selectedArrivalIds.length === 0) return;
+
+    // Filter to only process workers with 'confirmed' status (working)
+    const eligibleIds = selectedArrivalIds.filter(id => {
+      const arrival = arrivals.find(a => a.arrival_id === id);
+      return arrival && arrival.arrival_status === 'confirmed';
+    });
+
+    if (eligibleIds.length === 0) {
+      showError('No working workers selected. Only working workers can be clocked out.');
+      return;
+    }
+
+    setBulkProcessing(true);
+    const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+    let successCount = 0;
+    for (const arrivalId of eligibleIds) {
+      const result = await labourService.markDeparture(arrivalId, now);
+      if (result.success) {
+        successCount++;
+        // Remove departed workers from the arrival list - they should only appear in attendance log
+        setArrivals(prev => prev.filter(arrival => arrival.arrival_id !== arrivalId));
+      }
+    }
+
+    setBulkProcessing(false);
+    setSelectedArrivalIds([]);
+
+    if (successCount > 0) {
+      showSuccess(`Clocked out ${successCount} worker(s) - moved to attendance log`);
+    }
+  };
+
+  // Toggle selection
+  const toggleSelection = (arrivalId: number) => {
+    setSelectedArrivalIds(prev =>
+      prev.includes(arrivalId)
+        ? prev.filter(id => id !== arrivalId)
+        : [...prev, arrivalId]
+    );
+  };
+
+  // Select all workers with a specific status
+  const selectByStatus = (status: string) => {
+    const filtered = arrivals.filter(a => a.arrival_status === status).map(a => a.arrival_id);
+    setSelectedArrivalIds(filtered);
+  };
+
+  // Select all
+  const selectAll = () => {
+    setSelectedArrivalIds(arrivals.map(a => a.arrival_id));
+  };
+
+  // Clear selection
+  const clearSelection = () => {
+    setSelectedArrivalIds([]);
   };
 
   const getStatusBadge = (status: string) => {
@@ -318,32 +478,146 @@ const ArrivalConfirmation: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-6">
-          {Object.entries(groupedArrivals).map(([reqId, group]) => (
-            <div key={reqId} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-              {/* Requisition Header */}
-              {group.requisition && (
-                <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-b border-purple-200 px-4 py-3">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <div>
-                      <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                        <span className="text-purple-600">{group.requisition.requisition_code}</span>
-                        <span className="text-gray-400">•</span>
-                        <span>{group.requisition.work_description}</span>
-                      </h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        <span className="font-medium">{group.requisition.skill_required}</span>
-                        {group.requisition.site_name && (
-                          <>
-                            <span className="mx-2">•</span>
-                            <MapPinIcon className="w-4 h-4 inline text-gray-400" />
-                            <span className="ml-1">{group.requisition.site_name}</span>
-                          </>
-                        )}
-                      </p>
+          {Object.entries(groupedArrivals).map(([reqId, group]) => {
+            const requisitionId = parseInt(reqId);
+            const isCollapsed = collapsedRequisitions.has(requisitionId);
+
+            return (
+              <div key={reqId} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                {/* Requisition Header */}
+                {group.requisition && (
+                  <button
+                    onClick={() => toggleRequisitionCollapse(requisitionId)}
+                    className="w-full bg-gradient-to-r from-purple-50 to-blue-50 border-b border-purple-200 px-4 py-3 hover:from-purple-100 hover:to-blue-100 transition-colors"
+                  >
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-3 flex-1">
+                        {/* Collapse/Expand Icon */}
+                        <div className="flex-shrink-0">
+                          {isCollapsed ? (
+                            <ChevronDownIcon className="w-5 h-5 text-gray-500" />
+                          ) : (
+                            <ChevronUpIcon className="w-5 h-5 text-gray-500" />
+                          )}
+                        </div>
+
+                        {/* Requisition Info */}
+                        <div className="text-left">
+                          <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                            <span className="text-purple-600">{group.requisition.requisition_code}</span>
+                            <span className="text-gray-400">•</span>
+                            <span>{group.requisition.work_description}</span>
+                          </h3>
+                          <p className="text-sm text-gray-600 mt-1">
+                            <span className="font-medium">{group.requisition.skill_required}</span>
+                            {group.requisition.site_name && (
+                              <>
+                                <span className="mx-2">•</span>
+                                <MapPinIcon className="w-4 h-4 inline text-gray-400" />
+                                <span className="ml-1">{group.requisition.site_name}</span>
+                              </>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Worker Count Badge */}
+                      <div className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full border border-purple-200">
+                        <strong className="text-green-600">{group.arrivals.filter(a => a.arrival_status === 'confirmed').length}</strong> / {group.arrivals.length} Workers
+                      </div>
                     </div>
-                    <div className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full border border-purple-200">
-                      <strong className="text-green-600">{group.arrivals.filter(a => a.arrival_status === 'confirmed').length}</strong> / {group.arrivals.length} Workers
+                  </button>
+                )}
+
+              {/* Collapsible Content */}
+              {!isCollapsed && (
+                <>
+                  {/* Bulk Actions Toolbar */}
+                  {group.arrivals.length > 0 && (
+                <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-2">
+                      {/* Quick Select Dropdown */}
+                      <div className="relative">
+                        <select
+                          onChange={(e) => {
+                            if (e.target.value === 'all') selectAll();
+                            else if (e.target.value === 'none') clearSelection();
+                            else selectByStatus(e.target.value);
+                          }}
+                          className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                          defaultValue=""
+                        >
+                          <option value="" disabled>Quick Select...</option>
+                          <option value="all">All Workers</option>
+                          <option value="assigned">Pending Only</option>
+                          <option value="confirmed">Working Only</option>
+                          <option value="no_show">No Show Only</option>
+                          <option value="none">Clear Selection</option>
+                        </select>
+                      </div>
+
+                      {selectedArrivalIds.length > 0 && (
+                        <span className="text-xs text-gray-600 ml-2">
+                          <strong>{selectedArrivalIds.length}</strong> selected
+                        </span>
+                      )}
                     </div>
+
+                    {/* Bulk Action Buttons */}
+                    {selectedArrivalIds.length > 0 && (() => {
+                      // Count selected workers by status
+                      const hasPending = selectedArrivalIds.some(id => {
+                        const arrival = arrivals.find(a => a.arrival_id === id);
+                        return arrival && arrival.arrival_status === 'assigned';
+                      });
+                      const hasWorking = selectedArrivalIds.some(id => {
+                        const arrival = arrivals.find(a => a.arrival_id === id);
+                        return arrival && arrival.arrival_status === 'confirmed';
+                      });
+
+                      // Only show buttons if there are eligible workers
+                      if (!hasPending && !hasWorking) return null;
+
+                      return (
+                        <div className="flex items-center gap-2">
+                          {hasPending && (
+                            <>
+                              <button
+                                onClick={handleBulkConfirm}
+                                disabled={bulkProcessing}
+                                className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                              >
+                                {bulkProcessing ? (
+                                  <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                                ) : (
+                                  <CheckCircleIcon className="w-4 h-4" />
+                                )}
+                                Mark Arrived
+                              </button>
+                              <button
+                                onClick={handleBulkNoShow}
+                                disabled={bulkProcessing}
+                                className="flex items-center gap-1 px-3 py-1.5 border border-red-300 text-red-600 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                              >
+                                <XCircleIcon className="w-4 h-4" />
+                                Mark No Show
+                              </button>
+                            </>
+                          )}
+                          {hasWorking && (
+                            <button
+                              onClick={handleBulkClockOut}
+                              disabled={bulkProcessing}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                            >
+                              <ArrowRightOnRectangleIcon className="w-4 h-4" />
+                              Clock Out
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               )}
@@ -353,6 +627,7 @@ const ArrivalConfirmation: React.FC = () => {
                 <table className="w-full">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
+                      <th className="px-2 py-3 w-10"></th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Worker</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Phone</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Skills</th>
@@ -367,14 +642,18 @@ const ArrivalConfirmation: React.FC = () => {
                   const workerName = arrival.worker?.full_name || arrival.worker_name || 'Unknown Worker';
                   const workerCode = arrival.worker?.worker_code || arrival.worker_code || '';
                   const isPending = arrival.arrival_status === 'assigned';
+                  const isSelected = selectedArrivalIds.includes(arrival.arrival_id);
 
                   return (
                     <motion.tr
                       key={arrival.arrival_id}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      className={`transition-colors ${
-                        arrival.arrival_status === 'confirmed'
+                      onClick={() => toggleSelection(arrival.arrival_id)}
+                      className={`cursor-pointer transition-colors ${
+                        isSelected
+                          ? 'bg-purple-50'
+                          : arrival.arrival_status === 'confirmed'
                           ? 'bg-green-50/50'
                           : arrival.arrival_status === 'no_show'
                           ? 'bg-red-50/50'
@@ -383,6 +662,18 @@ const ArrivalConfirmation: React.FC = () => {
                           : 'hover:bg-gray-50'
                       }`}
                     >
+                      {/* Checkbox Column */}
+                      <td className="px-2 py-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelection(arrival.arrival_id)}
+                            className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500 cursor-pointer"
+                          />
+                        </div>
+                      </td>
+
                       {/* Worker Column */}
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-3">
@@ -466,7 +757,7 @@ const ArrivalConfirmation: React.FC = () => {
                       </td>
 
                       {/* Actions Column */}
-                      <td className="px-4 py-4">
+                      <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
                         {isPending ? (
                           <div className="flex gap-2">
                             <button
@@ -516,8 +807,11 @@ const ArrivalConfirmation: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+                </>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
