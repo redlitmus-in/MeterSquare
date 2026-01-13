@@ -479,8 +479,17 @@ const ReceiveReturns: React.FC = () => {
                   <div className="p-4">
                     <div className="flex items-center justify-between">
                       <button
-                        onClick={() => toggleRDNExpand(rdn.return_note_id)}
-                        className="flex items-center gap-3 flex-1 text-left hover:bg-gray-50 -m-2 p-2 rounded transition-colors"
+                        onClick={() => {
+                          // Disable expand for IN_TRANSIT items
+                          if (rdn.status === 'IN_TRANSIT') return;
+                          toggleRDNExpand(rdn.return_note_id);
+                        }}
+                        disabled={rdn.status === 'IN_TRANSIT'}
+                        className={`flex items-center gap-3 flex-1 text-left -m-2 p-2 rounded transition-colors ${
+                          rdn.status === 'IN_TRANSIT'
+                            ? 'cursor-not-allowed opacity-60'
+                            : 'hover:bg-gray-50 cursor-pointer'
+                        }`}
                       >
                         <div className="p-2 bg-orange-100 rounded-lg">
                           <DocumentTextIcon className="w-5 h-5 text-orange-600" />
@@ -500,7 +509,9 @@ const ReceiveReturns: React.FC = () => {
                             </p>
                           </div>
                         </div>
-                        {isExpanded ? (
+                        {rdn.status === 'IN_TRANSIT' ? (
+                          <ChevronDownIcon className="w-5 h-5 text-gray-300" />
+                        ) : isExpanded ? (
                           <ChevronUpIcon className="w-5 h-5 text-gray-400" />
                         ) : (
                           <ChevronDownIcon className="w-5 h-5 text-gray-400" />
@@ -597,59 +608,70 @@ const ReceiveReturns: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Items Table */}
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="text-left text-gray-500 border-b border-gray-200">
-                              <th className="pb-2 pr-1 font-medium">Material</th>
-                              <th className="pb-2 px-2 font-medium text-center w-24">Quantity</th>
-                              <th className="pb-2 px-2 font-medium text-center w-24">Condition</th>
-                              <th className="pb-2 px-2 font-medium">Reason</th>
-                              {['RECEIVED', 'PARTIAL', 'APPROVED'].includes(rdn.status) && (
-                                <th className="pb-2 px-2 font-medium text-center w-24">Status</th>
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200">
-                            {rdn.items.map((item) => (
-                              <tr key={item.return_item_id} className="hover:bg-white">
-                                <td className="py-2 pr-1">
-                                  <p className="font-medium text-gray-900 text-sm">{item.material_name}</p>
-                                  <p className="text-xs text-gray-500">{item.material_code}</p>
-                                </td>
-                                <td className="py-2 px-2 text-center">
-                                  <span className="font-semibold text-gray-900">{item.quantity}</span>
-                                  <span className="text-gray-500 ml-1 text-xs">{item.unit}</span>
-                                </td>
-                                <td className="py-2 px-2 text-center">
-                                  <span className={`px-2 py-1 rounded-full text-xs font-medium inline-block ${CONDITION_COLORS[item.condition.toUpperCase()] || CONDITION_COLORS.GOOD}`}>
-                                    {item.condition}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-2">
-                                  <span className="text-gray-600 text-xs">
-                                    {item.processing_notes || item.return_reason || '-'}
-                                  </span>
-                                </td>
-                                {['RECEIVED', 'PARTIAL', 'APPROVED'].includes(rdn.status) && (
-                                  <td className="py-2 px-2 text-center">
-                                    {item.material_return_id ? (
+                        {/* Items Table - Only show if all items are processed */}
+                        {(() => {
+                          const allItemsProcessed = rdn.items.every(item => item.material_return_id);
+
+                          if (!allItemsProcessed) {
+                            // Show summary for unprocessed items
+                            return (
+                              <div className="text-center py-6 bg-white rounded-lg border border-gray-200">
+                                <ClockIcon className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                                <p className="text-sm text-gray-600 font-medium">
+                                  {rdn.total_items} item(s) waiting to be processed
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Click "Process Items" button to view and process the returned materials
+                                </p>
+                              </div>
+                            );
+                          }
+
+                          // Show full items table for processed items
+                          return (
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-left text-gray-500 border-b border-gray-200">
+                                  <th className="pb-2 pr-1 font-medium">Material</th>
+                                  <th className="pb-2 px-2 font-medium text-center w-24">Quantity</th>
+                                  <th className="pb-2 px-2 font-medium text-center w-24">Condition</th>
+                                  <th className="pb-2 px-2 font-medium">Action Taken</th>
+                                  <th className="pb-2 px-2 font-medium text-center w-24">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-200">
+                                {rdn.items.map((item) => (
+                                  <tr key={item.return_item_id} className="hover:bg-white">
+                                    <td className="py-2 pr-1">
+                                      <p className="font-medium text-gray-900 text-sm">{item.material_name}</p>
+                                      <p className="text-xs text-gray-500">{item.material_code}</p>
+                                    </td>
+                                    <td className="py-2 px-2 text-center">
+                                      <span className="font-semibold text-gray-900">{item.quantity}</span>
+                                      <span className="text-gray-500 ml-1 text-xs">{item.unit}</span>
+                                    </td>
+                                    <td className="py-2 px-2 text-center">
+                                      <span className={`px-2 py-1 rounded-full text-xs font-medium inline-block ${CONDITION_COLORS[item.condition.toUpperCase()] || CONDITION_COLORS.GOOD}`}>
+                                        {item.condition}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-2">
+                                      <span className="text-gray-600 text-xs">
+                                        {item.processing_notes || item.return_reason || '-'}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-2 text-center">
                                       <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
                                         <CheckCircleIcon className="w-3 h-3" />
                                         Processed
                                       </span>
-                                    ) : (
-                                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-medium">
-                                        <ClockIcon className="w-3 h-3" />
-                                        Pending
-                                      </span>
-                                    )}
-                                  </td>
-                                )}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          );
+                        })()}
 
                         {rdn.acceptance_notes && (
                           <div className="mt-3 pt-3 border-t border-gray-200">

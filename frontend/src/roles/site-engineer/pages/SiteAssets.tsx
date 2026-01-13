@@ -377,7 +377,9 @@ const SiteAssets: React.FC = () => {
       showError('Please select a category');
       return;
     }
-    if (requisitionForm.quantity < 1) {
+
+    const qtyToAdd = requisitionForm.quantity ?? 1;
+    if (qtyToAdd < 1) {
       showError('Quantity must be at least 1');
       return;
     }
@@ -390,7 +392,7 @@ const SiteAssets: React.FC = () => {
     // Check if category already in list - if so, update quantity
     const existingItem = requisitionItems.find(item => item.category_id === requisitionForm.category_id);
     if (existingItem) {
-      const newQty = existingItem.quantity + requisitionForm.quantity;
+      const newQty = existingItem.quantity + qtyToAdd;
 
       // Validate against available quantity
       if (newQty > availableQty) {
@@ -406,7 +408,7 @@ const SiteAssets: React.FC = () => {
       ));
     } else {
       // Validate quantity against available for new item
-      if (requisitionForm.quantity > availableQty) {
+      if (qtyToAdd > availableQty) {
         showError(`Cannot exceed available quantity (${availableQty}) for ${category.category_name}`);
         return;
       }
@@ -416,7 +418,7 @@ const SiteAssets: React.FC = () => {
         category_id: category.category_id,
         category_code: category.category_code,
         category_name: category.category_name,
-        quantity: requisitionForm.quantity,
+        quantity: qtyToAdd,
         available_quantity: availableQty
       };
       setRequisitionItems(prev => [...prev, newItem]);
@@ -464,7 +466,8 @@ const SiteAssets: React.FC = () => {
 
     // Check if we have items in the list OR a single item selected
     const hasListItems = requisitionItems.length > 0;
-    const hasSingleItem = requisitionForm.category_id > 0;
+    const categoryId = requisitionForm.category_id ?? 0;
+    const hasSingleItem = categoryId > 0;
 
     if (!hasListItems && !hasSingleItem) {
       showError('Please add at least one item to your request');
@@ -481,15 +484,15 @@ const SiteAssets: React.FC = () => {
       let itemsToSubmit = [...requisitionItems];
 
       // If there's a current selection but not added to list, add it now
-      if (hasSingleItem && !requisitionItems.some(item => item.category_id === requisitionForm.category_id)) {
-        const category = assetCategories.find(c => c.category_id === requisitionForm.category_id);
+      if (hasSingleItem && !requisitionItems.some(item => item.category_id === categoryId)) {
+        const category = assetCategories.find(c => c.category_id === categoryId);
         if (category) {
           itemsToSubmit.push({
             id: Date.now(),
             category_id: category.category_id,
             category_code: category.category_code,
             category_name: category.category_name,
-            quantity: requisitionForm.quantity,
+            quantity: requisitionForm.quantity ?? 1,
             available_quantity: category.available_quantity ?? 0
           });
         }
@@ -576,7 +579,7 @@ const SiteAssets: React.FC = () => {
     const items = req.items && req.items.length > 0
       ? req.items.map(item => ({
           category_id: item.category_id,
-          category_name: item.category_name,
+          category_name: item.category_name || '',
           quantity: item.quantity
         }))
       : [{
@@ -711,6 +714,21 @@ const SiteAssets: React.FC = () => {
   // Dispatch return note with driver details
   const handleDispatchARDN = async () => {
     if (!dispatchARDN) return;
+
+    // Validate required fields
+    if (!dispatchDriverName.trim()) {
+      showError('Driver name is required');
+      return;
+    }
+    if (!dispatchVehicleNumber.trim()) {
+      showError('Vehicle number is required');
+      return;
+    }
+    if (!dispatchDriverContact.trim()) {
+      showError('Driver contact is required');
+      return;
+    }
+
     setProcessingARDN(dispatchARDN.ardn_id);
     try {
       await apiClient.put(`/assets/return-notes/${dispatchARDN.ardn_id}/dispatch`, {
@@ -1206,7 +1224,7 @@ const SiteAssets: React.FC = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 flex items-center justify-center">
-        <ModernLoadingSpinners variant="pulse-wave" />
+        <ModernLoadingSpinners size="lg" />
       </div>
     );
   }
@@ -2654,13 +2672,14 @@ const SiteAssets: React.FC = () => {
                 {/* Driver Name */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Driver Name
+                    Driver Name <span className="text-red-600">*</span>
                   </label>
                   <input
                     type="text"
                     value={dispatchDriverName}
                     onChange={(e) => setDispatchDriverName(e.target.value)}
                     placeholder="Enter driver name"
+                    required
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
@@ -2668,13 +2687,14 @@ const SiteAssets: React.FC = () => {
                 {/* Vehicle Number */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Vehicle Number
+                    Vehicle Number <span className="text-red-600">*</span>
                   </label>
                   <input
                     type="text"
                     value={dispatchVehicleNumber}
                     onChange={(e) => setDispatchVehicleNumber(e.target.value)}
                     placeholder="Enter vehicle number (e.g., KA-01-AB-1234)"
+                    required
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
@@ -2682,13 +2702,14 @@ const SiteAssets: React.FC = () => {
                 {/* Driver Contact */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Driver Contact
+                    Driver Contact <span className="text-red-600">*</span>
                   </label>
                   <input
                     type="tel"
                     value={dispatchDriverContact}
                     onChange={(e) => setDispatchDriverContact(e.target.value)}
                     placeholder="Enter driver phone number"
+                    required
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
@@ -2717,7 +2738,12 @@ const SiteAssets: React.FC = () => {
                 </button>
                 <button
                   onClick={handleDispatchARDN}
-                  disabled={processingARDN === dispatchARDN.ardn_id}
+                  disabled={
+                    processingARDN === dispatchARDN.ardn_id ||
+                    !dispatchDriverName.trim() ||
+                    !dispatchVehicleNumber.trim() ||
+                    !dispatchDriverContact.trim()
+                  }
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
                 >
                   {processingARDN === dispatchARDN.ardn_id ? (
@@ -2812,7 +2838,8 @@ const SiteAssets: React.FC = () => {
                       <div className="flex-1 relative">
                         <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
                         {(() => {
-                          const selectedInListQty = requisitionForm.category_id > 0 ? getCategoryInListQty(requisitionForm.category_id) : null;
+                          const categoryId = requisitionForm.category_id ?? 0;
+                          const selectedInListQty = categoryId > 0 ? getCategoryInListQty(categoryId) : null;
                           const isAlreadyInList = selectedInListQty !== null;
                           return (
                             <>
@@ -2833,8 +2860,8 @@ const SiteAssets: React.FC = () => {
                                 }`}
                               />
                               {isAlreadyInList && (
-                                <p className="text-xs text-gray-800 mt-1">
-                                  Already in list with qty {selectedInListQty}. Adding will update total.
+                                <p className="text-xs text-yellow-700 mt-1">
+                                  Already in list (qty: {selectedInListQty}). Click "+ Add" to add more.
                                 </p>
                               )}
                             </>
@@ -2862,49 +2889,19 @@ const SiteAssets: React.FC = () => {
                                     onClick={() => {
                                       if (isOutOfStock) return;
 
-                                      if (isInList) {
-                                        // If already in list, increase quantity by 1 if not maxed out
-                                        if (currentQty >= availableQty) {
-                                          showError(`Cannot exceed available quantity (${availableQty}) for ${c.category_name}`);
-                                          return;
-                                        }
-
-                                        setRequisitionItems(prev => prev.map(item =>
-                                          item.category_id === c.category_id
-                                            ? { ...item, quantity: currentQty + 1 }
-                                            : item
-                                        ));
-                                        showSuccess(`Increased ${c.category_name} quantity to ${currentQty + 1}`);
-                                      } else {
-                                        // Add new item with quantity 1
-                                        if (availableQty < 1) {
-                                          showError(`No stock available for ${c.category_name}`);
-                                          return;
-                                        }
-
-                                        const newItem: RequisitionItem = {
-                                          id: Date.now() + itemIdCounter,
-                                          category_id: c.category_id,
-                                          category_code: c.category_code,
-                                          category_name: c.category_name,
-                                          quantity: 1,
-                                          available_quantity: availableQty
-                                        };
-                                        setRequisitionItems(prev => [...prev, newItem]);
-                                        setItemIdCounter(prev => prev + 1);
-                                        showSuccess(`Added ${c.category_name} to requisition`);
-                                      }
-
+                                      // Just select the category - user will use + Add button to add it
+                                      setRequisitionForm(prev => ({
+                                        ...prev,
+                                        category_id: c.category_id
+                                      }));
                                       setCategorySearch('');
                                       setShowCategoryDropdown(false);
                                     }}
                                     className={`w-full px-3 py-2 text-left text-sm flex justify-between items-center gap-2 ${
                                       isOutOfStock
                                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-60'
-                                        : isMaxedOut
-                                        ? 'bg-gray-50 opacity-60 cursor-not-allowed'
                                         : isInList
-                                        ? 'bg-gray-50 border-l-2 border-gray-400 hover:bg-gray-100'
+                                        ? 'bg-yellow-50 border-l-2 border-yellow-400 hover:bg-yellow-100'
                                         : 'hover:bg-gray-50'
                                     }`}
                                   >
@@ -2913,10 +2910,8 @@ const SiteAssets: React.FC = () => {
                                         {c.category_code} - {c.category_name}
                                       </span>
                                       {isInList && !isOutOfStock && (
-                                        <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
-                                          isMaxedOut ? 'text-gray-800 bg-gray-100' : 'text-gray-800 bg-gray-100'
-                                        }`}>
-                                          {currentQty} / {availableQty} {isMaxedOut ? '(Max)' : ''}
+                                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800">
+                                          In list: {currentQty}
                                         </span>
                                       )}
                                       {isOutOfStock && (
@@ -2947,7 +2942,7 @@ const SiteAssets: React.FC = () => {
                         <input
                           type="number"
                           min={1}
-                          value={requisitionForm.quantity}
+                          value={requisitionForm.quantity ?? 1}
                           onChange={(e) => setRequisitionForm(prev => ({ ...prev, quantity: Number(e.target.value) }))}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 text-sm"
                         />
@@ -2955,7 +2950,8 @@ const SiteAssets: React.FC = () => {
 
                       {/* Add/Update Button */}
                       {(() => {
-                        const isUpdate = requisitionForm.category_id > 0 && getCategoryInListQty(requisitionForm.category_id) !== null;
+                        const categoryId = requisitionForm.category_id ?? 0;
+                        const isUpdate = categoryId > 0 && getCategoryInListQty(categoryId) !== null;
                         return (
                           <button
                             type="button"

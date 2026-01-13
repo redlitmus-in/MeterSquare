@@ -307,7 +307,13 @@ const AssetReceiveReturns: React.FC = () => {
                       )}
                       <button
                         onClick={() => fetchReturnDetails(rn.ardn_id)}
-                        className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg"
+                        disabled={rn.status === 'IN_TRANSIT'}
+                        className={`p-2 rounded-lg ${
+                          rn.status === 'IN_TRANSIT'
+                            ? 'text-gray-300 cursor-not-allowed opacity-50'
+                            : 'text-gray-500 hover:bg-gray-100'
+                        }`}
+                        title={rn.status === 'IN_TRANSIT' ? 'Receive the items first to view details' : 'View details'}
                       >
                         <Eye className="w-4 h-4" />
                       </button>
