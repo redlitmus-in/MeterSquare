@@ -61,6 +61,10 @@ const WorkerAssignments: React.FC = () => {
   const [selectedFilter, setSelectedFilter] = useState<'low-rate' | 'high-rate' | 'single-skill' | 'multi-skill' | null>(null);
   const [detailsRequisition, setDetailsRequisition] = useState<LabourRequisition | null>(null);
 
+  // Scroll position preservation
+  const workerListRef = React.useRef<HTMLDivElement>(null);
+  const [shouldPreserveScroll, setShouldPreserveScroll] = React.useState(false);
+
   // Add Worker Form State
   const [showAddWorkerForm, setShowAddWorkerForm] = useState(false);
   const [addingWorker, setAddingWorker] = useState(false);
@@ -265,11 +269,22 @@ const WorkerAssignments: React.FC = () => {
   };
 
   const toggleWorkerSelection = (workerId: number) => {
+    // Save scroll position before state change
+    const scrollTop = workerListRef.current?.scrollTop || 0;
+
     setSelectedWorkerIds(prev => {
       const isCurrentlySelected = prev.includes(workerId);
 
       // If deselecting, always allow
       if (isCurrentlySelected) {
+        // Preserve scroll position for manual selection
+        setShouldPreserveScroll(true);
+        requestAnimationFrame(() => {
+          if (workerListRef.current) {
+            workerListRef.current.scrollTop = scrollTop;
+          }
+          setShouldPreserveScroll(false);
+        });
         return prev.filter(id => id !== workerId);
       }
 
@@ -279,6 +294,15 @@ const WorkerAssignments: React.FC = () => {
         showError(`Cannot select more than ${maxWorkers} workers for this requisition`);
         return prev;
       }
+
+      // Preserve scroll position for manual selection
+      setShouldPreserveScroll(true);
+      requestAnimationFrame(() => {
+        if (workerListRef.current) {
+          workerListRef.current.scrollTop = scrollTop;
+        }
+        setShouldPreserveScroll(false);
+      });
 
       // Add to selection
       return [...prev, workerId];
@@ -832,7 +856,7 @@ const WorkerAssignments: React.FC = () => {
                 <>
                   {/* Worker List */}
                   {availableWorkers.length > 0 && (
-                    <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
+                    <div ref={workerListRef} className="space-y-2 max-h-60 overflow-y-auto mb-4">
                       {availableWorkers
                         .sort((a, b) => {
                           // Selected workers first
