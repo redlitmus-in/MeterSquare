@@ -128,9 +128,17 @@ const ArrivalConfirmation: React.FC = () => {
   const handleConfirm = async (arrivalId: number, workerName: string) => {
     setProcessing(arrivalId);
     const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+    // Check if this is a late arrival (was marked as no_show)
+    const arrival = arrivals.find(a => a.arrival_id === arrivalId);
+    const isLateArrival = arrival?.arrival_status === 'no_show';
+
     const result = await labourService.confirmArrival(arrivalId, now);
     if (result.success) {
-      showSuccess(`${workerName} marked as arrived at ${now}`);
+      const message = isLateArrival
+        ? `${workerName} marked as arrived late at ${now} ⏰`
+        : `${workerName} marked as arrived at ${now}`;
+      showSuccess(message);
       // Optimistic UI update - update state directly without refreshing
       setArrivals(prev => prev.map(arrival =>
         arrival.arrival_id === arrivalId
@@ -192,16 +200,22 @@ const ArrivalConfirmation: React.FC = () => {
   const handleBulkConfirm = async () => {
     if (selectedArrivalIds.length === 0) return;
 
-    // Filter to only process workers with 'assigned' status (pending)
+    // Filter to process workers with 'assigned' (pending) or 'no_show' status
     const eligibleIds = selectedArrivalIds.filter(id => {
       const arrival = arrivals.find(a => a.arrival_id === id);
-      return arrival && arrival.arrival_status === 'assigned';
+      return arrival && (arrival.arrival_status === 'assigned' || arrival.arrival_status === 'no_show');
     });
 
     if (eligibleIds.length === 0) {
-      showError('No pending workers selected. Only pending workers can be marked as arrived.');
+      showError('No pending or no-show workers selected.');
       return;
     }
+
+    // Count late arrivals
+    const lateArrivalCount = eligibleIds.filter(id => {
+      const arrival = arrivals.find(a => a.arrival_id === id);
+      return arrival && arrival.arrival_status === 'no_show';
+    }).length;
 
     setBulkProcessing(true);
     const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
@@ -223,7 +237,10 @@ const ArrivalConfirmation: React.FC = () => {
     setSelectedArrivalIds([]);
 
     if (successCount > 0) {
-      showSuccess(`Marked ${successCount} worker(s) as arrived`);
+      const message = lateArrivalCount > 0
+        ? `Marked ${successCount} worker(s) as arrived (${lateArrivalCount} late arrival${lateArrivalCount > 1 ? 's' : ''})`
+        : `Marked ${successCount} worker(s) as arrived`;
+      showSuccess(message);
     }
   };
 
@@ -571,13 +588,17 @@ const ArrivalConfirmation: React.FC = () => {
                         const arrival = arrivals.find(a => a.arrival_id === id);
                         return arrival && arrival.arrival_status === 'assigned';
                       });
+                      const hasNoShow = selectedArrivalIds.some(id => {
+                        const arrival = arrivals.find(a => a.arrival_id === id);
+                        return arrival && arrival.arrival_status === 'no_show';
+                      });
                       const hasWorking = selectedArrivalIds.some(id => {
                         const arrival = arrivals.find(a => a.arrival_id === id);
                         return arrival && arrival.arrival_status === 'confirmed';
                       });
 
                       // Only show buttons if there are eligible workers
-                      if (!hasPending && !hasWorking) return null;
+                      if (!hasPending && !hasWorking && !hasNoShow) return null;
 
                       return (
                         <div className="flex items-center gap-2">
@@ -604,6 +625,20 @@ const ArrivalConfirmation: React.FC = () => {
                                 Mark No Show
                               </button>
                             </>
+                          )}
+                          {hasNoShow && (
+                            <button
+                              onClick={handleBulkConfirm}
+                              disabled={bulkProcessing}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-orange-600 text-white text-xs font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 transition-colors"
+                            >
+                              {bulkProcessing ? (
+                                <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                              ) : (
+                                <CheckCircleIcon className="w-4 h-4" />
+                              )}
+                              Mark Late Arrival
+                            </button>
                           )}
                           {hasWorking && (
                             <button
@@ -758,30 +793,36 @@ const ArrivalConfirmation: React.FC = () => {
 
                       {/* Actions Column */}
                       <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                        {isPending ? (
+                        {isPending || arrival.arrival_status === 'no_show' ? (
                           <div className="flex gap-2">
                             <button
                               onClick={() => handleConfirm(arrival.arrival_id, workerName)}
                               disabled={processing === arrival.arrival_id}
-                              className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-                              title="Mark as arrived"
+                              className={`flex items-center gap-1 px-3 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-50 transition-colors ${
+                                arrival.arrival_status === 'no_show'
+                                  ? 'bg-orange-600 hover:bg-orange-700'
+                                  : 'bg-green-600 hover:bg-green-700'
+                              }`}
+                              title={arrival.arrival_status === 'no_show' ? 'Mark as arrived late' : 'Mark as arrived'}
                             >
                               {processing === arrival.arrival_id ? (
                                 <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
                               ) : (
                                 <CheckCircleIcon className="w-4 h-4" />
                               )}
-                              Arrived
+                              {arrival.arrival_status === 'no_show' ? 'Late Arrival' : 'Arrived'}
                             </button>
-                            <button
-                              onClick={() => handleNoShow(arrival.arrival_id, workerName)}
-                              disabled={processing === arrival.arrival_id}
-                              className="flex items-center gap-1 px-3 py-1.5 border border-red-300 text-red-600 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
-                              title="Mark as no show"
-                            >
-                              <XCircleIcon className="w-4 h-4" />
-                              No Show
-                            </button>
+                            {isPending && (
+                              <button
+                                onClick={() => handleNoShow(arrival.arrival_id, workerName)}
+                                disabled={processing === arrival.arrival_id}
+                                className="flex items-center gap-1 px-3 py-1.5 border border-red-300 text-red-600 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                                title="Mark as no show"
+                              >
+                                <XCircleIcon className="w-4 h-4" />
+                                No Show
+                              </button>
+                            )}
                           </div>
                         ) : arrival.arrival_status === 'confirmed' ? (
                           <button
