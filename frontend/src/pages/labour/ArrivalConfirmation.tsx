@@ -196,6 +196,8 @@ const ArrivalConfirmation: React.FC = () => {
   };
 
   const pendingCount = arrivals.filter(a => a.arrival_status === 'assigned').length;
+  const presentCount = arrivals.filter(a => a.arrival_status === 'confirmed').length;
+  const totalWorkers = arrivals.length;
 
   // Get initials for worker avatar (handles edge cases)
   const getInitials = (name: string): string => {
@@ -340,7 +342,7 @@ const ArrivalConfirmation: React.FC = () => {
                       </p>
                     </div>
                     <div className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full border border-purple-200">
-                      <strong>{group.arrivals.length}</strong> / {group.requisition.workers_count} Workers
+                      <strong className="text-green-600">{group.arrivals.filter(a => a.arrival_status === 'confirmed').length}</strong> / {group.arrivals.length} Workers
                     </div>
                   </div>
                 </div>
