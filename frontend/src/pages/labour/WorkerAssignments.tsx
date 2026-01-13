@@ -57,6 +57,8 @@ const WorkerAssignments: React.FC = () => {
   const [assigning, setAssigning] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('pending');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showQuickSelectDropdown, setShowQuickSelectDropdown] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState<'low-rate' | 'high-rate' | 'single-skill' | 'multi-skill' | null>(null);
   const [detailsRequisition, setDetailsRequisition] = useState<LabourRequisition | null>(null);
 
   // Add Worker Form State
@@ -95,6 +97,7 @@ const WorkerAssignments: React.FC = () => {
   const openAssignModal = async (requisition: LabourRequisition) => {
     setSelectedRequisition(requisition);
     setSelectedWorkerIds([]);
+    setSelectedFilter(null); // Reset filter when opening modal
     setShowAssignModal(true);
     setLoadingWorkers(true);
     setShowAddWorkerForm(false);
@@ -193,6 +196,72 @@ const WorkerAssignments: React.FC = () => {
     } finally {
       setAddingWorker(false);
     }
+  };
+
+  // Auto-select workers based on filter
+  const handleAutoSelect = (filter: 'low-rate' | 'high-rate' | 'single-skill' | 'multi-skill') => {
+    const maxWorkers = selectedRequisition?.total_workers_count || selectedRequisition?.workers_count || 0;
+
+    // Get available workers (not already assigned)
+    const eligibleWorkers = availableWorkers.filter(w => !w.is_assigned);
+
+    if (eligibleWorkers.length === 0) {
+      showError('No available workers to select');
+      return;
+    }
+
+    let sortedWorkers = [...eligibleWorkers];
+
+    // Apply sorting based on filter
+    switch (filter) {
+      case 'low-rate':
+        // Sort by hourly rate ascending (lowest first)
+        sortedWorkers.sort((a, b) => (a.hourly_rate || 0) - (b.hourly_rate || 0));
+        break;
+
+      case 'high-rate':
+        // Sort by hourly rate descending (highest first)
+        sortedWorkers.sort((a, b) => (b.hourly_rate || 0) - (a.hourly_rate || 0));
+        break;
+
+      case 'single-skill':
+        // Filter and prioritize workers with only one skill
+        sortedWorkers = sortedWorkers.filter(w => (w.skills?.length || 0) === 1);
+        if (sortedWorkers.length === 0) {
+          showError('No single-skill workers available');
+          return;
+        }
+        // Then sort by rate (lowest first for single skill)
+        sortedWorkers.sort((a, b) => (a.hourly_rate || 0) - (b.hourly_rate || 0));
+        break;
+
+      case 'multi-skill':
+        // Filter and prioritize workers with multiple skills
+        sortedWorkers = sortedWorkers.filter(w => (w.skills?.length || 0) > 1);
+        if (sortedWorkers.length === 0) {
+          showError('No multi-skill workers available');
+          return;
+        }
+        // Then sort by rate (lowest first for multi skill)
+        sortedWorkers.sort((a, b) => (a.hourly_rate || 0) - (b.hourly_rate || 0));
+        break;
+    }
+
+    // Select the required number of workers
+    const workersToSelect = sortedWorkers.slice(0, maxWorkers);
+    const workerIds = workersToSelect.map(w => w.worker_id);
+
+    setSelectedWorkerIds(workerIds);
+    setSelectedFilter(filter); // Save the selected filter
+
+    const filterLabels = {
+      'low-rate': 'Low Rate',
+      'high-rate': 'High Rate',
+      'single-skill': 'Single Skill',
+      'multi-skill': 'Multi Skill'
+    };
+
+    showSuccess(`Auto-selected ${workerIds.length} worker(s) - ${filterLabels[filter]}`);
   };
 
   const toggleWorkerSelection = (workerId: number) => {
@@ -618,7 +687,7 @@ const WorkerAssignments: React.FC = () => {
             </div>
 
             <div className="p-4">
-              <p className="text-sm text-gray-600 mb-4">
+              <p className="text-sm text-gray-600 mb-3">
                 Select {selectedRequisition.total_workers_count || selectedRequisition.workers_count} worker(s) with {selectedRequisition.labour_items && selectedRequisition.labour_items.length > 0 ? (
                   <>
                     {Array.from(new Set(selectedRequisition.labour_items.map((item: any) => item.skill_required))).map((skill, idx, arr) => (
@@ -633,6 +702,128 @@ const WorkerAssignments: React.FC = () => {
                 )}
               </p>
 
+              {/* Auto-Select Dropdown */}
+              {!loadingWorkers && availableWorkers.length > 0 && (
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="relative flex-1">
+                    <button
+                      onClick={() => setShowQuickSelectDropdown(!showQuickSelectDropdown)}
+                      onBlur={() => setTimeout(() => setShowQuickSelectDropdown(false), 200)}
+                      className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm"
+                    >
+                      <div className="flex items-center gap-2">
+                        <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        <span className="text-gray-700 font-medium">
+                          {selectedFilter ? (
+                            {
+                              'low-rate': 'Low Rate',
+                              'high-rate': 'High Rate',
+                              'single-skill': 'Single Skill',
+                              'multi-skill': 'Multi Skill'
+                            }[selectedFilter]
+                          ) : 'Quick Select'}
+                        </span>
+                      </div>
+                      <svg className={`w-4 h-4 text-gray-400 transition-transform ${showQuickSelectDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {/* Dropdown Menu */}
+                    {showQuickSelectDropdown && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                        <button
+                          onClick={() => {
+                            handleAutoSelect('low-rate');
+                            setShowQuickSelectDropdown(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-green-50 text-left transition-colors border-b border-gray-100"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-green-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">Low Rate</p>
+                            <p className="text-xs text-gray-500">Select cheapest workers</p>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            handleAutoSelect('high-rate');
+                            setShowQuickSelectDropdown(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-blue-50 text-left transition-colors border-b border-gray-100"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-blue-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">High Rate</p>
+                            <p className="text-xs text-gray-500">Select premium workers</p>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            handleAutoSelect('single-skill');
+                            setShowQuickSelectDropdown(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-orange-50 text-left transition-colors border-b border-gray-100"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-orange-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">Single Skill</p>
+                            <p className="text-xs text-gray-500">Workers with one skill</p>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            handleAutoSelect('multi-skill');
+                            setShowQuickSelectDropdown(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-purple-50 text-left transition-colors"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-purple-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">Multi Skill</p>
+                            <p className="text-xs text-gray-500">Versatile workers</p>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Clear All Button */}
+                  {selectedWorkerIds.length > 0 && (
+                    <button
+                      onClick={() => {
+                        setSelectedWorkerIds([]);
+                        setSelectedFilter(null); // Reset filter when clearing
+                      }}
+                      className="px-3 py-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors font-medium whitespace-nowrap"
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
+              )}
+
               {loadingWorkers ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
@@ -642,7 +833,16 @@ const WorkerAssignments: React.FC = () => {
                   {/* Worker List */}
                   {availableWorkers.length > 0 && (
                     <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
-                      {availableWorkers.map((worker) => {
+                      {availableWorkers
+                        .sort((a, b) => {
+                          // Selected workers first
+                          const aSelected = selectedWorkerIds.includes(a.worker_id);
+                          const bSelected = selectedWorkerIds.includes(b.worker_id);
+                          if (aSelected && !bSelected) return -1;
+                          if (!aSelected && bSelected) return 1;
+                          return 0;
+                        })
+                        .map((worker) => {
                         const isAlreadyAssigned = worker.is_assigned || false;
                         const isSelected = selectedWorkerIds.includes(worker.worker_id);
                         const maxWorkers = selectedRequisition?.total_workers_count || selectedRequisition?.workers_count || 0;
@@ -671,15 +871,36 @@ const WorkerAssignments: React.FC = () => {
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <p className="font-medium text-gray-900">{worker.full_name}</p>
-                                  {isAlreadyAssigned && (
-                                    <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 font-medium">
-                                      Already Assigned
-                                    </span>
+                              <div className="flex items-center gap-3 flex-1">
+                                {/* Selection Checkbox */}
+                                <div className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                                  isSelected
+                                    ? 'bg-purple-600 border-purple-600'
+                                    : isAlreadyAssigned || limitReached
+                                    ? 'bg-gray-200 border-gray-300'
+                                    : 'border-gray-300 bg-white'
+                                }`}>
+                                  {isSelected && (
+                                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                    </svg>
                                   )}
                                 </div>
+
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium text-gray-900">{worker.full_name}</p>
+                                    {isSelected && (
+                                      <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700 font-medium">
+                                        Selected
+                                      </span>
+                                    )}
+                                    {isAlreadyAssigned && (
+                                      <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 font-medium">
+                                        Already Assigned
+                                      </span>
+                                    )}
+                                  </div>
                                 <p className="text-sm text-gray-500">{worker.worker_code}</p>
                                 {isAlreadyAssigned && worker.assignment?.available_from && (
                                   <p className="text-xs text-gray-400 mt-1">
@@ -704,10 +925,11 @@ const WorkerAssignments: React.FC = () => {
                               </div>
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                   {/* No Workers Message */}
                   {availableWorkers.length === 0 && !showAddWorkerForm && (
