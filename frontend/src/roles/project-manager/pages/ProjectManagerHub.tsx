@@ -41,6 +41,9 @@ const ProjectManagerHub: React.FC = () => {
         stats: stats.stats,
         boq_status: stats.boq_status,
         items_breakdown: stats.items_breakdown,
+        purchase_order_status: stats.purchase_order_status || {},
+        labour_data: stats.labour_data || [],
+        top_budget_projects: stats.top_budget_projects || [],
         recent_activities: stats.recent_activities || [],
         projects: stats.projects || [],
         // Legacy format for backward compatibility
@@ -73,6 +76,17 @@ const ProjectManagerHub: React.FC = () => {
     materials: 0,
     labour: 0
   };
+
+  const purchaseOrderStatus = dashboardData?.purchase_order_status || {
+    sent_to_buyer: 0,
+    accepted: 0,
+    completed: 0,
+    rejected: 0
+  };
+
+  const labourData = dashboardData?.labour_data || [];
+
+  const topBudgetProjects = dashboardData?.top_budget_projects || [];
 
   const recentActivities = dashboardData?.recent_activities || [];
 
@@ -172,83 +186,17 @@ const ProjectManagerHub: React.FC = () => {
     credits: { enabled: false }
   };
 
-  // Project Activity Chart - Use data from dashboard stats
-  const totalBudget = stats.total_project_value;
+  // Labour Data Chart - Labour Requisition & Attendance Lock Status
+  const hasLabourData = labourData.length > 0 && labourData.some(item => item.quantity > 0);
 
-  // Calculate activity stats from dashboard status counts
-  const activeBoqs = statusCounts.approved + statusCounts.pending;
-  const completedBoqs = statusCounts.completed;
-  const rejectedBoqs = statusCounts.rejected;
-  const hasActivityData = activeBoqs > 0 || completedBoqs > 0 || rejectedBoqs > 0;
-
-  const budgetUtilizationOptions = {
-    chart: {
-      type: 'pie',
-      backgroundColor: 'transparent',
-      height: 300
-    },
-    title: {
-      text: 'Project Activity',
-      style: {
-        fontSize: '16px',
-        fontWeight: 'bold',
-        color: '#1f2937'
-      }
-    },
-    plotOptions: {
-      pie: {
-        innerSize: '60%',
-        borderRadius: 8,
-        dataLabels: {
-          enabled: true,
-          format: '<b>{point.name}</b><br>{point.y} ({point.percentage:.1f}%)',
-          style: {
-            fontSize: '12px',
-            fontWeight: '600',
-            textOutline: 'none',
-            color: '#374151'
-          }
-        },
-        showInLegend: true
-      }
-    },
-    legend: {
-      align: 'center',
-      verticalAlign: 'bottom',
-      layout: 'horizontal',
-      itemStyle: {
-        fontSize: '11px',
-        fontWeight: '600'
-      }
-    },
-    series: [{
-      name: 'BOQs',
-      data: hasActivityData ? [
-        { name: 'Active', y: activeBoqs, color: '#3B82F6' },
-        { name: 'Completed', y: completedBoqs, color: '#10B981' },
-        { name: 'Rejected', y: rejectedBoqs, color: '#EF4444' }
-      ].filter(item => item.y > 0) : [
-        { name: 'No Data', y: 1, color: '#E5E7EB' }
-      ]
-    }],
-    tooltip: {
-      pointFormat: '<b>{point.y}</b> BOQs ({point.percentage:.1f}%)'
-    },
-    credits: { enabled: false }
-  };
-
-  // BOQ Items Breakdown Chart - Use data from dashboard API
-  const totalMaterials = itemsBreakdown.materials;
-  const totalLabour = itemsBreakdown.labour;
-
-  const boqTrendOptions = {
+  const labourDataOptions = {
     chart: {
       type: 'column',
       backgroundColor: 'transparent',
       height: 300
     },
     title: {
-      text: 'BOQ Items Breakdown',
+      text: 'Labour Status',
       style: {
         fontSize: '16px',
         fontWeight: 'bold',
@@ -256,18 +204,117 @@ const ProjectManagerHub: React.FC = () => {
       }
     },
     xAxis: {
-      categories: ['Materials', 'Labour'],
+      categories: hasLabourData
+        ? labourData.map(item => {
+            // Shorten labels for better display
+            const label = item.labour_type || 'Unknown';
+            if (label.includes('Requisition - Pending')) return 'Req - Pending';
+            if (label.includes('Requisition - Approved')) return 'Req - Approved';
+            if (label.includes('Requisition - Rejected')) return 'Req - Rejected';
+            if (label.includes('Attendance - Pending Lock')) return 'Attn - Pending Lock';
+            if (label.includes('Attendance - Locked')) return 'Attn - Locked';
+            return label.substring(0, 15);
+          })
+        : ['No Data'],
       labels: {
         style: {
-          fontSize: '12px',
+          fontSize: '10px',
           fontWeight: '600',
           color: '#4b5563'
-        }
+        },
+        rotation: -45
       }
     },
     yAxis: {
       title: {
-        text: 'Total Count',
+        text: 'Count',
+        style: {
+          fontSize: '12px',
+          color: '#6b7280'
+        }
+      },
+      allowDecimals: false,
+      min: 0,
+      labels: {
+        style: {
+          fontSize: '11px',
+          color: '#6b7280'
+        }
+      }
+    },
+    legend: {
+      enabled: false
+    },
+    plotOptions: {
+      column: {
+        borderRadius: 6,
+        dataLabels: {
+          enabled: true,
+          style: {
+            fontSize: '11px',
+            fontWeight: 'bold',
+            textOutline: 'none'
+          }
+        }
+      }
+    },
+    series: [{
+      name: 'Count',
+      data: hasLabourData
+        ? labourData.map((item, index) => {
+            // Color code by status type
+            let color = '#F59E0B'; // Default orange
+            if (item.labour_type?.includes('Pending')) color = '#F59E0B'; // Orange
+            if (item.labour_type?.includes('Approved') || item.labour_type?.includes('Locked')) color = '#10B981'; // Green
+            if (item.labour_type?.includes('Rejected')) color = '#EF4444'; // Red
+            return { y: item.quantity, color };
+          })
+        : [{ y: 0, color: '#E5E7EB' }],
+      colorByPoint: true
+    }],
+    tooltip: {
+      pointFormat: '<b>{point.y}</b> records',
+      style: {
+        fontSize: '12px'
+      }
+    },
+    credits: { enabled: false }
+  };
+
+  // Purchase Order Status Chart
+  const hasPOData = purchaseOrderStatus.sent_to_buyer > 0 ||
+                    purchaseOrderStatus.accepted > 0 ||
+                    purchaseOrderStatus.completed > 0 ||
+                    purchaseOrderStatus.rejected > 0;
+
+  const purchaseOrderOptions = {
+    chart: {
+      type: 'column',
+      backgroundColor: 'transparent',
+      height: 300
+    },
+    title: {
+      text: 'Purchase Order Status',
+      style: {
+        fontSize: '16px',
+        fontWeight: 'bold',
+        color: '#1f2937'
+      }
+    },
+    xAxis: {
+      categories: ['Sent to Buyer', 'Accepted', 'Completed', 'Rejected'],
+      labels: {
+        style: {
+          fontSize: '11px',
+          fontWeight: '600',
+          color: '#4b5563'
+        },
+        rotation: -45
+      }
+    },
+    yAxis: {
+      title: {
+        text: 'Count',
         style: {
           fontSize: '12px',
           color: '#6b7280'
@@ -299,15 +346,19 @@ const ProjectManagerHub: React.FC = () => {
       }
     },
     series: [{
-      name: 'Items',
-      data: [
-        { y: totalMaterials, color: '#10B981', name: 'Materials' },
-        { y: totalLabour, color: '#F59E0B', name: 'Labour' }
+      name: 'Purchase Orders',
+      data: hasPOData ? [
+        { y: purchaseOrderStatus.sent_to_buyer, color: '#3B82F6', name: 'Sent to Buyer' },
+        { y: purchaseOrderStatus.accepted, color: '#10B981', name: 'Accepted' },
+        { y: purchaseOrderStatus.completed, color: '#8B5CF6', name: 'Completed' },
+        { y: purchaseOrderStatus.rejected, color: '#EF4444', name: 'Rejected' }
+      ] : [
+        { y: 0, color: '#E5E7EB', name: 'No Data' }
       ],
       colorByPoint: true
     }],
     tooltip: {
-      pointFormat: '<b>{point.y}</b> items',
+      pointFormat: '<b>{point.y}</b> POs',
       style: {
         fontSize: '12px'
       }
@@ -315,20 +366,17 @@ const ProjectManagerHub: React.FC = () => {
     credits: { enabled: false }
   };
 
-  // Project Progress Chart
-  const topProjects = projects.slice(0, 5);
-  const avgProgress = projects.length > 0
-    ? Math.round(projects.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.length)
-    : 0;
+  // Top 5 High Budget Projects Chart
+  const hasTopBudgetProjects = topBudgetProjects.length > 0;
 
-  const projectProgressOptions = {
+  const topBudgetProjectsOptions = {
     chart: {
       type: 'bar',
       backgroundColor: 'transparent',
       height: 300
     },
     title: {
-      text: `Project Progress (Avg: ${avgProgress}%)`,
+      text: 'Top 5 High Budget Projects',
       style: {
         fontSize: '16px',
         fontWeight: 'bold',
@@ -336,8 +384,8 @@ const ProjectManagerHub: React.FC = () => {
       }
     },
     xAxis: {
-      categories: topProjects.length > 0
-        ? topProjects.map(p => p.project_name?.substring(0, 20) || 'Project')
+      categories: hasTopBudgetProjects
+        ? topBudgetProjects.map(p => p.project_name?.substring(0, 20) || 'Project')
         : ['No Projects'],
       labels: {
         style: {
@@ -349,18 +397,20 @@ const ProjectManagerHub: React.FC = () => {
     },
     yAxis: {
       title: {
-        text: 'Completion (%)',
+        text: 'Budget (AED)',
         style: {
           fontSize: '12px',
           color: '#6b7280'
         }
       },
       min: 0,
-      max: 100,
       labels: {
         style: {
           fontSize: '11px',
           color: '#6b7280'
+        },
+        formatter: function() {
+          return (this.value / 1000).toFixed(0) + 'K';
         }
       }
     },
@@ -372,7 +422,9 @@ const ProjectManagerHub: React.FC = () => {
         borderRadius: 6,
         dataLabels: {
           enabled: true,
-          format: '{y}%',
+          formatter: function() {
+            return 'AED ' + (this.y / 1000).toFixed(1) + 'K';
+          },
           style: {
             fontSize: '11px',
             fontWeight: 'bold',
@@ -383,16 +435,17 @@ const ProjectManagerHub: React.FC = () => {
       }
     },
     series: [{
-      name: 'Progress',
-      data: topProjects.length > 0
-        ? topProjects.map((p) => ({
-            y: p.progress || 0,
-            color: (p.progress || 0) >= 75 ? '#10B981' : (p.progress || 0) >= 50 ? '#3B82F6' : (p.progress || 0) >= 25 ? '#F59E0B' : '#EF4444'
-          }))
+      name: 'Budget',
+      data: hasTopBudgetProjects
+        ? topBudgetProjects.map((p, index) => {
+            // Color gradient from highest to lowest budget
+            const colors = ['#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444'];
+            return { y: p.budget, color: colors[index] || '#6B7280' };
+          })
         : [{ y: 0, color: '#E5E7EB' }]
     }],
     tooltip: {
-      pointFormat: '<b>{point.y}%</b> complete',
+      pointFormat: '<b>AED {point.y:,.2f}</b>',
       style: {
         fontSize: '12px'
       }
@@ -523,7 +576,7 @@ const ProjectManagerHub: React.FC = () => {
             transition={{ delay: 0.3 }}
             className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
           >
-            <HighchartsReact highcharts={Highcharts} options={budgetUtilizationOptions} />
+            <HighchartsReact highcharts={Highcharts} options={labourDataOptions} />
           </motion.div>
 
           <motion.div
@@ -532,7 +585,7 @@ const ProjectManagerHub: React.FC = () => {
             transition={{ delay: 0.4 }}
             className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
           >
-            <HighchartsReact highcharts={Highcharts} options={boqTrendOptions} />
+            <HighchartsReact highcharts={Highcharts} options={purchaseOrderOptions} />
           </motion.div>
 
           <motion.div
@@ -541,7 +594,7 @@ const ProjectManagerHub: React.FC = () => {
             transition={{ delay: 0.5 }}
             className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
           >
-            <HighchartsReact highcharts={Highcharts} options={projectProgressOptions} />
+            <HighchartsReact highcharts={Highcharts} options={topBudgetProjectsOptions} />
           </motion.div>
         </div>
 
