@@ -1147,8 +1147,8 @@ const ChangeRequestsPage: React.FC = () => {
     );
   };
 
-  // Vendor Approvals Table View Component
-  const VendorApprovalsTable = ({ poChildren }: { poChildren: POChild[] }) => {
+  // Vendor Approvals Table View Component - handles both Purchase and POChild types
+  const VendorApprovalsTable = ({ items }: { items: Array<Purchase | POChild> }) => {
     return (
       <div className="border rounded-lg overflow-hidden">
         <Table>
@@ -1165,24 +1165,36 @@ const ChangeRequestsPage: React.FC = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {poChildren.map((poChild) => {
-              const totalCost = calculatePOChildTotal(poChild);
-              const isPending = poChild.vendor_selection_status === 'pending_td_approval';
-              const isApproved = poChild.vendor_selection_status === 'approved';
-              const isRejected = poChild.vendor_selection_status === 'rejected';
+            {items.map((item) => {
+              const isPoChild = isPOChild(item);
+
+              // Extract common fields based on item type
+              const displayId = isPoChild ? item.formatted_id : (item.formatted_cr_id || `CR-${item.cr_id}`);
+              const projectName = item.project_name;
+              const itemName = item.item_name;
+              const vendorName = item.vendor_name;
+              const createdAt = item.created_at;
+              const materialsCount = item.materials?.length || 0;
+              const totalCost = isPoChild ? calculatePOChildTotal(item) : (item.total_cost || 0);
+              const status = item.vendor_selection_status;
+              const itemId = isPoChild ? item.id : item.cr_id;
+
+              const isPending = status === 'pending_td_approval';
+              const isApproved = status === 'approved';
+              const isRejected = status === 'rejected';
 
               return (
-                <TableRow key={poChild.id}>
-                  <TableCell className="font-semibold text-blue-600">{poChild.formatted_id}</TableCell>
+                <TableRow key={`${isPoChild ? 'po' : 'cr'}-${itemId}`}>
+                  <TableCell className="font-semibold text-blue-600">{displayId}</TableCell>
                   <TableCell>
-                    <div className="font-medium">{poChild.project_name || poChild.item_name || 'N/A'}</div>
-                    {poChild.item_name && poChild.project_name && (
-                      <div className="text-xs text-gray-500">{poChild.item_name}</div>
+                    <div className="font-medium">{projectName || itemName || 'N/A'}</div>
+                    {itemName && projectName && (
+                      <div className="text-xs text-gray-500">{itemName}</div>
                     )}
                   </TableCell>
-                  <TableCell className="font-medium text-gray-900">{poChild.vendor_name || 'N/A'}</TableCell>
-                  <TableCell>{poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}</TableCell>
-                  <TableCell>{poChild.materials?.length || 0}</TableCell>
+                  <TableCell className="font-medium text-gray-900">{vendorName || 'N/A'}</TableCell>
+                  <TableCell>{createdAt ? new Date(createdAt).toLocaleDateString() : 'N/A'}</TableCell>
+                  <TableCell>{materialsCount}</TableCell>
                   <TableCell className="font-semibold text-blue-700">AED {totalCost.toLocaleString()}</TableCell>
                   <TableCell>
                     <Badge className={
@@ -1195,21 +1207,42 @@ const ChangeRequestsPage: React.FC = () => {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Button size="sm" variant="outline" onClick={() => handleOpenLpoEditor(poChild, true)}>
-                        <Eye className="h-3.5 w-3.5 mr-1" />
-                        Details
-                      </Button>
-                      {isPending && (
+                      {isPoChild ? (
                         <>
-                          <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprovePOChild(poChild.id)}>
-                            <Check className="h-3.5 w-3.5" />
+                          <Button size="sm" variant="outline" onClick={() => handleOpenLpoEditor(item, true)}>
+                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            Details
                           </Button>
-                          <Button size="sm" variant="destructive" onClick={() => {
-                            setRejectingPOChildId(poChild.id);
-                            setShowRejectionModal(true);
-                          }}>
-                            <X className="h-3.5 w-3.5" />
+                          {isPending && (
+                            <>
+                              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprovePOChild(item.id)}>
+                                <Check className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button size="sm" variant="destructive" onClick={() => {
+                                setRejectingPOChildId(item.id);
+                                setShowRejectionModal(true);
+                              }}>
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => handleReviewVendorApproval(item.cr_id)}>
+                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            Details
                           </Button>
+                          {isPending && (
+                            <>
+                              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApproveVendor(item.cr_id)}>
+                                <Check className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button size="sm" variant="destructive" onClick={() => handleRejectVendorSelection(item.cr_id)}>
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
                         </>
                       )}
                     </div>
@@ -1599,10 +1632,10 @@ const ChangeRequestsPage: React.FC = () => {
                     </p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <VendorApprovalsTable poChildren={
-                    vendorApprovalsSubTab === 'pending' ? filteredPOChildren :
-                    vendorApprovalsSubTab === 'approved' ? filteredApprovedPOChildren :
-                    filteredRejectedPOChildren
+                  <VendorApprovalsTable items={
+                    vendorApprovalsSubTab === 'pending' ? paginatedPendingItems :
+                    vendorApprovalsSubTab === 'approved' ? paginatedApprovedItems :
+                    paginatedRejectedItems
                   } />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
