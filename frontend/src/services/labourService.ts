@@ -11,6 +11,7 @@
  * 8. Admin (HR): Payroll Processing
  */
 import { apiClient } from '@/api/config';
+import { useAdminViewStore } from '@/store/adminViewStore';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -568,6 +569,13 @@ class LabourService {
       const params: Record<string, string | number> = { page, per_page: perPage };
       if (status) params.status = status;
       if (projectId) params.project_id = projectId;
+
+      // If admin is viewing as another role, pass that info to backend
+      const { viewingAsRole } = useAdminViewStore.getState();
+      if (viewingAsRole && viewingAsRole !== 'admin') {
+        params.view_as_role = viewingAsRole;
+      }
+
       const response = await apiClient.get('/labour/requisitions/pending', { params });
       return {
         success: true,
@@ -891,6 +899,12 @@ class LabourService {
       if (projectId) params.project_id = projectId;
       if (date) params.date = date;
       if (status) params.approval_status = status;
+
+      // If admin is viewing as another role, pass that info to backend
+      const { viewingAsRole } = useAdminViewStore.getState();
+      if (viewingAsRole && viewingAsRole !== 'admin') {
+        params.view_as_role = viewingAsRole;
+      }
 
       const response = await apiClient.get('/labour/attendance/to-lock', { params });
       return {

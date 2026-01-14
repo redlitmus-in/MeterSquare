@@ -854,6 +854,12 @@ def get_pending_requisitions():
         per_page = min(request.args.get('per_page', 15, type=int), 100)
         project_id = request.args.get('project_id', type=int)
         status = request.args.get('status', 'pending')  # Default to pending
+        view_as_role = request.args.get('view_as_role', '').lower()  # For admin viewing as other roles
+
+        # If admin is viewing as another role, use that role for filtering
+        if user_role in SUPER_ADMIN_ROLES and view_as_role:
+            log.info(f"Admin {user_id} viewing as role: {view_as_role}")
+            user_role = view_as_role
 
         # Query labour requisitions
         query = LabourRequisition.query.options(
@@ -913,6 +919,46 @@ def get_pending_requisitions():
                     # For approved/rejected tabs: filter by approved_by_user_id
                     log.info(f"PM user_id {user_id} - filtering {status.upper()} by approved_by_user_id")
                     query = query.filter(LabourRequisition.approved_by_user_id == user_id)
+
+            elif user_role in ['mep', 'mepsupervisor', 'mep_supervisor']:
+                # MEP Supervisor: filter by projects where mep_supervisor_id contains this user
+                # For PENDING tab: filter by MEP's assigned projects
+                # For APPROVED/REJECTED tabs: filter by approved_by_user_id
+                if status == 'pending':
+                    log.info(f"MEP user_id {user_id} - filtering PENDING by mep_supervisor_id")
+
+                    from models.project import Project
+                    all_projects = Project.query.filter(
+                        Project.is_deleted == False,
+                        Project.mep_supervisor_id.isnot(None)
+                    ).all()
+
+                    assigned_project_ids = []
+                    for proj in all_projects:
+                        if proj.mep_supervisor_id and isinstance(proj.mep_supervisor_id, list) and user_id in proj.mep_supervisor_id:
+                            assigned_project_ids.append(proj.project_id)
+
+                    log.info(f"MEP {user_id} assigned to projects: {assigned_project_ids}")
+
+                    if assigned_project_ids:
+                        query = query.filter(LabourRequisition.project_id.in_(assigned_project_ids))
+                    else:
+                        log.warning(f"No assigned projects found for MEP user_id: {user_id}")
+                        return jsonify({
+                            "success": True,
+                            "requisitions": [],
+                            "pagination": {
+                                "page": page,
+                                "per_page": per_page,
+                                "total": 0,
+                                "pages": 0
+                            }
+                        }), 200
+                else:
+                    # For approved/rejected tabs: filter by approved_by_user_id
+                    log.info(f"MEP user_id {user_id} - filtering {status.upper()} by approved_by_user_id")
+                    query = query.filter(LabourRequisition.approved_by_user_id == user_id)
+
             else:
                 # For other roles (SE, etc), use project assignment filtering
                 assigned_project_ids = get_user_assigned_project_ids(user_id)
@@ -1838,33 +1884,54 @@ def update_attendance(attendance_id):
 # =============================================================================
 
 def get_attendance_to_lock():
-    """Get attendance records with optional status filter - only for PM's assigned projects"""
+    """Get attendance records with optional status filter - only for PM/MEP's assigned projects"""
     try:
         user_id = g.user.get('user_id')
+        user_role = normalize_role(g.user.get('role', ''))
         if not user_id:
             return jsonify({'success': False, 'error': 'User not authenticated'}), 401
 
         project_id = request.args.get('project_id', type=int)
         date_str = request.args.get('date')
         approval_status = request.args.get('approval_status', 'pending')  # 'pending' or 'locked'
+        view_as_role = request.args.get('view_as_role', '').lower()  # For admin viewing as other roles
 
-        # Get PM's assigned projects from Project.user_id array
+        # If admin is viewing as another role, use that role for filtering
+        if user_role in SUPER_ADMIN_ROLES and view_as_role:
+            log.info(f"Admin {user_id} viewing attendance as role: {view_as_role}")
+            user_role = view_as_role
+
         from models.project import Project
         from models.labour_arrival import LabourArrival
         from models.worker import Worker
 
-        # Get all projects and find which ones this PM is assigned to
-        all_projects = Project.query.filter(
-            Project.is_deleted == False,
-            Project.user_id.isnot(None)
-        ).all()
-
         pm_project_ids = []
-        for proj in all_projects:
-            if proj.user_id and isinstance(proj.user_id, list) and user_id in proj.user_id:
-                pm_project_ids.append(proj.project_id)
 
-        log.info(f"PM {user_id} assigned to projects for attendance: {pm_project_ids}")
+        # Role-based project filtering
+        if user_role in ['mep', 'mepsupervisor', 'mep_supervisor']:
+            # MEP: Get projects where mep_supervisor_id contains this user
+            all_projects = Project.query.filter(
+                Project.is_deleted == False,
+                Project.mep_supervisor_id.isnot(None)
+            ).all()
+
+            for proj in all_projects:
+                if proj.mep_supervisor_id and isinstance(proj.mep_supervisor_id, list) and user_id in proj.mep_supervisor_id:
+                    pm_project_ids.append(proj.project_id)
+
+            log.info(f"MEP {user_id} assigned to projects for attendance: {pm_project_ids}")
+        else:
+            # PM: Get projects where user_id contains this user
+            all_projects = Project.query.filter(
+                Project.is_deleted == False,
+                Project.user_id.isnot(None)
+            ).all()
+
+            for proj in all_projects:
+                if proj.user_id and isinstance(proj.user_id, list) and user_id in proj.user_id:
+                    pm_project_ids.append(proj.project_id)
+
+            log.info(f"PM {user_id} assigned to projects for attendance: {pm_project_ids}")
 
         # If no projects assigned, return empty list
         if not pm_project_ids:

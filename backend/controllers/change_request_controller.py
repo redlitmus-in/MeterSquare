@@ -1246,10 +1246,45 @@ def get_all_change_requests():
             )
 
             if is_admin_viewing:
-                # Admin viewing as MEP - show ALL requests (no filtering)
-                # Admin should see everything when viewing as any role
-                log.info(f"Admin viewing as MEP - showing ALL requests (no filtering)")
-                pass  # No additional filtering - admin sees everything
+                # Admin viewing as MEP - show only MEP-assigned projects' requests
+                # Get ALL projects that have MEP supervisors assigned
+                all_mep_projects = Project.query.filter(
+                    Project.mep_supervisor_id.isnot(None),
+                    Project.mep_supervisor_id != [],
+                    Project.is_deleted == False
+                ).all()
+                all_mep_project_ids = [p.project_id for p in all_mep_projects]
+
+                log.info(f"Admin viewing as MEP - showing requests from {len(all_mep_project_ids)} MEP-assigned projects")
+
+                if all_mep_project_ids:
+                    # Admin sees all MEP-related requests from all MEP-assigned projects
+                    query = query.filter(
+                        or_(
+                            and_(
+                                ChangeRequest.project_id.in_(all_mep_project_ids),
+                                ChangeRequest.requested_by_role.in_(['mep', 'mepsupervisor']),
+                                ChangeRequest.status == 'pending'
+                            ),
+                            and_(
+                                ChangeRequest.project_id.in_(all_mep_project_ids),
+                                ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_MEP,
+                                ChangeRequest.current_approver_role == CR_CONFIG.ROLE_MEP
+                            ),
+                            and_(
+                                ChangeRequest.project_id.in_(all_mep_project_ids),
+                                ChangeRequest.requested_by_role == 'admin'
+                            ),
+                            and_(
+                                ChangeRequest.project_id.in_(all_mep_project_ids),
+                                mep_approved_statuses
+                            )
+                        )
+                    )
+                else:
+                    # No MEP-assigned projects exist
+                    log.warning(f"No MEP-assigned projects found for admin view")
+                    query = query.filter(False)  # Return empty result
             elif mep_project_ids:
                 # Regular MEP - sees pending requests from MEPs + SE requests sent to THIS MEP + approved/completed + own requests
                 query = query.filter(

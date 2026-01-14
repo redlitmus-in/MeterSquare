@@ -469,6 +469,10 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
+    // MEP Manager specific navigation items - Same as PM (includes Labour)
+    // MEP sees labour requisitions from their assigned SEs only
+    const mepManagerItems: NavigationItem[] = [...projectManagerItems];
+
     // Estimator specific navigation items
     const estimatorItems: NavigationItem[] = [
       {
@@ -845,7 +849,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             navigation.push(...projectManagerItems);
             break;
           case 'mep':
-            navigation.push(...projectManagerItems); // MEP shares PM menu items
+            navigation.push(...mepManagerItems); // MEP has no Labour menu
             break;
           case 'siteEngineer':
             navigation.push(...siteEngineerItems);
@@ -921,21 +925,30 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       // Estimator gets Projects page, not Procurement
       navigation.push(...estimatorItems);
     } else if (
-      userRole === 'projectmanager' ||
-      userRole === 'project manager' ||
-      userRole === 'project_manager' ||
       userRole === 'mep' ||
       userRole === 'mep manager' ||
       userRole === 'mep_manager' ||
-      user?.role_id === UserRole.PROJECT_MANAGER ||
-      currentRole === UserRole.PROJECT_MANAGER ||
+      userRole === 'mep supervisor' ||
+      userRole === 'mep_supervisor' ||
       user?.role_id === UserRole.MEP ||
       currentRole === UserRole.MEP ||
       currentRole === 'mep' ||
       roleIdLower === 'mep' ||
+      roleIdLower === 'mep supervisor' ||
+      roleIdLower === 'mep_supervisor' ||
       getRoleDisplayName(roleId || '') === 'MEP Manager'
     ) {
-      // Project Manager AND MEP Manager get the same specialized menu items - SHARED CODE
+      // MEP Manager gets menu items WITHOUT Labour menu
+      // Labour requisitions go to the assigned PM, not MEP
+      navigation.push(...mepManagerItems);
+    } else if (
+      userRole === 'projectmanager' ||
+      userRole === 'project manager' ||
+      userRole === 'project_manager' ||
+      user?.role_id === UserRole.PROJECT_MANAGER ||
+      currentRole === UserRole.PROJECT_MANAGER
+    ) {
+      // Project Manager gets full menu including Labour
       navigation.push(...projectManagerItems);
     } else if (isSiteEngineer) {
       // Site Engineer gets Projects menu with submenu (Assigned, Ongoing, Completed)

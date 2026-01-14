@@ -1074,51 +1074,54 @@ const MyProjects: React.FC = () => {
                           <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md">
                             <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-600 flex-shrink-0" />
                             <span className="text-[10px] sm:text-xs font-medium text-purple-900 truncate">{project.site_supervisor_name}</span>
-                            <div className="flex items-center gap-0.5 sm:gap-1 ml-auto">
-                              <button
-                                onClick={async () => {
-                                  const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                                  if (se) {
-                                    setEditingSE(se);
-                                    setEditSEData({
-                                      full_name: se.sitesupervisor_name,
-                                      email: se.email || '',
-                                      phone: se.phone || ''
-                                    });
-                                    setShowEditModal(true);
-                                  } else {
-                                    await loadAvailableSEs();
-                                    const refreshedSE = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                                    if (refreshedSE) {
-                                      setEditingSE(refreshedSE);
+                            {/* Hide edit/delete buttons in Approved tab - view only */}
+                            {filterStatus !== 'approved' && (
+                              <div className="flex items-center gap-0.5 sm:gap-1 ml-auto">
+                                <button
+                                  onClick={async () => {
+                                    const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
+                                    if (se) {
+                                      setEditingSE(se);
                                       setEditSEData({
-                                        full_name: refreshedSE.sitesupervisor_name,
-                                        email: refreshedSE.email || '',
-                                        phone: refreshedSE.phone || ''
+                                        full_name: se.sitesupervisor_name,
+                                        email: se.email || '',
+                                        phone: se.phone || ''
                                       });
                                       setShowEditModal(true);
+                                    } else {
+                                      await loadAvailableSEs();
+                                      const refreshedSE = availableSEs.find(s => s.user_id === project.site_supervisor_id);
+                                      if (refreshedSE) {
+                                        setEditingSE(refreshedSE);
+                                        setEditSEData({
+                                          full_name: refreshedSE.sitesupervisor_name,
+                                          email: refreshedSE.email || '',
+                                          phone: refreshedSE.phone || ''
+                                        });
+                                        setShowEditModal(true);
+                                      }
                                     }
-                                  }
-                                }}
-                                className="p-0.5 sm:p-1 text-purple-600 hover:text-blue-600 hover:bg-blue-100 rounded transition-all flex-shrink-0"
-                                title="Edit Site Engineer Details"
-                              >
-                                <PencilIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setSeToDelete({
-                                    id: project.site_supervisor_id,
-                                    name: project.site_supervisor_name
-                                  });
-                                  setShowDeleteConfirm(true);
-                                }}
-                                className="p-0.5 sm:p-1 text-purple-600 hover:text-red-600 hover:bg-red-100 rounded transition-all flex-shrink-0"
-                                title="Delete Site Engineer"
-                              >
-                                <XMarkIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                              </button>
-                            </div>
+                                  }}
+                                  className="p-0.5 sm:p-1 text-purple-600 hover:text-blue-600 hover:bg-blue-100 rounded transition-all flex-shrink-0"
+                                  title="Edit Site Engineer Details"
+                                >
+                                  <PencilIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSeToDelete({
+                                      id: project.site_supervisor_id,
+                                      name: project.site_supervisor_name
+                                    });
+                                    setShowDeleteConfirm(true);
+                                  }}
+                                  className="p-0.5 sm:p-1 text-purple-600 hover:text-red-600 hover:bg-red-100 rounded transition-all flex-shrink-0"
+                                  title="Delete Site Engineer"
+                                >
+                                  <XMarkIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1139,9 +1142,10 @@ const MyProjects: React.FC = () => {
                         <EyeIcon className="w-5 h-5" />
                       </button>
 
-                      {/* Show assign button for projects with approved BOQ (works in both Pending and Assigned tabs) */}
+                      {/* Show assign button for projects with approved BOQ (works in Pending and Assigned tabs, NOT in Approved tab) */}
                       {project.boq_id &&
                        project.user_id !== null &&
+                       filterStatus !== 'approved' &&
                        (project.boq_status?.toLowerCase() === 'approved' ||
                         project.boq_status?.toLowerCase() === 'pm_approved' ||
                         project.boq_status?.toLowerCase() === 'client_confirmed' ||
@@ -1159,8 +1163,9 @@ const MyProjects: React.FC = () => {
                           <UserPlusIcon className="w-5 h-5" />
                         </button>
                       )}
-                      {/* Show completion confirmation tracking */}
-                      {(project.site_supervisor_id ||
+                      {/* Show completion confirmation tracking - hide in Approved tab */}
+                      {filterStatus !== 'approved' &&
+                       (project.site_supervisor_id ||
                         (project.total_items_assigned && project.total_items_assigned > 0)) &&
                        project.status?.toLowerCase() !== 'completed' && (
                         <div className="flex items-center gap-2">
@@ -1310,51 +1315,54 @@ const MyProjects: React.FC = () => {
                           <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md w-fit max-w-full">
                             <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-600 flex-shrink-0" />
                             <span className="text-[10px] sm:text-xs font-medium text-purple-900 truncate">{project.site_supervisor_name}</span>
-                            <div className="flex items-center gap-0.5 sm:gap-1 ml-auto flex-shrink-0">
-                              <button
-                                onClick={async () => {
-                                  const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                                  if (se) {
-                                    setEditingSE(se);
-                                    setEditSEData({
-                                      full_name: se.sitesupervisor_name,
-                                      email: se.email || '',
-                                      phone: se.phone || ''
-                                    });
-                                    setShowEditModal(true);
-                                  } else {
-                                    await loadAvailableSEs();
-                                    const refreshedSE = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                                    if (refreshedSE) {
-                                      setEditingSE(refreshedSE);
+                            {/* Hide edit/delete buttons in Approved tab - view only */}
+                            {filterStatus !== 'approved' && (
+                              <div className="flex items-center gap-0.5 sm:gap-1 ml-auto flex-shrink-0">
+                                <button
+                                  onClick={async () => {
+                                    const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
+                                    if (se) {
+                                      setEditingSE(se);
                                       setEditSEData({
-                                        full_name: refreshedSE.sitesupervisor_name,
-                                        email: refreshedSE.email || '',
-                                        phone: refreshedSE.phone || ''
+                                        full_name: se.sitesupervisor_name,
+                                        email: se.email || '',
+                                        phone: se.phone || ''
                                       });
                                       setShowEditModal(true);
+                                    } else {
+                                      await loadAvailableSEs();
+                                      const refreshedSE = availableSEs.find(s => s.user_id === project.site_supervisor_id);
+                                      if (refreshedSE) {
+                                        setEditingSE(refreshedSE);
+                                        setEditSEData({
+                                          full_name: refreshedSE.sitesupervisor_name,
+                                          email: refreshedSE.email || '',
+                                          phone: refreshedSE.phone || ''
+                                        });
+                                        setShowEditModal(true);
+                                      }
                                     }
-                                  }
-                                }}
-                                className="p-0.5 sm:p-1 text-purple-600 hover:text-blue-600 hover:bg-blue-100 rounded transition-all"
-                                title="Edit Site Engineer Details"
-                              >
-                                <PencilIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setSeToDelete({
-                                    id: project.site_supervisor_id,
-                                    name: project.site_supervisor_name
-                                  });
-                                  setShowDeleteConfirm(true);
-                                }}
-                                className="p-0.5 sm:p-1 text-purple-600 hover:text-red-600 hover:bg-red-100 rounded transition-all"
-                                title="Delete Site Engineer"
-                              >
-                                <XMarkIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                              </button>
-                            </div>
+                                  }}
+                                  className="p-0.5 sm:p-1 text-purple-600 hover:text-blue-600 hover:bg-blue-100 rounded transition-all"
+                                  title="Edit Site Engineer Details"
+                                >
+                                  <PencilIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSeToDelete({
+                                      id: project.site_supervisor_id,
+                                      name: project.site_supervisor_name
+                                    });
+                                    setShowDeleteConfirm(true);
+                                  }}
+                                  className="p-0.5 sm:p-1 text-purple-600 hover:text-red-600 hover:bg-red-100 rounded transition-all"
+                                  title="Delete Site Engineer"
+                                >
+                                  <XMarkIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <span className="text-xs sm:text-sm text-gray-400">Not assigned</span>
@@ -1379,8 +1387,10 @@ const MyProjects: React.FC = () => {
                           >
                             <EyeIcon className="w-5 h-5" />
                           </button>
+                          {/* Hide assign button in Approved tab - view only */}
                           {!project.site_supervisor_id &&
                            project.user_id !== null &&
+                           filterStatus !== 'approved' &&
                            (project.boq_status?.toLowerCase() === 'client_confirmed' ||
                             project.boq_status?.toLowerCase() === 'approved') && (
                             <button
@@ -1394,7 +1404,8 @@ const MyProjects: React.FC = () => {
                               <UserPlusIcon className="w-5 h-5" />
                             </button>
                           )}
-                          {project.site_supervisor_id && project.status?.toLowerCase() !== 'completed' && (
+                          {/* Hide completion confirmation in Approved tab - view only */}
+                          {filterStatus !== 'approved' && project.site_supervisor_id && project.status?.toLowerCase() !== 'completed' && (
                             <>
                               {project.completion_requested ? (
                                 <button

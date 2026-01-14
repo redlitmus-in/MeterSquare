@@ -1,4 +1,5 @@
 import { apiClient } from '@/api/config';
+import { useAdminViewStore } from '@/store/adminViewStore';
 
 // Dashboard Stats Interface for MEP Supervisor
 export interface MEPDashboardStats {
@@ -34,12 +35,23 @@ export interface MEPDashboardStats {
   }>;
 }
 
+// Helper function to get view_as_role params
+const getViewAsParams = (): Record<string, string> => {
+  const { viewingAsRole } = useAdminViewStore.getState();
+  const params: Record<string, string> = {};
+  if (viewingAsRole && viewingAsRole !== 'admin') {
+    params.view_as_role = viewingAsRole;
+  }
+  return params;
+};
+
 // API Functions for MEP Supervisor
 export const mepService = {
   // Get MEP Dashboard Statistics
   async getDashboardStats(): Promise<MEPDashboardStats> {
     try {
-      const response = await apiClient.get('/mep_dashboard');
+      const params = getViewAsParams();
+      const response = await apiClient.get('/mep_dashboard', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching MEP dashboard stats:', error);
@@ -50,7 +62,8 @@ export const mepService = {
   // Get MEP Approval BOQs (For Approval tab)
   async getMEPApprovalBOQs(): Promise<any> {
     try {
-      const response = await apiClient.get('/mep_approval');
+      const params = getViewAsParams();
+      const response = await apiClient.get('/mep_approval', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching MEP approval BOQs:', error);
@@ -61,7 +74,8 @@ export const mepService = {
   // Get MEP Pending BOQs (Pending tab)
   async getMEPPendingBOQs(): Promise<any> {
     try {
-      const response = await apiClient.get('/mep_pending_boq');
+      const params = getViewAsParams();
+      const response = await apiClient.get('/mep_pending_boq', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching MEP pending BOQs:', error);
@@ -72,7 +86,8 @@ export const mepService = {
   // Get MEP Assigned Projects (Assigned tab)
   async getMEPAssignedProjects(): Promise<any> {
     try {
-      const response = await apiClient.get('/mep_assign_project');
+      const params = getViewAsParams();
+      const response = await apiClient.get('/mep_assign_project', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching MEP assigned projects:', error);
@@ -83,7 +98,8 @@ export const mepService = {
   // Get MEP Approved BOQs (Approved tab)
   async getMEPApprovedBOQs(): Promise<any> {
     try {
-      const response = await apiClient.get('/mep_approve_boq');
+      const params = getViewAsParams();
+      const response = await apiClient.get('/mep_approve_boq', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching MEP approved BOQs:', error);
@@ -94,7 +110,8 @@ export const mepService = {
   // Get MEP Rejected BOQs (Rejected tab)
   async getMEPRejectedBOQs(): Promise<any> {
     try {
-      const response = await apiClient.get('/mep_rejected_boq');
+      const params = getViewAsParams();
+      const response = await apiClient.get('/mep_rejected_boq', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching MEP rejected BOQs:', error);
@@ -105,7 +122,8 @@ export const mepService = {
   // Get MEP Completed Projects (Completed tab)
   async getMEPCompletedProjects(): Promise<any> {
     try {
-      const response = await apiClient.get('/mep_completed_project');
+      const params = getViewAsParams();
+      const response = await apiClient.get('/mep_completed_project', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching MEP completed projects:', error);

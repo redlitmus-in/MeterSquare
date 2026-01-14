@@ -23,10 +23,12 @@ def check_mep_or_admin_access():
     """
     current_user = g.user
     user_role = current_user.get('role', '').lower()
-    if user_role not in ['mep', 'admin']:
+    # Support all MEP role variants: mep, mepsupervisor, mep_supervisor
+    allowed_roles = ['mep', 'mepsupervisor', 'mep_supervisor', 'admin']
+    if user_role not in allowed_roles:
         return jsonify({
             "error": "Access denied. MEP Supervisor or Admin role required.",
-            "required_roles": ["mep", "admin"],
+            "required_roles": allowed_roles,
             "your_role": user_role
         }), 403
     return None

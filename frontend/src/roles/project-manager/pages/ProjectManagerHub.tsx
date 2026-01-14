@@ -66,7 +66,7 @@ const ProjectManagerHub: React.FC = () => {
   };
 
   const boqStatus = dashboardData?.boq_status || {
-    approved: 0,
+    assigned: 0,
     pending: 0,
     rejected: 0,
     completed: 0
@@ -79,7 +79,7 @@ const ProjectManagerHub: React.FC = () => {
 
   const purchaseOrderStatus = dashboardData?.purchase_order_status || {
     sent_to_buyer: 0,
-    accepted: 0,
+    se_requested: 0,
     completed: 0,
     rejected: 0
   };
@@ -92,6 +92,11 @@ const ProjectManagerHub: React.FC = () => {
 
   // Projects data from dashboard API
   const projects = dashboardData?.projects || [];
+
+  // Asset details from dashboard API
+  const assetDetails = dashboardData?.asset_details || {
+    total_approved: 0
+  };
 
   useEffect(() => {
     // Set Highcharts global options for consistent theming
@@ -125,7 +130,7 @@ const ProjectManagerHub: React.FC = () => {
       }
     },
     xAxis: {
-      categories: ['Approved', 'Pending', 'Rejected', 'Completed'],
+      categories: ['Assigned', 'Pending', 'Rejected', 'Completed'],
       labels: {
         style: {
           fontSize: '12px',
@@ -170,7 +175,7 @@ const ProjectManagerHub: React.FC = () => {
     series: [{
       name: 'BOQs',
       data: [
-        { y: statusCounts.approved, color: '#10B981', name: 'Approved' },
+        { y: statusCounts.assigned, color: '#10B981', name: 'Assigned' },
         { y: statusCounts.pending, color: '#F59E0B', name: 'Pending' },
         { y: statusCounts.rejected, color: '#EF4444', name: 'Rejected' },
         { y: statusCounts.completed, color: '#3B82F6', name: 'Completed' }
@@ -283,7 +288,7 @@ const ProjectManagerHub: React.FC = () => {
 
   // Purchase Order Status Chart
   const hasPOData = purchaseOrderStatus.sent_to_buyer > 0 ||
-                    purchaseOrderStatus.accepted > 0 ||
+                    purchaseOrderStatus.se_requested > 0 ||
                     purchaseOrderStatus.completed > 0 ||
                     purchaseOrderStatus.rejected > 0;
 
@@ -302,7 +307,7 @@ const ProjectManagerHub: React.FC = () => {
       }
     },
     xAxis: {
-      categories: ['Sent to Buyer', 'Accepted', 'Completed', 'Rejected'],
+      categories: ['Sent to Buyer', 'SE Requested', 'Completed', 'Rejected'],
       labels: {
         style: {
           fontSize: '11px',
@@ -347,13 +352,11 @@ const ProjectManagerHub: React.FC = () => {
     },
     series: [{
       name: 'Purchase Orders',
-      data: hasPOData ? [
-        { y: purchaseOrderStatus.sent_to_buyer, color: '#3B82F6', name: 'Sent to Buyer' },
-        { y: purchaseOrderStatus.accepted, color: '#10B981', name: 'Accepted' },
-        { y: purchaseOrderStatus.completed, color: '#8B5CF6', name: 'Completed' },
-        { y: purchaseOrderStatus.rejected, color: '#EF4444', name: 'Rejected' }
-      ] : [
-        { y: 0, color: '#E5E7EB', name: 'No Data' }
+      data: [
+        { y: purchaseOrderStatus.sent_to_buyer || 0, color: '#3B82F6', name: 'Sent to Buyer' },
+        { y: purchaseOrderStatus.se_requested || 0, color: '#10B981', name: 'SE Requested' },
+        { y: purchaseOrderStatus.completed || 0, color: '#8B5CF6', name: 'Completed' },
+        { y: purchaseOrderStatus.rejected || 0, color: '#EF4444', name: 'Rejected' }
       ],
       colorByPoint: true
     }],
@@ -369,6 +372,11 @@ const ProjectManagerHub: React.FC = () => {
   // Top 5 High Budget Projects Chart
   const hasTopBudgetProjects = topBudgetProjects.length > 0;
 
+  // Calculate grand total of top budget projects
+  const grandTotalBudget = hasTopBudgetProjects
+    ? topBudgetProjects.reduce((sum: number, p: { budget?: number }) => sum + (p.budget || 0), 0)
+    : 0;
+
   const topBudgetProjectsOptions = {
     chart: {
       type: 'bar',
@@ -381,6 +389,14 @@ const ProjectManagerHub: React.FC = () => {
         fontSize: '16px',
         fontWeight: 'bold',
         color: '#1f2937'
+      }
+    },
+    subtitle: {
+      text: `Grand Total: AED ${grandTotalBudget.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      style: {
+        fontSize: '14px',
+        fontWeight: '600',
+        color: '#10B981'
       }
     },
     xAxis: {
@@ -446,6 +462,75 @@ const ProjectManagerHub: React.FC = () => {
     }],
     tooltip: {
       pointFormat: '<b>AED {point.y:,.2f}</b>',
+      style: {
+        fontSize: '12px'
+      }
+    },
+    credits: { enabled: false }
+  };
+
+  // Items Breakdown Chart (Materials vs Labour) - For MEP as replacement for Labour Status
+  const hasItemsBreakdown = itemsBreakdown.materials > 0 || itemsBreakdown.labour > 0;
+  const totalItems = itemsBreakdown.materials + itemsBreakdown.labour;
+
+  const itemsBreakdownOptions = {
+    chart: {
+      type: 'pie',
+      backgroundColor: 'transparent',
+      height: 300
+    },
+    title: {
+      text: 'Items Breakdown',
+      style: {
+        fontSize: '16px',
+        fontWeight: 'bold',
+        color: '#1f2937'
+      }
+    },
+    subtitle: {
+      text: `Total Items: ${totalItems}`,
+      style: {
+        fontSize: '14px',
+        fontWeight: '600',
+        color: '#6b7280'
+      }
+    },
+    plotOptions: {
+      pie: {
+        innerSize: '50%',
+        borderRadius: 8,
+        dataLabels: {
+          enabled: true,
+          format: '<b>{point.name}</b>: {point.y}',
+          style: {
+            fontSize: '12px',
+            fontWeight: 'bold',
+            textOutline: 'none'
+          }
+        },
+        showInLegend: true
+      }
+    },
+    legend: {
+      align: 'center',
+      verticalAlign: 'bottom',
+      layout: 'horizontal',
+      itemStyle: {
+        fontSize: '12px',
+        fontWeight: '600'
+      }
+    },
+    series: [{
+      name: 'Items',
+      data: hasItemsBreakdown ? [
+        { name: 'Materials', y: itemsBreakdown.materials, color: '#3B82F6' },
+        { name: 'Labour', y: itemsBreakdown.labour, color: '#10B981' }
+      ] : [
+        { name: 'No Data', y: 1, color: '#E5E7EB' }
+      ]
+    }],
+    tooltip: {
+      pointFormat: '<b>{point.y}</b> items ({point.percentage:.1f}%)',
       style: {
         fontSize: '12px'
       }
@@ -526,7 +611,7 @@ const ProjectManagerHub: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">Pending Assignment</p>
+                <p className="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">Pending Item Assignment</p>
                 <p className="text-2xl font-bold text-orange-900">{dashboardData?.materialPurchaseStats?.items_pending || 0}</p>
                 <p className="text-xs text-orange-700 mt-1">Awaiting action</p>
               </div>
@@ -546,13 +631,13 @@ const ProjectManagerHub: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">Total Project Value</p>
-                <p className="text-2xl font-bold text-purple-900">AED {(dashboardData?.materialPurchaseStats?.total_cost || 0).toLocaleString()}</p>
-                <p className="text-xs text-purple-700 mt-1">All BOQs combined</p>
+                <p className="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">Asset Details</p>
+                <p className="text-2xl font-bold text-purple-900">{assetDetails.total_approved}</p>
+                <p className="text-xs text-purple-700 mt-1">Total Approved</p>
               </div>
               <div className="text-purple-500">
                 <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                 </svg>
               </div>
             </div>
@@ -570,19 +655,34 @@ const ProjectManagerHub: React.FC = () => {
             <HighchartsReact highcharts={Highcharts} options={projectStatusOptions} />
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.3 }}
-            className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
-          >
-            <HighchartsReact highcharts={Highcharts} options={labourDataOptions} />
-          </motion.div>
+          {/* Labour Status chart - Only show for PM, not for MEP (MEP doesn't deal with labour requisitions) */}
+          {!isMEP && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.3 }}
+              className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
+            >
+              <HighchartsReact highcharts={Highcharts} options={labourDataOptions} />
+            </motion.div>
+          )}
+
+          {/* Items Breakdown chart - Only show for MEP (replaces Labour Status) */}
+          {isMEP && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.3 }}
+              className="bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-xl shadow-lg p-6"
+            >
+              <HighchartsReact highcharts={Highcharts} options={itemsBreakdownOptions} />
+            </motion.div>
+          )}
 
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.4 }}
+            transition={{ delay: isMEP ? 0.3 : 0.4 }}
             className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
           >
             <HighchartsReact highcharts={Highcharts} options={purchaseOrderOptions} />
@@ -591,7 +691,7 @@ const ProjectManagerHub: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.5 }}
+            transition={{ delay: isMEP ? 0.4 : 0.5 }}
             className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
           >
             <HighchartsReact highcharts={Highcharts} options={topBudgetProjectsOptions} />
@@ -602,7 +702,7 @@ const ProjectManagerHub: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
+          transition={{ delay: isMEP ? 0.5 : 0.6 }}
           className="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
         >
           <h2 className="text-lg font-bold text-gray-900 mb-4">Recent BOQ Activities</h2>

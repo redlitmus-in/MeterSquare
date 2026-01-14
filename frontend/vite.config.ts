@@ -64,6 +64,7 @@ export default defineConfig(({ mode }) => {
         '@/utils': resolve(__dirname, './src/utils'),
         '@/api': resolve(__dirname, './src/api'),
         '@/lib': resolve(__dirname, './src/lib'),
+        '@/roles': resolve(__dirname, './src/roles'),
       },
       // ✅ CRITICAL: Dedupe React to prevent multiple instances
       // This ensures only ONE copy of React is used across all dependencies

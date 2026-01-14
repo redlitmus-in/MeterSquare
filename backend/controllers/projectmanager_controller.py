@@ -29,6 +29,7 @@ from models.po_child import POChild
 from models.change_request import ChangeRequest
 from models.labour_requisition import LabourRequisition
 from models.daily_attendance import DailyAttendance
+from models.asset_requisition import AssetRequisition
 from config.change_request_config import CR_CONFIG
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
@@ -3256,11 +3257,11 @@ def get_pm_dashboard():
                 ), ChangeRequest.cr_id),
                 else_=None
             ))).label('sent_to_buyer'),
-            # Accepted: approved_by_pm, send_to_est, send_to_buyer, pending_td_approval, split_to_sub_crs
+            # SE Requested: send_to_pm, send_to_mep (SE-initiated requests waiting for approval)
             func.count(func.distinct(case(
-                (ChangeRequest.status.in_(['approved_by_pm', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs']), ChangeRequest.cr_id),
+                (ChangeRequest.status.in_(['send_to_pm', 'send_to_mep']), ChangeRequest.cr_id),
                 else_=None
-            ))).label('accepted'),
+            ))).label('se_requested'),
             # Completed: purchase_completed OR routed_to_store
             func.count(func.distinct(case(
                 (ChangeRequest.status.in_(['purchase_completed', 'routed_to_store']), ChangeRequest.cr_id),
@@ -3277,7 +3278,7 @@ def get_pm_dashboard():
 
         purchase_order_status = {
             "sent_to_buyer": int(po_status_counts.sent_to_buyer) if po_status_counts.sent_to_buyer else 0,
-            "accepted": int(po_status_counts.accepted) if po_status_counts.accepted else 0,
+            "se_requested": int(po_status_counts.se_requested) if po_status_counts.se_requested else 0,
             "completed": int(po_status_counts.completed) if po_status_counts.completed else 0,
             "rejected": int(po_status_counts.rejected) if po_status_counts.rejected else 0
         }
@@ -3319,36 +3320,100 @@ def get_pm_dashboard():
         print(f"==========================================\n")
 
         # Labour Requisition status counts (Pending, Approved, Rejected)
-        # IMPORTANT: Labour data filtering logic:
-        # - Admin viewing general dashboard: Shows ALL labour data from ALL projects (project_ids includes all projects)
-        # - Regular PM: Shows labour data ONLY from projects where they are assigned as PM
-        # - Admin viewing as specific PM: Shows labour data ONLY from that PM's assigned projects
-        # The project_ids list is already correctly filtered above (lines 2714-2792)
+        # IMPORTANT: Labour data filtering logic for PM consistency:
+        # - Pending: Requisitions with status='send_to_pm' in PM's assigned projects (awaiting PM action)
+        # - Approved/Rejected: Only requisitions where approved_by_user_id == this PM (actioned BY this PM)
+        # - Admin viewing general dashboard: Shows ALL labour data
+        # - Admin viewing as specific PM: Uses filter_user_id for that PM
 
-        labour_req_filters = [
-            LabourRequisition.project_id.in_(project_ids) if project_ids else LabourRequisition.project_id == -1,  # No match if no projects
-            LabourRequisition.is_deleted == False
-        ]
+        is_admin_general_view = user_role == 'admin' and not viewing_as_pm_id
 
-        labour_req_counts = db.session.query(
-            func.sum(case((LabourRequisition.status == 'pending', 1), else_=0)).label('req_pending'),
-            func.sum(case((LabourRequisition.status == 'approved', 1), else_=0)).label('req_approved'),
-            func.sum(case((LabourRequisition.status == 'rejected', 1), else_=0)).label('req_rejected')
-        ).filter(
-            *labour_req_filters
-        ).first()
+        if is_admin_general_view:
+            # Admin viewing general dashboard - show ALL labour data
+            labour_req_counts = db.session.query(
+                func.sum(case((LabourRequisition.status == 'send_to_pm', 1), else_=0)).label('req_pending'),
+                func.sum(case((LabourRequisition.status == 'approved', 1), else_=0)).label('req_approved'),
+                func.sum(case((LabourRequisition.status == 'rejected', 1), else_=0)).label('req_rejected')
+            ).filter(
+                LabourRequisition.is_deleted == False
+            ).first()
+        else:
+            # Regular PM or admin viewing as specific PM - filter by PM's context
+            # Pending: Requisitions awaiting this PM's action (send_to_pm status in their projects)
+            req_pending_count = db.session.query(func.count(LabourRequisition.requisition_id)).filter(
+                LabourRequisition.project_id.in_(project_ids) if project_ids else LabourRequisition.project_id == -1,
+                LabourRequisition.status == 'send_to_pm',
+                LabourRequisition.is_deleted == False
+            ).scalar() or 0
+
+            # Approved/Rejected: Only requisitions actioned BY this PM
+            req_approved_count = db.session.query(func.count(LabourRequisition.requisition_id)).filter(
+                LabourRequisition.approved_by_user_id == filter_user_id,
+                LabourRequisition.status == 'approved',
+                LabourRequisition.is_deleted == False
+            ).scalar() or 0
+
+            req_rejected_count = db.session.query(func.count(LabourRequisition.requisition_id)).filter(
+                LabourRequisition.approved_by_user_id == filter_user_id,
+                LabourRequisition.status == 'rejected',
+                LabourRequisition.is_deleted == False
+            ).scalar() or 0
+
+            # Create a named tuple-like object for consistency
+            class LabourReqCounts:
+                def __init__(self, pending, approved, rejected):
+                    self.req_pending = pending
+                    self.req_approved = approved
+                    self.req_rejected = rejected
+
+            labour_req_counts = LabourReqCounts(req_pending_count, req_approved_count, req_rejected_count)
 
         # Attendance Lock status counts (Pending = 'pending', Locked = 'locked')
-        attendance_lock_filters = [
-            DailyAttendance.project_id.in_(project_ids) if project_ids else DailyAttendance.project_id == -1  # No match if no projects
-        ]
+        # Must match the Attendance Lock page logic: only attendance from requisitions approved BY this PM
 
-        attendance_lock_counts = db.session.query(
-            func.sum(case((DailyAttendance.approval_status == 'pending', 1), else_=0)).label('pending_lock'),
-            func.sum(case((DailyAttendance.approval_status == 'locked', 1), else_=0)).label('locked')
-        ).filter(
-            *attendance_lock_filters
-        ).first()
+        if is_admin_general_view:
+            # Admin viewing general dashboard - show ALL attendance data
+            attendance_lock_counts = db.session.query(
+                func.sum(case((DailyAttendance.approval_status == 'pending', 1), else_=0)).label('pending_lock'),
+                func.sum(case((DailyAttendance.approval_status == 'locked', 1), else_=0)).label('locked')
+            ).first()
+        else:
+            # Regular PM or admin viewing as specific PM
+            # Join with LabourRequisition to filter by requisitions approved BY this PM
+            pending_lock_count = db.session.query(func.count(DailyAttendance.attendance_id)).join(
+                LabourRequisition,
+                DailyAttendance.requisition_id == LabourRequisition.requisition_id
+            ).filter(
+                DailyAttendance.project_id.in_(project_ids) if project_ids else DailyAttendance.project_id == -1,
+                DailyAttendance.is_deleted == False,
+                LabourRequisition.approved_by_user_id == filter_user_id,
+                or_(
+                    DailyAttendance.approval_status == 'pending',
+                    and_(
+                        DailyAttendance.approval_status.is_(None),
+                        DailyAttendance.attendance_status == 'completed',
+                        DailyAttendance.clock_out_time.isnot(None)
+                    )
+                )
+            ).scalar() or 0
+
+            locked_count = db.session.query(func.count(DailyAttendance.attendance_id)).join(
+                LabourRequisition,
+                DailyAttendance.requisition_id == LabourRequisition.requisition_id
+            ).filter(
+                DailyAttendance.project_id.in_(project_ids) if project_ids else DailyAttendance.project_id == -1,
+                DailyAttendance.is_deleted == False,
+                LabourRequisition.approved_by_user_id == filter_user_id,
+                DailyAttendance.approval_status == 'locked'
+            ).scalar() or 0
+
+            # Create a named tuple-like object for consistency
+            class AttendanceLockCounts:
+                def __init__(self, pending, locked):
+                    self.pending_lock = pending
+                    self.locked = locked
+
+            attendance_lock_counts = AttendanceLockCounts(pending_lock_count, locked_count)
 
         # Combine into labour data array for chart
         labour_data = [
@@ -3374,40 +3439,102 @@ def get_pm_dashboard():
             }
         ]
 
-        # Top 5 High Budget Projects
-        # Sort projects by total BOQ cost (sum of all BOQDetails.total_cost)
-        top_high_budget_projects = db.session.query(
-            Project.project_id,
-            Project.project_name,
-            Project.location,
-            Project.client,
-            func.coalesce(func.sum(BOQDetails.total_cost), 0).label('project_value')
-        ).outerjoin(
-            BOQ, Project.project_id == BOQ.project_id
-        ).outerjoin(
+        # Top 5 High Budget Projects - Calculate Grand Total from JSONB
+        # Grand Total = Items Subtotal + Preliminary - Discount (stored in summary)
+        project_budgets = {}
+
+        # Query all BOQ details for PM's projects
+        boq_details_query = db.session.query(
+            BOQ.project_id,
+            BOQDetails.boq_details
+        ).join(
             BOQDetails, BOQ.boq_id == BOQDetails.boq_id
         ).filter(
-            Project.project_id.in_(project_ids),
-            Project.is_deleted == False
-        ).group_by(
+            BOQ.project_id.in_(project_ids),
+            BOQ.is_deleted == False,
+            BOQDetails.is_deleted == False
+        ).all()
+
+        # Extract grand total from each BOQ's summary
+        for row in boq_details_query:
+            project_id = row.project_id
+            boq_json = row.boq_details or {}
+
+            # Try to get grand total from summary
+            summary = boq_json.get('summary', {}) or boq_json.get('combined_summary', {}) or {}
+            grand_total = summary.get('total_cost') or summary.get('selling_price') or 0
+
+            # If not found in summary, calculate from items + preliminary - discount
+            if not grand_total:
+                items = boq_json.get('items', [])
+                subtotal = sum(
+                    float(item.get('amount', 0) or item.get('total', 0) or item.get('item_total', 0) or 0)
+                    for item in items
+                )
+
+                # Get preliminary amount
+                preliminaries = boq_json.get('preliminaries', {})
+                preliminary_amount = float(
+                    preliminaries.get('cost_details', {}).get('amount', 0) or
+                    preliminaries.get('amount', 0) or
+                    summary.get('preliminary_amount', 0) or 0
+                )
+
+                combined_subtotal = subtotal + preliminary_amount
+
+                # Apply discount
+                discount_percentage = float(summary.get('discount_percentage', 0) or boq_json.get('discount_percentage', 0) or 0)
+                discount_amount = float(summary.get('discount_amount', 0) or boq_json.get('discount_amount', 0) or 0)
+
+                if discount_percentage > 0 and discount_amount == 0:
+                    discount_amount = (combined_subtotal * discount_percentage) / 100
+
+                grand_total = combined_subtotal - discount_amount
+
+            # Accumulate per project
+            if project_id not in project_budgets:
+                project_budgets[project_id] = 0
+            project_budgets[project_id] += float(grand_total or 0)
+
+        # Get project details and sort by budget
+        top_projects_query = db.session.query(
             Project.project_id,
             Project.project_name,
             Project.location,
             Project.client
-        ).order_by(
-            func.coalesce(func.sum(BOQDetails.total_cost), 0).desc()
-        ).limit(5).all()
+        ).filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).all()
 
         top_budget_projects = [
             {
-                "project_id": row.project_id,
-                "project_name": row.project_name,
-                "location": row.location,
-                "client": row.client,
-                "budget": round(float(row.project_value), 2) if row.project_value else 0
+                "project_id": p.project_id,
+                "project_name": p.project_name,
+                "location": p.location,
+                "client": p.client,
+                "budget": round(project_budgets.get(p.project_id, 0), 2)
             }
-            for row in top_high_budget_projects
+            for p in top_projects_query
         ]
+
+        # Sort by budget descending and take top 5
+        top_budget_projects = sorted(top_budget_projects, key=lambda x: x['budget'], reverse=True)[:5]
+
+        # Asset Requisition Stats - Count approved assets for PM's projects
+        asset_stats = db.session.query(
+            func.count(func.distinct(case(
+                (AssetRequisition.status.in_(['pm_approved', 'prod_mgr_approved', 'dispatched', 'completed']), AssetRequisition.requisition_id),
+                else_=None
+            ))).label('total_approved')
+        ).filter(
+            AssetRequisition.project_id.in_(project_ids),
+            AssetRequisition.is_deleted == False
+        ).first()
+
+        asset_details = {
+            "total_approved": int(asset_stats.total_approved) if asset_stats.total_approved else 0
+        }
 
         return jsonify({
             "success": True,
@@ -3426,7 +3553,8 @@ def get_pm_dashboard():
             "labour_data": labour_data,
             "top_budget_projects": top_budget_projects,
             "recent_activities": recent_activities,
-            "projects": projects_data
+            "projects": projects_data,
+            "asset_details": asset_details
         }), 200
 
     except Exception as e:

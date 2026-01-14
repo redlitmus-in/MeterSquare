@@ -8,5 +8,10 @@
     "security-guidance@claude-plugins-official": true,
     "ralph-wiggum@claude-plugins-official": true,
     "supabase@claude-plugins-official": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(source:*)"
+    ]
   }
 }

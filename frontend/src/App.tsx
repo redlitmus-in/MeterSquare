@@ -160,7 +160,7 @@ const RoleSpecificProcurementHub: React.FC = () => {
 
   const userRoleLower = userRole.toLowerCase();
 
-  // Check if user is MEP Supervisor - use separate MEP dashboard
+  // Check if user is MEP Supervisor - use MEPDashboard
   if (userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor') {
     return <MEPDashboard />;
   }
@@ -579,6 +579,53 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
                  roleId?.toString().toLowerCase() === 'admin';
 
   if (!isProjectManager && !isMEP && !isTechnicalDirector && !isAdmin) {
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+// PM Only Route - Excludes MEP (for Labour routes that are PM-specific)
+// MEP does NOT deal with labour requisitions - those go to the assigned PM
+const PMOnlyRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, getRoleDashboard } = useAuthStore();
+
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  // Check if MEP - redirect to dashboard
+  const isMEP = userRole === 'MEP' ||
+                userRole === 'MEP Manager' ||
+                userRoleLower === 'mep' ||
+                userRoleLower === 'mep supervisor' ||
+                userRoleLower === 'mep_supervisor' ||
+                roleId === UserRole.MEP ||
+                roleId === 'mep' ||
+                roleIdLower === 'mep';
+
+  // If MEP, redirect to their dashboard (they don't have access to labour routes)
+  if (isMEP) {
+    return <Navigate to={getRoleDashboard()} replace />;
+  }
+
+  // Allow Project Manager and Admin only
+  const isProjectManager = userRole === 'Project Manager' ||
+                          userRoleLower === 'project manager' ||
+                          userRoleLower === 'project_manager' ||
+                          userRoleLower === 'projectmanager' ||
+                          roleId === UserRole.PROJECT_MANAGER ||
+                          roleId === 'projectManager' ||
+                          roleIdLower === 'project_manager';
+
+  const isAdmin = userRole === 'Admin' ||
+                 userRoleLower === 'admin' ||
+                 roleId === 'admin' ||
+                 roleIdLower === 'admin' ||
+                 roleId?.toString().toLowerCase() === 'admin';
+
+  if (!isProjectManager && !isAdmin) {
     return <Navigate to="/403" replace />;
   }
 
@@ -1064,7 +1111,8 @@ function App() {
               </SiteEngineerRoute>
             } />
 
-            {/* Labour Management Routes - Project Manager (Steps 3, 7) */}
+            {/* Labour Management Routes - Project Manager & MEP (Steps 3, 7) */}
+            {/* Backend filters requisitions to show only from assigned SEs */}
             <Route path="labour/approvals" element={
               <ProjectManagerRoute>
                 <RequisitionApprovals />
