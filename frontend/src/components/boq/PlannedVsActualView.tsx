@@ -220,20 +220,30 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                 {item.labour?.filter((lab: any) => lab.planned.total > 0).length > 0 && (
                   <div className="mb-4">
                     <p className="text-sm font-semibold text-gray-700 mb-2">Labour:</p>
-                    <div className="bg-gray-50 rounded p-3 space-y-2 text-sm">
-                      {item.labour
-                        .filter((lab: any) => lab.planned.total > 0)
-                        .map((lab: any, lIdx: number) => (
-                          <div key={lIdx} className="flex justify-between items-center">
-                            <span className="text-gray-700">
-                              {lab.labour_role}
-                              <span className="text-xs text-gray-500 ml-2">
-                                ({lab.planned.hours} hrs @ {formatCurrency(lab.planned.rate_per_hour)}/hr)
-                              </span>
-                            </span>
-                            <span className="font-medium text-gray-900">{formatCurrency(lab.planned.total)}</span>
-                          </div>
-                        ))}
+                    <div className="bg-gray-50 rounded p-3 text-sm">
+                      {/* Labour Table */}
+                      <table className="w-full text-sm">
+                        <thead className="border-b border-gray-300">
+                          <tr>
+                            <th className="text-left py-2 text-gray-700 font-semibold">Role</th>
+                            <th className="text-right py-2 text-gray-700 font-semibold">Hours</th>
+                            <th className="text-right py-2 text-gray-700 font-semibold">Rate/Hr</th>
+                            <th className="text-right py-2 text-gray-700 font-semibold">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {item.labour
+                            .filter((lab: any) => lab.planned.total > 0)
+                            .map((lab: any, lIdx: number) => (
+                              <tr key={lIdx} className="border-t border-gray-200">
+                                <td className="py-2 text-gray-700">{lab.labour_role}</td>
+                                <td className="py-2 text-right text-gray-600">{lab.planned.hours}</td>
+                                <td className="py-2 text-right text-gray-600">{formatCurrency(lab.planned.rate_per_hour)}</td>
+                                <td className="py-2 text-right font-medium text-gray-900">{formatCurrency(lab.planned.total)}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
@@ -492,6 +502,8 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       <thead className="bg-gray-100 border-b border-gray-200">
                         <tr>
                           <th className="text-left py-2 px-3 text-gray-700 font-semibold">Role</th>
+                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">Hours</th>
+                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">Rate/Hr</th>
                           <th className="text-right py-2 px-3 text-gray-700 font-semibold">Amount</th>
                         </tr>
                       </thead>
@@ -501,6 +513,8 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                           .map((lab: any, lIdx: number) => (
                           <tr key={lIdx} className="border-t border-gray-100">
                             <td className="py-2 px-3 text-gray-700">{lab.labour_role}</td>
+                            <td className="py-2 px-3 text-right text-gray-600">{lab.planned.hours}</td>
+                            <td className="py-2 px-3 text-right text-gray-600">{formatCurrency(lab.planned.rate_per_hour)}</td>
                             <td className="py-2 px-3 text-right font-medium text-gray-900">
                               {formatCurrency(lab.planned.total)}
                             </td>
@@ -670,6 +684,8 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       <thead className="bg-gray-100 border-b border-gray-200">
                         <tr>
                           <th className="text-left py-2 px-3 text-gray-700 font-semibold">Role</th>
+                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">Hours</th>
+                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">Rate/Hr</th>
                           <th className="text-right py-2 px-3 text-gray-700 font-semibold">Amount</th>
                           <th className="text-left py-2 px-3 text-gray-700 font-semibold text-xs">Reason</th>
                         </tr>
@@ -677,21 +693,37 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       <tbody>
                         {item.labour
                           .filter((lab: any) => lab.planned.total > 0 || (lab.actual && lab.actual.total > 0))
-                          .map((lab: any, lIdx: number) => (
-                            <tr key={lIdx} className="border-t border-gray-100">
-                              <td className="py-2 px-3 text-gray-700">{lab.labour_role}</td>
-                              <td className="py-2 px-3 text-right">
-                                <span className={`font-medium ${
-                                  lab.variance?.status === 'overrun' ? 'text-red-600' :
-                                  lab.variance?.status === 'saved' ? 'text-green-600' :
-                                  'text-gray-900'
-                                }`}>
-                                  {lab.actual ? formatCurrency(lab.actual.total) : formatCurrency(lab.planned.total)}
-                                </span>
-                              </td>
-                              <td className="py-2 px-3 text-xs text-gray-500 italic">-</td>
-                            </tr>
-                          ))}
+                          .map((lab: any, lIdx: number) => {
+                            const actualHours = lab.actual?.hours || lab.planned.hours;
+                            const actualRate = lab.actual?.rate_per_hour || lab.planned.rate_per_hour;
+                            const actualTotal = lab.actual?.total || lab.planned.total;
+                            const isOverrun = lab.variance?.status === 'overrun';
+                            const isSaved = lab.variance?.status === 'saved';
+
+                            return (
+                              <tr key={lIdx} className="border-t border-gray-100">
+                                <td className="py-2 px-3 text-gray-700">{lab.labour_role}</td>
+                                <td className={`py-2 px-3 text-right ${isOverrun ? 'text-red-600' : isSaved ? 'text-green-600' : 'text-gray-600'}`}>
+                                  {actualHours}
+                                </td>
+                                <td className={`py-2 px-3 text-right ${isOverrun ? 'text-red-600' : isSaved ? 'text-green-600' : 'text-gray-600'}`}>
+                                  {formatCurrency(actualRate)}
+                                </td>
+                                <td className="py-2 px-3 text-right">
+                                  <span className={`font-medium ${
+                                    isOverrun ? 'text-red-600' :
+                                    isSaved ? 'text-green-600' :
+                                    'text-gray-900'
+                                  }`}>
+                                    {formatCurrency(actualTotal)}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 text-xs text-gray-500 italic">
+                                  {lab.variance_reason || '-'}
+                                </td>
+                              </tr>
+                            );
+                          })}
                       </tbody>
                     </table>
                   </div>
