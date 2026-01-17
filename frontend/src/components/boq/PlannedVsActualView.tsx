@@ -216,30 +216,42 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   </div>
                 )}
 
-                {/* Labour */}
+                {/* Labour Section - Enhanced */}
                 {item.labour?.filter((lab: any) => lab.planned.total > 0).length > 0 && (
                   <div className="mb-4">
-                    <p className="text-sm font-semibold text-gray-700 mb-2">Labour:</p>
-                    <div className="bg-gray-50 rounded p-3 text-sm">
-                      {/* Labour Table */}
+                    {/* Labour Header with Icon and Count */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 bg-purple-100 rounded-lg">
+                          <Users className="w-4 h-4 text-purple-600" />
+                        </div>
+                        <p className="text-sm font-bold text-gray-800">Labour Breakdown</p>
+                        <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">
+                          {item.labour.filter((lab: any) => lab.planned.total > 0).length} {item.labour.filter((lab: any) => lab.planned.total > 0).length === 1 ? 'Role' : 'Roles'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Labour Table with Enhanced Styling */}
+                    <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg p-3 border-2 border-purple-200 shadow-sm">
                       <table className="w-full text-sm">
-                        <thead className="border-b border-gray-300">
-                          <tr>
-                            <th className="text-left py-2 text-gray-700 font-semibold">Role</th>
-                            <th className="text-right py-2 text-gray-700 font-semibold">Hours</th>
-                            <th className="text-right py-2 text-gray-700 font-semibold">Rate/Hr</th>
-                            <th className="text-right py-2 text-gray-700 font-semibold">Total</th>
+                        <thead className="border-b-2 border-purple-300">
+                          <tr className="bg-purple-100/50">
+                            <th className="text-left py-2.5 px-2 text-purple-900 font-bold text-xs uppercase tracking-wide">Role</th>
+                            <th className="text-right py-2.5 px-2 text-purple-900 font-bold text-xs uppercase tracking-wide">Hours</th>
+                            <th className="text-right py-2.5 px-2 text-purple-900 font-bold text-xs uppercase tracking-wide">Rate/Hr</th>
+                            <th className="text-right py-2.5 px-2 text-purple-900 font-bold text-xs uppercase tracking-wide">Total</th>
                           </tr>
                         </thead>
                         <tbody>
                           {item.labour
                             .filter((lab: any) => lab.planned.total > 0)
                             .map((lab: any, lIdx: number) => (
-                              <tr key={lIdx} className="border-t border-gray-200">
-                                <td className="py-2 text-gray-700">{lab.labour_role}</td>
-                                <td className="py-2 text-right text-gray-600">{lab.planned.hours}</td>
-                                <td className="py-2 text-right text-gray-600">{formatCurrency(lab.planned.rate_per_hour)}</td>
-                                <td className="py-2 text-right font-medium text-gray-900">{formatCurrency(lab.planned.total)}</td>
+                              <tr key={lIdx} className="border-t border-purple-200 hover:bg-white/50 transition-colors">
+                                <td className="py-2.5 px-2 text-gray-800 font-medium">{lab.labour_role}</td>
+                                <td className="py-2.5 px-2 text-right text-gray-700 font-medium">{lab.planned.hours} hrs</td>
+                                <td className="py-2.5 px-2 text-right text-gray-700 font-medium">{formatCurrency(lab.planned.rate_per_hour)}</td>
+                                <td className="py-2.5 px-2 text-right font-bold text-purple-700">{formatCurrency(lab.planned.total)}</td>
                               </tr>
                             ))}
                         </tbody>
@@ -493,30 +505,48 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                 </div>
               )}
 
-              {/* Labour */}
+              {/* Labour - Enhanced with Visual Distinction */}
               {item.labour.filter((lab: any) => lab.planned.total > 0).length > 0 && (
                 <div className="mb-6">
-                  <h5 className="text-sm font-semibold text-gray-700 mb-3">Labour</h5>
-                  <div className="bg-white rounded border border-gray-200 overflow-hidden">
+                  {/* Labour Section Header */}
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="p-1.5 bg-purple-100 rounded-lg">
+                      <Users className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <h5 className="text-base font-bold text-gray-900">Labour Costs</h5>
+                    <span className="px-2.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-bold">
+                      {item.labour.filter((lab: any) => lab.planned.total > 0).length} {item.labour.filter((lab: any) => lab.planned.total > 0).length === 1 ? 'Role' : 'Roles'}
+                    </span>
+                  </div>
+
+                  {/* Enhanced Labour Table */}
+                  <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border-2 border-purple-300 overflow-hidden shadow-md">
                     <table className="w-full text-sm">
-                      <thead className="bg-gray-100 border-b border-gray-200">
+                      <thead className="bg-gradient-to-r from-purple-100 to-indigo-100 border-b-2 border-purple-300">
                         <tr>
-                          <th className="text-left py-2 px-3 text-gray-700 font-semibold">Role</th>
-                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">Hours</th>
-                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">Rate/Hr</th>
-                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">Amount</th>
+                          <th className="text-left py-3 px-3 text-purple-900 font-bold text-xs uppercase tracking-wide">Role</th>
+                          <th className="text-right py-3 px-3 text-purple-900 font-bold text-xs uppercase tracking-wide">Hours</th>
+                          <th className="text-right py-3 px-3 text-purple-900 font-bold text-xs uppercase tracking-wide">Rate/Hr</th>
+                          <th className="text-right py-3 px-3 text-purple-900 font-bold text-xs uppercase tracking-wide">Amount</th>
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody className="bg-white">
                         {item.labour
                           .filter((lab: any) => lab.planned.total > 0)
                           .map((lab: any, lIdx: number) => (
-                          <tr key={lIdx} className="border-t border-gray-100">
-                            <td className="py-2 px-3 text-gray-700">{lab.labour_role}</td>
-                            <td className="py-2 px-3 text-right text-gray-600">{lab.planned.hours}</td>
-                            <td className="py-2 px-3 text-right text-gray-600">{formatCurrency(lab.planned.rate_per_hour)}</td>
-                            <td className="py-2 px-3 text-right font-medium text-gray-900">
-                              {formatCurrency(lab.planned.total)}
+                          <tr key={lIdx} className="border-t border-purple-200 hover:bg-purple-50/30 transition-colors">
+                            <td className="py-3 px-3 text-gray-800 font-semibold">{lab.labour_role}</td>
+                            <td className="py-3 px-3 text-right text-gray-700 font-medium">
+                              <span className="inline-flex items-center gap-1">
+                                {lab.planned.hours}
+                                <span className="text-xs text-gray-500">hrs</span>
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 text-right text-gray-700 font-medium">{formatCurrency(lab.planned.rate_per_hour)}</td>
+                            <td className="py-3 px-3 text-right">
+                              <span className="font-bold text-purple-700 text-base">
+                                {formatCurrency(lab.planned.total)}
+                              </span>
                             </td>
                           </tr>
                         ))}
@@ -675,51 +705,101 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                 </div>
               )}
 
-              {/* Labour */}
+              {/* Labour - Actual with Variance Indicators */}
               {item.labour?.length > 0 && item.labour.filter((lab: any) => lab.planned.total > 0 || (lab.actual && lab.actual.total > 0)).length > 0 && (
                 <div className="mb-6">
-                  <h5 className="text-sm font-semibold text-gray-700 mb-3">Labour</h5>
-                  <div className="bg-white rounded border border-gray-200 overflow-hidden">
+                  {/* Labour Section Header with Status */}
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="p-1.5 bg-purple-100 rounded-lg">
+                      <Users className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <h5 className="text-base font-bold text-gray-900">Labour Costs (Actual)</h5>
+                    <span className="px-2.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-bold">
+                      {item.labour.filter((lab: any) => lab.planned.total > 0 || (lab.actual && lab.actual.total > 0)).length} {item.labour.filter((lab: any) => lab.planned.total > 0 || (lab.actual && lab.actual.total > 0)).length === 1 ? 'Role' : 'Roles'}
+                    </span>
+                  </div>
+
+                  {/* Enhanced Labour Table with Variance */}
+                  <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border-2 border-purple-300 overflow-hidden shadow-md">
                     <table className="w-full text-sm">
-                      <thead className="bg-gray-100 border-b border-gray-200">
+                      <thead className="bg-gradient-to-r from-purple-100 to-indigo-100 border-b-2 border-purple-300">
                         <tr>
-                          <th className="text-left py-2 px-3 text-gray-700 font-semibold">Role</th>
-                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">Hours</th>
-                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">Rate/Hr</th>
-                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">Amount</th>
-                          <th className="text-left py-2 px-3 text-gray-700 font-semibold text-xs">Reason</th>
+                          <th className="text-left py-3 px-3 text-purple-900 font-bold text-xs uppercase tracking-wide">Role</th>
+                          <th className="text-right py-3 px-3 text-purple-900 font-bold text-xs uppercase tracking-wide">Hours</th>
+                          <th className="text-right py-3 px-3 text-purple-900 font-bold text-xs uppercase tracking-wide">Rate/Hr</th>
+                          <th className="text-right py-3 px-3 text-purple-900 font-bold text-xs uppercase tracking-wide">Amount</th>
+                          <th className="text-left py-3 px-3 text-purple-900 font-bold text-xs uppercase tracking-wide">Variance</th>
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody className="bg-white">
                         {item.labour
                           .filter((lab: any) => lab.planned.total > 0 || (lab.actual && lab.actual.total > 0))
                           .map((lab: any, lIdx: number) => {
-                            const actualHours = lab.actual?.hours || lab.planned.hours;
-                            const actualRate = lab.actual?.rate_per_hour || lab.planned.rate_per_hour;
-                            const actualTotal = lab.actual?.total || lab.planned.total;
+                            const actualHours = lab.actual?.hours ?? lab.planned.hours;
+                            const actualRate = lab.actual?.rate_per_hour ?? lab.planned.rate_per_hour;
+                            const actualTotal = lab.actual?.total ?? lab.planned.total;
                             const isOverrun = lab.variance?.status === 'overrun';
                             const isSaved = lab.variance?.status === 'saved';
+                            const varianceAmount = lab.variance?.amount ?? 0;
 
                             return (
-                              <tr key={lIdx} className="border-t border-gray-100">
-                                <td className="py-2 px-3 text-gray-700">{lab.labour_role}</td>
-                                <td className={`py-2 px-3 text-right ${isOverrun ? 'text-red-600' : isSaved ? 'text-green-600' : 'text-gray-600'}`}>
-                                  {actualHours}
+                              <tr key={lIdx} className={`border-t border-purple-200 transition-colors ${
+                                isOverrun ? 'bg-red-50/30 hover:bg-red-50/50' :
+                                isSaved ? 'bg-green-50/30 hover:bg-green-50/50' :
+                                'hover:bg-purple-50/30'
+                              }`}>
+                                <td className="py-3 px-3 text-gray-800 font-semibold">
+                                  <div className="flex items-center gap-2">
+                                    {lab.labour_role}
+                                    {isOverrun && (
+                                      <TrendingUp className="w-4 h-4 text-red-600" />
+                                    )}
+                                    {isSaved && (
+                                      <TrendingDown className="w-4 h-4 text-green-600" />
+                                    )}
+                                  </div>
                                 </td>
-                                <td className={`py-2 px-3 text-right ${isOverrun ? 'text-red-600' : isSaved ? 'text-green-600' : 'text-gray-600'}`}>
-                                  {formatCurrency(actualRate)}
-                                </td>
-                                <td className="py-2 px-3 text-right">
-                                  <span className={`font-medium ${
-                                    isOverrun ? 'text-red-600' :
-                                    isSaved ? 'text-green-600' :
-                                    'text-gray-900'
+                                <td className="py-3 px-3 text-right">
+                                  <span className={`font-medium inline-flex items-center gap-1 ${
+                                    isOverrun ? 'text-red-700' :
+                                    isSaved ? 'text-green-700' :
+                                    'text-gray-700'
                                   }`}>
-                                    {formatCurrency(actualTotal)}
+                                    {actualHours}
+                                    <span className="text-xs text-gray-500">hrs</span>
                                   </span>
                                 </td>
-                                <td className="py-2 px-3 text-xs text-gray-500 italic">
-                                  {lab.variance_reason || '-'}
+                                <td className={`py-3 px-3 text-right font-medium ${
+                                  isOverrun ? 'text-red-700' :
+                                  isSaved ? 'text-green-700' :
+                                  'text-gray-700'
+                                }`}>
+                                  {formatCurrency(actualRate)}
+                                </td>
+                                <td className="py-3 px-3 text-right">
+                                  <div className="flex flex-col items-end gap-0.5">
+                                    <span className={`font-bold text-base ${
+                                      isOverrun ? 'text-red-700' :
+                                      isSaved ? 'text-green-700' :
+                                      'text-purple-700'
+                                    }`}>
+                                      {formatCurrency(actualTotal)}
+                                    </span>
+                                    {varianceAmount !== 0 && (
+                                      <span className={`text-xs font-semibold ${
+                                        isOverrun ? 'text-red-600' : 'text-green-600'
+                                      }`}>
+                                        {isOverrun ? '+' : '-'}{formatCurrency(Math.abs(varianceAmount))}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3 text-xs">
+                                  {lab.variance_reason ? (
+                                    <span className="text-gray-700 italic">{lab.variance_reason}</span>
+                                  ) : (
+                                    <span className="text-gray-400">-</span>
+                                  )}
                                 </td>
                               </tr>
                             );
