@@ -172,10 +172,96 @@ def get_boq_planned_vs_actual(boq_id):
             MaterialPurchaseTracking.purchase_tracking_id == latest_tracking_subquery.c.latest_id
         ).all()
 
-        # Get actual labour tracking from LabourTracking
-        actual_labour = LabourTracking.query.filter_by(
-            boq_id=boq_id, is_deleted=False
+        # Get actual labour tracking from DailyAttendance (new workflow)
+        # Import required models
+        from models.labour_requisition import LabourRequisition
+        from models.worker_assignment import WorkerAssignment
+        from models.daily_attendance import DailyAttendance
+        from models.worker import Worker
+        from sqlalchemy.orm import selectinload
+        from sqlalchemy import func
+        from collections import defaultdict
+
+        # Get all labour requisitions for this BOQ with locked attendance
+        requisitions = LabourRequisition.query.options(
+            selectinload(LabourRequisition.assignments).selectinload(WorkerAssignment.worker),
+            selectinload(LabourRequisition.assignments).selectinload(WorkerAssignment.attendance_records)
+        ).filter(
+            LabourRequisition.boq_id == boq_id,
+            LabourRequisition.is_deleted == False
         ).all()
+
+        # Aggregate actual labour by labour_role (skill_required)
+        # Group attendance records by labour role
+        labour_aggregates = defaultdict(lambda: {
+            'total_hours': Decimal('0'),
+            'total_cost': Decimal('0'),
+            'work_entries': [],
+            'labour_role': None,
+            'master_labour_id': None
+        })
+
+        for req in requisitions:
+            labour_role = req.skill_required  # The labour role from requisition
+
+            # Get labour items to find master_labour_id
+            for labour_item in (req.labour_items or []):
+                item_role = labour_item.get('skill_required') or labour_item.get('labour_role')
+                master_labour_id = labour_item.get('master_labour_id')
+
+                if item_role == labour_role or not labour_role:
+                    labour_role = item_role
+                    labour_aggregates[labour_role]['labour_role'] = labour_role
+                    labour_aggregates[labour_role]['master_labour_id'] = master_labour_id
+
+            for assignment in req.assignments:
+                if assignment.is_deleted:
+                    continue
+
+                worker = assignment.worker
+                # Get locked attendance records only
+                attendance_records = [a for a in assignment.attendance_records
+                                     if not a.is_deleted and a.approval_status == 'locked']
+
+                for attendance in attendance_records:
+                    hours = Decimal(str(attendance.total_hours or 0))
+                    cost = Decimal(str(attendance.total_cost or 0))
+                    rate = Decimal(str(attendance.hourly_rate or 0))
+
+                    # Add to aggregates
+                    labour_aggregates[labour_role]['total_hours'] += hours
+                    labour_aggregates[labour_role]['total_cost'] += cost
+                    labour_aggregates[labour_role]['work_entries'].append({
+                        'work_date': attendance.attendance_date.isoformat() if attendance.attendance_date else None,
+                        'hours': float(hours),
+                        'rate_per_hour': float(rate),
+                        'total_cost': float(cost),
+                        'worker_name': worker.full_name if worker else 'Unknown',
+                        'notes': attendance.entry_notes
+                    })
+
+        # Convert aggregates to LabourTracking-like objects for compatibility
+        # Create a mock object that has the same interface as LabourTracking
+        class ActualLabourData:
+            def __init__(self, labour_role, master_labour_id, master_item_id, total_hours, total_cost, work_entries):
+                self.labour_role = labour_role
+                self.master_labour_id = master_labour_id
+                self.master_item_id = master_item_id
+                self.total_hours_worked = float(total_hours)
+                self.total_cost = float(total_cost)
+                self.labour_history = work_entries
+
+        actual_labour = []
+        for labour_role, data in labour_aggregates.items():
+            if data['total_hours'] > 0:  # Only include if there's actual work done
+                actual_labour.append(ActualLabourData(
+                    labour_role=data['labour_role'],
+                    master_labour_id=data['master_labour_id'],
+                    master_item_id=None,  # We don't have item-level granularity from attendance
+                    total_hours=data['total_hours'],
+                    total_cost=data['total_cost'],
+                    work_entries=data['work_entries']
+                ))
 
         # Build comparison
         comparison = {
