@@ -66,11 +66,15 @@ class BOQTrackingService {
     // Determine endpoint based on effective role
     let endpoint = `/pm_production_management`; // Default to PM production endpoint
 
-    // Technical Director uses NEW td_production_management endpoint (shows ALL BOQs)
+    // Technical Director uses td_production_management endpoint (shows ALL BOQs)
     if (effectiveRole === 'technical director' ||
         effectiveRole === 'technical_director' ||
         effectiveRole === 'technicaldirector' ||
-        effectiveRole === 'td') {
+        effectiveRole === 'td' ||
+        userRole === 'technical director' ||
+        userRole === 'technical_director' ||
+        userRole === 'technicaldirector' ||
+        userRole === 'td') {
       endpoint = `/td_production_management`;
     }
     // MEP uses mep_approve_boq endpoint (shows only MEP's assigned BOQs)
