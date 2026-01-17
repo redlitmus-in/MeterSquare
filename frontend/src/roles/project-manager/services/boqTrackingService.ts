@@ -193,6 +193,25 @@ class BOQTrackingService {
     );
     return response.data;
   }
+
+  /**
+   * Get comprehensive labour workflow details for a BOQ
+   * Includes:
+   * - Labour requisitions (who requested, approval status)
+   * - Worker assignments (which workers, rates, dates)
+   * - Daily attendance records (clock times, hours, costs)
+   * - Attendance locks (approval status, who locked, when)
+   * - Payment status and locks
+   *
+   * Uses API: /api/labour_workflow/<boq_id>
+   */
+  async getLabourWorkflowDetails(boq_id: number) {
+    const response = await apiClient.get(
+      `/labour_workflow/${boq_id}`,
+      { headers: this.getHeaders() }
+    );
+    return response.data;
+  }
 }
 
 export const boqTrackingService = new BOQTrackingService();

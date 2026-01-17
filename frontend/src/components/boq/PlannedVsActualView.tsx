@@ -27,6 +27,7 @@ interface PlannedVsActualViewProps {
 
 const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClose }) => {
   const [data, setData] = useState<any>(null);
+  const [labourWorkflowData, setLabourWorkflowData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedItemForBreakdown, setSelectedItemForBreakdown] = useState<any>(null);
   const [showBreakdownModal, setShowBreakdownModal] = useState(false);
@@ -35,6 +36,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
 
   useEffect(() => {
     fetchData();
+    fetchLabourWorkflowData();
   }, [boqId]);
 
   const fetchData = async () => {
@@ -48,6 +50,32 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchLabourWorkflowData = async () => {
+    try {
+      const response = await boqTrackingService.getLabourWorkflowDetails(boqId);
+      if (response.success) {
+        setLabourWorkflowData(response.data);
+      }
+    } catch (error: any) {
+      // Silent fail - workflow data is optional enhancement
+      console.log('Labour workflow data not available:', error);
+    }
+  };
+
+  // Helper function to merge labour data with workflow data
+  const enrichLabourDataWithWorkflow = (labourArray: any[]) => {
+    if (!labourWorkflowData?.labour_workflow) {
+      return labourArray;
+    }
+
+    // For now, attach all requisitions to labour data
+    // In future, we can match by labour_role or labour_id
+    return labourArray.map(lab => ({
+      ...lab,
+      requisitions: labourWorkflowData.labour_workflow
+    }));
   };
 
   const handleSendPurchaseRequest = async () => {
@@ -673,9 +701,10 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
               {/* Labour - Professional Workflow Section */}
               {item.labour?.length > 0 && item.labour.filter((lab: any) => lab.planned.total > 0 || (lab.actual && lab.actual.total > 0)).length > 0 && (
                 <LabourWorkflowSection
-                  labourData={item.labour.filter((lab: any) => lab.planned.total > 0 || (lab.actual && lab.actual.total > 0))}
+                  labourData={enrichLabourDataWithWorkflow(item.labour.filter((lab: any) => lab.planned.total > 0 || (lab.actual && lab.actual.total > 0)))}
                   title="Labour Tracking & Actual Costs"
                   showActual={true}
+                  showWorkflow={true}
                 />
               )}
 

@@ -2347,3 +2347,197 @@ def get_all_purchase_comparision_projects():
     except Exception as e:
         log.error(f"Error in get_all_purchase_boq: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+def get_labour_workflow_details(boq_id):
+    """
+    Get comprehensive labour workflow details for a BOQ including:
+    - Labour requisitions (who requested, when, approval status)
+    - Worker assignments (which workers, rates, dates)
+    - Daily attendance records (clock times, hours, costs)
+    - Attendance locks (approval status, who locked, when)
+    - Payment status and locks
+
+    This endpoint provides complete visibility into the labour workflow
+    from requisition through to payment.
+    """
+    try:
+        from models.labour_requisition import LabourRequisition
+        from models.worker_assignment import WorkerAssignment
+        from models.daily_attendance import DailyAttendance
+        from models.worker import Worker
+        from sqlalchemy import func, and_
+
+        # Verify BOQ exists
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get all labour requisitions for this BOQ
+        requisitions = LabourRequisition.query.filter(
+            LabourRequisition.boq_id == boq_id,
+            LabourRequisition.is_deleted == False
+        ).order_by(LabourRequisition.request_date.desc()).all()
+
+        labour_workflow_data = []
+
+        for req in requisitions:
+            # Get worker assignments for this requisition
+            assignments = WorkerAssignment.query.filter(
+                WorkerAssignment.requisition_id == req.requisition_id,
+                WorkerAssignment.is_deleted == False
+            ).all()
+
+            assignment_details = []
+            total_worked_hours = Decimal('0')
+            total_worked_cost = Decimal('0')
+            attendance_records_list = []
+
+            for assignment in assignments:
+                # Get worker details
+                worker = Worker.query.filter_by(
+                    worker_id=assignment.worker_id,
+                    is_deleted=False
+                ).first()
+
+                # Get attendance records for this assignment
+                attendance_records = DailyAttendance.query.filter(
+                    DailyAttendance.assignment_id == assignment.assignment_id,
+                    DailyAttendance.is_deleted == False
+                ).order_by(DailyAttendance.attendance_date.desc()).all()
+
+                # Calculate totals for this worker
+                worker_total_hours = Decimal('0')
+                worker_total_cost = Decimal('0')
+                locked_count = 0
+                pending_count = 0
+
+                attendance_list = []
+                for attendance in attendance_records:
+                    hours = Decimal(str(attendance.total_hours or 0))
+                    cost = Decimal(str(attendance.total_cost or 0))
+                    worker_total_hours += hours
+                    worker_total_cost += cost
+
+                    # Count lock statuses
+                    if attendance.approval_status == 'locked':
+                        locked_count += 1
+                    elif attendance.approval_status == 'pending':
+                        pending_count += 1
+
+                    attendance_list.append({
+                        'attendance_id': attendance.attendance_id,
+                        'attendance_date': attendance.attendance_date.isoformat() if attendance.attendance_date else None,
+                        'clock_in_time': attendance.clock_in_time.strftime('%H:%M') if attendance.clock_in_time else '--',
+                        'clock_out_time': attendance.clock_out_time.strftime('%H:%M') if attendance.clock_out_time else '--',
+                        'total_hours': float(hours),
+                        'regular_hours': float(attendance.regular_hours or 0),
+                        'overtime_hours': float(attendance.overtime_hours or 0),
+                        'hourly_rate': float(attendance.hourly_rate or 0),
+                        'total_cost': float(cost),
+                        'attendance_status': attendance.attendance_status,
+                        'approval_status': attendance.approval_status,  # pending, locked, rejected
+                        'approved_by_name': attendance.approved_by_name,
+                        'approval_date': attendance.approval_date.isoformat() if attendance.approval_date else None,
+                        'is_locked': attendance.approval_status == 'locked'
+                    })
+
+                total_worked_hours += worker_total_hours
+                total_worked_cost += worker_total_cost
+
+                # Determine payment lock status
+                payment_locked = locked_count > 0
+                payment_status = 'locked' if payment_locked else 'pending'
+
+                assignment_details.append({
+                    'assignment_id': assignment.assignment_id,
+                    'worker_id': assignment.worker_id,
+                    'worker_name': worker.full_name if worker else 'Unknown',
+                    'worker_code': worker.worker_code if worker else None,
+                    'assignment_start_date': assignment.assignment_start_date.isoformat() if assignment.assignment_start_date else None,
+                    'assignment_end_date': assignment.assignment_end_date.isoformat() if assignment.assignment_end_date else None,
+                    'hourly_rate': float(assignment.hourly_rate_override or (worker.hourly_rate if worker else 0)),
+                    'role_at_site': assignment.role_at_site,
+                    'assignment_status': assignment.status,
+                    'total_hours_worked': float(worker_total_hours),
+                    'total_cost': float(worker_total_cost),
+                    'attendance_records': attendance_list,
+                    'attendance_locked_count': locked_count,
+                    'attendance_pending_count': pending_count,
+                    'payment_status': payment_status,
+                    'payment_locked': payment_locked
+                })
+
+                attendance_records_list.extend(attendance_list)
+
+            # Get labour items from requisition
+            labour_items_list = req.labour_items or []
+
+            # Calculate planned totals from labour items
+            planned_workers = sum(item.get('workers_count', 0) for item in labour_items_list)
+
+            # Determine overall lock status
+            total_attendance_records = len(attendance_records_list)
+            locked_attendance = sum(1 for a in attendance_records_list if a['is_locked'])
+            overall_lock_status = 'fully_locked' if locked_attendance == total_attendance_records and total_attendance_records > 0 else \
+                                  'partially_locked' if locked_attendance > 0 else 'unlocked'
+
+            labour_workflow_data.append({
+                'requisition_id': req.requisition_id,
+                'requisition_code': req.requisition_code,
+                'labour_items': labour_items_list,
+                'planned_workers_count': planned_workers,
+                'site_name': req.site_name,
+                'required_date': req.required_date.isoformat() if req.required_date else None,
+                'work_description': req.work_description,
+                'skill_required': req.skill_required,
+
+                # Requester info
+                'requested_by_user_id': req.requested_by_user_id,
+                'requested_by_name': req.requested_by_name,
+                'request_date': req.request_date.isoformat() if req.request_date else None,
+
+                # Approval workflow
+                'status': req.status,
+                'approved_by_user_id': req.approved_by_user_id,
+                'approved_by_name': req.approved_by_name,
+                'approval_date': req.approval_date.isoformat() if req.approval_date else None,
+                'rejection_reason': req.rejection_reason,
+
+                # Assignment tracking
+                'assignment_status': req.assignment_status,
+                'assigned_by_name': req.assigned_by_name,
+                'assignment_date': req.assignment_date.isoformat() if req.assignment_date else None,
+                'work_status': req.work_status,
+
+                # Worker assignments and attendance
+                'assignments': assignment_details,
+                'assigned_workers_count': len(assignment_details),
+
+                # Totals
+                'total_hours_worked': float(total_worked_hours),
+                'total_cost': float(total_worked_cost),
+
+                # Lock status
+                'overall_lock_status': overall_lock_status,
+                'total_attendance_records': total_attendance_records,
+                'locked_attendance_records': locked_attendance,
+                'pending_attendance_records': total_attendance_records - locked_attendance
+            })
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "boq_id": boq_id,
+                "boq_code": boq.boq_code,
+                "project_id": boq.project_id,
+                "labour_workflow": labour_workflow_data,
+                "total_requisitions": len(labour_workflow_data)
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error in get_labour_workflow_details: {str(e)}")
+        import traceback
+        log.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500

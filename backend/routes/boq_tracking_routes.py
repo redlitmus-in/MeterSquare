@@ -25,3 +25,10 @@ def get_purchase_comparison_route(project_id):
 @jwt_required
 def get_all_purchase_boq_route():
     return get_all_purchase_comparision_projects()
+
+
+# Get comprehensive labour workflow details for a BOQ
+@boq_tracking_routes.route('/labour_workflow/<int:boq_id>', methods=['GET'])
+@jwt_required
+def get_labour_workflow_details_route(boq_id):
+    return get_labour_workflow_details(boq_id)
