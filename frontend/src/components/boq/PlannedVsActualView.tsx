@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Package,
@@ -14,11 +14,14 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
+  Download,
 } from 'lucide-react';
 import { boqTrackingService } from '../../roles/project-manager/services/boqTrackingService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '../ui/ModernLoadingSpinners';
 import LabourWorkflowSection from './LabourWorkflowSection';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface PlannedVsActualViewProps {
   boqId: number;
@@ -33,6 +36,8 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
   const [showBreakdownModal, setShowBreakdownModal] = useState(false);
   const [showProfitCalculationModal, setShowProfitCalculationModal] = useState(false);
   const [sendingRequest, setSendingRequest] = useState(false);
+  const [generatingPDF, setGeneratingPDF] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchData();
@@ -155,6 +160,209 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
     setSelectedItemForBreakdown(null);
   };
 
+  const handleDownloadPDF = async () => {
+    if (!data) return;
+
+    try {
+      setGeneratingPDF(true);
+
+      // Generate filename with BOQ name and date
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+      const filename = `Profit_Comparison_${data.boq_name?.replace(/[^a-zA-Z0-9]/g, '_')}_${dateStr}.pdf`;
+
+      // Create PDF using jsPDF
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      let yPos = 15;
+
+      // Header
+      doc.setFillColor(30, 64, 175);
+      doc.rect(0, 0, pageWidth, 30, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(18);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Profit Comparison Report', 15, 12);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`BOQ: ${data.boq_name || 'N/A'}`, 15, 19);
+      doc.text(`Generated: ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`, 15, 24);
+
+      yPos = 35;
+
+      // Executive Summary (combined with margin breakdown)
+      doc.setTextColor(30, 64, 175);
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Executive Summary', 15, yPos);
+      yPos += 7;
+
+      // Calculate correct values
+      const clientPays = data.summary?.discount_details?.grand_total_after_discount || data.summary?.actual_total || 0;
+      const actualSpending = data.summary?.actual_spending || 0;
+      const negotiableMargin = clientPays - actualSpending;
+      const opAllocation = (data.summary?.total_actual_overhead || 0) + (data.summary?.total_planned_profit || 0);
+      const costVarianceImpact = negotiableMargin - opAllocation;
+
+      const summaryData = [
+        ['Metric', 'Amount (AED)'],
+        [
+          'CLIENT PAYS',
+          formatCurrency(clientPays)
+        ],
+        [
+          'ACTUAL SPENDING',
+          formatCurrency(actualSpending)
+        ],
+        [
+          'NEGOTIABLE MARGIN',
+          formatCurrency(negotiableMargin)
+        ],
+        [
+          'O&P Allocation (25%)',
+          formatCurrency(opAllocation)
+        ],
+        [
+          'Cost Variance Impact',
+          formatCurrency(costVarianceImpact)
+        ]
+      ];
+
+      autoTable(doc, {
+        startY: yPos,
+        head: [summaryData[0]],
+        body: summaryData.slice(1),
+        theme: 'grid',
+        headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+        bodyStyles: { fontSize: 8, textColor: [75, 85, 99] },
+        alternateRowStyles: { fillColor: [249, 250, 251] },
+        margin: { left: 15, right: 15 },
+      });
+
+      // Items Comparison (one item per page if needed)
+      data.items?.forEach((item: any, idx: number) => {
+        if (idx > 0) {
+          doc.addPage();
+          yPos = 15;
+        } else {
+          yPos = (doc as any).lastAutoTable.finalY + 15;
+          if (yPos > pageHeight - 60) {
+            doc.addPage();
+            yPos = 15;
+          }
+        }
+
+        doc.setTextColor(30, 64, 175);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`${idx + 1}. ${item.item_name}`, 15, yPos);
+        yPos += 7;
+
+        const itemData = [
+          ['Component', 'Planned (AED)', 'Actual (AED)', 'Variance (AED)'],
+          [
+            'Materials',
+            formatCurrency(item.planned?.materials_total || 0),
+            formatCurrency(item.actual?.materials_total || 0),
+            formatCurrency(Math.abs((item.actual?.materials_total || 0) - (item.planned?.materials_total || 0)))
+          ],
+          [
+            'Labour',
+            formatCurrency(item.planned?.labour_total || 0),
+            formatCurrency(item.actual?.labour_total || 0),
+            formatCurrency(Math.abs((item.actual?.labour_total || 0) - (item.planned?.labour_total || 0)))
+          ],
+          [
+            'Base Cost',
+            formatCurrency((item.planned?.materials_total || 0) + (item.planned?.labour_total || 0)),
+            formatCurrency(item.actual?.base_cost || 0),
+            formatCurrency(Math.abs((item.actual?.base_cost || 0) - ((item.planned?.materials_total || 0) + (item.planned?.labour_total || 0))))
+          ],
+          [
+            'Miscellaneous',
+            formatCurrency(item.planned?.miscellaneous_amount || 0),
+            formatCurrency(item.actual?.miscellaneous_amount || 0),
+            '-'
+          ],
+          [
+            'Transport',
+            formatCurrency(item.planned?.transport_amount || 0),
+            formatCurrency(item.actual?.transport_amount || 0),
+            '-'
+          ],
+          [
+            'Actual Spending',
+            '-',
+            formatCurrency(item.actual?.spending || 0),
+            '-'
+          ],
+          [
+            'Client Pays',
+            formatCurrency(item.discount_details?.grand_total_after_discount || item.planned?.client_amount_after_discount || 0),
+            formatCurrency(item.actual?.total || 0),
+            '-'
+          ],
+          [
+            'Negotiable Margin',
+            formatCurrency(item.planned?.profit_amount || 0),
+            formatCurrency(item.actual?.negotiable_margin || 0),
+            formatCurrency(Math.abs((item.actual?.negotiable_margin || 0) - (item.planned?.profit_amount || 0)))
+          ]
+        ];
+
+        autoTable(doc, {
+          startY: yPos,
+          head: [itemData[0]],
+          body: itemData.slice(1),
+          theme: 'striped',
+          headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+          bodyStyles: { fontSize: 7, textColor: [75, 85, 99] },
+          alternateRowStyles: { fillColor: [243, 244, 246] },
+          columnStyles: {
+            0: { cellWidth: 60, fontStyle: 'bold' },
+            1: { halign: 'right', cellWidth: 45 },
+            2: { halign: 'right', cellWidth: 45 },
+            3: { halign: 'right', cellWidth: 40 }
+          },
+          margin: { left: 15, right: 15 },
+        });
+
+        yPos = (doc as any).lastAutoTable.finalY + 5;
+
+        // Formula note
+        doc.setFontSize(7);
+        doc.setTextColor(30, 64, 175);
+        doc.setFont('helvetica', 'italic');
+        const formula = `Formula: Negotiable Margin = Client Pays (${formatCurrency(item.actual?.total || 0)}) - Actual Spending (${formatCurrency(item.actual?.spending || 0)}) = ${formatCurrency(item.actual?.negotiable_margin || 0)}`;
+        doc.text(formula, 15, yPos);
+      });
+
+      // Footer on last page
+      doc.setFontSize(7);
+      doc.setTextColor(107, 114, 128);
+      doc.setFont('helvetica', 'normal');
+      doc.text('This report was generated on ' + now.toLocaleDateString() + ' at ' + now.toLocaleTimeString(), pageWidth / 2, pageHeight - 10, { align: 'center' });
+      doc.text('MeterSquare Construction Management System', pageWidth / 2, pageHeight - 6, { align: 'center' });
+
+      // Save PDF
+      doc.save(filename);
+      showSuccess('PDF downloaded successfully!');
+
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      showError('Failed to generate PDF. Please try again.');
+    } finally {
+      setGeneratingPDF(false);
+    }
+  };
+
+
   const getVarianceIcon = (status: string) => {
     switch (status) {
       case 'saved':
@@ -194,12 +402,26 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
   }
 
   return (
-    <div className="space-y-6 p-4">
+    <div className="space-y-6 p-4" ref={contentRef}>
       {/* Header */}
       <div className="bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] rounded-xl p-6 shadow-lg">
-        <div>
-          <h2 className="text-2xl font-bold text-white mb-2">{data.boq_name}</h2>
-          <p className="text-sm text-blue-100">Real-time Cost Tracking & Variance Analysis</p>
+        <div className="flex justify-between items-center">
+          <div>
+            <h2 className="text-2xl font-bold text-white mb-2">{data.boq_name}</h2>
+            <p className="text-sm text-blue-100">Real-time Cost Tracking & Variance Analysis</p>
+          </div>
+          <button
+            onClick={handleDownloadPDF}
+            disabled={generatingPDF}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all ${
+              generatingPDF
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-white text-[#243d8a] hover:bg-blue-50'
+            }`}
+          >
+            <Download className={`w-5 h-5 ${generatingPDF ? 'animate-bounce' : ''}`} />
+            {generatingPDF ? 'Generating PDF...' : 'Download PDF'}
+          </button>
         </div>
       </div>
 
@@ -601,50 +823,11 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     <span className="font-bold text-gray-900 flex items-center gap-1">
                       <span className="text-lg">=</span> Total Planned:
                     </span>
-                    <span className="font-bold text-gray-900 text-lg">{formatCurrency(item.planned.total)}</span>
+                    <span className="font-bold text-gray-900 text-lg">{formatCurrency(item.discount_details?.client_cost_before_discount || item.planned?.client_amount_before_discount || item.planned.total)}</span>
                   </div>
                 </div>
               </div>
 
-              {/* Discount Details */}
-              {item.discount_details?.has_discount && (
-                <div className="bg-orange-50 rounded border border-orange-300 p-4 mt-4">
-                  <h5 className="text-sm font-semibold text-orange-800 mb-3">Discount Details</h5>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between py-1">
-                      <span className="text-gray-700">Client Cost (Before Discount):</span>
-                      <span className="font-medium text-gray-900">{formatCurrency(item.discount_details.client_cost_before_discount)}</span>
-                    </div>
-                    <div className="flex justify-between py-1 text-orange-700">
-                      <span className="flex items-center gap-1">
-                        <span className="text-lg">-</span> Discount ({item.discount_details.discount_percentage.toFixed(2)}%):
-                      </span>
-                      <span className="font-medium">-{formatCurrency(item.discount_details.discount_amount)}</span>
-                    </div>
-                    <div className="flex justify-between py-2 border-t-2 border-orange-400 font-semibold">
-                      <span className="text-gray-900">Grand Total (After Discount):</span>
-                      <span className="text-green-700">{formatCurrency(item.discount_details.grand_total_after_discount)}</span>
-                    </div>
-                    <div className="mt-3 pt-3 border-t border-orange-300">
-                      <p className="text-xs font-semibold text-orange-800 mb-2">Profit Impact:</p>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Profit Before Discount:</span>
-                          <span className="font-medium text-gray-900">{formatCurrency(item.discount_details.profit_impact.profit_before_discount)}</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Negotiable Margin:</span>
-                          <span className="font-medium text-green-700">{formatCurrency(item.discount_details.profit_impact.profit_after_discount)}</span>
-                        </div>
-                        <div className="flex justify-between text-xs text-red-700 font-semibold">
-                          <span>Profit Reduction:</span>
-                          <span>-{formatCurrency(item.discount_details.profit_impact.profit_reduction)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* RIGHT SIDE - ACTUAL */}
@@ -848,47 +1031,6 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                 </div>
               </div>
 
-              {/* Discount Details - Actual */}
-              {item.discount_details?.has_discount && (
-                <div className="bg-green-50 rounded border border-green-300 p-4 mt-4">
-                  <h5 className="text-sm font-semibold text-green-800 mb-3">Discount Applied</h5>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between py-1">
-                      <span className="text-gray-700">Client Amount (Before Discount):</span>
-                      <span className="font-medium text-gray-900">{formatCurrency(item.discount_details.client_cost_before_discount)}</span>
-                    </div>
-                    <div className="flex justify-between py-1 text-green-700">
-                      <span className="flex items-center gap-1">
-                        <span className="text-lg">-</span> Discount Applied ({item.discount_details.discount_percentage.toFixed(2)}%):
-                      </span>
-                      <span className="font-medium">-{formatCurrency(item.discount_details.discount_amount)}</span>
-                    </div>
-                    <div className="flex justify-between py-2 border-t-2 border-green-400 font-semibold">
-                      <span className="text-gray-900">Client Pays (After Discount):</span>
-                      <span className="text-green-700">{formatCurrency(item.discount_details.grand_total_after_discount)}</span>
-                    </div>
-                    <div className="text-[10px] text-green-700 mt-1 italic bg-green-100 px-2 py-1 rounded">
-                      = {formatCurrency(item.discount_details.client_cost_before_discount)} - {formatCurrency(item.discount_details.discount_amount)}
-                      = {formatCurrency(item.discount_details.grand_total_after_discount)}
-                    </div>
-                    <div className="mt-3 pt-3 border-t border-green-300">
-                      <p className="text-xs font-semibold text-green-800 mb-2">Actual Profit Impact:</p>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Profit Before Discount:</span>
-                          <span className="font-medium text-gray-900">{formatCurrency(item.actual.profit_before_discount || 0)}</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Negotiable Margin:</span>
-                          <span className={`font-medium ${(item.actual.negotiable_margin || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                            {formatCurrency(item.actual.negotiable_margin || 0)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -958,7 +1100,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     <span className="text-lg">=</span> Total Planned:
                   </span>
                   <span className="font-bold text-gray-900 text-lg">
-                    {formatCurrency(data.summary.planned_total)}
+                    {formatCurrency(data.summary.discount_details?.client_cost_before_discount || data.summary.client_amount_before_discount || data.summary.planned_total)}
                   </span>
                 </div>
               </div>
@@ -1032,11 +1174,11 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     Client Pays:
                   </span>
                   <span className={`font-bold text-lg ${
-                    data.summary.actual_total > data.summary.planned_total
+                    (data.summary.discount_details?.grand_total_after_discount || data.summary.actual_total) > data.summary.planned_total
                       ? 'text-red-600'
                       : 'text-gray-900'
                   }`}>
-                    {formatCurrency(data.summary.actual_total)}
+                    {formatCurrency(data.summary.discount_details?.grand_total_after_discount || data.summary.actual_total)}
                   </span>
                 </div>
                 {/* Formula for Client Pays (Summary) */}
@@ -1046,7 +1188,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     <br />
                     = {formatCurrency(data.summary.discount_details.client_cost_before_discount)} - {formatCurrency(data.summary.discount_details.discount_amount)}
                     <br />
-                    = {formatCurrency(data.summary.grand_total_with_preliminaries || data.summary.actual_total)}
+                    = {formatCurrency(data.summary.discount_details.grand_total_after_discount)}
                   </div>
                 )}
 
@@ -1107,7 +1249,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                 <h4 className="text-base font-bold text-orange-900">Discount Applied to Project</h4>
               </div>
               <div className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="bg-white rounded-lg border border-orange-200 p-4">
                     <p className="text-xs font-semibold text-gray-600 mb-2 uppercase">Client Cost (Before Discount)</p>
                     <p className="text-2xl font-bold text-gray-900">{formatCurrency(data.summary.discount_details.client_cost_before_discount)}</p>
@@ -1123,25 +1265,11 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     <p className="text-xs font-semibold text-gray-600 mb-2 uppercase">Client Pays (After Discount)</p>
                     <p className="text-2xl font-bold text-green-600">{formatCurrency(data.summary.discount_details.grand_total_after_discount)}</p>
                   </div>
-                </div>
-
-                <div className="mt-6 pt-6 border-t-2 border-orange-300">
-                  <h5 className="text-sm font-bold text-orange-900 mb-4">Profit Impact from Discount</h5>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-blue-50 rounded-lg border border-blue-200 p-3">
-                      <p className="text-xs text-gray-600 mb-1">Profit Before Discount:</p>
-                      <p className="text-lg font-bold text-gray-900">{formatCurrency(data.summary.discount_details.profit_impact.profit_before_discount)}</p>
-                    </div>
-                    <div className="bg-green-50 rounded-lg border border-green-200 p-3">
-                      <p className="text-xs text-gray-600 mb-1">Negotiable Margin:</p>
-                      <p className={`text-lg font-bold ${data.summary.discount_details.profit_impact.profit_after_discount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatCurrency(data.summary.discount_details.profit_impact.profit_after_discount)}
-                      </p>
-                    </div>
-                    <div className="bg-red-50 rounded-lg border border-red-200 p-3">
-                      <p className="text-xs text-gray-600 mb-1">Profit Reduction:</p>
-                      <p className="text-lg font-bold text-red-600">-{formatCurrency(data.summary.discount_details.profit_impact.profit_reduction)}</p>
-                    </div>
+                  <div className="bg-white rounded-lg border border-green-300 p-4">
+                    <p className="text-xs font-semibold text-gray-600 mb-2 uppercase">Negotiable Margin</p>
+                    <p className={`text-2xl font-bold ${data.summary.discount_details.profit_impact.profit_after_discount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatCurrency(data.summary.discount_details.profit_impact.profit_after_discount)}
+                    </p>
                   </div>
                 </div>
               </div>

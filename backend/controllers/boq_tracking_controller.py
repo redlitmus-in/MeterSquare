@@ -1545,8 +1545,9 @@ def get_boq_planned_vs_actual(boq_id):
                 # Item's share of preliminaries
                 item_preliminary_share = preliminary_amount * item_proportion
 
-            # The selling price BEFORE discount includes item base cost + preliminary share
-            selling_price_before_discount = planned_base + item_preliminary_share
+            # The selling price BEFORE discount is the BOQ client amount (planned_base)
+            # NOT including preliminary share (preliminary is separate)
+            selling_price_before_discount = planned_base
 
             # USE BOQ-LEVEL DISCOUNT (from top-level boq_data)
             # If sub-item level discount exists, use that; otherwise use BOQ-level discount
