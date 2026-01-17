@@ -70,12 +70,26 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
       return labourArray;
     }
 
-    // For now, attach all requisitions to labour data
-    // In future, we can match by labour_role or labour_id
-    return labourArray.map(lab => ({
-      ...lab,
-      requisitions: labourWorkflowData.labour_workflow
-    }));
+    // Match requisitions to labour roles to avoid duplicating data
+    // Filter requisitions that match the labour role's skill requirement
+    return labourArray.map(lab => {
+      const matchingReqs = labourWorkflowData.labour_workflow.filter((req: any) => {
+        // Match by skill_required or labour_items
+        if (req.skill_required === lab.labour_role) {
+          return true;
+        }
+        // Check if any labour_items match this labour role
+        return req.labour_items?.some((item: any) =>
+          item.skill_required === lab.labour_role ||
+          item.labour_role === lab.labour_role
+        );
+      });
+
+      return {
+        ...lab,
+        requisitions: matchingReqs.length > 0 ? matchingReqs : labourWorkflowData.labour_workflow
+      };
+    });
   };
 
   const handleSendPurchaseRequest = async () => {

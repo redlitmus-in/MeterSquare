@@ -2367,14 +2367,52 @@ def get_labour_workflow_details(boq_id):
         from models.daily_attendance import DailyAttendance
         from models.worker import Worker
         from sqlalchemy import func, and_
+        from sqlalchemy.orm import selectinload
+
+        # Input validation
+        try:
+            boq_id = int(boq_id)
+            if boq_id <= 0:
+                return jsonify({"error": "BOQ ID must be positive"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid BOQ ID"}), 400
 
         # Verify BOQ exists
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
 
-        # Get all labour requisitions for this BOQ
-        requisitions = LabourRequisition.query.filter(
+        # Authorization check - verify user has access to this BOQ's project
+        current_user = g.user if hasattr(g, 'user') else None
+        if current_user:
+            user_role = current_user.get('role', '').strip().lower()
+            user_id = current_user.get('user_id')
+
+            # Admin and TD have access to all BOQs
+            # PM and MEP need to be assigned to the project
+            if user_role not in ['admin', 'technical director', 'technical_director', 'technicaldirector', 'td']:
+                # Check if user is assigned to this project
+                project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+                if not project:
+                    return jsonify({"error": "Project not found"}), 404
+
+                # Check PM assignment
+                if user_role in ['projectmanager', 'project_manager', 'project manager', 'pm']:
+                    if project.project_manager_id != user_id:
+                        return jsonify({"error": "Access denied. You are not assigned to this project."}), 403
+
+                # Check MEP assignment
+                elif user_role in ['mep', 'mep manager', 'mep_manager', 'mepmanager']:
+                    if project.mep_id != user_id:
+                        return jsonify({"error": "Access denied. You are not assigned to this project."}), 403
+
+        # Get all labour requisitions for this BOQ with eager loading to prevent N+1 queries
+        # This loads requisitions, their assignments, workers, and attendance records in ~4-5 queries
+        # instead of 100+ separate queries
+        requisitions = LabourRequisition.query.options(
+            selectinload(LabourRequisition.assignments).selectinload(WorkerAssignment.worker),
+            selectinload(LabourRequisition.assignments).selectinload(WorkerAssignment.attendance_records)
+        ).filter(
             LabourRequisition.boq_id == boq_id,
             LabourRequisition.is_deleted == False
         ).order_by(LabourRequisition.request_date.desc()).all()
@@ -2382,11 +2420,8 @@ def get_labour_workflow_details(boq_id):
         labour_workflow_data = []
 
         for req in requisitions:
-            # Get worker assignments for this requisition
-            assignments = WorkerAssignment.query.filter(
-                WorkerAssignment.requisition_id == req.requisition_id,
-                WorkerAssignment.is_deleted == False
-            ).all()
+            # Get worker assignments for this requisition (already loaded via eager loading)
+            assignments = [a for a in req.assignments if not a.is_deleted]
 
             assignment_details = []
             total_worked_hours = Decimal('0')
@@ -2394,17 +2429,12 @@ def get_labour_workflow_details(boq_id):
             attendance_records_list = []
 
             for assignment in assignments:
-                # Get worker details
-                worker = Worker.query.filter_by(
-                    worker_id=assignment.worker_id,
-                    is_deleted=False
-                ).first()
+                # Get worker details (already loaded via eager loading)
+                worker = assignment.worker
 
-                # Get attendance records for this assignment
-                attendance_records = DailyAttendance.query.filter(
-                    DailyAttendance.assignment_id == assignment.assignment_id,
-                    DailyAttendance.is_deleted == False
-                ).order_by(DailyAttendance.attendance_date.desc()).all()
+                # Get attendance records for this assignment (already loaded via eager loading)
+                attendance_records = [a for a in assignment.attendance_records if not a.is_deleted]
+                attendance_records.sort(key=lambda x: x.attendance_date, reverse=True)
 
                 # Calculate totals for this worker
                 worker_total_hours = Decimal('0')
