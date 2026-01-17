@@ -719,6 +719,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   title="Labour Tracking & Actual Costs"
                   showActual={true}
                   showWorkflow={true}
+                  showPlanned={false}
                 />
               )}
 

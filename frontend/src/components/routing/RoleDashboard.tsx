@@ -13,7 +13,7 @@ const ProjectManagerDashboard = lazy(() => import('@/roles/project-manager/pages
 const MEPDashboard = lazy(() => import('@/roles/mep/pages/MEPDashboard'));
 const SiteEngineerDashboard = lazy(() => import('@/roles/site-engineer/pages/Dashboard'));
 const BuyerDashboard = lazy(() => import('@/roles/buyer/pages/Dashboard'));
-const ProductionManagerDashboard = lazy(() => import('@/roles/production-manager/pages/M2StoreDashboard'));
+const ProductionManagerDashboard = lazy(() => import('@/roles/production-manager/pages/ProductionManagerDashboard'));
 
 /**
  * Component that dynamically loads the appropriate dashboard based on user role

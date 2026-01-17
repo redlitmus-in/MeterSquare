@@ -92,13 +92,15 @@ interface LabourWorkflowSectionProps {
   title: string;
   showActual?: boolean;
   showWorkflow?: boolean;  // New: toggle for showing detailed workflow
+  showPlanned?: boolean;  // New: toggle for showing planned columns (default true)
 }
 
 const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
   labourData,
   title,
   showActual = false,
-  showWorkflow = false
+  showWorkflow = false,
+  showPlanned = true
 }) => {
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [expandedRequisitions, setExpandedRequisitions] = useState<Set<number>>(new Set());
@@ -209,9 +211,13 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
           <thead className="bg-gray-100 border-b-2 border-gray-300">
             <tr>
               <th className="text-left py-3 px-4 text-gray-700 font-bold text-xs uppercase">Role</th>
-              <th className="text-right py-3 px-3 text-gray-700 font-bold text-xs uppercase">Planned Hours</th>
-              <th className="text-right py-3 px-3 text-gray-700 font-bold text-xs uppercase">Planned Rate</th>
-              <th className="text-right py-3 px-3 text-gray-700 font-bold text-xs uppercase">Planned Total</th>
+              {showPlanned && (
+                <>
+                  <th className="text-right py-3 px-3 text-gray-700 font-bold text-xs uppercase">Planned Hours</th>
+                  <th className="text-right py-3 px-3 text-gray-700 font-bold text-xs uppercase">Planned Rate</th>
+                  <th className="text-right py-3 px-3 text-gray-700 font-bold text-xs uppercase">Planned Total</th>
+                </>
+              )}
               {showActual && (
                 <>
                   <th className="text-right py-3 px-3 text-gray-700 font-bold text-xs uppercase">Actual Hours</th>
@@ -252,9 +258,13 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
                     </td>
 
                     {/* Planned Data */}
-                    <td className="py-3 px-3 text-right text-gray-700">{lab.planned.hours}</td>
-                    <td className="py-3 px-3 text-right text-gray-700">{formatCurrency(lab.planned.rate_per_hour)}</td>
-                    <td className="py-3 px-3 text-right font-semibold text-gray-900">{formatCurrency(lab.planned.total)}</td>
+                    {showPlanned && (
+                      <>
+                        <td className="py-3 px-3 text-right text-gray-700">{lab.planned.hours}</td>
+                        <td className="py-3 px-3 text-right text-gray-700">{formatCurrency(lab.planned.rate_per_hour)}</td>
+                        <td className="py-3 px-3 text-right font-semibold text-gray-900">{formatCurrency(lab.planned.total)}</td>
+                      </>
+                    )}
 
                     {/* Actual Data (if showing) */}
                     {showActual && (

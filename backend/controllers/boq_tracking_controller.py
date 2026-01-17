@@ -182,14 +182,26 @@ def get_boq_planned_vs_actual(boq_id):
         from sqlalchemy import func
         from collections import defaultdict
 
-        # Get all labour requisitions for this BOQ with locked attendance
-        requisitions = LabourRequisition.query.options(
-            selectinload(LabourRequisition.assignments).selectinload(WorkerAssignment.worker),
-            selectinload(LabourRequisition.assignments).selectinload(WorkerAssignment.attendance_records)
-        ).filter(
-            LabourRequisition.boq_id == boq_id,
+        # Get all labour requisitions for this BOQ
+        # Note: Cannot use selectinload on 'assignments' because it's lazy='dynamic'
+        # IMPORTANT: boq_id can be in the deprecated boq_id column OR in labour_items JSONB array
+        from sqlalchemy import or_, cast, Integer
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        requisitions = LabourRequisition.query.filter(
+            or_(
+                # Check deprecated boq_id column
+                LabourRequisition.boq_id == boq_id,
+                # Check labour_items JSONB array for boq_id
+                LabourRequisition.labour_items.op('@>')(
+                    cast([{"boq_id": boq_id}], JSONB)
+                )
+            ),
             LabourRequisition.is_deleted == False
         ).all()
+
+        # Debug: Log requisitions found
+        print(f"DEBUG: Found {len(requisitions)} requisitions for BOQ {boq_id}")
 
         # Aggregate actual labour by labour_role (skill_required)
         # Group attendance records by labour role
@@ -201,44 +213,67 @@ def get_boq_planned_vs_actual(boq_id):
             'master_labour_id': None
         })
 
-        for req in requisitions:
-            labour_role = req.skill_required  # The labour role from requisition
+        # Preload all assignments and attendance for efficiency
+        if requisitions:
+            req_ids = [r.requisition_id for r in requisitions]
+            assignments_with_data = WorkerAssignment.query.options(
+                selectinload(WorkerAssignment.worker),
+                selectinload(WorkerAssignment.attendance_records)
+            ).filter(
+                WorkerAssignment.requisition_id.in_(req_ids),
+                WorkerAssignment.is_deleted == False
+            ).all()
 
-            # Get labour items to find master_labour_id
-            for labour_item in (req.labour_items or []):
-                item_role = labour_item.get('skill_required') or labour_item.get('labour_role')
-                master_labour_id = labour_item.get('master_labour_id')
+            # Group assignments by requisition_id for easy lookup
+            assignments_by_req = defaultdict(list)
+            for assignment in assignments_with_data:
+                assignments_by_req[assignment.requisition_id].append(assignment)
 
-                if item_role == labour_role or not labour_role:
-                    labour_role = item_role
-                    labour_aggregates[labour_role]['labour_role'] = labour_role
-                    labour_aggregates[labour_role]['master_labour_id'] = master_labour_id
+            # Debug: Log assignments found
+            print(f"DEBUG: Found {len(assignments_with_data)} assignments total")
 
-            for assignment in req.assignments:
-                if assignment.is_deleted:
-                    continue
+            for req in requisitions:
+                labour_role = req.skill_required  # The labour role from requisition
 
-                worker = assignment.worker
-                # Get locked attendance records only
-                attendance_records = [a for a in assignment.attendance_records
-                                     if not a.is_deleted and a.approval_status == 'locked']
+                # Get labour items to find master_labour_id
+                for labour_item in (req.labour_items or []):
+                    item_role = labour_item.get('skill_required') or labour_item.get('labour_role')
+                    master_labour_id = labour_item.get('master_labour_id')
 
-                for attendance in attendance_records:
-                    hours = Decimal(str(attendance.total_hours or 0))
-                    cost = Decimal(str(attendance.total_cost or 0))
-                    rate = Decimal(str(attendance.hourly_rate or 0))
+                    if item_role == labour_role or not labour_role:
+                        labour_role = item_role
+                        labour_aggregates[labour_role]['labour_role'] = labour_role
+                        labour_aggregates[labour_role]['master_labour_id'] = master_labour_id
 
-                    # Add to aggregates
-                    labour_aggregates[labour_role]['total_hours'] += hours
-                    labour_aggregates[labour_role]['total_cost'] += cost
-                    labour_aggregates[labour_role]['work_entries'].append({
-                        'work_date': attendance.attendance_date.isoformat() if attendance.attendance_date else None,
-                        'hours': float(hours),
-                        'rate_per_hour': float(rate),
-                        'total_cost': float(cost),
-                        'worker_name': worker.full_name if worker else 'Unknown',
-                        'notes': attendance.entry_notes
-                    })
+                # Get assignments for this requisition from preloaded data
+                req_assignments = assignments_by_req.get(req.requisition_id, [])
+
+                for assignment in req_assignments:
+                    worker = assignment.worker
+                    # Get locked attendance records only (already eager loaded)
+                    attendance_records = [a for a in assignment.attendance_records
+                                         if not a.is_deleted and a.approval_status == 'locked']
+
+                    # Debug: Log locked attendance
+                    if attendance_records:
+                        print(f"DEBUG:   - Worker {worker.full_name if worker else 'Unknown'}: {len(attendance_records)} locked attendance records")
+
+                    for attendance in attendance_records:
+                        hours = Decimal(str(attendance.total_hours or 0))
+                        cost = Decimal(str(attendance.total_cost or 0))
+                        rate = Decimal(str(attendance.hourly_rate or 0))
+
+                        # Add to aggregates
+                        labour_aggregates[labour_role]['total_hours'] += hours
+                        labour_aggregates[labour_role]['total_cost'] += cost
+                        labour_aggregates[labour_role]['work_entries'].append({
+                            'work_date': attendance.attendance_date.isoformat() if attendance.attendance_date else None,
+                            'hours': float(hours),
+                            'rate_per_hour': float(rate),
+                            'total_cost': float(cost),
+                            'worker_name': worker.full_name if worker else 'Unknown',
+                            'notes': attendance.entry_notes
+                        })
 
         # Convert aggregates to LabourTracking-like objects for compatibility
         # Create a mock object that has the same interface as LabourTracking
@@ -262,6 +297,11 @@ def get_boq_planned_vs_actual(boq_id):
                     total_cost=data['total_cost'],
                     work_entries=data['work_entries']
                 ))
+
+        # Debug: Log actual labour data
+        print(f"DEBUG: Found {len(actual_labour)} actual labour records for BOQ {boq_id}")
+        for al in actual_labour:
+            print(f"  - {al.labour_role}: {al.total_hours_worked}h @ ₹{al.total_cost} (master_labour_id: {al.master_labour_id})")
 
         # Build comparison
         comparison = {

@@ -83,7 +83,7 @@ const VendorDetails = lazy(() => import('@/roles/buyer/pages/VendorDetails'));
 const BuyerStore = lazy(() => import('@/roles/buyer/pages/Store'));
 
 // Production Manager Pages - M2 Store Management
-const M2StoreDashboard = lazy(() => import('@/roles/production-manager/pages/M2StoreDashboard'));
+const ProductionManagerDashboard = lazy(() => import('@/roles/production-manager/pages/ProductionManagerDashboard'));
 const M2StoreLanding = lazy(() => import('@/roles/production-manager/pages/M2StoreLanding'));
 const MaterialsManagement = lazy(() => import('@/roles/production-manager/pages/MaterialsManagement'));
 const ReceiveStock = lazy(() => import('@/roles/production-manager/pages/ReceiveStock'));
