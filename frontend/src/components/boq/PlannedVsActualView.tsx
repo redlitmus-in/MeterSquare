@@ -718,7 +718,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   labourData={enrichLabourDataWithWorkflow(item.labour.filter((lab: any) => lab.planned.total > 0 || (lab.actual && lab.actual.total > 0)))}
                   title="Labour Tracking & Actual Costs"
                   showActual={true}
-                  showWorkflow={true}
+                  showWorkflow={false}
                   showPlanned={false}
                 />
               )}

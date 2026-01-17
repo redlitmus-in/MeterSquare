@@ -105,6 +105,28 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [expandedRequisitions, setExpandedRequisitions] = useState<Set<number>>(new Set());
 
+  // Calculate totals for footer row
+  const totals = React.useMemo(() => {
+    let totalPlannedHours = 0;
+    let totalPlannedCost = 0;
+    let totalActualHours = 0;
+    let totalActualCost = 0;
+
+    labourData.forEach(lab => {
+      totalPlannedHours += lab.planned.hours || 0;
+      totalPlannedCost += lab.planned.total || 0;
+      if (lab.actual) {
+        totalActualHours += lab.actual.hours || 0;
+        totalActualCost += lab.actual.total || 0;
+      }
+    });
+
+    const costVariance = totalActualCost - totalPlannedCost;
+    const costVarianceStatus = costVariance > 0 ? 'overrun' : costVariance < 0 ? 'saved' : 'neutral';
+
+    return { totalPlannedHours, totalPlannedCost, totalActualHours, totalActualCost, costVariance, costVarianceStatus };
+  }, [labourData]);
+
   const toggleRow = (index: number) => {
     const newExpanded = new Set(expandedRows);
     if (newExpanded.has(index)) {
@@ -233,9 +255,9 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
           {/* Table Body */}
           <tbody>
             {labourData.map((lab, idx) => {
-              const actualHours = lab.actual?.hours ?? lab.planned.hours;
-              const actualRate = lab.actual?.rate_per_hour ?? lab.planned.rate_per_hour;
-              const actualTotal = lab.actual?.total ?? lab.planned.total;
+              const actualHours = lab.actual?.hours ?? 0;
+              const actualRate = lab.actual?.rate_per_hour ?? 0;
+              const actualTotal = lab.actual?.total ?? 0;
               const isOverrun = lab.variance?.status === 'overrun';
               const isSaved = lab.variance?.status === 'saved';
               const varianceAmount = lab.variance?.amount ?? 0;
@@ -413,6 +435,37 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
               );
             })}
           </tbody>
+
+          {/* Table Footer with Totals */}
+          {showActual && (
+            <tfoot className="bg-gray-800 text-white">
+              <tr>
+                <td className="py-3 px-4 font-bold text-sm">
+                  TOTAL ({labourData.length} {labourData.length === 1 ? 'Role' : 'Roles'})
+                </td>
+                {showPlanned && (
+                  <>
+                    <td className="py-3 px-3 text-right font-bold">{totals.totalPlannedHours.toFixed(1)}</td>
+                    <td className="py-3 px-3 text-right font-bold">-</td>
+                    <td className="py-3 px-3 text-right font-bold">{formatCurrency(totals.totalPlannedCost)}</td>
+                  </>
+                )}
+                <td className="py-3 px-3 text-right font-bold">{totals.totalActualHours.toFixed(1)}</td>
+                <td className="py-3 px-3 text-right font-bold">-</td>
+                <td className="py-3 px-3 text-right font-bold">{formatCurrency(totals.totalActualCost)}</td>
+                <td className="py-3 px-3 text-right">
+                  {totals.costVariance !== 0 && (
+                    <span className={`font-bold ${
+                      totals.costVarianceStatus === 'overrun' ? 'text-red-300' : 'text-green-300'
+                    }`}>
+                      {totals.costVarianceStatus === 'overrun' ? '+' : '-'}{formatCurrency(Math.abs(totals.costVariance))}
+                    </span>
+                  )}
+                </td>
+                <td></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
