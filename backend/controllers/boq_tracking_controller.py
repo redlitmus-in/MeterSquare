@@ -1308,17 +1308,24 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Actual percentages stay the same (based on base_total)
                 sub_actual_misc = sub_item_base_total * (misc_pct / 100)  # Same as planned
-                sub_actual_overhead = sub_planned_overhead  # Same as planned
+                sub_actual_overhead = sub_planned_overhead  # Keep as allocation for tracking
                 sub_actual_transport = sub_planned_transport  # Same as planned
 
-                # Actual profit = we don't calculate from percentages, it's what remains
-                # For now, use planned profit (will be adjusted by consumption flow later)
-                sub_negotiable_margin = sub_planned_profit
+                # Calculate actual spending (NO O&P, NO Profit included in spending)
+                # Actual Spending = Materials + Labour + Misc + Transport
+                sub_actual_spending = (sub_actual_materials_cost + sub_actual_labour_cost +
+                                      sub_actual_misc + sub_actual_transport)
 
-                # CORRECT FORMULA: Total = Materials + Labour + Misc + Overhead + Profit + Transport - Discount
-                sub_actual_total = (sub_actual_materials_cost + sub_actual_labour_cost +
-                                  sub_actual_misc + sub_actual_overhead + sub_negotiable_margin +
-                                  sub_actual_transport - sub_discount_amount)
+                # Client amount for this sub-item (after discount)
+                sub_client_amount = sub_item_base_total - sub_discount_amount
+
+                # NEW CORRECT FORMULA: Negotiable Margin = Client Amount - Actual Spending
+                # This includes BOTH O&P allocation (25%) AND remaining profit
+                # Per client requirement: Negotiable Margin = CLIENT Quoted Price - (Materials + Labour + Misc + Transport)
+                sub_negotiable_margin = sub_client_amount - sub_actual_spending
+
+                # For compatibility, keep sub_actual_total for now but it's not used in margin calculation
+                sub_actual_total = sub_client_amount  # Client pays this amount (fixed)
 
                 # Aggregate to item level (planned)
                 planned_base += sub_item_base_total
@@ -1332,11 +1339,8 @@ def get_boq_planned_vs_actual(boq_id):
                 planned_total += sub_planned_total
 
                 # Aggregate to item level (actual) - using actual internal costs
-                # For CR sub-items, use actual internal cost instead of base_total (which is 0)
-                if is_cr_sub_item:
-                    actual_base += sub_actual_internal_cost  # CR items: use actual cost
-                else:
-                    actual_base += sub_item_base_total  # Regular items: client rate stays the same
+                # CORRECTED: actual_base should ALWAYS be materials + labour (internal cost), NOT client rate
+                actual_base += sub_actual_internal_cost  # Use actual materials + labour cost
                 actual_materials_total += sub_actual_materials_cost
                 actual_labour_total += sub_actual_labour_cost
                 actual_miscellaneous += sub_actual_misc  # Misc % stays the same
@@ -1388,7 +1392,8 @@ def get_boq_planned_vs_actual(boq_id):
                     },
                     'planned_total': float(sub_planned_total),
                     'actual_total': float(sub_actual_total),
-                    'calculation_note': 'Total = Materials + Labour + Misc + Overhead + Profit + Transport - Discount'
+                    'actual_spending': float(sub_actual_spending),
+                    'calculation_note': 'Negotiable Margin = Client Amount - (Materials + Labour + Misc + Transport). O&P is included in margin, not subtracted.'
                 })
 
             # Get overall percentages for display
@@ -1437,13 +1442,20 @@ def get_boq_planned_vs_actual(boq_id):
             # This is the actual amount client will pay
             client_amount_after_discount = selling_price_before_discount - item_discount_amount
 
+            # Calculate actual spending (Materials + Labour + Misc + Transport)
+            # DO NOT include O&P or Profit - those are part of the Negotiable Margin
+            actual_spending = (actual_materials_total + actual_labour_total +
+                              actual_miscellaneous + actual_transport)
+
             # Calculate profit BEFORE giving discount to client
-            # This shows profit if we kept the discount as margin
-            profit_before_discount = selling_price_before_discount - actual_total
+            # Negotiable Margin = Selling Price - Actual Spending (includes O&P allocation)
+            profit_before_discount = selling_price_before_discount - actual_spending
 
             # Calculate actual profit after giving discount to client
-            # Actual Profit = Client Amount (after discount) - Total Actual Spending
-            after_discount_negotiable_margin = client_amount_after_discount - actual_total
+            # NEW CORRECT FORMULA: Negotiable Margin = Client Amount (after discount) - Actual Spending
+            # This includes BOTH O&P allocation (25%) AND remaining profit
+            # Per client requirement: Negotiable Margin = CLIENT Quoted Price - (Materials + Labour + Misc + Transport)
+            after_discount_negotiable_margin = client_amount_after_discount - actual_spending
 
             # The selling price shown to client (after discount)
             selling_price = client_amount_after_discount
@@ -1472,10 +1484,17 @@ def get_boq_planned_vs_actual(boq_id):
 
             # 2. Allocation Impact Analysis
             # NOTE: Miscellaneous, Overhead, and Transport are FIXED allocations
-            # Only the Negotiable Margin (profit) absorbs all variances
+            # The Negotiable Margin now INCLUDES O&P allocation PLUS remaining profit
+
+            # Calculate the planned negotiable margin correctly
+            # Planned spending = Materials + Labour + Misc + Transport (NO O&P)
+            planned_spending = (planned_materials_total + planned_labour_total +
+                               planned_miscellaneous + planned_transport)
+            planned_negotiable_margin = client_amount_after_discount - planned_spending
 
             # Calculate profit variance (how much profit was impacted)
-            profit_variance = after_discount_negotiable_margin - planned_profit
+            # This now compares the full negotiable margin (including O&P)
+            profit_variance = after_discount_negotiable_margin - planned_negotiable_margin
 
             # Determine if extra costs impacted profit
             profit_impact_from_extra_costs = Decimal('0')
@@ -1486,14 +1505,14 @@ def get_boq_planned_vs_actual(boq_id):
             # Calculate variances (allocations stay same, only profit changes)
             base_cost_variance = actual_base - planned_base
             misc_variance = Decimal('0')  # Miscellaneous stays at allocation
-            overhead_variance = Decimal('0')  # Overhead stays at allocation
+            overhead_variance = Decimal('0')  # Overhead stays at allocation (but included in margin now)
             transport_variance = Decimal('0')  # Transport stays at allocation
 
             # Calculate savings/overrun (use absolute values for display)
             cost_savings = abs(planned_base - actual_base)  # Always positive
             misc_diff = abs(planned_miscellaneous - actual_miscellaneous)  # Always positive
             overhead_diff = abs(planned_overhead - actual_overhead)  # Always positive
-            profit_diff = abs(planned_profit - negotiable_margin)  # Always positive
+            profit_diff = abs(planned_negotiable_margin - after_discount_negotiable_margin)  # Always positive
 
            # Calculate completion percentage
             total_materials = len(planned_item.get('materials', []))
@@ -1543,17 +1562,18 @@ def get_boq_planned_vs_actual(boq_id):
                     "discount_percentage": float(item_discount_percentage),
                     "client_amount_after_discount": float(client_amount_after_discount),
                     "grand_total": float(client_amount_after_discount),
-                    "negotiable_margin": float(planned_profit),  # Planned profit/negotiable margin
+                    "negotiable_margin": float(planned_negotiable_margin),  # NEW: Includes O&P + profit
                     "miscellaneous_amount": float(planned_miscellaneous),
                     "miscellaneous_percentage": float(misc_pct),
                     "overhead_amount": float(planned_overhead),
                     "overhead_percentage": float(overhead_pct),
-                    "profit_amount": float(planned_profit),
+                    "profit_amount": float(planned_profit),  # Keep for reference (60% of O&P)
                     "profit_percentage": float(profit_pct),
                     "transport_amount": float(planned_transport),
                     "total": float(planned_total),
                     "selling_price": float(selling_price),
-                    "balance": float(planned_total - actual_total),  # Item-level balance
+                    "spending": float(planned_spending),  # NEW: Materials + Labour + Misc + Transport
+                    "balance": float(client_amount_after_discount - actual_spending),  # NEW: Actual balance
                     "materials_balance": float(planned_materials_total - actual_materials_total),
                     "labour_balance": float(planned_labour_total - actual_labour_total)
                 },
@@ -1567,15 +1587,16 @@ def get_boq_planned_vs_actual(boq_id):
                     "client_amount_after_discount": float(client_amount_after_discount),
                     "grand_total": float(client_amount_after_discount),
                     "profit_before_discount": float(profit_before_discount),
-                    "negotiable_margin": float(after_discount_negotiable_margin),
+                    "negotiable_margin": float(after_discount_negotiable_margin),  # NEW: Includes O&P + profit
                     "miscellaneous_amount": float(actual_miscellaneous),
                     "miscellaneous_percentage": float(misc_pct),
-                    "overhead_amount": float(actual_overhead),
+                    "overhead_amount": float(actual_overhead),  # Keep as allocation for tracking
                     "overhead_percentage": float(overhead_pct),
-                    "profit_amount": float(negotiable_margin),
-                    "profit_percentage": (float(negotiable_margin) / float(selling_price) * 100) if selling_price > 0 else 0,
+                    "profit_amount": float(after_discount_negotiable_margin),  # Same as negotiable margin now
+                    "profit_percentage": (float(after_discount_negotiable_margin) / float(selling_price) * 100) if selling_price > 0 else 0,
                     "transport_amount": float(actual_transport),
-                    "total": float(actual_total),
+                    "spending": float(actual_spending),  # NEW: Materials + Labour + Misc + Transport
+                    "total": float(actual_total),  # Keep for compatibility (client amount)
                     "selling_price": float(selling_price)
                 },
                 "consumption_flow": {
@@ -1638,6 +1659,8 @@ def get_boq_planned_vs_actual(boq_id):
         total_client_amount_before_discount = sum(float(item['planned']['client_amount_before_discount']) for item in comparison['items'])  # Includes preliminary shares
         total_planned = sum(float(item['planned']['total']) for item in comparison['items'])
         total_actual = sum(float(item['actual']['total']) for item in comparison['items'])
+        total_planned_spending = sum(float(item['planned']['spending']) for item in comparison['items'])  # NEW: Planned spending
+        total_actual_spending = sum(float(item['actual']['spending']) for item in comparison['items'])  # NEW: Actual spending
         total_discount_amount = sum(float(item['planned']['discount_amount']) for item in comparison['items'])
         total_client_amount_after_discount = sum(float(item['planned']['client_amount_after_discount']) for item in comparison['items'])
         total_profit_before_discount = sum(float(item['actual']['profit_before_discount']) for item in comparison['items'])
@@ -1688,7 +1711,8 @@ def get_boq_planned_vs_actual(boq_id):
 
         # Calculate actual profit using formula: Client Amount (After Discount) - Total Actual Spending
         # This is the REAL profit/loss - what client pays minus what we spent
-        actual_project_profit = total_client_amount_after_discount - total_actual
+        # NEW: Use total_actual_spending which is Materials + Labour + Misc + Transport (NO O&P)
+        actual_project_profit = total_client_amount_after_discount - total_actual_spending
 
         # Calculate combined subtotal and discount
         # NOTE: total_client_amount_before_discount already includes each item's preliminary share
@@ -1707,8 +1731,9 @@ def get_boq_planned_vs_actual(boq_id):
         combined_grand_total_after_discount = combined_subtotal_before_discount - combined_discount_amount
 
         # Calculate profit impact on combined totals
-        combined_profit_before_discount = combined_subtotal_before_discount - Decimal(str(total_actual))
-        combined_profit_after_discount = combined_grand_total_after_discount - Decimal(str(total_actual))
+        # NEW: Use total_actual_spending instead of total_actual (which is client amount)
+        combined_profit_before_discount = combined_subtotal_before_discount - Decimal(str(total_actual_spending))
+        combined_profit_after_discount = combined_grand_total_after_discount - Decimal(str(total_actual_spending))
         combined_profit_reduction = combined_profit_before_discount - combined_profit_after_discount
 
         comparison['summary'] = {
@@ -1734,6 +1759,8 @@ def get_boq_planned_vs_actual(boq_id):
             },
             "planned_total": float(total_planned),
             "actual_total": float(total_actual),
+            "planned_spending": float(total_planned_spending),  # NEW: Materials + Labour + Misc + Transport
+            "actual_spending": float(total_actual_spending),  # NEW: Materials + Labour + Misc + Transport
             "variance": float(abs(total_actual - total_planned)),  # Always positive number
             "variance_percentage": float(abs((total_actual - total_planned) / total_planned * 100)) if total_planned > 0 else 0,
             "status": "under_budget" if total_actual < total_planned else "over_budget" if total_actual > total_planned else "on_budget",
@@ -1770,7 +1797,7 @@ def get_boq_planned_vs_actual(boq_id):
             "total_overhead_consumed": float(total_overhead_consumed),
             "total_profit_consumed": float(total_profit_consumed),
             "total_loss_beyond_buffers": float(total_loss_beyond_buffers),
-            "calculation_note": "Client Amount (Before Discount) is the base selling price. Discount = Client Amount × Discount %. Grand Total (Client Amount After Discount) = Client Amount - Discount. Actual Profit = Grand Total - Actual Total Spending.",
+            "calculation_note": "Client Amount (Before Discount) is the base selling price. Discount = Client Amount × Discount %. Grand Total (Client Amount After Discount) = Client Amount - Discount. Negotiable Margin = Grand Total - Actual Spending (Materials + Labour + Misc + Transport). O&P is included in Negotiable Margin, not subtracted.",
 
             # Add preliminaries data
             "preliminaries": {
