@@ -575,14 +575,14 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     </div>
                   </div>
 
-                  {/* Margin Display */}
+                  {/* Negotiable Margin Display */}
                   <div className={`rounded-lg p-2 text-xs ${
                     (item.planned.base_cost - item.planned.total) >= 0
                       ? 'bg-green-100 border border-green-300'
                       : 'bg-red-100 border border-red-300'
                   }`}>
                     <div className="flex justify-between items-center">
-                      <span className="font-semibold">Margin:</span>
+                      <span className="font-semibold">Negotiable Margin:</span>
                       <span className={`font-bold ${
                         (item.planned.base_cost - item.planned.total) >= 0
                           ? 'text-green-700'
@@ -819,11 +819,39 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     </span>
                     <span className="font-medium text-gray-900">{formatCurrency(item.planned.transport_amount || 0)}</span>
                   </div>
-                  <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-gray-50 -mx-4 px-4">
+                  <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-orange-50 -mx-4 px-4">
                     <span className="font-bold text-gray-900 flex items-center gap-1">
-                      <span className="text-lg">=</span> Total Planned:
+                      <span className="text-lg">=</span> Total Planned Spending:
                     </span>
-                    <span className="font-bold text-gray-900 text-lg">{formatCurrency(item.discount_details?.client_cost_before_discount || item.planned?.client_amount_before_discount || item.planned.total)}</span>
+                    <span className="font-bold text-orange-700 text-lg">{formatCurrency(
+                      item.planned.materials_total +
+                      item.planned.labour_total +
+                      (item.planned.miscellaneous_amount || 0) +
+                      ((item.planned.overhead_amount || 0) + (item.planned.profit_amount || 0)) +
+                      (item.planned.transport_amount || 0)
+                    )}</span>
+                  </div>
+                  <div className="flex justify-between py-3 border-t-2 border-gray-300 bg-blue-50 -mx-4 px-4">
+                    <span className="font-bold text-gray-900 flex items-center gap-1">
+                      Client Amount:
+                    </span>
+                    <span className="font-bold text-blue-700 text-lg">{formatCurrency(item.discount_details?.client_cost_before_discount || item.planned?.client_amount_before_discount || item.planned.total)}</span>
+                  </div>
+                  <div className="flex justify-between py-2 bg-green-50 -mx-4 px-4">
+                    <span className="font-semibold text-gray-700">Negotiable Margin:</span>
+                    <span className={`font-bold text-lg ${
+                      ((item.discount_details?.client_cost_before_discount || item.planned?.client_amount_before_discount || item.planned.total) -
+                      (item.planned.materials_total + item.planned.labour_total + (item.planned.miscellaneous_amount || 0) +
+                      ((item.planned.overhead_amount || 0) + (item.planned.profit_amount || 0)) + (item.planned.transport_amount || 0))) >= 0
+                        ? 'text-green-700'
+                        : 'text-red-700'
+                    }`}>
+                      {formatCurrency(
+                        (item.discount_details?.client_cost_before_discount || item.planned?.client_amount_before_discount || item.planned.total) -
+                        (item.planned.materials_total + item.planned.labour_total + (item.planned.miscellaneous_amount || 0) +
+                        ((item.planned.overhead_amount || 0) + (item.planned.profit_amount || 0)) + (item.planned.transport_amount || 0))
+                      )}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -982,15 +1010,15 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     </div>
                   )}
 
-                  {/* Total Negotiable Margin - SHOWN FIRST */}
-                  <div className="mt-3 pt-3 border-t-2 border-green-400 bg-green-50 -mx-4 px-4 pb-3">
+                  {/* Negotiable Margin Calculation */}
+                  <div className="mt-3 pt-3 border-t-2 border-gray-400 bg-gray-50 -mx-4 px-4 pb-3">
                     <div className="flex justify-between text-sm font-semibold mb-2">
-                      <span className="text-green-900">Total Negotiable Margin:</span>
+                      <span className="text-gray-700">Negotiable Margin:</span>
                       <span className={`text-lg ${(item.actual.negotiable_margin || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
                         {formatCurrency(item.actual.negotiable_margin || 0)}
                       </span>
                     </div>
-                    <div className="text-[10px] text-green-800 italic bg-green-100 px-2 py-1 rounded">
+                    <div className="text-[10px] text-gray-700 italic bg-gray-100 px-2 py-1 rounded">
                       Formula: Negotiable Margin = Client Pays - Actual Spending
                       <br />
                       = {formatCurrency(item.actual.total)} - {formatCurrency(item.actual.spending || 0)}
@@ -998,34 +1026,52 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     </div>
                   </div>
 
-                  {/* Actual Margin Breakdown - SHOWN SECOND */}
+                  {/* Actual Margin Breakdown */}
                   <div className="mt-3 pt-3 border-t-2 border-blue-300 bg-blue-50 -mx-4 px-4 pb-3">
                     <p className="text-xs font-semibold text-blue-900 mb-2">Actual Margin Breakdown:</p>
                     <div className="space-y-1 text-sm">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-gray-700">O&P Allocation (25%):</span>
-                        <span className="font-medium text-gray-900">
-                          {formatCurrency((item.actual.overhead_amount || 0) + (item.planned.profit_amount || 0))}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-gray-700">Cost Variance Impact:</span>
-                        <span className={`font-medium ${
-                          (item.actual.negotiable_margin || 0) - ((item.actual.overhead_amount || 0) + (item.planned.profit_amount || 0)) >= 0
-                            ? 'text-green-700'
-                            : 'text-red-700'
-                        }`}>
-                          {formatCurrency((item.actual.negotiable_margin || 0) - ((item.actual.overhead_amount || 0) + (item.planned.profit_amount || 0)))}
-                        </span>
-                      </div>
-                      {/* Formula for Cost Variance Impact */}
-                      <div className="text-[10px] text-blue-600 mt-1 mb-2 italic bg-blue-50 px-2 py-1 rounded border border-blue-200">
-                        <strong>Formula:</strong> Cost Variance = Negotiable Margin - O&P Allocation
-                        <br />
-                        = {formatCurrency(item.actual.negotiable_margin || 0)} - {formatCurrency((item.actual.overhead_amount || 0) + (item.planned.profit_amount || 0))}
-                        <br />
-                        = {formatCurrency((item.actual.negotiable_margin || 0) - ((item.actual.overhead_amount || 0) + (item.planned.profit_amount || 0)))}
-                      </div>
+                      {(() => {
+                        // Calculate O&P from planned percentage on Client Amount
+                        const opPercentage = item.planned.overhead_profit_percentage || 25;
+                        const opAllocation = (item.actual.total || 0) * (opPercentage / 100);
+                        const negotiableMargin = item.actual.negotiable_margin || 0;
+                        const actualMargin = opAllocation + negotiableMargin;
+
+                        return (
+                          <>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-gray-700">O&P Allocation ({opPercentage}%):</span>
+                              <span className="font-medium text-gray-900">
+                                {formatCurrency(opAllocation)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-gray-700">Negotiable Margin:</span>
+                              <span className={`font-medium ${
+                                negotiableMargin >= 0 ? 'text-green-700' : 'text-red-700'
+                              }`}>
+                                {formatCurrency(negotiableMargin)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-xs pt-2 border-t border-blue-300 font-bold">
+                              <span className="text-blue-900">= ACTUAL MARGIN:</span>
+                              <span className={`text-lg ${
+                                actualMargin >= 0 ? 'text-green-700' : 'text-red-700'
+                              }`}>
+                                {formatCurrency(actualMargin)}
+                              </span>
+                            </div>
+                            {/* Formula for breakdown */}
+                            <div className="text-[10px] text-blue-600 mt-2 italic bg-blue-100 px-2 py-1 rounded border border-blue-200">
+                              <strong>Formula:</strong> ACTUAL MARGIN = O&P + Negotiable Margin
+                              <br />
+                              = {formatCurrency(opAllocation)} + ({formatCurrency(negotiableMargin)})
+                              <br />
+                              = {formatCurrency(actualMargin)}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -1095,12 +1141,42 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     {formatCurrency(data.summary.total_planned_transport || 0)}
                   </span>
                 </div>
-                <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-gray-50 -mx-6 px-6">
+                <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-orange-50 -mx-6 px-6">
                   <span className="font-bold text-gray-900 flex items-center gap-1">
-                    <span className="text-lg">=</span> Total Planned:
+                    <span className="text-lg">=</span> Total Planned Spending:
                   </span>
-                  <span className="font-bold text-gray-900 text-lg">
+                  <span className="font-bold text-orange-700 text-lg">
+                    {formatCurrency(
+                      totals.planned_materials +
+                      totals.planned_labour +
+                      (data.summary.total_planned_miscellaneous || 0) +
+                      ((data.summary.total_planned_overhead || 0) + (data.summary.total_planned_profit || 0)) +
+                      (data.summary.total_planned_transport || 0)
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between py-3 border-t-2 border-gray-300 bg-blue-50 -mx-6 px-6">
+                  <span className="font-bold text-gray-900 flex items-center gap-1">
+                    Client Amount:
+                  </span>
+                  <span className="font-bold text-blue-700 text-lg">
                     {formatCurrency(data.summary.discount_details?.client_cost_before_discount || data.summary.client_amount_before_discount || data.summary.planned_total)}
+                  </span>
+                </div>
+                <div className="flex justify-between py-2 bg-green-50 -mx-6 px-6">
+                  <span className="font-semibold text-gray-700">Negotiable Margin:</span>
+                  <span className={`font-bold text-lg ${
+                    ((data.summary.discount_details?.client_cost_before_discount || data.summary.client_amount_before_discount || data.summary.planned_total) -
+                    (totals.planned_materials + totals.planned_labour + (data.summary.total_planned_miscellaneous || 0) +
+                    ((data.summary.total_planned_overhead || 0) + (data.summary.total_planned_profit || 0)) + (data.summary.total_planned_transport || 0))) >= 0
+                      ? 'text-green-700'
+                      : 'text-red-700'
+                  }`}>
+                    {formatCurrency(
+                      (data.summary.discount_details?.client_cost_before_discount || data.summary.client_amount_before_discount || data.summary.planned_total) -
+                      (totals.planned_materials + totals.planned_labour + (data.summary.total_planned_miscellaneous || 0) +
+                      ((data.summary.total_planned_overhead || 0) + (data.summary.total_planned_profit || 0)) + (data.summary.total_planned_transport || 0))
+                    )}
                   </span>
                 </div>
               </div>
@@ -1192,15 +1268,15 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   </div>
                 )}
 
-                {/* Total Negotiable Margin - SHOWN FIRST */}
-                <div className="mt-3 pt-3 border-t-2 border-green-400 bg-green-50 -mx-6 px-6 pb-3">
+                {/* Negotiable Margin Calculation */}
+                <div className="mt-3 pt-3 border-t-2 border-gray-400 bg-gray-50 -mx-6 px-6 pb-3">
                   <div className="flex justify-between text-sm font-semibold mb-2">
-                    <span className="text-green-900">Total Negotiable Margin:</span>
+                    <span className="text-gray-700">Negotiable Margin:</span>
                     <span className={`text-lg ${(data.summary.total_negotiable_margin || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
                       {formatCurrency(data.summary.total_negotiable_margin || 0)}
                     </span>
                   </div>
-                  <div className="text-[10px] text-green-800 italic bg-green-100 px-2 py-1 rounded">
+                  <div className="text-[10px] text-gray-700 italic bg-gray-100 px-2 py-1 rounded">
                     Formula: Negotiable Margin = Client Pays - Total Actual Spending
                     <br />
                     = {formatCurrency(data.summary.actual_total || 0)} - {formatCurrency(data.summary.actual_spending || 0)}
@@ -1208,34 +1284,53 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   </div>
                 </div>
 
-                {/* Actual Margin Breakdown - SHOWN SECOND */}
+                {/* Actual Margin Breakdown */}
                 <div className="mt-3 pt-3 border-t-2 border-blue-300 bg-blue-50 -mx-6 px-6 pb-3">
                   <p className="text-xs font-semibold text-blue-900 mb-2">Overall Actual Margin Breakdown:</p>
                   <div className="space-y-1 text-sm">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-700">O&P Allocation (25%):</span>
-                      <span className="font-medium text-gray-900">
-                        {formatCurrency((data.summary.total_actual_overhead || 0) + (data.summary.total_planned_profit || 0))}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-700">Cost Variance Impact:</span>
-                      <span className={`font-medium ${
-                        (data.summary.total_negotiable_margin || 0) - ((data.summary.total_actual_overhead || 0) + (data.summary.total_planned_profit || 0)) >= 0
-                          ? 'text-green-700'
-                          : 'text-red-700'
-                      }`}>
-                        {formatCurrency((data.summary.total_negotiable_margin || 0) - ((data.summary.total_actual_overhead || 0) + (data.summary.total_planned_profit || 0)))}
-                      </span>
-                    </div>
-                    {/* Formula for Cost Variance Impact (Summary) */}
-                    <div className="text-[10px] text-blue-600 mt-1 mb-2 italic bg-blue-50 px-2 py-1 rounded border border-blue-200">
-                      <strong>Formula:</strong> Cost Variance = Negotiable Margin - O&P Allocation
-                      <br />
-                      = {formatCurrency(data.summary.total_negotiable_margin || 0)} - {formatCurrency((data.summary.total_actual_overhead || 0) + (data.summary.total_planned_profit || 0))}
-                      <br />
-                      = {formatCurrency((data.summary.total_negotiable_margin || 0) - ((data.summary.total_actual_overhead || 0) + (data.summary.total_planned_profit || 0)))}
-                    </div>
+                    {(() => {
+                      // Calculate O&P from planned percentage on Client Amount
+                      const clientPays = data.summary.discount_details?.grand_total_after_discount || data.summary.actual_total || 0;
+                      const opPercentage = 25; // Standard O&P percentage
+                      const opAllocation = clientPays * (opPercentage / 100);
+                      const negotiableMargin = data.summary.total_negotiable_margin || 0;
+                      const actualMargin = opAllocation + negotiableMargin;
+
+                      return (
+                        <>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-gray-700">O&P Allocation ({opPercentage}%):</span>
+                            <span className="font-medium text-gray-900">
+                              {formatCurrency(opAllocation)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-gray-700">Negotiable Margin:</span>
+                            <span className={`font-medium ${
+                              negotiableMargin >= 0 ? 'text-green-700' : 'text-red-700'
+                            }`}>
+                              {formatCurrency(negotiableMargin)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-xs pt-2 border-t border-blue-300 font-bold">
+                            <span className="text-blue-900">= ACTUAL MARGIN:</span>
+                            <span className={`text-lg ${
+                              actualMargin >= 0 ? 'text-green-700' : 'text-red-700'
+                            }`}>
+                              {formatCurrency(actualMargin)}
+                            </span>
+                          </div>
+                          {/* Formula for breakdown */}
+                          <div className="text-[10px] text-blue-600 mt-2 italic bg-blue-100 px-2 py-1 rounded border border-blue-200">
+                            <strong>Formula:</strong> ACTUAL MARGIN = O&P + Negotiable Margin
+                            <br />
+                            = {formatCurrency(opAllocation)} + ({formatCurrency(negotiableMargin)})
+                            <br />
+                            = {formatCurrency(actualMargin)}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -1643,7 +1738,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                             Cost overruns have reduced the available profit margin.
                           </div>
                           <div className="flex justify-between items-center mb-2">
-                            <span className="text-xs text-gray-600">Planned Margin:</span>
+                            <span className="text-xs text-gray-600">Planned Negotiable Margin:</span>
                             <span className="text-sm font-semibold">{formatCurrency(selectedItemForBreakdown.planned.profit_amount)}</span>
                           </div>
                           <div className="flex justify-between items-center">

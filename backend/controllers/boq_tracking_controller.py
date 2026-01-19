@@ -204,7 +204,6 @@ def get_boq_planned_vs_actual(boq_id):
 
         # If no requisitions found, check labour_id pattern: lab_{boq_id}_...
         if not requisitions:
-            print(f"DEBUG: No direct boq_id match, checking labour_id pattern for BOQ {boq_id}")
             all_requisitions = LabourRequisition.query.filter(
                 LabourRequisition.is_deleted == False,
                 LabourRequisition.labour_items.isnot(None)
@@ -220,13 +219,9 @@ def get_boq_planned_vs_actual(boq_id):
                         match = re.match(r'^lab_(\d+)_', labour_id)
                         if match and int(match.group(1)) == boq_id:
                             matching_requisitions.append(req)
-                            print(f"DEBUG: Matched requisition {req.requisition_id} via labour_id pattern: {labour_id}")
                             break
 
             requisitions = matching_requisitions
-
-        # Debug: Log requisitions found
-        print(f"DEBUG: Found {len(requisitions)} requisitions for BOQ {boq_id}")
 
         # Aggregate actual labour by labour_role (skill_required)
         # Group attendance records by labour role
@@ -268,7 +263,6 @@ def get_boq_planned_vs_actual(boq_id):
                     DailyAttendance.approval_status == 'locked'
                 ).all()
                 attendance_records_all.extend(attendance_by_assignment_id)
-                print(f"DEBUG: Found {len(attendance_by_assignment_id)} attendance records via assignment_id")
 
             # Also get attendance directly by requisition_id (for records where assignment_id is NULL)
             attendance_by_req_id = DailyAttendance.query.filter(
@@ -282,9 +276,6 @@ def get_boq_planned_vs_actual(boq_id):
             for att in attendance_by_req_id:
                 if att.attendance_id not in existing_att_ids:
                     attendance_records_all.append(att)
-
-            print(f"DEBUG: Found {len(attendance_by_req_id)} attendance records via requisition_id")
-            print(f"DEBUG: Total unique attendance records: {len(attendance_records_all)}")
 
             # Group attendance by assignment_id (for records with assignment_id)
             attendance_by_assignment = defaultdict(list)
@@ -305,9 +296,6 @@ def get_boq_planned_vs_actual(boq_id):
             assignments_by_req = defaultdict(list)
             for assignment in assignments_with_data:
                 assignments_by_req[assignment.requisition_id].append(assignment)
-
-            # Debug: Log assignments found
-            print(f"DEBUG: Found {len(assignments_with_data)} assignments total")
 
             for req in requisitions:
                 # Process EACH labour_item in the requisition separately
@@ -343,8 +331,6 @@ def get_boq_planned_vs_actual(boq_id):
                 # This handles the case where attendance has requisition_id but no assignment_id
                 req_attendance_records = attendance_by_requisition.get(req.requisition_id, [])
 
-                print(f"DEBUG: Requisition {req.requisition_id} has {len(req_attendance_records)} attendance records")
-
                 # Process each attendance record directly
                 for attendance in req_attendance_records:
                     # Get worker info
@@ -368,7 +354,6 @@ def get_boq_planned_vs_actual(boq_id):
                             'worker_name': worker.full_name if worker else 'Unknown',
                             'notes': attendance.entry_notes
                         })
-                        print(f"DEBUG:   - Worker {worker.full_name if worker else 'Unknown'}: {hours}h @ ₹{cost}")
 
         # ALSO fetch old labour_tracking data for backward compatibility
         # Some BOQs may have data in the deprecated labour_tracking table
@@ -376,8 +361,6 @@ def get_boq_planned_vs_actual(boq_id):
             boq_id=boq_id,
             is_deleted=False
         ).all()
-
-        print(f"DEBUG: Found {len(old_labour_tracking)} old labour_tracking records for BOQ {boq_id}")
 
         # Merge old labour_tracking data into labour_aggregates
         for old_labour in old_labour_tracking:
@@ -403,8 +386,6 @@ def get_boq_planned_vs_actual(boq_id):
                         'notes': entry.get('notes')
                     })
 
-            print(f"DEBUG:   - Old labour: {labour_role}: {hours}h @ ₹{cost}")
-
         # Convert aggregates to LabourTracking-like objects for compatibility
         # Create a mock object that has the same interface as LabourTracking
         class ActualLabourData:
@@ -429,11 +410,6 @@ def get_boq_planned_vs_actual(boq_id):
                     total_cost=data['total_cost'],
                     work_entries=data['work_entries']
                 ))
-
-        # Debug: Log actual labour data
-        print(f"DEBUG: Found {len(actual_labour)} actual labour records for BOQ {boq_id}")
-        for al in actual_labour:
-            print(f"  - {al.labour_role}: {al.total_hours_worked}h @ ₹{al.total_cost} (master_labour_id: {al.master_labour_id})")
 
         # Build comparison
         comparison = {
@@ -1838,15 +1814,12 @@ def get_boq_planned_vs_actual(boq_id):
         # Calculate net loss (costs that exceeded all buffers)
         total_loss_beyond_buffers = total_extra_costs - total_misc_consumed - total_overhead_consumed - total_profit_consumed
 
-        # Calculate actual profit using formula: Client Amount (After Discount) - Total Actual Spending
-        # This is the REAL profit/loss - what client pays minus what we spent
-        # NEW: Use total_actual_spending which is Materials + Labour + Misc + Transport (NO O&P)
-        actual_project_profit = total_client_amount_after_discount - total_actual_spending
+        # IMPORTANT: Add preliminaries' internal cost to total actual spending
+        # Total Actual Spending = BOQ Items Spending + Preliminaries Internal Cost
+        total_actual_spending_with_preliminaries = total_actual_spending + float(preliminary_internal_cost)
 
-        # Calculate combined subtotal and discount
-        # NOTE: total_client_amount_before_discount already includes each item's preliminary share
-        # So we DON'T add preliminary_amount again (that would be double-counting)
-        combined_subtotal_before_discount = Decimal(str(total_client_amount_before_discount))
+        # Calculate combined subtotal (Items + Preliminaries) BEFORE discount
+        combined_subtotal_before_discount = items_only_subtotal + Decimal(str(preliminary_amount))
 
         # Calculate discount on combined subtotal
         combined_discount_amount = Decimal('0')
@@ -1856,13 +1829,17 @@ def get_boq_planned_vs_actual(boq_id):
             combined_discount_percentage = boq_level_discount_percentage
             combined_discount_amount = combined_subtotal_before_discount * (combined_discount_percentage / Decimal('100'))
 
-        # Calculate grand total after discount
+        # Calculate grand total after discount (this is what client pays)
         combined_grand_total_after_discount = combined_subtotal_before_discount - combined_discount_amount
 
+        # Calculate actual profit using formula: Grand Total (After Discount) - Total Actual Spending
+        # This is the REAL profit/loss - what client pays minus what we spent
+        actual_project_profit = float(combined_grand_total_after_discount) - total_actual_spending_with_preliminaries
+
         # Calculate profit impact on combined totals
-        # NEW: Use total_actual_spending instead of total_actual (which is client amount)
-        combined_profit_before_discount = combined_subtotal_before_discount - Decimal(str(total_actual_spending))
-        combined_profit_after_discount = combined_grand_total_after_discount - Decimal(str(total_actual_spending))
+        # NEW: Use total_actual_spending_with_preliminaries instead of total_actual (which is client amount)
+        combined_profit_before_discount = combined_subtotal_before_discount - Decimal(str(total_actual_spending_with_preliminaries))
+        combined_profit_after_discount = combined_grand_total_after_discount - Decimal(str(total_actual_spending_with_preliminaries))
         combined_profit_reduction = combined_profit_before_discount - combined_profit_after_discount
 
         comparison['summary'] = {
@@ -1888,8 +1865,8 @@ def get_boq_planned_vs_actual(boq_id):
             },
             "planned_total": float(total_planned),
             "actual_total": float(total_actual),
-            "planned_spending": float(total_planned_spending),  # NEW: Materials + Labour + Misc + Transport
-            "actual_spending": float(total_actual_spending),  # NEW: Materials + Labour + Misc + Transport
+            "planned_spending": float(total_planned_spending),  # NEW: Materials + Labour + Misc + Transport (BOQ Items only)
+            "actual_spending": float(total_actual_spending_with_preliminaries),  # NEW: Materials + Labour + Misc + Transport + Preliminaries Internal Cost
             "variance": float(abs(total_actual - total_planned)),  # Always positive number
             "variance_percentage": float(abs((total_actual - total_planned) / total_planned * 100)) if total_planned > 0 else 0,
             "status": "under_budget" if total_actual < total_planned else "over_budget" if total_actual > total_planned else "on_budget",
@@ -2710,7 +2687,6 @@ def get_labour_workflow_details(boq_id):
 
         # If no requisitions found, check labour_id pattern: lab_{boq_id}_...
         if not requisitions:
-            print(f"DEBUG: No direct boq_id match, checking labour_id pattern for BOQ {boq_id}")
             all_requisitions = LabourRequisition.query.filter(
                 LabourRequisition.is_deleted == False,
                 LabourRequisition.labour_items.isnot(None)
@@ -2726,12 +2702,9 @@ def get_labour_workflow_details(boq_id):
                         match = re.match(r'^lab_(\d+)_', labour_id)
                         if match and int(match.group(1)) == boq_id:
                             matching_requisitions.append(req)
-                            print(f"DEBUG: Matched requisition {req.requisition_id} via labour_id pattern: {labour_id}")
                             break
 
             requisitions = matching_requisitions
-
-        print(f"DEBUG: Found {len(requisitions)} requisitions for BOQ {boq_id} in get_labour_workflow_details")
 
         # Preload all assignments and attendance for efficiency (prevents N+1 queries)
         # Note: WorkerAssignment.attendance_records is also lazy='dynamic', so we can't eager load it
