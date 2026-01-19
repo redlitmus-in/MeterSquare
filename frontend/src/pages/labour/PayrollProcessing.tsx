@@ -33,8 +33,9 @@ const PayrollProcessing: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
 
-  // Collapse state for projects and workers
+  // Collapse state for projects, requisitions, and workers
   const [expandedProjects, setExpandedProjects] = useState<Set<number>>(new Set());
+  const [expandedRequisitions, setExpandedRequisitions] = useState<Set<string>>(new Set()); // "projectId-requisitionId"
   const [expandedWorkers, setExpandedWorkers] = useState<Set<string>>(new Set()); // "projectId-workerId"
 
   // Date range - default to current month
@@ -52,6 +53,20 @@ const PayrollProcessing: React.FC = () => {
         newSet.delete(projectId);
       } else {
         newSet.add(projectId);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle requisition expansion within a project
+  const toggleRequisition = (projectId: number, requisitionId: number | string) => {
+    const key = `${projectId}-${requisitionId}`;
+    setExpandedRequisitions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(key)) {
+        newSet.delete(key);
+      } else {
+        newSet.add(key);
       }
       return newSet;
     });
@@ -85,23 +100,25 @@ const PayrollProcessing: React.FC = () => {
     setLoadingProjects(false);
   };
 
-  // Date validation handlers
+  // Date validation handlers - Allow setting dates freely
   const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newStart = e.target.value;
-    if (newStart > endDate) {
-      showError('Start date cannot be after end date');
-      return;
-    }
     setStartDate(newStart);
+
+    // If new start date is after current end date, also update end date
+    if (newStart > endDate) {
+      setEndDate(newStart);
+    }
   };
 
   const handleEndDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newEnd = e.target.value;
-    if (newEnd < startDate) {
-      showError('End date cannot be before start date');
-      return;
-    }
     setEndDate(newEnd);
+
+    // If new end date is before current start date, also update start date
+    if (newEnd < startDate) {
+      setStartDate(newEnd);
+    }
   };
 
   const fetchData = async () => {
@@ -117,6 +134,17 @@ const PayrollProcessing: React.FC = () => {
       // Auto-expand all projects on load
       if (result.grouped_by_project && result.grouped_by_project.length > 0) {
         setExpandedProjects(new Set(result.grouped_by_project.map(p => p.project_id)));
+
+        // Auto-expand all requisitions on load
+        const allRequisitionKeys: string[] = [];
+        result.grouped_by_project.forEach(project => {
+          if (project.requisitions) {
+            project.requisitions.forEach(req => {
+              allRequisitionKeys.push(`${project.project_id}-${req.requisition_id || 'no_req'}`);
+            });
+          }
+        });
+        setExpandedRequisitions(new Set(allRequisitionKeys));
       }
     } else {
       showError(result.message || 'Failed to fetch payroll summary');
@@ -145,11 +173,10 @@ const PayrollProcessing: React.FC = () => {
   };
 
   // Memoize calculations to prevent recalculation on every render
-  const { totalPayroll, totalWorkers, totalHours, totalDays } = useMemo(() => ({
+  const { totalPayroll, totalWorkers, totalHours } = useMemo(() => ({
     totalPayroll: summary.reduce((sum, s) => sum + s.total_cost, 0),
     totalWorkers: summary.length,
-    totalHours: summary.reduce((sum, s) => sum + s.total_hours, 0),
-    totalDays: summary.reduce((sum, s) => sum + s.total_days, 0)
+    totalHours: summary.reduce((sum, s) => sum + s.total_hours, 0)
   }), [summary]);
 
   // Export to PDF
@@ -230,7 +257,6 @@ const PayrollProcessing: React.FC = () => {
               type="date"
               value={startDate}
               onChange={handleStartDateChange}
-              max={endDate}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
             />
           </div>
@@ -245,7 +271,6 @@ const PayrollProcessing: React.FC = () => {
               type="date"
               value={endDate}
               onChange={handleEndDateChange}
-              min={startDate}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
             />
           </div>
@@ -357,35 +382,58 @@ const PayrollProcessing: React.FC = () => {
                       className="overflow-hidden"
                     >
                       {/* Iterate over requisitions */}
-                      {project.requisitions && project.requisitions.map((requisition) => (
-                        <div key={requisition.requisition_id || 'no_req'} className="border-t border-gray-200">
-                          {/* Requisition Header */}
-                          <div className="bg-gradient-to-r from-purple-50 to-blue-50 px-5 py-3 border-b border-purple-200">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="font-semibold text-gray-900">
-                                  <span className="text-purple-600">{requisition.requisition_code}</span>
-                                  <span className="mx-2 text-gray-400">•</span>
-                                  <span>{requisition.work_description}</span>
-                                </p>
-                                <p className="text-sm text-gray-600 mt-1">
-                                  <span className="font-medium">{requisition.skill_required}</span>
-                                  {requisition.site_name && (
-                                    <>
-                                      <span className="mx-2">•</span>
-                                      <span>{requisition.site_name}</span>
-                                    </>
-                                  )}
-                                </p>
-                              </div>
-                              <div className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full border border-purple-200">
-                                <strong>{requisition.workers.length}</strong> / {requisition.workers_count || requisition.workers.length} Workers
-                              </div>
-                            </div>
-                          </div>
+                      {project.requisitions && project.requisitions.map((requisition) => {
+                        const requisitionKey = `${project.project_id}-${requisition.requisition_id || 'no_req'}`;
+                        const isRequisitionExpanded = expandedRequisitions.has(requisitionKey);
 
-                          {/* Workers Table for this Requisition */}
-                          <table className="min-w-full divide-y divide-gray-200">
+                        return (
+                          <div key={requisition.requisition_id || 'no_req'} className="border-t border-gray-200">
+                            {/* Requisition Header - Clickable */}
+                            <button
+                              onClick={() => toggleRequisition(project.project_id, requisition.requisition_id || 'no_req')}
+                              className="w-full bg-gradient-to-r from-purple-50 to-blue-50 px-5 py-3 border-b border-purple-200 hover:from-purple-100 hover:to-blue-100 transition-colors"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  {isRequisitionExpanded ? (
+                                    <ChevronDownIcon className="w-5 h-5 text-purple-600" />
+                                  ) : (
+                                    <ChevronRightIcon className="w-5 h-5 text-purple-600" />
+                                  )}
+                                  <div className="text-left">
+                                    <p className="font-semibold text-gray-900">
+                                      <span className="text-purple-600">{requisition.requisition_code}</span>
+                                      <span className="mx-2 text-gray-400">•</span>
+                                      <span>{requisition.work_description}</span>
+                                    </p>
+                                    <p className="text-sm text-gray-600 mt-1">
+                                      <span className="font-medium">{requisition.skill_required}</span>
+                                      {requisition.site_name && (
+                                        <>
+                                          <span className="mx-2">•</span>
+                                          <span>{requisition.site_name}</span>
+                                        </>
+                                      )}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full border border-purple-200">
+                                  <strong>{requisition.workers.length}</strong> / {requisition.workers_count || requisition.workers.length} Workers
+                                </div>
+                              </div>
+                            </button>
+
+                            {/* Workers Table - Collapsible */}
+                            <AnimatePresence>
+                              {isRequisitionExpanded && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: 'auto', opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="overflow-hidden"
+                                >
+                                  <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
                               <tr>
                                 <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase w-10"></th>
@@ -477,8 +525,12 @@ const PayrollProcessing: React.FC = () => {
                               })}
                             </tbody>
                           </table>
-                        </div>
-                      ))}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })}
                     </motion.div>
                   )}
                 </AnimatePresence>

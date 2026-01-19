@@ -1375,31 +1375,18 @@ def get_boq_planned_vs_actual(boq_id):
                         matching_labour = None
 
                     if matching_labour:
-                        # Use actual if available, otherwise use planned for pending labour
+                        # Only use actual cost if there's actual work done (assigned workers)
+                        # Do NOT include planned cost for unassigned labour in actual spending
                         if matching_labour.get('actual') and matching_labour['actual'].get('total', 0) > 0:
                             lab_cost = Decimal(str(matching_labour['actual']['total']))
-                        else:
-                            # Pending labour - use planned cost
-                            lab_cost = Decimal(str(matching_labour['planned']['total']))
-                        sub_actual_labour_cost += lab_cost
-                        # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
-                        if labour_id:
-                            item_level_labour_ids_processed.add(labour_id)
-                        if labour_role:
-                            item_level_labour_roles_processed.add(labour_role)
-                    else:
-                        # If no tracking data found, use planned from sub_item
-                        lab_cost = Decimal(str(planned_labour_entry.get('total_cost', 0)))
-                        if lab_cost == 0:
-                            lab_hours = Decimal(str(planned_labour_entry.get('hours', 0)))
-                            lab_rate = Decimal(str(planned_labour_entry.get('rate_per_hour', 0)))
-                            lab_cost = lab_hours * lab_rate
-                        sub_actual_labour_cost += lab_cost
-                        # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
-                        if labour_id:
-                            item_level_labour_ids_processed.add(labour_id)
-                        if labour_role:
-                            item_level_labour_roles_processed.add(labour_role)
+                            sub_actual_labour_cost += lab_cost
+                        # else: Skip unassigned labour - don't add to actual costs
+
+                    # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
+                    if labour_id:
+                        item_level_labour_ids_processed.add(labour_id)
+                    if labour_role:
+                        item_level_labour_roles_processed.add(labour_role)
 
                 # Case 2: If this is the first non-CR sub-item and item-level labour hasn't been assigned yet,
                 # assign item-level labour to this sub-item
@@ -1436,31 +1423,19 @@ def get_boq_planned_vs_actual(boq_id):
                             matching_labour = None
 
                         if matching_labour:
-                            # Use actual if available, otherwise use planned for pending labour
+                            # Only use actual cost if there's actual work done (assigned workers)
+                            # Do NOT include planned cost for unassigned labour in actual spending
                             if matching_labour.get('actual') and matching_labour['actual'].get('total', 0) > 0:
                                 lab_cost = Decimal(str(matching_labour['actual']['total']))
-                            else:
-                                # Pending labour - use planned cost
-                                lab_cost = Decimal(str(matching_labour['planned']['total']))
-                            sub_actual_labour_cost += lab_cost
+                                sub_actual_labour_cost += lab_cost
+                            # else: Skip unassigned labour - don't add to actual costs
+
                             # Track this labour to prevent processing in future sub-items
                             if labour_id:
                                 item_level_labour_ids_processed.add(labour_id)
                             if labour_role:
                                 item_level_labour_roles_processed.add(labour_role)
-                        else:
-                            # If no tracking data found, use planned from item
-                            lab_cost = Decimal(str(item_labour_entry.get('total_cost', 0)))
-                            if lab_cost == 0:
-                                lab_hours = Decimal(str(item_labour_entry.get('hours', 0)))
-                                lab_rate = Decimal(str(item_labour_entry.get('rate_per_hour', 0)))
-                                lab_cost = lab_hours * lab_rate
-                            sub_actual_labour_cost += lab_cost
-                            # Track this labour to prevent processing in future sub-items
-                            if labour_id:
-                                item_level_labour_ids_processed.add(labour_id)
-                            if labour_role:
-                                item_level_labour_roles_processed.add(labour_role)
+                        # else: If no tracking data found, skip (don't use planned cost)
 
                     # Mark that item-level labour has been assigned
                     item_level_labour_assigned = True

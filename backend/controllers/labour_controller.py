@@ -343,10 +343,14 @@ def get_workers_by_skill(skill):
 # =============================================================================
 
 def create_requisition():
-    """Site Engineer creates a labour requisition with multiple labour items"""
+    """Site Engineer or Project Manager creates a labour requisition with multiple labour items"""
     try:
         current_user = g.user
         data = request.get_json()
+
+        # Detect if requester is PM or SE
+        user_role = current_user.get('role', '').upper()
+        requester_role = 'PM' if user_role == 'PM' else 'SE'
 
         # Validate required fields
         required = ['project_id', 'site_name', 'required_date', 'labour_items']
@@ -380,6 +384,9 @@ def create_requisition():
                 total_workers = sum(item.get('workers_count', 0) for item in labour_items)
 
                 # Create single requisition with multiple labour items
+                # PM requisitions start as 'pending' (draft), SE requisitions need approval
+                initial_status = 'pending' if requester_role == 'PM' else 'pending'
+
                 requisition = LabourRequisition(
                     requisition_code=requisition_code,
                     project_id=data['project_id'],
@@ -396,7 +403,8 @@ def create_requisition():
                     work_status='pending_assignment',
                     requested_by_user_id=current_user.get('user_id'),
                     requested_by_name=current_user.get('full_name', 'Unknown'),
-                    status='pending',
+                    requester_role=requester_role,  # Track if PM or SE created this
+                    status=initial_status,
                     created_by=current_user.get('full_name', 'System')
                 )
 
@@ -724,6 +732,61 @@ def resubmit_requisition(requisition_id):
     except Exception as e:
         db.session.rollback()
         log.error(f"Error resubmitting requisition: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+def send_to_production(requisition_id):
+    """PM sends a pending (draft) requisition to production for worker assignment"""
+    try:
+        current_user = g.user
+        user_role = current_user.get('role', '').upper()
+
+        # Only PMs can send to production
+        if user_role != 'PM':
+            return jsonify({"error": "Only Project Managers can send requisitions to production"}), 403
+
+        requisition = LabourRequisition.query.filter_by(
+            requisition_id=requisition_id,
+            is_deleted=False
+        ).first()
+
+        if not requisition:
+            return jsonify({"error": "Requisition not found"}), 404
+
+        # Verify this is a PM's requisition
+        if requisition.requester_role != 'PM':
+            return jsonify({"error": "Only PM-created requisitions can be sent to production"}), 400
+
+        # Verify it's in pending status (draft)
+        if requisition.status != 'pending':
+            return jsonify({"error": f"Can only send pending requisitions to production. Current status: {requisition.status}"}), 400
+
+        # Verify PM owns this requisition
+        if requisition.requested_by_user_id != current_user.get('user_id'):
+            return jsonify({"error": "You can only send your own requisitions to production"}), 403
+
+        # Update status to 'approved' - ready for production manager to assign workers
+        requisition.status = 'approved'
+        requisition.approved_by_user_id = current_user.get('user_id')
+        requisition.approved_by_name = current_user.get('full_name', 'Unknown')
+        requisition.approval_date = datetime.utcnow()
+        requisition.last_modified_by = current_user.get('full_name', 'System')
+
+        db.session.commit()
+
+        log.info(f"PM requisition sent to production: {requisition.requisition_code} by {current_user.get('full_name')}")
+
+        # TODO: Send notification to production manager
+
+        return jsonify({
+            "success": True,
+            "message": "Requisition sent to production for worker assignment",
+            "requisition": requisition.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error sending requisition to production: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 

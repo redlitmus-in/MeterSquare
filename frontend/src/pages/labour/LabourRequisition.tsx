@@ -148,6 +148,13 @@ const LabourRequisition: React.FC = () => {
   const [pagination, setPagination] = useState<any>(null);
   const perPage = 15;
 
+  // Get current user role
+  const [userRole, setUserRole] = useState<string>('');
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    setUserRole(user.role?.toUpperCase() || '');
+  }, []);
+
   // Tab counts
   const [tabCounts, setTabCounts] = useState<Record<TabType, number>>({
     pending: 0,
@@ -683,6 +690,28 @@ const LabourRequisition: React.FC = () => {
     );
   };
 
+  // Handle send to production (PM only)
+  const handleSendToProduction = (requisitionId: number) => {
+    showConfirm(
+      'Send to Production',
+      'Send this requisition to Production Manager for worker assignment?',
+      async () => {
+        try {
+          const result = await labourService.sendToProduction(requisitionId);
+          if (result.success) {
+            showSuccess(result.message || 'Requisition sent to production successfully');
+            fetchRequisitions();
+            fetchTabCounts();
+          } else {
+            showError(result.message || 'Failed to send requisition');
+          }
+        } catch (error: any) {
+          showError('Failed to send requisition to production');
+        }
+      }
+    );
+  };
+
   // Update labour item field
   const updateLabourItemField = (index: number, field: string, value: any) => {
     setEditLabourItems(prev => {
@@ -925,6 +954,16 @@ const LabourRequisition: React.FC = () => {
                   <span className="font-semibold text-gray-900 text-sm">{req.requisition_code}</span>
                   {getStatusBadge(req.status)}
                   {req.status === 'approved' && getAssignmentBadge(req.assignment_status)}
+                  {/* Show requester role badge */}
+                  {req.requester_role && (
+                    <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                      req.requester_role === 'PM'
+                        ? 'bg-indigo-100 text-indigo-700'
+                        : 'bg-teal-100 text-teal-700'
+                    }`}>
+                      {req.requester_role === 'PM' ? 'PM Request' : 'SE Request'}
+                    </span>
+                  )}
                   <span className="text-xs text-gray-400 hidden sm:inline">|</span>
                   {req.labour_items && req.labour_items.length > 0 ? (
                     <div className="flex items-center gap-1 flex-wrap">
@@ -965,14 +1004,26 @@ const LabourRequisition: React.FC = () => {
                         <PencilSquareIcon className="w-3.5 h-3.5" />
                         <span className="hidden sm:inline">Edit</span>
                       </button>
-                      <button
-                        onClick={() => handleResendRequisition(req.requisition_id)}
-                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-green-600 border border-green-200 rounded hover:bg-green-50 transition-colors"
-                        title="Send to PM"
-                      >
-                        <PaperAirplaneIcon className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Send to PM</span>
-                      </button>
+                      {/* Show "Send to Production" for PM requisitions, "Send to PM" for SE requisitions */}
+                      {req.requester_role === 'PM' && userRole === 'PM' ? (
+                        <button
+                          onClick={() => handleSendToProduction(req.requisition_id)}
+                          className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-purple-600 border border-purple-200 rounded hover:bg-purple-50 transition-colors"
+                          title="Send to Production"
+                        >
+                          <PaperAirplaneIcon className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Send to Production</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleResendRequisition(req.requisition_id)}
+                          className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-green-600 border border-green-200 rounded hover:bg-green-50 transition-colors"
+                          title="Send to PM"
+                        >
+                          <PaperAirplaneIcon className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Send to PM</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDeleteRequisition(req.requisition_id)}
                         className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50 transition-colors"

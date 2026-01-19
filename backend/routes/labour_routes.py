@@ -26,6 +26,7 @@ from controllers.labour_controller import (
     get_requisitions_by_project,
     update_requisition,
     resubmit_requisition,
+    send_to_production,
     delete_requisition,
     resend_requisition,
     # Step 3: Approvals
@@ -166,6 +167,13 @@ def edit_requisition(requisition_id):
 def resubmit_req(requisition_id):
     """Resubmit/update requisition with edits (Site Engineer)"""
     return resubmit_requisition(requisition_id)
+
+
+@labour_routes.route('/requisitions/<int:requisition_id>/send-to-production', methods=['POST'])
+@jwt_required
+def send_req_to_production(requisition_id):
+    """Send PM's pending requisition to production for worker assignment (Project Manager only)"""
+    return send_to_production(requisition_id)
 
 
 @labour_routes.route('/requisitions/<int:requisition_id>', methods=['DELETE'])

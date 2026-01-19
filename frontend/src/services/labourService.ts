@@ -84,6 +84,7 @@ export interface LabourRequisition {
   work_status?: 'pending_assignment' | 'assigned' | 'in_progress' | 'completed';
   requested_by_user_id: number;
   requested_by_name: string;
+  requester_role?: 'SE' | 'PM';  // Who created the requisition
   request_date: string;
   status: 'pending' | 'approved' | 'rejected';
   approved_by_user_id?: number;
@@ -628,6 +629,26 @@ class LabourService {
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to reject requisition'
+      };
+    }
+  }
+
+  /**
+   * Send PM's pending requisition to production (PM only)
+   */
+  async sendToProduction(requisitionId: number): Promise<{ success: boolean; data?: LabourRequisition; message?: string }> {
+    try {
+      const response = await apiClient.post(`/labour/requisitions/${requisitionId}/send-to-production`);
+      return {
+        success: true,
+        data: response.data.requisition,
+        message: response.data.message || 'Requisition sent to production successfully'
+      };
+    } catch (error: any) {
+      console.error('Error sending requisition to production:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to send requisition to production'
       };
     }
   }

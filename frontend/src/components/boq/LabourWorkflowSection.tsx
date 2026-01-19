@@ -104,28 +104,6 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
 }) => {
   const [expandedRequisitions, setExpandedRequisitions] = useState<Set<number>>(new Set());
 
-  // Calculate totals for footer row
-  const totals = React.useMemo(() => {
-    let totalPlannedHours = 0;
-    let totalPlannedCost = 0;
-    let totalActualHours = 0;
-    let totalActualCost = 0;
-
-    labourData.forEach(lab => {
-      totalPlannedHours += lab.planned.hours || 0;
-      totalPlannedCost += lab.planned.total || 0;
-      if (lab.actual) {
-        totalActualHours += lab.actual.hours || 0;
-        totalActualCost += lab.actual.total || 0;
-      }
-    });
-
-    const costVariance = totalActualCost - totalPlannedCost;
-    const costVarianceStatus = costVariance > 0 ? 'overrun' : costVariance < 0 ? 'saved' : 'neutral';
-
-    return { totalPlannedHours, totalPlannedCost, totalActualHours, totalActualCost, costVariance, costVarianceStatus };
-  }, [labourData]);
-
   const toggleRequisition = (reqId: number) => {
     const newExpanded = new Set(expandedRequisitions);
     if (newExpanded.has(reqId)) {
@@ -239,10 +217,12 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
               const actualTotal = lab.actual?.total ?? 0;
 
               // Calculate variance from planned vs actual
+              // Only show variance for labour roles that have actual hours (assigned workers)
               const plannedTotal = lab.planned?.total ?? 0;
-              const varianceAmount = actualTotal - plannedTotal;
-              const isOverrun = varianceAmount > 0;
-              const isSaved = varianceAmount < 0;
+              const hasActualWork = actualHours > 0;
+              const varianceAmount = hasActualWork ? actualTotal - plannedTotal : 0;
+              const isOverrun = hasActualWork && varianceAmount > 0;
+              const isSaved = hasActualWork && varianceAmount < 0;
 
               return (
                 <tr key={idx} className={`border-t border-gray-200 hover:bg-gray-50 transition-colors ${
@@ -292,7 +272,7 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
                           <span className={`font-semibold ${
                             isOverrun ? 'text-red-600' : isSaved ? 'text-green-600' : 'text-gray-700'
                           }`}>
-                            {varianceAmount !== 0 ? (isOverrun ? '+' : '') + formatCurrency(varianceAmount) : '-'}
+                            {hasActualWork && varianceAmount !== 0 ? (isOverrun ? '+' : '') + formatCurrency(varianceAmount) : '-'}
                           </span>
                         </td>
                       </>
@@ -301,34 +281,6 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
               );
             })}
           </tbody>
-
-          {/* Table Footer with Totals */}
-          {showActual && (
-            <tfoot className="bg-gray-800 text-white">
-              <tr>
-                <td className="py-3 px-4 font-bold text-sm">
-                  TOTAL ({labourData.length} {labourData.length === 1 ? 'Role' : 'Roles'})
-                </td>
-                {showPlanned && (
-                  <>
-                    <td className="py-3 px-3 text-right font-bold">{totals.totalPlannedHours.toFixed(1)}</td>
-                    <td className="py-3 px-3 text-right font-bold">-</td>
-                    <td className="py-3 px-3 text-right font-bold">{formatCurrency(totals.totalPlannedCost)}</td>
-                  </>
-                )}
-                <td className="py-3 px-3 text-right font-bold">{totals.totalActualHours.toFixed(1)}</td>
-                <td className="py-3 px-3 text-right font-bold">-</td>
-                <td className="py-3 px-3 text-right font-bold">{formatCurrency(totals.totalActualCost)}</td>
-                <td className="py-3 px-3 text-right">
-                  <span className={`font-bold ${
-                    totals.costVarianceStatus === 'overrun' ? 'text-red-300' : totals.costVarianceStatus === 'saved' ? 'text-green-300' : 'text-white'
-                  }`}>
-                    {totals.costVariance !== 0 ? (totals.costVarianceStatus === 'overrun' ? '+' : '') + formatCurrency(totals.costVariance) : '-'}
-                  </span>
-                </td>
-              </tr>
-            </tfoot>
-          )}
         </table>
       </div>
 

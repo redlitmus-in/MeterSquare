@@ -38,9 +38,10 @@ class LabourRequisition(db.Model):
     # Work completion status (tracks labour work progress)
     work_status = db.Column(db.String(50), default='pending_assignment', index=True)  # pending_assignment, assigned, in_progress, completed
 
-    # Requester info (Site Engineer)
+    # Requester info (Site Engineer or Project Manager)
     requested_by_user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False, index=True)
     requested_by_name = db.Column(db.String(255), nullable=False)
+    requester_role = db.Column(db.String(10), default='SE', index=True)  # 'SE' or 'PM'
     request_date = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Approval workflow (Step 3 - Project Manager)
@@ -107,6 +108,7 @@ class LabourRequisition(db.Model):
             'work_status': self.work_status,
             'requested_by_user_id': self.requested_by_user_id,
             'requested_by_name': self.requested_by_name,
+            'requester_role': self.requester_role,
             'request_date': self.request_date.isoformat() if self.request_date else None,
             'status': self.status,
             'approved_by_user_id': self.approved_by_user_id,

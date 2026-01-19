@@ -163,7 +163,9 @@
       "Bash(so that who are requested and payment lock all they can see easily\".\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(PGPASSWORD='MeterSquare@123' psql:*)",
       "Bash(./venv/bin/python:*)",
-      "Bash(python test_labour_display.py:*)"
+      "Bash(python test_labour_display.py:*)",
+      "Bash(/usr/bin/python3:*)",
+      "Bash(python migrations/add_requester_role_to_labour_requisitions.py:*)"
     ],
     "deny": [],
     "ask": []
