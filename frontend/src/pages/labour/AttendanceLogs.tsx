@@ -4,7 +4,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { labourService, DailyAttendance } from '@/services/labourService';
+import { labourService, DailyAttendance, LabourRequisition } from '@/services/labourService';
 import { apiClient } from '@/api/config';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import {
@@ -14,7 +14,8 @@ import {
   UserGroupIcon,
   BuildingOfficeIcon,
   CalendarDaysIcon,
-  ChevronDownIcon
+  ChevronDownIcon,
+  WrenchScrewdriverIcon
 } from '@heroicons/react/24/outline';
 
 // Project interface
@@ -22,6 +23,12 @@ interface Project {
   project_id: number;
   project_name: string;
   project_code: string;
+}
+
+// Labour role for dropdown
+interface LabourRole {
+  role: string;
+  requisition_code?: string;
 }
 
 const AttendanceLogs: React.FC = () => {
@@ -33,6 +40,12 @@ const AttendanceLogs: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [processing, setProcessing] = useState<number | null>(null);
   const [summary, setSummary] = useState<any>(null);
+
+  // Labour role selection for clock-in
+  const [labourRoles, setLabourRoles] = useState<LabourRole[]>([]);
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [pendingClockIn, setPendingClockIn] = useState<{ workerId: number; hourlyRate: number } | null>(null);
+  const [selectedRole, setSelectedRole] = useState<string>('');
 
   // Fetch SE's assigned projects
   const fetchProjects = async () => {
@@ -65,6 +78,63 @@ const AttendanceLogs: React.FC = () => {
     setLoading(false);
   };
 
+  // Fetch labour roles from project requisitions
+  const fetchLabourRoles = async () => {
+    if (!selectedProject) return;
+    const result = await labourService.getRequisitionsByProject(selectedProject.project_id);
+    if (result.success) {
+      // Extract unique labour roles from approved requisitions
+      const roles: LabourRole[] = [];
+      const seenRoles = new Set<string>();
+
+      result.data
+        .filter((req: LabourRequisition) => req.status === 'approved')
+        .forEach((req: LabourRequisition) => {
+          // Handle new JSONB labour_items array
+          if (req.labour_items && Array.isArray(req.labour_items)) {
+            req.labour_items.forEach((item) => {
+              const role = item.skill_required || item.work_description;
+              if (role && !seenRoles.has(role.toLowerCase())) {
+                seenRoles.add(role.toLowerCase());
+                roles.push({
+                  role: role,
+                  requisition_code: req.requisition_code
+                });
+              }
+            });
+          }
+          // Handle deprecated single fields
+          else if (req.skill_required && !seenRoles.has(req.skill_required.toLowerCase())) {
+            seenRoles.add(req.skill_required.toLowerCase());
+            roles.push({
+              role: req.skill_required,
+              requisition_code: req.requisition_code
+            });
+          }
+        });
+
+      setLabourRoles(roles);
+    } else {
+      console.warn('Could not fetch labour roles:', result.message);
+      setLabourRoles([]);
+    }
+  };
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    if (!showRoleModal) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowRoleModal(false);
+        setPendingClockIn(null);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [showRoleModal]);
+
   useEffect(() => {
     fetchProjects();
   }, []);
@@ -72,10 +142,33 @@ const AttendanceLogs: React.FC = () => {
   useEffect(() => {
     if (selectedProject) {
       fetchAttendance();
+      fetchLabourRoles();
     }
   }, [selectedProject, selectedDate]);
 
-  const handleClockIn = async (workerId: number, hourlyRate: number) => {
+  // Show role selection modal before clock-in
+  const initiateClockIn = (workerId: number, hourlyRate: number) => {
+    if (!selectedProject) return;
+    if (labourRoles.length > 0) {
+      // Show role selection modal
+      setPendingClockIn({ workerId, hourlyRate });
+      setSelectedRole(labourRoles[0]?.role || '');
+      setShowRoleModal(true);
+    } else {
+      // No roles available, clock in without role
+      handleClockIn(workerId, hourlyRate, undefined);
+    }
+  };
+
+  // Confirm clock-in with selected role
+  const confirmClockIn = () => {
+    if (!pendingClockIn) return;
+    setShowRoleModal(false);
+    handleClockIn(pendingClockIn.workerId, pendingClockIn.hourlyRate, selectedRole || undefined);
+    setPendingClockIn(null);
+  };
+
+  const handleClockIn = async (workerId: number, hourlyRate: number, labourRole?: string) => {
     if (!selectedProject) return;
     setProcessing(workerId);
     const now = new Date().toISOString();
@@ -84,7 +177,8 @@ const AttendanceLogs: React.FC = () => {
       project_id: selectedProject.project_id,
       attendance_date: selectedDate,
       clock_in_time: now,
-      hourly_rate: hourlyRate
+      hourly_rate: hourlyRate,
+      labour_role: labourRole
     });
     if (result.success) {
       showSuccess('Worker clocked in');
@@ -251,6 +345,7 @@ const AttendanceLogs: React.FC = () => {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Worker</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clock In</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clock Out</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
@@ -273,6 +368,15 @@ const AttendanceLogs: React.FC = () => {
                       <p className="font-medium text-gray-900">{record.worker_name}</p>
                       <p className="text-sm text-gray-500">{record.worker_code}</p>
                     </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {record.labour_role ? (
+                      <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                        {record.labour_role}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 text-sm">-</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">
                     {formatTime(record.clock_in_time)}
@@ -301,7 +405,7 @@ const AttendanceLogs: React.FC = () => {
                   <td className="px-4 py-3">
                     {!record.clock_in_time ? (
                       <button
-                        onClick={() => handleClockIn(record.worker_id, record.hourly_rate)}
+                        onClick={() => initiateClockIn(record.worker_id, record.hourly_rate)}
                         disabled={processing === record.worker_id}
                         className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50"
                       >
@@ -325,6 +429,74 @@ const AttendanceLogs: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Labour Role Selection Modal */}
+      {showRoleModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="role-modal-title"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4"
+          >
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                  <WrenchScrewdriverIcon className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h3 id="role-modal-title" className="text-lg font-semibold text-gray-900">Select Labour Role</h3>
+                  <p className="text-sm text-gray-500">Choose the work type for this attendance</p>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <label htmlFor="labour-role-select" className="block text-sm font-medium text-gray-700 mb-2">
+                  Labour Role / Skill
+                </label>
+                <select
+                  id="labour-role-select"
+                  value={selectedRole}
+                  onChange={(e) => setSelectedRole(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  {labourRoles.map((role) => (
+                    <option key={`${role.role}-${role.requisition_code}`} value={role.role}>
+                      {role.role}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  This links the attendance to the correct BOQ labour item for cost tracking
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowRoleModal(false);
+                    setPendingClockIn(null);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmClockIn}
+                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center gap-2"
+                >
+                  <PlayIcon className="w-4 h-4" />
+                  Clock In
+                </button>
+              </div>
+            </div>
+          </motion.div>
         </div>
       )}
     </div>

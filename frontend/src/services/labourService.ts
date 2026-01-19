@@ -164,6 +164,7 @@ export interface DailyAttendance {
   project_name?: string;
   assignment_id?: number;
   attendance_date: string;
+  labour_role?: string;  // Links to BOQ labour item for cost tracking
   clock_in_time?: string;
   clock_out_time?: string;
   total_hours?: number;
@@ -197,6 +198,7 @@ export interface ClockInData {
   attendance_date: string;
   clock_in_time: string;
   hourly_rate: number;
+  labour_role?: string;  // Links to BOQ labour item for cost tracking
 }
 
 export interface PayrollSummary {

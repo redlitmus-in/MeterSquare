@@ -1648,6 +1648,11 @@ def clock_in_worker():
         project_id = data.get('project_id')
         attendance_date = data.get('attendance_date', date.today().isoformat())
         clock_in_time = data.get('clock_in_time')  # ISO format or HH:MM
+        labour_role = data.get('labour_role')  # Labour role/skill for BOQ cost tracking
+
+        # Sanitize labour_role if provided
+        if labour_role:
+            labour_role = str(labour_role).strip()[:100]
 
         if not worker_id or not project_id:
             return jsonify({"error": "worker_id and project_id are required"}), 400
@@ -1666,6 +1671,9 @@ def clock_in_worker():
             if existing.clock_in_time:
                 return jsonify({"error": "Worker already clocked in for this day"}), 400
             attendance = existing
+            # Update labour_role if provided and not already set
+            if labour_role and not attendance.labour_role:
+                attendance.labour_role = labour_role
         else:
             # Get worker's hourly rate
             worker = Worker.query.get(worker_id)
@@ -1677,6 +1685,7 @@ def clock_in_worker():
                 project_id=project_id,
                 attendance_date=target_date,
                 hourly_rate=worker.hourly_rate,
+                labour_role=labour_role,  # Link to BOQ labour item for cost tracking
                 approval_status='pending',  # Will be reviewed by PM after completion
                 entered_by_user_id=current_user.get('user_id'),
                 entered_by_role=current_user.get('role', 'SE'),

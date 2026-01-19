@@ -331,6 +331,13 @@ def get_boq_planned_vs_actual(boq_id):
                 # This handles the case where attendance has requisition_id but no assignment_id
                 req_attendance_records = attendance_by_requisition.get(req.requisition_id, [])
 
+                # Build a lookup of labour roles from labour_items (case-insensitive)
+                labour_role_lookup = {}
+                for labour_item in labour_items_to_process:
+                    role_name = labour_item.get('skill_required') or labour_item.get('labour_role')
+                    if role_name:
+                        labour_role_lookup[role_name.lower().strip()] = role_name
+
                 # Process each attendance record directly
                 for attendance in req_attendance_records:
                     # Get worker info
@@ -342,11 +349,51 @@ def get_boq_planned_vs_actual(boq_id):
                     cost = Decimal(str(attendance.total_cost or 0))
                     rate = Decimal(str(attendance.hourly_rate or 0))
 
-                    # Add to aggregates using primary_labour_role
-                    if primary_labour_role:
-                        labour_aggregates[primary_labour_role]['total_hours'] += hours
-                        labour_aggregates[primary_labour_role]['total_cost'] += cost
-                        labour_aggregates[primary_labour_role]['work_entries'].append({
+                    # Determine the labour role for this attendance record
+                    # Priority: 1) attendance.labour_role (direct), 2) assignment's role_at_site, 3) worker's skills, 4) primary_labour_role
+                    determined_labour_role = None
+
+                    # FIRST: Check if attendance record has labour_role set directly
+                    if hasattr(attendance, 'labour_role') and attendance.labour_role:
+                        # Check if it matches any labour_item (case-insensitive)
+                        role_key = attendance.labour_role.lower().strip()
+                        if role_key in labour_role_lookup:
+                            determined_labour_role = labour_role_lookup[role_key]
+                        else:
+                            determined_labour_role = attendance.labour_role
+
+                    # Try to get role from assignment
+                    if not determined_labour_role and attendance.assignment_id:
+                        assignment = next(
+                            (a for a in assignments_with_data if a.assignment_id == attendance.assignment_id),
+                            None
+                        )
+                        if assignment and assignment.role_at_site:
+                            # Check if role_at_site matches any labour_item
+                            role_key = assignment.role_at_site.lower().strip()
+                            if role_key in labour_role_lookup:
+                                determined_labour_role = labour_role_lookup[role_key]
+                            else:
+                                determined_labour_role = assignment.role_at_site
+
+                    # Try to match worker's skills to labour_items
+                    if not determined_labour_role and worker and worker.skills:
+                        for skill in worker.skills:
+                            skill_key = skill.lower().strip() if isinstance(skill, str) else ''
+                            if skill_key in labour_role_lookup:
+                                determined_labour_role = labour_role_lookup[skill_key]
+                                break
+
+                    # Fallback to primary_labour_role
+                    if not determined_labour_role:
+                        determined_labour_role = primary_labour_role
+
+                    # Add to aggregates using determined_labour_role
+                    if determined_labour_role:
+                        labour_aggregates[determined_labour_role]['total_hours'] += hours
+                        labour_aggregates[determined_labour_role]['total_cost'] += cost
+                        labour_aggregates[determined_labour_role]['labour_role'] = determined_labour_role
+                        labour_aggregates[determined_labour_role]['work_entries'].append({
                             'work_date': attendance.attendance_date.isoformat() if attendance.attendance_date else None,
                             'hours': float(hours),
                             'rate_per_hour': float(rate),
@@ -354,6 +401,7 @@ def get_boq_planned_vs_actual(boq_id):
                             'worker_name': worker.full_name if worker else 'Unknown',
                             'notes': attendance.entry_notes
                         })
+                        print(f"DEBUG:   - Worker {worker.full_name if worker else 'Unknown'}: {hours}h @ ₹{cost} -> {determined_labour_role}")
 
         # ALSO fetch old labour_tracking data for backward compatibility
         # Some BOQs may have data in the deprecated labour_tracking table
@@ -1046,8 +1094,9 @@ def get_boq_planned_vs_actual(boq_id):
 
             for planned_lab in all_labour:
                 master_labour_id = planned_lab.get('master_labour_id')
+                planned_labour_role = planned_lab.get('labour_role', '').lower().strip()
 
-                # Find actual labour tracking for this role - Try exact match first
+                # Find actual labour tracking for this role - Try exact match first by master_labour_id and master_item_id
                 actual_lab = next(
                     (al for al in actual_labour
                      if al.master_labour_id == master_labour_id
@@ -1055,11 +1104,19 @@ def get_boq_planned_vs_actual(boq_id):
                     None
                 )
 
-                # Fallback: match by labour_id only
-                if not actual_lab:
+                # Fallback 1: match by master_labour_id only
+                if not actual_lab and master_labour_id:
                     actual_lab = next(
                         (al for al in actual_labour
                          if al.master_labour_id == master_labour_id),
+                        None
+                    )
+
+                # Fallback 2: match by labour_role name (case-insensitive)
+                if not actual_lab and planned_labour_role:
+                    actual_lab = next(
+                        (al for al in actual_labour
+                         if al.labour_role and al.labour_role.lower().strip() == planned_labour_role),
                         None
                     )
 

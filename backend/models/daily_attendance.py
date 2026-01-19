@@ -22,6 +22,10 @@ class DailyAttendance(db.Model):
     requisition_id = db.Column(db.Integer, db.ForeignKey("labour_requisitions.requisition_id"), nullable=True, index=True)
     attendance_date = db.Column(db.Date, nullable=False, index=True)
 
+    # Labour role tracking - which labour type/skill the worker performed this day
+    # This links attendance to specific labour items in BOQ for accurate cost tracking
+    labour_role = db.Column(db.String(100), nullable=True, index=True)
+
     # Clock times
     clock_in_time = db.Column(db.DateTime, nullable=True)
     clock_out_time = db.Column(db.DateTime, nullable=True)
@@ -121,6 +125,7 @@ class DailyAttendance(db.Model):
             'project_name': self.project.project_name if self.project else None,
             'assignment_id': self.assignment_id,
             'requisition_id': self.requisition_id,
+            'labour_role': self.labour_role,
             'attendance_date': self.attendance_date.isoformat() if self.attendance_date else None,
             'clock_in_time': self.clock_in_time.isoformat() if self.clock_in_time else None,
             'clock_out_time': self.clock_out_time.isoformat() if self.clock_out_time else None,
