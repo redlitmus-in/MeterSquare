@@ -348,9 +348,14 @@ def create_requisition():
         current_user = g.user
         data = request.get_json()
 
-        # Detect if requester is PM or SE
-        user_role = current_user.get('role', '').upper()
-        requester_role = 'PM' if user_role == 'PM' else 'SE'
+        # Detect if requester is PM or SE - ALWAYS use session role, NEVER trust request body
+        # This is critical for security - malicious SE could send requester_role='PM' to bypass approval
+        user_role = normalize_role(current_user.get('role', ''))
+        requester_role = 'PM' if user_role in ['pm', 'projectmanager'] else 'SE'
+
+        # Ignore any requester_role from request body for security
+        if data.get('requester_role'):
+            log.warning(f"Ignoring requester_role from request body. Using session role: {requester_role}")
 
         # Validate required fields
         required = ['project_id', 'site_name', 'required_date', 'labour_items']
@@ -384,8 +389,11 @@ def create_requisition():
                 total_workers = sum(item.get('workers_count', 0) for item in labour_items)
 
                 # Create single requisition with multiple labour items
-                # PM requisitions start as 'pending' (draft), SE requisitions need approval
-                initial_status = 'pending' if requester_role == 'PM' else 'pending'
+                # Status Flow:
+                # - Both PM and SE requisitions: 'pending' (draft, must be manually sent)
+                # - PM must manually send to Production Manager (no auto-approval)
+                # - SE must send to PM first, then PM sends to Production Manager
+                initial_status = 'pending'
 
                 requisition = LabourRequisition(
                     requisition_code=requisition_code,
@@ -739,10 +747,10 @@ def send_to_production(requisition_id):
     """PM sends a pending (draft) requisition to production for worker assignment"""
     try:
         current_user = g.user
-        user_role = current_user.get('role', '').upper()
+        user_role = normalize_role(current_user.get('role', ''))
 
         # Only PMs can send to production
-        if user_role != 'PM':
+        if user_role not in ['pm', 'projectmanager']:
             return jsonify({"error": "Only Project Managers can send requisitions to production"}), 403
 
         requisition = LabourRequisition.query.filter_by(
@@ -895,7 +903,23 @@ def resend_requisition(requisition_id):
 # =============================================================================
 
 def get_pending_requisitions():
-    """Get requisitions for PM with optional status filter, filtered by user's assigned projects"""
+    """
+    Get requisitions for PM with optional status filter, filtered by user's assigned projects.
+
+    Status Flow:
+    1. SE creates requisition -> status: 'pending' (draft on SE side)
+    2. SE sends to PM -> status: 'send_to_pm' (visible in PM's "SE Pending" tab)
+    3. PM approves -> status: 'approved'
+    4. PM rejects -> status: 'rejected'
+    5. PM creates requisition -> status: 'pending' (draft in PM's "My Pending" tab)
+    6. PM manually sends to Production Manager -> status changes appropriately
+
+    Query Parameters:
+    - status: 'pending' (for send_to_pm), 'approved', 'rejected'
+    - project_id: Filter by specific project
+    - page: Page number for pagination
+    - per_page: Items per page (max 100)
+    """
     try:
         current_user = g.user
         user_id = current_user.get('user_id')
@@ -1062,7 +1086,12 @@ def get_pending_requisitions():
 
 
 def approve_requisition(requisition_id):
-    """PM approves a requisition"""
+    """
+    PM approves a requisition.
+
+    Only requisitions with status='send_to_pm' can be approved.
+    This ensures SE has explicitly sent the requisition for PM approval.
+    """
     try:
         current_user = g.user
 
@@ -1074,9 +1103,18 @@ def approve_requisition(requisition_id):
         if not requisition:
             return jsonify({"error": "Requisition not found"}), 404
 
-        # Allow approving both 'pending' and 'send_to_pm' status
-        if requisition.status not in ['pending', 'send_to_pm']:
-            return jsonify({"error": "Requisition is not pending or already processed"}), 400
+        # Only approve requisitions that have been sent to PM
+        if requisition.status != 'send_to_pm':
+            error_msg = "Requisition cannot be approved"
+            if requisition.status == 'pending':
+                error_msg = "This requisition is still in draft state and hasn't been sent to PM for approval"
+            elif requisition.status == 'approved':
+                error_msg = "This requisition has already been approved"
+            elif requisition.status == 'rejected':
+                error_msg = "This requisition has already been rejected"
+
+            log.warning(f"Attempt to approve requisition {requisition_id} with invalid status: {requisition.status}")
+            return jsonify({"error": error_msg}), 400
 
         requisition.status = 'approved'
         requisition.approved_by_user_id = current_user.get('user_id')
@@ -1103,7 +1141,12 @@ def approve_requisition(requisition_id):
 
 
 def reject_requisition(requisition_id):
-    """PM rejects a requisition"""
+    """
+    PM rejects a requisition.
+
+    Only requisitions with status='send_to_pm' can be rejected.
+    This ensures SE has explicitly sent the requisition for PM review.
+    """
     try:
         current_user = g.user
         data = request.get_json()
@@ -1120,9 +1163,18 @@ def reject_requisition(requisition_id):
         if not requisition:
             return jsonify({"error": "Requisition not found"}), 404
 
-        # Allow rejecting both 'pending' and 'send_to_pm' status
-        if requisition.status not in ['pending', 'send_to_pm']:
-            return jsonify({"error": "Requisition is not pending or already processed"}), 400
+        # Only reject requisitions that have been sent to PM
+        if requisition.status != 'send_to_pm':
+            error_msg = "Requisition cannot be rejected"
+            if requisition.status == 'pending':
+                error_msg = "This requisition is still in draft state and hasn't been sent to PM for review"
+            elif requisition.status == 'approved':
+                error_msg = "This requisition has already been approved"
+            elif requisition.status == 'rejected':
+                error_msg = "This requisition has already been rejected"
+
+            log.warning(f"Attempt to reject requisition {requisition_id} with invalid status: {requisition.status}")
+            return jsonify({"error": error_msg}), 400
 
         requisition.status = 'rejected'
         requisition.approved_by_user_id = current_user.get('user_id')

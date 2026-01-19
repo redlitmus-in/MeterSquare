@@ -752,6 +752,33 @@ const ProductionManagerRoute: React.FC<{ children: React.ReactNode }> = ({ child
   return <>{children}</>;
 };
 
+// Labour Requisition Route - For SE and PM (both can create requisitions)
+const LabourRequisitionRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuthStore();
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+
+  // Allow Site Engineer, Project Manager, MEP, Technical Director, and Admin
+  const isAuthorized =
+    userRoleLower === 'site engineer' ||
+    userRoleLower === 'siteengineer' ||
+    userRoleLower === 'site_engineer' ||
+    userRoleLower === 'project manager' ||
+    userRoleLower === 'projectmanager' ||
+    userRoleLower === 'project_manager' ||
+    userRoleLower === 'mep' ||
+    userRoleLower === 'mep manager' ||
+    userRoleLower === 'technical director' ||
+    userRoleLower === 'technicaldirector' ||
+    userRoleLower === 'admin';
+
+  if (!isAuthorized) {
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
 // Admin Only Route Component
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuthStore();
@@ -1094,11 +1121,13 @@ function App() {
               </SiteEngineerRoute>
             } />
 
-            {/* Labour Management Routes - Site Engineer (Steps 2, 5, 6) */}
+            {/* Labour Management Routes - Site Engineer & Project Manager (Steps 2, 5, 6) */}
+            {/* SE: Create requisitions for PM approval */}
+            {/* PM: Create requisitions that go directly to Production */}
             <Route path="labour/requisitions" element={
-              <SiteEngineerRoute>
+              <LabourRequisitionRoute>
                 <LabourRequisition />
-              </SiteEngineerRoute>
+              </LabourRequisitionRoute>
             } />
             <Route path="labour/arrivals" element={
               <SiteEngineerRoute>
