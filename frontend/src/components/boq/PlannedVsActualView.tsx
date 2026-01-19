@@ -666,32 +666,51 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                               {formatCurrency(data.summary.combined_subtotal || data.summary.discount_details.client_cost_before_discount)} → {formatCurrency(data.summary.grand_total_with_preliminaries || data.summary.discount_details.grand_total_after_discount)}
                             </p>
                           </div>
-                          <div className="bg-white rounded p-2 border border-gray-300">
-                            <p className="text-gray-600 mb-1">Internal Cost (Actual Spending):</p>
-                            <p className="font-bold text-red-700">{formatCurrency(data.summary.actual_spending || data.summary.planned_spending || 0)}</p>
-                          </div>
-                          <div className="bg-white rounded p-2 border border-gray-300">
-                            <p className="text-gray-600 mb-1">Total Margin:</p>
-                            <p className={`font-bold ${
-                              (data.summary.negotiable_margin || 0) >= 0
-                                ? 'text-green-700'
-                                : 'text-red-700'
-                            }`}>
-                              {formatCurrency((data.summary.combined_subtotal || data.summary.discount_details.client_cost_before_discount) - (data.summary.actual_spending || 0))} → {formatCurrency(data.summary.negotiable_margin || 0)}
-                            </p>
-                          </div>
-                          <div className="bg-white rounded p-2 border border-gray-300">
-                            <p className="text-gray-600 mb-1">Profit Margin %:</p>
-                            <p className={`font-bold ${
-                              (data.summary.negotiable_margin || 0) >= 0
-                                ? 'text-green-700'
-                                : 'text-red-700'
-                            }`}>
-                              {((((data.summary.combined_subtotal || data.summary.discount_details.client_cost_before_discount) - (data.summary.actual_spending || 0)) / (data.summary.combined_subtotal || data.summary.discount_details.client_cost_before_discount)) * 100).toFixed(1)}% → {(((data.summary.negotiable_margin || 0) / (data.summary.grand_total_with_preliminaries || 1)) * 100).toFixed(1)}%
-                            </p>
-                          </div>
+                          {(() => {
+                            // Calculate total planned spending the same way as in the summary section
+                            const totalPlannedSpendingWithOP = totals.planned_materials + totals.planned_labour +
+                              (data.summary.total_planned_miscellaneous || 0) +
+                              ((data.summary.total_planned_overhead || 0) + (data.summary.total_planned_profit || 0)) +
+                              (data.summary.total_planned_transport || 0);
+
+                            const clientCostBeforeDiscount = data.summary.combined_subtotal || data.summary.discount_details.client_cost_before_discount;
+                            const clientCostAfterDiscount = data.summary.discount_details.grand_total_after_discount || 0;
+
+                            // Negotiable Margin calculations
+                            const negotiableMarginBefore = clientCostBeforeDiscount - totalPlannedSpendingWithOP;
+                            const negotiableMarginAfter = clientCostAfterDiscount - totalPlannedSpendingWithOP;
+
+                            // Profit margin percentages
+                            const profitMarginPercentBefore = ((negotiableMarginBefore / clientCostBeforeDiscount) * 100).toFixed(1);
+                            const profitMarginPercentAfter = ((negotiableMarginAfter / clientCostAfterDiscount) * 100).toFixed(1);
+
+                            return (
+                              <>
+                                <div className="bg-white rounded p-2 border border-gray-300">
+                                  <p className="text-gray-600 mb-1">Internal Cost (Planned Spending):</p>
+                                  <p className="font-bold text-red-700">{formatCurrency(totalPlannedSpendingWithOP)}</p>
+                                </div>
+                                <div className="bg-white rounded p-2 border border-gray-300">
+                                  <p className="text-gray-600 mb-1">Total Margin:</p>
+                                  <p className={`font-bold ${
+                                    negotiableMarginAfter >= 0 ? 'text-green-700' : 'text-red-700'
+                                  }`}>
+                                    {formatCurrency(negotiableMarginBefore)} → {formatCurrency(negotiableMarginAfter)}
+                                  </p>
+                                </div>
+                                <div className="bg-white rounded p-2 border border-gray-300">
+                                  <p className="text-gray-600 mb-1">Profit Margin %:</p>
+                                  <p className={`font-bold ${
+                                    negotiableMarginAfter >= 0 ? 'text-green-700' : 'text-red-700'
+                                  }`}>
+                                    {profitMarginPercentBefore}% → {profitMarginPercentAfter}%
+                                  </p>
+                                </div>
+                              </>
+                            );
+                          })()}
                         </div>
-                        {(((data.summary.negotiable_margin || 0) / (data.summary.grand_total_with_preliminaries || 1)) < 0.15) && (
+                        {((((data.summary.discount_details.grand_total_after_discount || 0) - (data.summary.planned_spending || 0)) / (data.summary.discount_details.grand_total_after_discount || 1)) < 0.15) && (
                           <div className="mt-3 bg-yellow-50 border border-yellow-300 rounded p-2">
                             <p className="text-xs text-yellow-800">
                               <strong>Warning:</strong> Profit margin is below recommended 15%. This discount significantly reduces profitability.
@@ -985,8 +1004,12 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       <span className="text-yellow-900 font-semibold">Actual Spending:</span>
                       <span className="font-bold text-yellow-900">{formatCurrency(item.actual.spending || 0)}</span>
                     </div>
-                    <div className="text-[10px] text-yellow-700 mt-1 italic">
+                    <div className="text-[10px] text-yellow-800 mt-1 italic bg-yellow-100 px-2 py-1 rounded">
+                      <strong>Formula:</strong> Actual Spending = Materials + Labour + Misc + Transport
+                      <br />
                       = {formatCurrency(item.actual.materials_total)} + {formatCurrency(item.actual.labour_total)} + {formatCurrency(item.actual.miscellaneous_amount || 0)} + {formatCurrency(item.actual.transport_amount || 0)}
+                      <br />
+                      = {formatCurrency(item.actual.spending || 0)}
                     </div>
                   </div>
                   <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-gray-50 -mx-4 px-4">
@@ -1155,29 +1178,80 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     )}
                   </span>
                 </div>
-                <div className="flex justify-between py-3 border-t-2 border-gray-300 bg-blue-50 -mx-6 px-6">
-                  <span className="font-bold text-gray-900 flex items-center gap-1">
-                    Client Amount:
-                  </span>
-                  <span className="font-bold text-blue-700 text-lg">
-                    {formatCurrency(data.summary.discount_details?.client_cost_before_discount || data.summary.client_amount_before_discount || data.summary.planned_total)}
-                  </span>
+                {/* Client Amount - Before and After Discount */}
+                <div className="border-t-2 border-gray-300 bg-blue-50 -mx-6 px-6 py-3">
+                  <div className="flex justify-between">
+                    <span className="font-bold text-gray-900 flex items-center gap-1">
+                      Client Amount:
+                    </span>
+                    <span className="font-bold text-blue-700 text-lg">
+                      {formatCurrency(data.summary.discount_details?.client_cost_before_discount || data.summary.client_amount_before_discount || data.summary.planned_total)}
+                    </span>
+                  </div>
+                  {data.summary.discount_details && data.summary.discount_details.has_discount && (
+                    <div className="mt-2 pt-2 border-t border-blue-200">
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-gray-600">
+                          Discount ({((data.summary.discount_details.discount_amount / (data.summary.combined_subtotal || data.summary.discount_details.client_cost_before_discount)) * 100).toFixed(2)}%):
+                        </span>
+                        <span className="font-medium text-red-600">
+                          -{formatCurrency(data.summary.discount_details.discount_amount)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs font-semibold">
+                        <span className="text-gray-700">After Discount:</span>
+                        <span className="text-blue-800">
+                          {formatCurrency(data.summary.discount_details.grand_total_after_discount || data.summary.actual_total)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="flex justify-between py-2 bg-green-50 -mx-6 px-6">
-                  <span className="font-semibold text-gray-700">Negotiable Margin:</span>
-                  <span className={`font-bold text-lg ${
-                    ((data.summary.discount_details?.client_cost_before_discount || data.summary.client_amount_before_discount || data.summary.planned_total) -
-                    (totals.planned_materials + totals.planned_labour + (data.summary.total_planned_miscellaneous || 0) +
-                    ((data.summary.total_planned_overhead || 0) + (data.summary.total_planned_profit || 0)) + (data.summary.total_planned_transport || 0))) >= 0
-                      ? 'text-green-700'
-                      : 'text-red-700'
-                  }`}>
-                    {formatCurrency(
-                      (data.summary.discount_details?.client_cost_before_discount || data.summary.client_amount_before_discount || data.summary.planned_total) -
-                      (totals.planned_materials + totals.planned_labour + (data.summary.total_planned_miscellaneous || 0) +
-                      ((data.summary.total_planned_overhead || 0) + (data.summary.total_planned_profit || 0)) + (data.summary.total_planned_transport || 0))
-                    )}
-                  </span>
+
+                {/* Negotiable Margin - Before and After Discount */}
+                <div className="bg-green-50 -mx-6 px-6 py-2">
+                  {(() => {
+                    // Calculate negotiable margin from PLANNED values
+                    const clientAmountBeforeDiscount = data.summary.discount_details?.client_cost_before_discount || data.summary.client_amount_before_discount || data.summary.planned_total;
+                    const clientAmountAfterDiscount = data.summary.discount_details?.grand_total_after_discount || data.summary.client_amount_after_discount || data.summary.planned_total;
+
+                    // Total Planned Spending includes: Materials + Labour + Misc + O&P + Transport
+                    const plannedSpendingWithOP = totals.planned_materials + totals.planned_labour +
+                      (data.summary.total_planned_miscellaneous || 0) +
+                      ((data.summary.total_planned_overhead || 0) + (data.summary.total_planned_profit || 0)) +
+                      (data.summary.total_planned_transport || 0);
+
+                    // Negotiable Margin BEFORE discount = Client Amount (Before Discount) - Total Planned Spending
+                    const negotiableMarginBeforeDiscount = clientAmountBeforeDiscount - plannedSpendingWithOP;
+
+                    // Negotiable Margin AFTER discount = Client Amount (After Discount) - Total Planned Spending
+                    const negotiableMarginAfterDiscount = clientAmountAfterDiscount - plannedSpendingWithOP;
+
+                    return (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-gray-700">Negotiable Margin:</span>
+                          <span className={`font-bold text-lg ${
+                            negotiableMarginBeforeDiscount >= 0 ? 'text-green-700' : 'text-red-700'
+                          }`}>
+                            {formatCurrency(negotiableMarginBeforeDiscount)}
+                          </span>
+                        </div>
+                        {data.summary.discount_details && data.summary.discount_details.has_discount && (
+                          <div className="mt-2 pt-2 border-t border-green-200">
+                            <div className="flex justify-between text-xs font-semibold">
+                              <span className="text-gray-700">After Discount:</span>
+                              <span className={`${
+                                negotiableMarginAfterDiscount >= 0 ? 'text-green-800' : 'text-red-800'
+                              }`}>
+                                {formatCurrency(negotiableMarginAfterDiscount)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -1241,8 +1315,12 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     <span className="text-yellow-900 font-semibold">Total Actual Spending:</span>
                     <span className="font-bold text-yellow-900">{formatCurrency(data.summary.actual_spending || 0)}</span>
                   </div>
-                  <div className="text-[10px] text-yellow-700 mt-1 italic">
+                  <div className="text-[10px] text-yellow-800 mt-1 italic bg-yellow-100 px-2 py-1 rounded">
+                    <strong>Formula:</strong> Total Actual Spending = Materials + Labour + Misc + Transport
+                    <br />
                     = {formatCurrency(totals.actual_materials)} + {formatCurrency(totals.actual_labour)} + {formatCurrency(data.summary.total_actual_miscellaneous || 0)} + {formatCurrency(data.summary.total_actual_transport || 0)}
+                    <br />
+                    = {formatCurrency(data.summary.actual_spending || 0)}
                   </div>
                 </div>
                 <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-gray-50 -mx-6 px-6">
@@ -1362,8 +1440,8 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   </div>
                   <div className="bg-white rounded-lg border border-green-300 p-4">
                     <p className="text-xs font-semibold text-gray-600 mb-2 uppercase">Negotiable Margin</p>
-                    <p className={`text-2xl font-bold ${data.summary.discount_details.profit_impact.profit_after_discount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {formatCurrency(data.summary.discount_details.profit_impact.profit_after_discount)}
+                    <p className={`text-2xl font-bold ${(data.summary.negotiable_margin || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatCurrency(data.summary.negotiable_margin || 0)}
                     </p>
                   </div>
                 </div>

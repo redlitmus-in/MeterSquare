@@ -55,6 +55,18 @@ def get_boq_planned_vs_actual(boq_id):
         preliminary_transport_amount = Decimal(str(preliminary_cost_details.get('transport_amount', 0) or 0))
         preliminary_planned_profit = Decimal(str(preliminary_cost_details.get('planned_profit', 0) or 0))
 
+        # If internal_cost is not provided, calculate it by excluding O&P from the amount
+        # Internal Cost = Amount - O&P (since Amount includes O&P)
+        if preliminary_internal_cost == 0 and preliminary_amount > 0:
+            # If overhead_profit_amount is provided, use it
+            if preliminary_overhead_profit_amount > 0:
+                preliminary_internal_cost = preliminary_amount - preliminary_overhead_profit_amount
+            else:
+                # Otherwise, assume Amount includes misc, transport, and O&P, so internal cost is the base
+                # Internal Cost = Amount / (1 + misc% + overhead_profit% + transport%)
+                # For simplicity, if no breakdown is provided, use Amount as-is (will be corrected in future updates)
+                preliminary_internal_cost = preliminary_amount
+
         # Fetch ALL change requests (regardless of status) to show in comparison
         change_requests = ChangeRequest.query.filter_by(
             boq_id=boq_id,
@@ -1557,26 +1569,17 @@ def get_boq_planned_vs_actual(boq_id):
             # NOT including preliminary share (preliminary is separate)
             selling_price_before_discount = planned_base
 
-            # USE BOQ-LEVEL DISCOUNT (from top-level boq_data)
-            # If sub-item level discount exists, use that; otherwise use BOQ-level discount
+            # USE ITEM-LEVEL DISCOUNT (only if item has specific discount)
+            # NOTE: BOQ-level discount is applied at PROJECT level, NOT distributed to individual items
             item_discount_amount = planned_discount_amount if planned_discount_amount > 0 else Decimal('0')
             item_discount_percentage = Decimal('0')
 
-            # If no sub-item discount and BOQ has discount, calculate item's share
-            if item_discount_amount == 0 and boq_level_discount_percentage > 0:
-                # Apply BOQ-level discount PERCENTAGE to this item's selling price (including preliminary share)
-                item_discount_percentage = boq_level_discount_percentage
-                item_discount_amount = selling_price_before_discount * (item_discount_percentage / Decimal('100'))
-            elif item_discount_amount > 0 and selling_price_before_discount > 0:
-                # Calculate percentage from sub-item discount
+            # Calculate percentage from item-level discount (if any)
+            if item_discount_amount > 0 and selling_price_before_discount > 0:
                 item_discount_percentage = (item_discount_amount / selling_price_before_discount) * Decimal('100')
 
-            # If still no discount amount but have percentage, calculate it
-            if item_discount_amount == 0 and item_discount_percentage > 0 and selling_price_before_discount > 0:
-                item_discount_amount = selling_price_before_discount * (item_discount_percentage / Decimal('100'))
-
-            # Calculate Client Amount (Grand Total) after discount
-            # This is the actual amount client will pay
+            # Calculate Client Amount for this item (with item-level discount only)
+            # BOQ-level discount will be applied at the project summary level
             client_amount_after_discount = selling_price_before_discount - item_discount_amount
 
             # Calculate actual spending (Materials + Labour + Misc + Transport)
@@ -1733,7 +1736,7 @@ def get_boq_planned_vs_actual(boq_id):
                     "profit_percentage": (float(after_discount_negotiable_margin) / float(selling_price) * 100) if selling_price > 0 else 0,
                     "transport_amount": float(actual_transport),
                     "spending": float(actual_spending),  # NEW: Materials + Labour + Misc + Transport
-                    "total": float(actual_total),  # Keep for compatibility (client amount)
+                    "total": float(client_amount_after_discount),  # Client pays this (after discount)
                     "selling_price": float(selling_price)
                 },
                 "consumption_flow": {
@@ -1846,7 +1849,10 @@ def get_boq_planned_vs_actual(boq_id):
         # Calculate net loss (costs that exceeded all buffers)
         total_loss_beyond_buffers = total_extra_costs - total_misc_consumed - total_overhead_consumed - total_profit_consumed
 
-        # IMPORTANT: Add preliminaries' internal cost to total actual spending
+        # IMPORTANT: Add preliminaries' internal cost to total spending
+        # Total Planned Spending = BOQ Items Planned Spending + Preliminaries Internal Cost
+        total_planned_spending_with_preliminaries = total_planned_spending + float(preliminary_internal_cost)
+
         # Total Actual Spending = BOQ Items Spending + Preliminaries Internal Cost
         total_actual_spending_with_preliminaries = total_actual_spending + float(preliminary_internal_cost)
 
@@ -1868,10 +1874,10 @@ def get_boq_planned_vs_actual(boq_id):
         # This is the REAL profit/loss - what client pays minus what we spent
         actual_project_profit = float(combined_grand_total_after_discount) - total_actual_spending_with_preliminaries
 
-        # Calculate profit impact on combined totals
-        # NEW: Use total_actual_spending_with_preliminaries instead of total_actual (which is client amount)
-        combined_profit_before_discount = combined_subtotal_before_discount - Decimal(str(total_actual_spending_with_preliminaries))
-        combined_profit_after_discount = combined_grand_total_after_discount - Decimal(str(total_actual_spending_with_preliminaries))
+        # Calculate profit impact on combined totals (using PLANNED spending)
+        # This shows how discount affects the planned profitability
+        combined_profit_before_discount = combined_subtotal_before_discount - Decimal(str(total_planned_spending_with_preliminaries))
+        combined_profit_after_discount = combined_grand_total_after_discount - Decimal(str(total_planned_spending_with_preliminaries))
         combined_profit_reduction = combined_profit_before_discount - combined_profit_after_discount
 
         comparison['summary'] = {
@@ -1897,7 +1903,7 @@ def get_boq_planned_vs_actual(boq_id):
             },
             "planned_total": float(total_planned),
             "actual_total": float(total_actual),
-            "planned_spending": float(total_planned_spending),  # NEW: Materials + Labour + Misc + Transport (BOQ Items only)
+            "planned_spending": float(total_planned_spending_with_preliminaries),  # NEW: Materials + Labour + Misc + Transport + Preliminaries Internal Cost
             "actual_spending": float(total_actual_spending_with_preliminaries),  # NEW: Materials + Labour + Misc + Transport + Preliminaries Internal Cost
             "variance": float(abs(total_actual - total_planned)),  # Always positive number
             "variance_percentage": float(abs((total_actual - total_planned) / total_planned * 100)) if total_planned > 0 else 0,
