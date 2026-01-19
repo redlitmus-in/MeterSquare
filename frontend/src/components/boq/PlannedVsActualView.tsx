@@ -1991,9 +1991,9 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       </p>
                       <p className="text-gray-600 text-xs">
                         {data.summary.status === 'over_budget'
-                          ? `You spent ${formatCurrency(data.summary.variance || 0)} more than planned (${formatCurrency(data.summary.actual_total || 0)} vs ${formatCurrency(data.summary.planned_total || 0)}). This is a budget tracking reference - it does not affect profitability.`
+                          ? `You spent ${formatCurrency(data.summary.variance || 0)} more than planned (${formatCurrency(data.summary.actual_spending || 0)} vs ${formatCurrency(data.summary.planned_spending || 0)}). This is a budget tracking reference - it does not affect profitability.`
                           : data.summary.status === 'under_budget'
-                          ? `You spent ${formatCurrency(data.summary.variance || 0)} less than planned. Good cost control!`
+                          ? `You spent ${formatCurrency(data.summary.variance || 0)} less than planned (${formatCurrency(data.summary.actual_spending || 0)} vs ${formatCurrency(data.summary.planned_spending || 0)}). Good cost control!`
                           : 'You spent exactly what was planned.'
                         }
                       </p>

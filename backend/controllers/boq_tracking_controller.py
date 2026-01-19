@@ -1905,9 +1905,9 @@ def get_boq_planned_vs_actual(boq_id):
             "actual_total": float(total_actual),
             "planned_spending": float(total_planned_spending_with_preliminaries),  # NEW: Materials + Labour + Misc + Transport + Preliminaries Internal Cost
             "actual_spending": float(total_actual_spending_with_preliminaries),  # NEW: Materials + Labour + Misc + Transport + Preliminaries Internal Cost
-            "variance": float(abs(total_actual - total_planned)),  # Always positive number
-            "variance_percentage": float(abs((total_actual - total_planned) / total_planned * 100)) if total_planned > 0 else 0,
-            "status": "under_budget" if total_actual < total_planned else "over_budget" if total_actual > total_planned else "on_budget",
+            "variance": float(abs(total_actual_spending_with_preliminaries - total_planned_spending_with_preliminaries)),  # Spending variance
+            "variance_percentage": float(abs((total_actual_spending_with_preliminaries - total_planned_spending_with_preliminaries) / total_planned_spending_with_preliminaries * 100)) if total_planned_spending_with_preliminaries > 0 else 0,
+            "status": "under_budget" if total_actual_spending_with_preliminaries < total_planned_spending_with_preliminaries else "over_budget" if total_actual_spending_with_preliminaries > total_planned_spending_with_preliminaries else "on_budget",
 
             # Add materials and labour totals for variance calculations
             "planned_materials_total": float(total_planned_materials),
