@@ -52,6 +52,18 @@ const tabs: TabConfig[] = [
   { key: 'rejected', label: 'Rejected', color: 'text-red-700', bgColor: 'bg-red-100', borderColor: 'border-red-500', icon: XCircleIcon },
 ];
 
+// Helper function to convert 24-hour time to 12-hour format with AM/PM
+const formatTimeTo12Hour = (time24: string): string => {
+  if (!time24) return '';
+
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+
+  return `${hour12}:${minutes} ${period}`;
+};
+
 const RequisitionApprovals: React.FC = () => {
   const navigate = useNavigate();
   const [requisitions, setRequisitions] = useState<LabourRequisition[]>([]);
@@ -972,15 +984,15 @@ const RequisitionApprovals: React.FC = () => {
                     <p className="text-gray-900">
                       {selectedRequisition.start_time && selectedRequisition.end_time ? (
                         <span className="text-teal-600 font-medium">
-                          {selectedRequisition.start_time} - {selectedRequisition.end_time}
+                          {formatTimeTo12Hour(selectedRequisition.start_time)} - {formatTimeTo12Hour(selectedRequisition.end_time)}
                         </span>
                       ) : selectedRequisition.start_time ? (
                         <span className="text-teal-600 font-medium">
-                          From {selectedRequisition.start_time}
+                          From {formatTimeTo12Hour(selectedRequisition.start_time)}
                         </span>
                       ) : selectedRequisition.end_time ? (
                         <span className="text-teal-600 font-medium">
-                          Until {selectedRequisition.end_time}
+                          Until {formatTimeTo12Hour(selectedRequisition.end_time)}
                         </span>
                       ) : (
                         <span className="text-gray-500">Not specified</span>

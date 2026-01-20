@@ -46,6 +46,18 @@ const WhatsAppIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
+// Helper function to convert 24-hour time to 12-hour format with AM/PM
+const formatTimeTo12Hour = (time24: string): string => {
+  if (!time24) return '';
+
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+
+  return `${hour12}:${minutes} ${period}`;
+};
+
 const WorkerAssignments: React.FC = () => {
   const [requisitions, setRequisitions] = useState<LabourRequisition[]>([]);
   const [loading, setLoading] = useState(true);
@@ -675,15 +687,15 @@ const WorkerAssignments: React.FC = () => {
                     <p className="text-sm text-gray-900">
                       {detailsRequisition.start_time && detailsRequisition.end_time ? (
                         <span className="text-blue-600 font-medium">
-                          {detailsRequisition.start_time} - {detailsRequisition.end_time}
+                          {formatTimeTo12Hour(detailsRequisition.start_time)} - {formatTimeTo12Hour(detailsRequisition.end_time)}
                         </span>
                       ) : detailsRequisition.start_time ? (
                         <span className="text-blue-600 font-medium">
-                          From {detailsRequisition.start_time}
+                          From {formatTimeTo12Hour(detailsRequisition.start_time)}
                         </span>
                       ) : detailsRequisition.end_time ? (
                         <span className="text-blue-600 font-medium">
-                          Until {detailsRequisition.end_time}
+                          Until {formatTimeTo12Hour(detailsRequisition.end_time)}
                         </span>
                       ) : (
                         <span className="text-gray-500 text-xs">Not specified</span>

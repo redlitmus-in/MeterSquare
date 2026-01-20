@@ -139,6 +139,18 @@ const tabs: TabConfig[] = [
 // Available skill options for labour requisitions
 const skillOptions = ['Mason', 'Carpenter', 'Helper', 'Electrician', 'Plumber', 'Welder', 'Painter', 'Fitter'];
 
+// Helper function to convert 24-hour time to 12-hour format with AM/PM
+const formatTimeTo12Hour = (time24: string): string => {
+  if (!time24) return '';
+
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+
+  return `${hour12}:${minutes} ${period}`;
+};
+
 const LabourRequisition: React.FC = () => {
   const [requisitions, setRequisitions] = useState<RequisitionType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1925,15 +1937,15 @@ const LabourRequisition: React.FC = () => {
                           <p className="text-gray-900">
                             {requisition.start_time && requisition.end_time ? (
                               <span className="text-purple-600 font-medium">
-                                {requisition.start_time} - {requisition.end_time}
+                                {formatTimeTo12Hour(requisition.start_time)} - {formatTimeTo12Hour(requisition.end_time)}
                               </span>
                             ) : requisition.start_time ? (
                               <span className="text-purple-600 font-medium">
-                                From {requisition.start_time}
+                                From {formatTimeTo12Hour(requisition.start_time)}
                               </span>
                             ) : requisition.end_time ? (
                               <span className="text-purple-600 font-medium">
-                                Until {requisition.end_time}
+                                Until {formatTimeTo12Hour(requisition.end_time)}
                               </span>
                             ) : (
                               <span className="text-gray-500">Not specified</span>
