@@ -137,7 +137,8 @@ const WorkerAssignments: React.FC = () => {
       for (const skill of skillsToFetch) {
         const result = await labourService.getAvailableWorkers(
           skill,
-          requisition.required_date
+          requisition.required_date,
+          requisition.requisition_id
         );
         if (result.success && result.data) {
           // Add workers, avoiding duplicates
@@ -224,9 +225,18 @@ const WorkerAssignments: React.FC = () => {
   // Auto-select workers based on filter
   const handleAutoSelect = (filter: 'low-rate' | 'high-rate' | 'single-skill' | 'multi-skill') => {
     const maxWorkers = selectedRequisition?.total_workers_count || selectedRequisition?.workers_count || 0;
+    const currentlySelected = selectedWorkerIds.length;
+    const remainingSlots = maxWorkers - currentlySelected;
 
-    // Get available workers (not already assigned)
-    const eligibleWorkers = availableWorkers.filter(w => !w.is_assigned);
+    if (remainingSlots <= 0) {
+      showError(`Already selected ${maxWorkers} worker(s). No more slots available.`);
+      return;
+    }
+
+    // Get available workers (not already assigned AND not currently selected)
+    const eligibleWorkers = availableWorkers.filter(w =>
+      !w.is_assigned && !selectedWorkerIds.includes(w.worker_id)
+    );
 
     if (eligibleWorkers.length === 0) {
       showError('No available workers to select');
@@ -270,11 +280,12 @@ const WorkerAssignments: React.FC = () => {
         break;
     }
 
-    // Select the required number of workers
-    const workersToSelect = sortedWorkers.slice(0, maxWorkers);
-    const workerIds = workersToSelect.map(w => w.worker_id);
+    // Select workers to fill remaining slots (keep existing selections)
+    const workersToSelect = sortedWorkers.slice(0, remainingSlots);
+    const newWorkerIds = workersToSelect.map(w => w.worker_id);
 
-    setSelectedWorkerIds(workerIds);
+    // Add new selections to existing selections
+    setSelectedWorkerIds(prev => [...prev, ...newWorkerIds]);
     setSelectedFilter(filter); // Save the selected filter
 
     const filterLabels = {
@@ -284,7 +295,11 @@ const WorkerAssignments: React.FC = () => {
       'multi-skill': 'Multi Skill'
     };
 
-    showSuccess(`Auto-selected ${workerIds.length} worker(s) - ${filterLabels[filter]}`);
+    if (currentlySelected > 0) {
+      showSuccess(`Auto-selected ${newWorkerIds.length} more worker(s) using ${filterLabels[filter]} (Total: ${currentlySelected + newWorkerIds.length}/${maxWorkers})`);
+    } else {
+      showSuccess(`Auto-selected ${newWorkerIds.length} worker(s) - ${filterLabels[filter]}`);
+    }
   };
 
   const toggleWorkerSelection = (workerId: number) => {
@@ -831,14 +846,20 @@ const WorkerAssignments: React.FC = () => {
               )}
 
               {/* Auto-Select Dropdown */}
-              {!loadingWorkers && availableWorkers.length > 0 && (
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div className="relative flex-1">
-                    <button
-                      onClick={() => setShowQuickSelectDropdown(!showQuickSelectDropdown)}
-                      onBlur={() => setTimeout(() => setShowQuickSelectDropdown(false), 200)}
-                      className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm"
-                    >
+              {!loadingWorkers && availableWorkers.length > 0 && (() => {
+                const maxWorkers = selectedRequisition?.total_workers_count || selectedRequisition?.workers_count || 0;
+                const remainingSlots = maxWorkers - selectedWorkerIds.length;
+                const allSlotsFilled = remainingSlots <= 0;
+
+                return (
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    {!allSlotsFilled && (
+                      <div className="relative flex-1">
+                        <button
+                          onClick={() => setShowQuickSelectDropdown(!showQuickSelectDropdown)}
+                          onBlur={() => setTimeout(() => setShowQuickSelectDropdown(false), 200)}
+                          className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm"
+                        >
                       <div className="flex items-center gap-2">
                         <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -935,22 +956,31 @@ const WorkerAssignments: React.FC = () => {
                         </button>
                       </div>
                     )}
-                  </div>
+                      </div>
+                    )}
 
-                  {/* Clear All Button */}
-                  {selectedWorkerIds.length > 0 && (
-                    <button
-                      onClick={() => {
-                        setSelectedWorkerIds([]);
-                        setSelectedFilter(null); // Reset filter when clearing
-                      }}
-                      className="px-3 py-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors font-medium whitespace-nowrap"
-                    >
-                      Clear All
-                    </button>
-                  )}
-                </div>
-              )}
+                    {/* Clear All Button */}
+                    {selectedWorkerIds.length > 0 && (
+                      <button
+                        onClick={() => {
+                          // Keep preferred workers, clear only manually selected ones
+                          const preferredWorkerIds = selectedRequisition?.preferred_worker_ids || [];
+                          const remainingWorkers = selectedWorkerIds.filter(id => preferredWorkerIds.includes(id));
+                          setSelectedWorkerIds(remainingWorkers);
+                          setSelectedFilter(null); // Reset filter when clearing
+
+                          if (remainingWorkers.length > 0) {
+                            showSuccess(`Cleared selections (kept ${remainingWorkers.length} preferred worker(s))`);
+                          }
+                        }}
+                        className="px-3 py-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors font-medium whitespace-nowrap"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
 
               {loadingWorkers ? (
                 <div className="flex items-center justify-center py-8">

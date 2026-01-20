@@ -692,10 +692,15 @@ class LabourService {
   /**
    * Get available workers for skill and date
    */
-  async getAvailableWorkers(skill: string, date: string): Promise<{ success: boolean; data: Worker[]; message?: string }> {
+  async getAvailableWorkers(skill: string, date: string, requisition_id?: number): Promise<{ success: boolean; data: Worker[]; message?: string }> {
     try {
+      const params: any = { skill, date };
+      if (requisition_id) {
+        params.requisition_id = requisition_id;
+      }
+
       const response = await apiClient.get('/labour/workers/available', {
-        params: { skill, date }
+        params
       });
       return {
         success: true,

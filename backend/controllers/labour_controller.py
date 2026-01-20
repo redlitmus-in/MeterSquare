@@ -1332,6 +1332,12 @@ def get_available_workers():
         skill = request.args.get('skill')
         date_str = request.args.get('date', date.today().isoformat())
         target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        requisition_id = request.args.get('requisition_id', type=int)
+
+        # Get requisition to check time range if provided
+        target_requisition = None
+        if requisition_id:
+            target_requisition = LabourRequisition.query.get(requisition_id)
 
         # Get all active workers
         query = Worker.query.filter(
@@ -1378,11 +1384,23 @@ def get_available_workers():
                             is_deleted=False
                         ).first()
 
-                        # Worker is unavailable if:
-                        # 1. No arrival record exists yet (assigned but not processed)
-                        # 2. Arrival exists but status is not 'departed'
-                        if not arrival or (arrival and arrival.arrival_status != 'departed'):
-                            # Worker is currently assigned and hasn't departed
+                        # If target requisition has time range, check for time overlap
+                        is_unavailable = False
+                        if target_requisition and target_requisition.start_time and target_requisition.end_time and req.start_time and req.end_time:
+                            # Check time overlap: new_start < existing_end AND new_end > existing_start
+                            if (target_requisition.start_time < req.end_time and
+                                target_requisition.end_time > req.start_time):
+                                is_unavailable = True
+                        else:
+                            # No time info available, use departure status
+                            # Worker is unavailable if:
+                            # 1. No arrival record exists yet (assigned but not processed)
+                            # 2. Arrival exists but status is not 'departed'
+                            if not arrival or (arrival and arrival.arrival_status != 'departed'):
+                                is_unavailable = True
+
+                        if is_unavailable:
+                            # Worker is currently assigned and hasn't departed (or has time conflict)
                             assigned_workers[worker_id] = {
                                 'requisition_code': req.requisition_code,
                                 'status': arrival.arrival_status if arrival else 'assigned'
@@ -1484,20 +1502,20 @@ def assign_workers_to_requisition(requisition_id):
                             is_deleted=False
                         ).first()
 
-                        # Worker is unavailable if:
-                        # 1. No departure recorded (still working or not departed yet)
-                        # 2. Check for time overlap if both requisitions have times
-                        if arrival and arrival.arrival_status != 'departed':
-                            # Check time overlap if both have start/end times
-                            if requisition.start_time and requisition.end_time and existing_req.start_time and existing_req.end_time:
-                                # Check if times overlap
-                                # Overlap exists if: new_start < existing_end AND new_end > existing_start
-                                if (requisition.start_time < existing_req.end_time and
-                                    requisition.end_time > existing_req.start_time):
-                                    has_active_assignment = True
-                                    break
-                            else:
-                                # If times not specified, assume full day conflict
+                        # Check if times overlap when both requisitions have start/end times
+                        if requisition.start_time and requisition.end_time and existing_req.start_time and existing_req.end_time:
+                            # Time overlap exists if: new_start < existing_end AND new_end > existing_start
+                            # Example: 11AM-6PM vs 6PM-10PM -> 6PM < 6PM (FALSE) -> NO OVERLAP ✓
+                            # Example: 11AM-6PM vs 5PM-10PM -> 5PM < 6PM (TRUE) AND 10PM > 11AM (TRUE) -> OVERLAP ✗
+                            if (requisition.start_time < existing_req.end_time and
+                                requisition.end_time > existing_req.start_time):
+                                has_active_assignment = True
+                                break
+                            # No time overlap, worker is available for non-overlapping shift
+                        else:
+                            # If times not specified, check departure status
+                            if arrival and arrival.arrival_status != 'departed':
+                                # No departure recorded and no time info, assume full day conflict
                                 has_active_assignment = True
                                 break
 

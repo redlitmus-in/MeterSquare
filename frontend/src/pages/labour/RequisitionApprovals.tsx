@@ -471,6 +471,7 @@ const RequisitionApprovals: React.FC = () => {
     setSelectedLabours([]);
     setSelectedWorkers([]);
     setWorkerSearchQuery('');
+    setAvailableWorkers([]);
   };
 
   // Fetch available workers based on selected labour skills

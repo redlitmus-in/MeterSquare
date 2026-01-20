@@ -670,6 +670,9 @@ const LabourRequisition: React.FC = () => {
     setExpandedItems(new Set());
     setSelectedLabours([]);
     setLabourStatusMap({});
+    setSelectedWorkers([]);
+    setWorkerSearchQuery('');
+    setAvailableWorkers([]);
   };
 
   // Handle opening edit modal for rejected requisition
