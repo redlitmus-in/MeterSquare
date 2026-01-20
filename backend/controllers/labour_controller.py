@@ -2900,3 +2900,132 @@ def get_user_projects():
     except Exception as e:
         log.error(f"Error fetching user projects: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+def download_assignment_pdf(requisition_id):
+    """Download PDF report for a specific requisition assignment"""
+    try:
+        from flask import send_file
+        from utils.labour_assignment_pdf_generator import generate_assignment_pdf
+        from datetime import timezone
+
+        # Helper function to convert UTC to local timezone
+        def utc_to_local(utc_dt):
+            """Convert UTC datetime to local system timezone"""
+            if utc_dt.tzinfo is None:
+                # Assume UTC if timezone-naive
+                utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+            # Convert to local time using timestamp
+            timestamp = utc_dt.timestamp()
+            local_dt = datetime.fromtimestamp(timestamp)
+            return local_dt
+
+        # Fetch requisition with all details
+        requisition = LabourRequisition.query.filter_by(
+            requisition_id=requisition_id,
+            is_deleted=False
+        ).first()
+
+        if not requisition:
+            return jsonify({"error": "Requisition not found"}), 404
+
+        # Prepare data for PDF
+        requisition_dict = requisition.to_dict()
+
+        # Get assigned workers with full details
+        if requisition.assigned_worker_ids:
+            workers = Worker.query.filter(
+                Worker.worker_id.in_(requisition.assigned_worker_ids),
+                Worker.is_deleted == False
+            ).all()
+
+            requisition_dict['assigned_workers'] = [{
+                'worker_id': w.worker_id,
+                'worker_code': w.worker_code,
+                'full_name': w.full_name,
+                'skills': w.skills or [],
+                'phone': w.phone,
+                'hourly_rate': float(w.hourly_rate) if w.hourly_rate else 0
+            } for w in workers]
+        else:
+            requisition_dict['assigned_workers'] = []
+
+        # Format dates and times for display (convert UTC to local timezone)
+        # Note: required_date is a DATE field (no time component), so no timezone conversion needed
+        if requisition_dict.get('required_date'):
+            # Parse as date string (YYYY-MM-DD format)
+            date_str = requisition_dict['required_date']
+            if isinstance(date_str, str):
+                try:
+                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                    requisition_dict['required_date'] = date_obj.strftime('%B %d, %Y')
+                except:
+                    pass
+
+        # Format time fields to 12-hour format with AM/PM
+        # These are local work shift times, no timezone conversion needed
+        if requisition_dict.get('start_time'):
+            time_str = requisition_dict['start_time']
+            if isinstance(time_str, str):
+                try:
+                    # Try parsing HH:MM format first (from to_dict)
+                    try:
+                        time_obj = datetime.strptime(time_str, '%H:%M').time()
+                    except:
+                        # Fallback to HH:MM:SS format
+                        time_obj = datetime.strptime(time_str, '%H:%M:%S').time()
+
+                    # Format as 12-hour time
+                    requisition_dict['start_time'] = datetime.combine(datetime.today(), time_obj).strftime('%I:%M %p')
+                except:
+                    pass
+
+        if requisition_dict.get('end_time'):
+            time_str = requisition_dict['end_time']
+            if isinstance(time_str, str):
+                try:
+                    # Try parsing HH:MM format first (from to_dict)
+                    try:
+                        time_obj = datetime.strptime(time_str, '%H:%M').time()
+                    except:
+                        # Fallback to HH:MM:SS format
+                        time_obj = datetime.strptime(time_str, '%H:%M:%S').time()
+
+                    # Format as 12-hour time
+                    requisition_dict['end_time'] = datetime.combine(datetime.today(), time_obj).strftime('%I:%M %p')
+                except:
+                    pass
+
+        if requisition_dict.get('request_date'):
+            date_obj = datetime.fromisoformat(requisition_dict['request_date'])
+            local_date = utc_to_local(date_obj)
+            requisition_dict['request_date'] = local_date.strftime('%B %d, %Y %I:%M %p')
+
+        if requisition_dict.get('approval_date'):
+            date_obj = datetime.fromisoformat(requisition_dict['approval_date'])
+            local_date = utc_to_local(date_obj)
+            requisition_dict['approval_date'] = local_date.strftime('%B %d, %Y %I:%M %p')
+
+        if requisition_dict.get('assignment_date'):
+            date_obj = datetime.fromisoformat(requisition_dict['assignment_date'])
+            local_date = utc_to_local(date_obj)
+            requisition_dict['assignment_date'] = local_date.strftime('%B %d, %Y %I:%M %p')
+
+        # Generate PDF
+        pdf_buffer = generate_assignment_pdf(requisition_dict)
+
+        # Create filename with current date
+        filename = f"Assignment_{requisition.requisition_code}_{datetime.now().strftime('%Y%m%d')}.pdf"
+
+        return send_file(
+            pdf_buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        log.error(f"Error generating assignment PDF: {str(e)}")
+        import traceback
+        log.error(traceback.format_exc())
+        return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500

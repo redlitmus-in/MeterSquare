@@ -737,6 +737,37 @@ class LabourService {
     }
   }
 
+  /**
+   * Download assignment PDF report
+   */
+  async downloadAssignmentPDF(requisitionId: number): Promise<void> {
+    try {
+      const response = await apiClient.get(`/labour/requisitions/${requisitionId}/download_pdf`, {
+        responseType: 'blob'
+      });
+
+      // Create a blob from the response
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+
+      // Create a temporary URL for the blob
+      const url = window.URL.createObjectURL(blob);
+
+      // Create a temporary link element and trigger download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Assignment_Report_${requisitionId}_${new Date().toISOString().split('T')[0]}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+
+      // Clean up
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('Error downloading PDF:', error);
+      throw new Error('Failed to download PDF report');
+    }
+  }
+
   // ==========================================================================
   // STEP 5: Arrival Confirmation (Site Engineer)
   // ==========================================================================
