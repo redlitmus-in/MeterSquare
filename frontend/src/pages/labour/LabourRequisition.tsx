@@ -112,7 +112,7 @@ interface GroupedLabour {
 
 // Selected labour item with workers count for multi-select
 interface SelectedLabour extends LabourItem {
-  workers_count: number;
+  workers_count?: number;
   uniqueKey: string;
   // Status tracking
   requisition_status?: 'pending' | 'approved' | 'rejected' | 'assigned' | 'completed';
@@ -182,7 +182,10 @@ const LabourRequisition: React.FC = () => {
     work_description: '',
     skill_required: '',
     workers_count: 1,
-    required_date: ''
+    required_date: '',
+    start_time: '',
+    end_time: '',
+    preferred_workers_notes: ''
   });
   const [editLabourItems, setEditLabourItems] = useState<any[]>([]);
   const [resubmitting, setResubmitting] = useState(false);
@@ -202,13 +205,22 @@ const LabourRequisition: React.FC = () => {
   // Labour status tracking - map of labour_id to status info
   const [labourStatusMap, setLabourStatusMap] = useState<Record<string, LabourItemStatus>>({});
 
+  // Worker selection for preferred workers
+  const [availableWorkers, setAvailableWorkers] = useState<any[]>([]);
+  const [workersLoading, setWorkersLoading] = useState(false);
+  const [selectedWorkers, setSelectedWorkers] = useState<any[]>([]);
+  const [workerSearchQuery, setWorkerSearchQuery] = useState('');
+
   const [formData, setFormData] = useState<CreateRequisitionData>({
     project_id: 0,
     site_name: '',
     work_description: '',
     skill_required: '',
     workers_count: 1,
-    required_date: new Date().toISOString().split('T')[0]
+    required_date: new Date().toISOString().split('T')[0],
+    start_time: '',
+    end_time: '',
+    preferred_workers_notes: ''
   });
 
   // Fetch SE's assigned projects
@@ -225,6 +237,60 @@ const LabourRequisition: React.FC = () => {
       setProjectsLoading(false);
     }
   };
+
+  // Fetch available workers based on selected labour skills
+  const fetchWorkers = async () => {
+    setWorkersLoading(true);
+    try {
+      // Get unique skills from selected labours
+      // Use labour_role (from BOQ) or skill_required (from manual entry)
+      const selectedSkills = Array.from(new Set(
+        selectedLabours
+          .map(labour => (labour as any).labour_role || labour.skill_required)
+          .filter(skill => skill != null && skill !== '')
+      ));
+
+      if (selectedSkills.length === 0) {
+        setAvailableWorkers([]);
+        setWorkersLoading(false);
+        return;
+      }
+
+      // Fetch workers for all selected skills
+      const allWorkers: any[] = [];
+      const workerIds = new Set<number>();
+
+      for (const skill of selectedSkills) {
+        const response = await labourService.getWorkers({
+          status: 'active',
+          per_page: 100,
+          skill: skill
+        });
+
+        if (response.success && response.data) {
+          // Add workers, avoiding duplicates
+          response.data.forEach((worker: any) => {
+            if (!workerIds.has(worker.worker_id)) {
+              allWorkers.push(worker);
+              workerIds.add(worker.worker_id);
+            }
+          });
+        }
+      }
+
+      setAvailableWorkers(allWorkers);
+    } catch (error) {
+      console.error('Failed to load workers:', error);
+      showError('Failed to load workers');
+    } finally {
+      setWorkersLoading(false);
+    }
+  };
+
+  // Auto-fetch workers when selected labours change
+  useEffect(() => {
+    fetchWorkers();
+  }, [selectedLabours]);
 
   // Toggle item expansion
   const toggleItemExpand = (itemId: string) => {
@@ -307,10 +373,10 @@ const LabourRequisition: React.FC = () => {
       // Remove from selection
       setSelectedLabours(prev => prev.filter(s => s.uniqueKey !== key));
     } else {
-      // Add to selection with default workers count
+      // Add to selection with undefined workers count (will show placeholder)
       setSelectedLabours(prev => [...prev, {
         ...labour,
-        workers_count: 1,
+        workers_count: undefined,
         uniqueKey: key
       }]);
     }
@@ -337,7 +403,7 @@ const LabourRequisition: React.FC = () => {
       if (!selectedLabours.some(s => s.uniqueKey === key) && !isLabourItemProcessed(labour)) {
         newSelections.push({
           ...labour,
-          workers_count: 1,
+          workers_count: undefined,
           uniqueKey: key
         });
       }
@@ -381,7 +447,7 @@ const LabourRequisition: React.FC = () => {
       const labour_items = selectedLabours.map((labour) => ({
         work_description: `${labour.item_name} - ${labour.sub_item_name || labour.labour_role}`,
         skill_required: labour.labour_role,
-        workers_count: labour.workers_count,
+        workers_count: labour.workers_count || 1,
         boq_id: labour.boq_id,
         item_id: labour.item_id,
         labour_id: labour.labour_id ? String(labour.labour_id) : undefined
@@ -391,6 +457,9 @@ const LabourRequisition: React.FC = () => {
         project_id: formData.project_id,
         site_name: formData.site_name,
         required_date: formData.required_date,
+        start_time: formData.start_time || undefined,
+        end_time: formData.end_time || undefined,
+        preferred_worker_ids: selectedWorkers.map(w => w.worker_id),
         labour_items: labour_items
       };
 
@@ -591,7 +660,10 @@ const LabourRequisition: React.FC = () => {
       work_description: '',
       skill_required: '',
       workers_count: 1,
-      required_date: new Date().toISOString().split('T')[0]
+      required_date: new Date().toISOString().split('T')[0],
+      start_time: '',
+      end_time: '',
+      preferred_workers_notes: ''
     });
     setSelectedProject(null);
     setGroupedLabours([]);
@@ -608,7 +680,10 @@ const LabourRequisition: React.FC = () => {
       work_description: requisition.work_description || '',
       skill_required: requisition.skill_required || '',
       workers_count: requisition.workers_count || 1,
-      required_date: requisition.required_date?.split('T')[0] || new Date().toISOString().split('T')[0]
+      required_date: requisition.required_date?.split('T')[0] || new Date().toISOString().split('T')[0],
+      start_time: requisition.start_time || '',
+      end_time: requisition.end_time || '',
+      preferred_workers_notes: requisition.preferred_workers_notes || ''
     });
 
     // Initialize labour items for editing
@@ -775,6 +850,9 @@ const LabourRequisition: React.FC = () => {
       const payload = {
         site_name: editFormData.site_name,
         required_date: editFormData.required_date,
+        start_time: editFormData.start_time || undefined,
+        end_time: editFormData.end_time || undefined,
+        preferred_workers_notes: editFormData.preferred_workers_notes || undefined,
         labour_items: editLabourItems
       };
 
@@ -888,7 +966,10 @@ const LabourRequisition: React.FC = () => {
           <p className="text-gray-600">Create and manage labour requisitions for your projects</p>
         </div>
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={() => {
+            setShowAddModal(true);
+            fetchWorkers();
+          }}
           className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
         >
           <PlusIcon className="w-5 h-5" />
@@ -1200,6 +1281,184 @@ const LabourRequisition: React.FC = () => {
                   />
                 </div>
 
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                    <input
+                      type="time"
+                      value={formData.start_time || ''}
+                      onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white"
+                      placeholder="HH:MM"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                    <input
+                      type="time"
+                      value={formData.end_time || ''}
+                      onChange={(e) => setFormData({ ...formData, end_time: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white"
+                      placeholder="HH:MM"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  {(() => {
+                    const totalWorkersNeeded = selectedLabours.reduce((sum, labour) => sum + (labour.workers_count || 1), 0);
+                    const remainingSlots = totalWorkersNeeded - selectedWorkers.length;
+
+                    return (
+                      <>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Preferred Workers
+                          {totalWorkersNeeded > 0 && (
+                            <span className="ml-2 text-xs text-gray-500">
+                              ({selectedWorkers.length}/{totalWorkersNeeded} selected)
+                            </span>
+                          )}
+                        </label>
+
+                        {/* Search input with chips inside */}
+                        <div className="relative">
+                          <div className="w-full min-h-[42px] max-h-[200px] overflow-y-auto px-3 py-2 border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-purple-500 bg-white">
+                            {/* Selected workers as chips inside input */}
+                            <div className="flex flex-wrap gap-2 items-center">
+                              {selectedWorkers.map(worker => (
+                                <div
+                                  key={worker.worker_id}
+                                  className="flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs"
+                                >
+                                  <span className="font-medium">{worker.full_name} ({worker.worker_code})</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedWorkers(prev => prev.filter(w => w.worker_id !== worker.worker_id))}
+                                    className="hover:text-purple-900"
+                                  >
+                                    <XMarkIcon className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                              <input
+                                type="text"
+                                placeholder={
+                                  selectedWorkers.length === 0
+                                    ? totalWorkersNeeded > 0
+                                      ? `Select up to ${totalWorkersNeeded} workers...`
+                                      : "Search workers by name or code..."
+                                    : remainingSlots > 0
+                                      ? `${remainingSlots} more...`
+                                      : ""
+                                }
+                                value={workerSearchQuery}
+                                onChange={(e) => setWorkerSearchQuery(e.target.value)}
+                                className="flex-1 min-w-[200px] outline-none bg-transparent text-sm"
+                                disabled={totalWorkersNeeded > 0 && selectedWorkers.length >= totalWorkersNeeded}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Dropdown - only visible when typing */}
+                          {workerSearchQuery && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {workersLoading ? (
+                          <div className="text-sm text-gray-500 p-3 text-center">Loading workers...</div>
+                        ) : (
+                          <>
+                            {(() => {
+                              // Get unique skills from selected labour items (filter out undefined/null)
+                              // Use labour_role (from BOQ) or skill_required (from manual entry)
+                              const selectedSkills = selectedLabours
+                                .map(labour => (labour as any).labour_role || labour.skill_required)
+                                .filter(skill => skill != null && skill !== '');
+                              const totalWorkersNeeded = selectedLabours.reduce((sum, labour) => sum + (labour.workers_count || 1), 0);
+
+                              // Filter workers by search query AND selected skills
+                              const filteredWorkers = availableWorkers.filter(worker => {
+                                // Match search query (name or code)
+                                const matchesSearch = (worker.full_name || '').toLowerCase().includes(workerSearchQuery.toLowerCase()) ||
+                                  (worker.worker_code || '').toLowerCase().includes(workerSearchQuery.toLowerCase());
+
+                                // ONLY show workers if labour is selected AND worker has matching skill
+                                // Worker skills can be a string (comma-separated) or array
+                                const matchesSkill = selectedSkills.length > 0 && selectedSkills.some(skill => {
+                                  if (!worker.skills || !skill) return false;
+
+                                  // Handle comma-separated skills (e.g., "Carpenter, Mason, Painter")
+                                  const workerSkills = typeof worker.skills === 'string'
+                                    ? worker.skills.split(',').map(s => s.trim().toLowerCase()).filter(s => s)
+                                    : Array.isArray(worker.skills)
+                                      ? worker.skills.map(s => String(s).toLowerCase()).filter(s => s)
+                                      : [];
+
+                                  // Check if any worker skill matches the required skill
+                                  const skillLower = skill.toLowerCase();
+                                  return workerSkills.some(ws =>
+                                    ws.includes(skillLower) || skillLower.includes(ws)
+                                  );
+                                });
+
+                                return matchesSearch && matchesSkill;
+                              });
+
+                              return (
+                                <>
+                                  {filteredWorkers.slice(0, 10).map(worker => {
+                                    const isSelected = selectedWorkers.some(w => w.worker_id === worker.worker_id);
+                                    const limitReached = totalWorkersNeeded > 0 && selectedWorkers.length >= totalWorkersNeeded;
+                                    const canSelect = isSelected || !limitReached;
+
+                                    return (
+                                      <div
+                                        key={worker.worker_id}
+                                        onClick={() => {
+                                          if (isSelected) {
+                                            setSelectedWorkers(prev => prev.filter(w => w.worker_id !== worker.worker_id));
+                                          } else if (canSelect) {
+                                            setSelectedWorkers(prev => [...prev, worker]);
+                                            setWorkerSearchQuery('');
+                                          } else {
+                                            showError(`Maximum ${totalWorkersNeeded} workers allowed`);
+                                          }
+                                        }}
+                                        className={`p-3 cursor-pointer hover:bg-purple-50 transition-colors border-b border-gray-100 last:border-b-0 ${
+                                          isSelected ? 'bg-purple-100' : !canSelect ? 'opacity-50 cursor-not-allowed' : ''
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <div>
+                                            <p className="text-sm font-medium text-gray-900">{worker.full_name}</p>
+                                            <p className="text-xs text-gray-500">Code: {worker.worker_code}</p>
+                                          </div>
+                                          {isSelected && (
+                                            <CheckCircleIcon className="w-5 h-5 text-purple-600" />
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                  {filteredWorkers.length === 0 && (
+                                    <div className="text-sm text-gray-500 p-3 text-center">
+                                      No workers found matching "{workerSearchQuery}"
+                                      {selectedLabours.length > 0 && (
+                                        <span> with skills: {selectedSkills.join(', ')}</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </>
+                        )}
+                      </div>
+                    )}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+
                 {selectedLabours.length > 0 && (
                   <div className="p-3 bg-purple-100 rounded-lg">
                     <div className="flex items-center gap-2 text-purple-800">
@@ -1395,7 +1654,8 @@ const LabourRequisition: React.FC = () => {
                           <input
                             type="number"
                             min="1"
-                            value={labour.workers_count}
+                            value={labour.workers_count || ''}
+                            placeholder="1"
                             onChange={(e) => updateWorkersCount(labour.uniqueKey, parseInt(e.target.value) || 1)}
                             onClick={(e) => e.stopPropagation()}
                             className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-500"
@@ -1657,6 +1917,46 @@ const LabourRequisition: React.FC = () => {
                             })}
                           </p>
                         </div>
+                        <div>
+                          <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Work Shift</h4>
+                          <p className="text-gray-900">
+                            {requisition.start_time && requisition.end_time ? (
+                              <span className="text-purple-600 font-medium">
+                                {requisition.start_time} - {requisition.end_time}
+                              </span>
+                            ) : requisition.start_time ? (
+                              <span className="text-purple-600 font-medium">
+                                From {requisition.start_time}
+                              </span>
+                            ) : requisition.end_time ? (
+                              <span className="text-purple-600 font-medium">
+                                Until {requisition.end_time}
+                              </span>
+                            ) : (
+                              <span className="text-gray-500">Not specified</span>
+                            )}
+                          </p>
+                        </div>
+                        {(requisition.preferred_workers && requisition.preferred_workers.length > 0) && (
+                          <div className="col-span-2">
+                            <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Preferred Workers</h4>
+                            <div className="flex flex-wrap gap-2">
+                              {requisition.preferred_workers.map((worker: any) => (
+                                <div key={worker.worker_id} className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-full text-sm font-medium border border-purple-200">
+                                  {worker.full_name} ({worker.worker_code})
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {requisition.preferred_workers_notes && (
+                          <div className="col-span-2">
+                            <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Preferred Workers (Additional Notes)</h4>
+                            <p className="text-gray-900 text-sm whitespace-pre-wrap bg-gray-50 p-2 rounded border border-gray-200">
+                              {requisition.preferred_workers_notes}
+                            </p>
+                          </div>
+                        )}
                         {relatedRequisitions.length === 1 && (
                           <>
                             <div>
@@ -1783,6 +2083,42 @@ const LabourRequisition: React.FC = () => {
                     value={editFormData.required_date}
                     onChange={(e) => setEditFormData({ ...editFormData, required_date: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                </div>
+
+                {/* Work Shift Times */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                    <input
+                      type="time"
+                      value={editFormData.start_time}
+                      onChange={(e) => setEditFormData({ ...editFormData, start_time: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                      placeholder="HH:MM"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                    <input
+                      type="time"
+                      value={editFormData.end_time}
+                      onChange={(e) => setEditFormData({ ...editFormData, end_time: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                      placeholder="HH:MM"
+                    />
+                  </div>
+                </div>
+
+                {/* Preferred Workers Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Preferred Workers (Details/Notes)</label>
+                  <textarea
+                    value={editFormData.preferred_workers_notes}
+                    onChange={(e) => setEditFormData({ ...editFormData, preferred_workers_notes: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    rows={3}
+                    placeholder="Enter preferred worker names with Emp. numbers or other notes"
                   />
                 </div>
 

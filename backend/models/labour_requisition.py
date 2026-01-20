@@ -22,6 +22,10 @@ class LabourRequisition(db.Model):
     project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False, index=True)
     site_name = db.Column(db.String(255), nullable=False)
     required_date = db.Column(db.Date, nullable=False, index=True)
+    start_time = db.Column(db.Time, nullable=True)  # Work shift start time
+    end_time = db.Column(db.Time, nullable=True)  # Work shift end time
+    preferred_worker_ids = db.Column(JSONB, nullable=True)  # Array of preferred worker IDs: [1, 2, 3]
+    preferred_workers_notes = db.Column(db.Text, nullable=True)  # Additional notes
 
     # Labour items as JSONB array - stores multiple labours in single requisition
     # Format: [{"work_description": "...", "skill_required": "...", "workers_count": 5, "boq_id": 1, "item_id": "...", "labour_id": "..."}]
@@ -89,6 +93,18 @@ class LabourRequisition(db.Model):
                 ).all()
                 assigned_workers = [{'worker_id': w.worker_id, 'full_name': w.full_name, 'worker_code': w.worker_code} for w in workers]
 
+        # Get preferred worker details
+        preferred_workers = []
+        if self.preferred_worker_ids:
+            from models.worker import Worker
+            pref_worker_ids = self.preferred_worker_ids if isinstance(self.preferred_worker_ids, list) else []
+            if pref_worker_ids:
+                pref_workers = Worker.query.filter(
+                    Worker.worker_id.in_(pref_worker_ids),
+                    Worker.is_deleted == False
+                ).all()
+                preferred_workers = [{'worker_id': w.worker_id, 'full_name': w.full_name, 'worker_code': w.worker_code} for w in pref_workers]
+
         return {
             'requisition_id': self.requisition_id,
             'requisition_code': self.requisition_code,
@@ -96,6 +112,11 @@ class LabourRequisition(db.Model):
             'project_name': self.project.project_name if self.project else None,
             'site_name': self.site_name,
             'required_date': self.required_date.isoformat() if self.required_date else None,
+            'start_time': self.start_time.strftime('%H:%M') if self.start_time else None,
+            'end_time': self.end_time.strftime('%H:%M') if self.end_time else None,
+            'preferred_worker_ids': self.preferred_worker_ids or [],
+            'preferred_workers': preferred_workers,
+            'preferred_workers_notes': self.preferred_workers_notes,
             'labour_items': self.labour_items or [],
             'total_workers_count': total_workers,
             # Backward compatibility fields (deprecated, use labour_items instead)

@@ -151,6 +151,25 @@ const WorkerAssignments: React.FC = () => {
       }
 
       setAvailableWorkers(allWorkers);
+
+      // Auto-select preferred workers if they exist and are available
+      if (requisition.preferred_worker_ids && requisition.preferred_worker_ids.length > 0) {
+        const availablePreferredWorkers = requisition.preferred_worker_ids.filter(
+          (prefWorkerId: number) => allWorkers.some((w: Worker) => w.worker_id === prefWorkerId && !w.is_assigned)
+        );
+
+        if (availablePreferredWorkers.length > 0) {
+          setSelectedWorkerIds(availablePreferredWorkers);
+          // Show notification about auto-selection
+          const selectedCount = availablePreferredWorkers.length;
+          const totalPreferred = requisition.preferred_worker_ids.length;
+          if (selectedCount === totalPreferred) {
+            showSuccess(`✓ Auto-selected all ${selectedCount} preferred worker(s)`);
+          } else {
+            showSuccess(`✓ Auto-selected ${selectedCount} of ${totalPreferred} preferred workers (${totalPreferred - selectedCount} unavailable)`);
+          }
+        }
+      }
     } catch (error) {
       showError('Failed to fetch available workers');
     }
@@ -613,9 +632,51 @@ const WorkerAssignments: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Required Date</h3>
-                    <p className="text-sm text-gray-900">{new Date(detailsRequisition.required_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                    <p className="text-sm text-gray-900">
+                      {new Date(detailsRequisition.required_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                    </p>
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Work Shift</h3>
+                    <p className="text-sm text-gray-900">
+                      {detailsRequisition.start_time && detailsRequisition.end_time ? (
+                        <span className="text-blue-600 font-medium">
+                          {detailsRequisition.start_time} - {detailsRequisition.end_time}
+                        </span>
+                      ) : detailsRequisition.start_time ? (
+                        <span className="text-blue-600 font-medium">
+                          From {detailsRequisition.start_time}
+                        </span>
+                      ) : detailsRequisition.end_time ? (
+                        <span className="text-blue-600 font-medium">
+                          Until {detailsRequisition.end_time}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500 text-xs">Not specified</span>
+                      )}
+                    </p>
                   </div>
                 </div>
+                {(detailsRequisition.preferred_workers && detailsRequisition.preferred_workers.length > 0) && (
+                  <div className="mt-3">
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Preferred Workers</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {detailsRequisition.preferred_workers.map((worker: any) => (
+                        <div key={worker.worker_id} className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-full text-sm font-medium border border-purple-200">
+                          {worker.full_name} ({worker.worker_code})
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {detailsRequisition.preferred_workers_notes && (
+                  <div className="mt-3">
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Preferred Workers (Additional Notes)</h3>
+                    <p className="text-sm text-gray-900 whitespace-pre-wrap bg-gray-50 p-2 rounded border border-gray-200">
+                      {detailsRequisition.preferred_workers_notes}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Request Info */}
@@ -725,6 +786,49 @@ const WorkerAssignments: React.FC = () => {
                   <><span className="font-medium text-purple-600">{selectedRequisition.skill_required}</span> skill</>
                 )}
               </p>
+
+              {/* Preferred Workers Section */}
+              {selectedRequisition.preferred_workers && selectedRequisition.preferred_workers.length > 0 && (
+                <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                    </svg>
+                    <h3 className="text-sm font-semibold text-purple-900">
+                      Preferred Workers Requested
+                    </h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedRequisition.preferred_workers.map((worker: any) => {
+                      const isSelected = selectedWorkerIds.includes(worker.worker_id);
+                      return (
+                        <div
+                          key={worker.worker_id}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border-2 ${
+                            isSelected
+                              ? 'bg-green-100 border-green-500 text-green-900'
+                              : 'bg-white border-purple-300 text-purple-900'
+                          }`}
+                        >
+                          {isSelected && (
+                            <svg className="w-3.5 h-3.5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                          <span className="font-medium">{worker.full_name}</span>
+                          <span className={isSelected ? 'text-green-700' : 'text-purple-600'}>({worker.worker_code})</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs text-purple-700">
+                    💡 These workers were requested by the {selectedRequisition.requester_role === 'PM' ? 'Project Manager' : 'Site Engineer'}
+                    {selectedWorkerIds.some((id: number) => selectedRequisition.preferred_worker_ids?.includes(id)) && (
+                      <span className="ml-1 text-green-700 font-medium">• Auto-selected ✓</span>
+                    )}
+                  </p>
+                </div>
+              )}
 
               {/* Auto-Select Dropdown */}
               {!loadingWorkers && availableWorkers.length > 0 && (

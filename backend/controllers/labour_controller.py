@@ -395,11 +395,35 @@ def create_requisition():
                 # - SE must send to PM first, then PM sends to Production Manager
                 initial_status = 'pending'
 
+                # Parse time fields if provided
+                start_time = None
+                end_time = None
+
+                if data.get('start_time'):
+                    try:
+                        start_time = datetime.strptime(data['start_time'], '%H:%M').time()
+                    except ValueError:
+                        return jsonify({"error": "Invalid time format for start_time. Use HH:MM"}), 400
+
+                if data.get('end_time'):
+                    try:
+                        end_time = datetime.strptime(data['end_time'], '%H:%M').time()
+                    except ValueError:
+                        return jsonify({"error": "Invalid time format for end_time. Use HH:MM"}), 400
+
+                # Validate: end_time must be after start_time if both provided
+                if start_time and end_time and end_time <= start_time:
+                    return jsonify({"error": "End time must be after start time"}), 400
+
                 requisition = LabourRequisition(
                     requisition_code=requisition_code,
                     project_id=data['project_id'],
                     site_name=data['site_name'],
                     required_date=datetime.strptime(data['required_date'], '%Y-%m-%d').date(),
+                    start_time=start_time,
+                    end_time=end_time,
+                    preferred_worker_ids=data.get('preferred_worker_ids', []),
+                    preferred_workers_notes=data.get('preferred_workers_notes'),
                     labour_items=labour_items,  # Store all labour items in JSONB
                     # Backward compatibility: populate old fields with first item or summary
                     work_description=first_item.get('work_description') if len(labour_items) == 1 else f"Multiple Labour Items ({len(labour_items)} items)",
@@ -673,6 +697,38 @@ def resubmit_requisition(requisition_id):
             if new_date < date.today():
                 return jsonify({"error": "required_date cannot be in the past"}), 400
             requisition.required_date = new_date
+
+        # Update start_time if provided
+        if 'start_time' in data:
+            if data['start_time']:
+                try:
+                    requisition.start_time = datetime.strptime(data['start_time'], '%H:%M').time()
+                except ValueError:
+                    return jsonify({"error": "Invalid time format for start_time. Use HH:MM"}), 400
+            else:
+                requisition.start_time = None
+
+        # Update end_time if provided
+        if 'end_time' in data:
+            if data['end_time']:
+                try:
+                    requisition.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
+                except ValueError:
+                    return jsonify({"error": "Invalid time format for end_time. Use HH:MM"}), 400
+            else:
+                requisition.end_time = None
+
+        # Validate: end_time must be after start_time if both exist
+        if requisition.start_time and requisition.end_time and requisition.end_time <= requisition.start_time:
+            return jsonify({"error": "End time must be after start time"}), 400
+
+        # Update preferred_workers_notes if provided
+        # Update preferred_worker_ids if provided
+        if 'preferred_worker_ids' in data:
+            requisition.preferred_worker_ids = data.get('preferred_worker_ids', [])
+
+        if 'preferred_workers_notes' in data:
+            requisition.preferred_workers_notes = data.get('preferred_workers_notes')
 
         # Update labour_items if provided
         if 'labour_items' in data:
@@ -1294,30 +1350,43 @@ def get_available_workers():
         else:
             workers = all_workers
 
-        # Check which workers have active assignments on the date
-        # Get assignment details for each worker
-        assignments_query = db.session.query(
-            WorkerAssignment.worker_id,
-            WorkerAssignment.project_id,
-            WorkerAssignment.assignment_start_date,
-            WorkerAssignment.assignment_end_date
-        ).filter(
-            WorkerAssignment.is_deleted == False,
-            WorkerAssignment.status == 'active',
-            WorkerAssignment.assignment_start_date <= target_date,
-            or_(
-                WorkerAssignment.assignment_end_date.is_(None),
-                WorkerAssignment.assignment_end_date >= target_date
-            )
-        ).all()
+        # Check which workers have active assignments on the target date
+        # We need to check both WorkerAssignment AND LabourArrival tables
+        # to determine if worker is truly unavailable
 
-        # Create assignment lookup dict
+        today = datetime.utcnow().date()
         assigned_workers = {}
-        for assignment in assignments_query:
-            # Only expose availability date, not project details (security)
-            assigned_workers[assignment[0]] = {
-                'available_from': assignment[3].isoformat() if assignment[3] else None
-            }
+
+        # Only check for assignments on today or past dates
+        # Future dates don't need conflict checking
+        if target_date <= today:
+            # Find requisitions assigned for the target date
+            requisitions_on_date = db.session.query(LabourRequisition).filter(
+                LabourRequisition.required_date == target_date,
+                LabourRequisition.is_deleted == False,
+                LabourRequisition.assignment_status == 'assigned'
+            ).all()
+
+            for req in requisitions_on_date:
+                if req.assigned_worker_ids:
+                    for worker_id in req.assigned_worker_ids:
+                        # Check if worker has departed from this assignment
+                        arrival = LabourArrival.query.filter_by(
+                            requisition_id=req.requisition_id,
+                            worker_id=worker_id,
+                            arrival_date=target_date,
+                            is_deleted=False
+                        ).first()
+
+                        # Worker is unavailable if:
+                        # 1. No arrival record exists yet (assigned but not processed)
+                        # 2. Arrival exists but status is not 'departed'
+                        if not arrival or (arrival and arrival.arrival_status != 'departed'):
+                            # Worker is currently assigned and hasn't departed
+                            assigned_workers[worker_id] = {
+                                'requisition_code': req.requisition_code,
+                                'status': arrival.arrival_status if arrival else 'assigned'
+                            }
 
         # Build response with ALL workers, marking assignment status
         workers_response = []
@@ -1384,24 +1453,66 @@ def assign_workers_to_requisition(requisition_id):
 
         # CRITICAL: Verify no workers are already assigned on the target date (server-side validation)
         target_date = requisition.required_date
-        already_assigned = db.session.query(WorkerAssignment.worker_id).filter(
-            WorkerAssignment.worker_id.in_(worker_ids),
-            WorkerAssignment.status == 'active',
-            WorkerAssignment.is_deleted == False,
-            WorkerAssignment.assignment_start_date <= target_date,
-            or_(
-                WorkerAssignment.assignment_end_date.is_(None),
-                WorkerAssignment.assignment_end_date >= target_date
-            )
-        ).all()
+        today = datetime.utcnow().date()
 
-        if already_assigned:
-            assigned_ids = [a[0] for a in already_assigned]
-            assigned_workers_info = [w for w in workers if w.worker_id in assigned_ids]
-            worker_names = ', '.join([w.full_name for w in assigned_workers_info])
-            return jsonify({
-                "error": f"Cannot assign: {worker_names} already assigned to other projects on {target_date.strftime('%Y-%m-%d')}"
-            }), 400
+        # Only check for conflicts if assignment is for today
+        # Future dates are allowed without restriction
+        if target_date <= today:
+            # Check for existing assignments on the target date
+            conflicting_workers = []
+
+            for worker_id in worker_ids:
+                # Find all requisitions this worker is assigned to on the target date
+                existing_requisitions = db.session.query(LabourRequisition).filter(
+                    LabourRequisition.assigned_worker_ids.contains([worker_id]),
+                    LabourRequisition.required_date == target_date,
+                    LabourRequisition.is_deleted == False,
+                    LabourRequisition.assignment_status == 'assigned',
+                    LabourRequisition.requisition_id != requisition_id  # Exclude current requisition
+                ).all()
+
+                if existing_requisitions:
+                    # For each existing assignment, check if worker has departed
+                    has_active_assignment = False
+
+                    for existing_req in existing_requisitions:
+                        # Check arrival record to see if worker has departed
+                        arrival = LabourArrival.query.filter_by(
+                            requisition_id=existing_req.requisition_id,
+                            worker_id=worker_id,
+                            arrival_date=target_date,
+                            is_deleted=False
+                        ).first()
+
+                        # Worker is unavailable if:
+                        # 1. No departure recorded (still working or not departed yet)
+                        # 2. Check for time overlap if both requisitions have times
+                        if arrival and arrival.arrival_status != 'departed':
+                            # Check time overlap if both have start/end times
+                            if requisition.start_time and requisition.end_time and existing_req.start_time and existing_req.end_time:
+                                # Check if times overlap
+                                # Overlap exists if: new_start < existing_end AND new_end > existing_start
+                                if (requisition.start_time < existing_req.end_time and
+                                    requisition.end_time > existing_req.start_time):
+                                    has_active_assignment = True
+                                    break
+                            else:
+                                # If times not specified, assume full day conflict
+                                has_active_assignment = True
+                                break
+
+                    if has_active_assignment:
+                        worker = next((w for w in workers if w.worker_id == worker_id), None)
+                        if worker:
+                            # Get the conflicting requisition code for better error message
+                            conflict_req_code = existing_req.requisition_code if existing_req else 'unknown'
+                            conflicting_workers.append(f"{worker.full_name} (currently on {conflict_req_code})")
+
+            if conflicting_workers:
+                worker_details = '\n• '.join(conflicting_workers)
+                return jsonify({
+                    "error": f"Cannot assign workers - they are already working on another requisition:\n\n• {worker_details}\n\nThey must clock out first before being assigned to a new requisition."
+                }), 400
 
         # Create worker assignments
         for worker in workers:
@@ -1451,6 +1562,15 @@ def assign_workers_to_requisition(requisition_id):
         project_name = requisition.project.project_name if requisition.project else f"Project #{requisition.project_id}"
         formatted_date = requisition.required_date.strftime('%d %b %Y') if requisition.required_date else 'N/A'
 
+        # Format time shift details
+        time_shift = "Not specified"
+        if requisition.start_time and requisition.end_time:
+            time_shift = f"{requisition.start_time.strftime('%I:%M %p')} - {requisition.end_time.strftime('%I:%M %p')}"
+        elif requisition.start_time:
+            time_shift = f"From {requisition.start_time.strftime('%I:%M %p')}"
+        elif requisition.end_time:
+            time_shift = f"Until {requisition.end_time.strftime('%I:%M %p')}"
+
         for worker in workers:
             if worker.phone:
                 # Create assignment notification message
@@ -1463,10 +1583,11 @@ You have been assigned to a new work order:
 📋 *Assignment Details:*
 • Requisition: {requisition.requisition_code}
 • Project: {project_name}
-• Site: {requisition.site_name}
+• Location: {requisition.site_name}
 • Work: {requisition.work_description}
 • Role: {requisition.skill_required}
 • Date: {formatted_date}
+• Time: {time_shift}
 
 Please report to the site on time. Contact your supervisor for any queries.
 

@@ -72,6 +72,11 @@ export interface LabourRequisition {
   project_name?: string;
   site_name: string;
   required_date: string;
+  start_time?: string;
+  end_time?: string;
+  preferred_worker_ids?: number[];
+  preferred_workers?: Array<{ worker_id: number; full_name: string; worker_code: string }>;
+  preferred_workers_notes?: string;
   labour_items: LabourItem[];
   total_workers_count: number;
   // Backward compatibility fields (deprecated)
@@ -111,6 +116,10 @@ export interface CreateRequisitionData {
   project_id: number;
   site_name: string;
   required_date: string;
+  start_time?: string;
+  end_time?: string;
+  preferred_worker_ids?: number[];
+  preferred_workers_notes?: string;
   labour_items: LabourItem[];
   // Backward compatibility (deprecated, use labour_items array)
   work_description?: string;
