@@ -182,19 +182,80 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
       const pageHeight = doc.internal.pageSize.getHeight();
       let yPos = 15;
 
-      // Header
+      // Company Header with white background
+      doc.setFillColor(255, 255, 255);
+      doc.rect(0, 0, pageWidth, 28, 'F');
+
+      // Add logo (left side) - Load from public assets
+      try {
+        const logoImg = new Image();
+        logoImg.src = '/assets/logo.png';
+        // Add logo at position (10, 5) with width 45mm and height auto-scaled
+        doc.addImage(logoImg, 'PNG', 10, 5, 45, 16);
+      } catch (error) {
+        console.log('Logo not loaded, continuing without logo');
+      }
+
+      // Company name (right side)
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text('METERSQUARE INTERIORS LLC', pageWidth - 10, 11, { align: 'right' });
+
+      // Location (right side)
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 100, 100);
+      doc.text('Business Bay, Dubai, UAE', pageWidth - 10, 17, { align: 'right' });
+
+      // Horizontal line separator (matching letterhead - thin blue line)
+      doc.setDrawColor(100, 149, 237); // Cornflower blue color
+      doc.setLineWidth(0.5);
+      doc.line(10, 22, pageWidth - 10, 22); // Line with margins
+
+      // Contact details below line - centered, matching letterhead format with colored labels
+      doc.setFontSize(7);
+
+      // Calculate center position for the entire contact line
+      const centerX = pageWidth / 2;
+
+      // Sharjah (RED label) - positioned relative to center
+      doc.setTextColor(220, 20, 60); // Red color
+      doc.setFont('helvetica', 'bold');
+      doc.text('Sharjah', centerX - 85, 26);
+
+      doc.setTextColor(60, 60, 60);
+      doc.setFont('helvetica', 'normal');
+      doc.text('P.O. Box 66015 | Tel: 06 5398169', centerX - 68, 26);
+
+      // Vertical separator
+      doc.setTextColor(100, 100, 100);
+      doc.text('|', centerX - 10, 26);
+
+      // Dubai (BLUE label)
+      doc.setTextColor(100, 149, 237); // Blue color
+      doc.setFont('helvetica', 'bold');
+      doc.text('Dubai', centerX - 5, 26);
+
+      doc.setTextColor(60, 60, 60);
+      doc.setFont('helvetica', 'normal');
+      doc.text('P.O. Box 89381 | Tel: 04 2596772', centerX + 9, 26);
+
+      // Report Header with blue background
       doc.setFillColor(30, 64, 175);
-      doc.rect(0, 0, pageWidth, 30, 'F');
+      doc.rect(0, 32, pageWidth, 22, 'F');
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(18);
       doc.setFont('helvetica', 'bold');
-      doc.text('Profit Comparison Report', 15, 12);
+      doc.text('Profit Comparison Report', 10, 43);
+
+      // BOQ name and date on same line
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      doc.text(`BOQ: ${data.boq_name || 'N/A'}`, 15, 19);
-      doc.text(`Generated: ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`, 15, 24);
+      doc.text(`BOQ: ${data.boq_name || 'N/A'}`, 10, 50);
+      doc.text(`Generated: ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`, pageWidth - 10, 50, { align: 'right' });
 
-      yPos = 35;
+      yPos = 60;
 
       // Executive Summary (combined with margin breakdown)
       doc.setTextColor(30, 64, 175);
@@ -239,10 +300,24 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
         head: [summaryData[0]],
         body: summaryData.slice(1),
         theme: 'grid',
-        headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
-        bodyStyles: { fontSize: 8, textColor: [75, 85, 99] },
-        alternateRowStyles: { fillColor: [249, 250, 251] },
-        margin: { left: 15, right: 15 },
+        headStyles: {
+          fillColor: [59, 130, 246],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 10,
+          halign: 'left'
+        },
+        bodyStyles: {
+          fontSize: 9,
+          textColor: [50, 50, 50],
+          cellPadding: 3
+        },
+        columnStyles: {
+          0: { cellWidth: 80, fontStyle: 'bold', halign: 'left' },
+          1: { cellWidth: 'auto', halign: 'right', fontStyle: 'bold', textColor: [30, 64, 175] }
+        },
+        alternateRowStyles: { fillColor: [245, 247, 250] },
+        margin: { left: 10, right: 10 },
       });
 
       // Items Comparison (one item per page if needed)
@@ -320,17 +395,28 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
           startY: yPos,
           head: [itemData[0]],
           body: itemData.slice(1),
-          theme: 'striped',
-          headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
-          bodyStyles: { fontSize: 7, textColor: [75, 85, 99] },
-          alternateRowStyles: { fillColor: [243, 244, 246] },
-          columnStyles: {
-            0: { cellWidth: 60, fontStyle: 'bold' },
-            1: { halign: 'right', cellWidth: 45 },
-            2: { halign: 'right', cellWidth: 45 },
-            3: { halign: 'right', cellWidth: 40 }
+          theme: 'grid',
+          headStyles: {
+            fillColor: [59, 130, 246],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 9,
+            halign: 'center',
+            cellPadding: 2
           },
-          margin: { left: 15, right: 15 },
+          bodyStyles: {
+            fontSize: 8,
+            textColor: [50, 50, 50],
+            cellPadding: 2
+          },
+          columnStyles: {
+            0: { cellWidth: 55, fontStyle: 'bold', halign: 'left' },
+            1: { halign: 'right', cellWidth: 50 },
+            2: { halign: 'right', cellWidth: 50 },
+            3: { halign: 'right', cellWidth: 45 }
+          },
+          alternateRowStyles: { fillColor: [245, 247, 250] },
+          margin: { left: 10, right: 10 },
         });
 
         yPos = (doc as any).lastAutoTable.finalY + 5;
