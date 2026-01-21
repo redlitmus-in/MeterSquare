@@ -4624,17 +4624,17 @@ def get_estimator_tab_counts():
 
         pending_count = pending_query.scalar() or 0
 
-        # Send BOQ tab: Pending, Pending_PM_Approval (BOQs sent for review, waiting for approval)
+        # Send BOQ tab: Pending, Pending_PM_Approval, Pending_TD_Approval (BOQs sent for review, waiting for approval)
         # All keys are now lowercase after normalization
         sent_count = (
             counts_dict.get('pending', 0) +
-            counts_dict.get('pending_pm_approval', 0)
+            counts_dict.get('pending_pm_approval', 0) +
+            counts_dict.get('pending_td_approval', 0)
         )
 
-        # Approved tab: PM approved, Pending TD approval, TD approved, and subsequent statuses
+        # Approved tab: PM approved, TD approved, and subsequent statuses (excluding pending_td_approval which is in Send BOQ tab)
         approved_count = (
             counts_dict.get('pm_approved', 0) +
-            counts_dict.get('pending_td_approval', 0) +
             counts_dict.get('approved', 0) +
             counts_dict.get('revision_approved', 0) +
             counts_dict.get('sent_for_confirmation', 0) +
