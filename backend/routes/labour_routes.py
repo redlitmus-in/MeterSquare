@@ -194,6 +194,13 @@ def retain_workers(requisition_id):
     return retain_workers_for_next_day(requisition_id)
 
 
+@labour_routes.route('/requisitions/<int:requisition_id>/download_pdf', methods=['GET'])
+@jwt_required
+def download_pdf(requisition_id):
+    """Download PDF report for requisition assignment (Production Manager)"""
+    return download_assignment_pdf(requisition_id)
+
+
 # ============================================================================
 # STEP 5: Arrival Confirmation (Site Engineer)
 # ============================================================================

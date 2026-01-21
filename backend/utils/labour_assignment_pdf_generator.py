@@ -51,7 +51,7 @@ class LabourAssignmentPDFGenerator:
             parent=self.styles['Normal'],
             fontSize=12,
             fontName='Helvetica-Bold',
-            textColor=colors.HexColor('#2563eb'),
+            textColor=colors.HexColor('#1a1a1a'),
             spaceBefore=12,
             spaceAfter=6
         ))
@@ -167,9 +167,9 @@ class LabourAssignmentPDFGenerator:
         story.append(divider_table)
         story.append(Spacer(1, 2*mm))
 
-        # Contact info - matching the screenshot format
+        # Contact info - professional format without colors
         contact_info = """
-        <font color="#dc2626"><b>Sharjah</b></font>&nbsp;&nbsp;P.O. Box 66015 | Tel: 06 5398189&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;<font color="#5b8fd8"><b>Dubai</b></font>&nbsp;&nbsp;P.O. Box 89381 | Tel: 04 2596772
+        <b>Sharjah</b>&nbsp;&nbsp;P.O. Box 66015 | Tel: 06 5398189&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;<b>Dubai</b>&nbsp;&nbsp;P.O. Box 89381 | Tel: 04 2596772
         """
         story.append(Paragraph(contact_info, ParagraphStyle(
             'ContactInfo',
@@ -207,11 +207,21 @@ class LabourAssignmentPDFGenerator:
         )))
         story.append(Spacer(1, 6*mm))
 
-        # Combined Requisition Details & Request/Approval Information
-        story.append(Paragraph("Requisition Details", self.styles['SectionHeader']))
+        # Combined section headers side by side
+        section_headers = [[
+            Paragraph("Requisition Details", self.styles['SectionHeader']),
+            Paragraph("Request & Approval Information", self.styles['SectionHeader'])
+        ]]
+        headers_table = Table(section_headers, colWidths=[85*mm, 85*mm])
+        headers_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(headers_table)
 
-        # Build combined table data
-        combined_table_data = [
+        # Build left side: Requisition Details
+        requisition_details_data = [
             ['Requisition Code:', requisition_data.get('requisition_code', 'N/A')],
             ['Project Name:', requisition_data.get('project_name', 'N/A')],
             ['Site/Location:', requisition_data.get('site_name', 'N/A')],
@@ -221,56 +231,63 @@ class LabourAssignmentPDFGenerator:
             ['Assignment Status:', requisition_data.get('assignment_status', 'N/A').upper()]
         ]
 
-        combined_table = Table(combined_table_data, colWidths=[50*mm, 120*mm])
-        combined_table.setStyle(TableStyle([
+        requisition_table = Table(requisition_details_data, colWidths=[42*mm, 42*mm])
+        requisition_table.setStyle(TableStyle([
             ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
             ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#333333')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f3f4f6')),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#666666')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ]))
-        story.append(combined_table)
-        story.append(Spacer(1, 8*mm))
 
-        # Request & Approval Information
-        story.append(Paragraph("Request & Approval Information", self.styles['SectionHeader']))
-        request_table_data = [
+        # Build right side: Request & Approval Information - Single column (2-column table: label | value)
+        request_approval_data = [
             ['Requested By:', requisition_data.get('requested_by_name', 'N/A')],
             ['Requester Role:', requisition_data.get('requester_role', 'N/A')],
             ['Request Date:', requisition_data.get('request_date', 'N/A')],
         ]
 
         if requisition_data.get('approved_by_name'):
-            request_table_data.extend([
+            request_approval_data.extend([
                 ['Approved By:', requisition_data.get('approved_by_name', 'N/A')],
                 ['Approval Date:', requisition_data.get('approval_date', 'N/A')]
             ])
 
         if requisition_data.get('assigned_by_name'):
-            request_table_data.extend([
+            request_approval_data.extend([
                 ['Assigned By (PM):', requisition_data.get('assigned_by_name', 'N/A')],
                 ['Assignment Date:', requisition_data.get('assignment_date', 'N/A')]
             ])
 
-        request_table = Table(request_table_data, colWidths=[50*mm, 120*mm])
-        request_table.setStyle(TableStyle([
+        request_approval_table = Table(request_approval_data, colWidths=[42*mm, 42*mm])
+        request_approval_table.setStyle(TableStyle([
             ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
             ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#333333')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#fef3c7')),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#f59e0b')),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#666666')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ]))
-        story.append(request_table)
+
+        # Combine both tables side by side with minimal spacing
+        combined_sections = [[requisition_table, request_approval_table]]
+        combined_table = Table(combined_sections, colWidths=[85*mm, 85*mm], spaceBefore=0, spaceAfter=0)
+        combined_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (0, -1), 0),
+            ('RIGHTPADDING', (0, 0), (0, -1), 0),
+            ('LEFTPADDING', (1, 0), (1, -1), 1*mm),
+            ('RIGHTPADDING', (1, 0), (1, -1), 0),
+        ]))
+
+        story.append(combined_table)
         story.append(Spacer(1, 8*mm))
 
         # Labour Items Section
@@ -291,12 +308,11 @@ class LabourAssignmentPDFGenerator:
                     ('FONT', (0, 1), (0, -1), 'Helvetica-Bold', 9),
                     ('FONT', (1, 1), (1, -1), 'Helvetica', 9),
                     ('SPAN', (0, 0), (-1, 0)),
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563eb')),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#333333')),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                     ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#333333')),
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                    ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#f3f4f6')),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#666666')),
                     ('LEFTPADDING', (0, 0), (-1, -1), 8),
                     ('RIGHTPADDING', (0, 0), (-1, -1), 8),
                     ('TOPPADDING', (0, 0), (-1, -1), 6),
@@ -346,19 +362,18 @@ class LabourAssignmentPDFGenerator:
             workers_table = Table(workers_table_data, colWidths=[10*mm, 25*mm, 40*mm, 60*mm, 35*mm])
             workers_table.setStyle(TableStyle([
                 # Header style
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f2937')),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#333333')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                 ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 # Data rows
                 ('FONT', (0, 1), (-1, -1), 'Helvetica', 8),
                 ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#333333')),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('ALIGN', (0, 0), (0, -1), 'CENTER'),  # # column center
-                # Alternating row colors
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')]),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
                 # Grid
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#666666')),
                 ('LEFTPADDING', (0, 0), (-1, -1), 4),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 4),
                 ('TOPPADDING', (0, 0), (-1, -1), 6),
