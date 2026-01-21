@@ -157,14 +157,6 @@ class LabourAssignmentPDFGenerator:
             ]))
 
         story.append(header_table)
-
-        # Divider line
-        story.append(Spacer(1, 3*mm))
-        divider_table = Table([['']], colWidths=[170*mm])
-        divider_table.setStyle(TableStyle([
-            ('LINEABOVE', (0, 0), (-1, -1), 1.5, colors.HexColor('#dc2626')),
-        ]))
-        story.append(divider_table)
         story.append(Spacer(1, 2*mm))
 
         # Contact info - professional format without colors
@@ -179,6 +171,14 @@ class LabourAssignmentPDFGenerator:
             textColor=colors.HexColor('#333333'),
             alignment=TA_CENTER
         )))
+
+        # Divider line
+        story.append(Spacer(1, 2*mm))
+        divider_table = Table([['']], colWidths=[170*mm])
+        divider_table.setStyle(TableStyle([
+            ('LINEABOVE', (0, 0), (-1, -1), 1.5, colors.HexColor('#dc2626')),
+        ]))
+        story.append(divider_table)
         story.append(Spacer(1, 10*mm))
 
         # Document Title
@@ -290,39 +290,6 @@ class LabourAssignmentPDFGenerator:
         story.append(combined_table)
         story.append(Spacer(1, 8*mm))
 
-        # Labour Items Section
-        if requisition_data.get('labour_items') and len(requisition_data['labour_items']) > 0:
-            story.append(Paragraph("Labour Requirements", self.styles['SectionHeader']))
-
-            for idx, item in enumerate(requisition_data['labour_items'], 1):
-                labour_item_data = [
-                    [f"Item {idx}", ''],
-                    ['Work Description:', item.get('work_description', 'N/A')],
-                    ['Skill Required:', item.get('skill_required', 'N/A')],
-                    ['Workers Required:', str(item.get('workers_count', 0))]
-                ]
-
-                labour_item_table = Table(labour_item_data, colWidths=[50*mm, 120*mm])
-                labour_item_table.setStyle(TableStyle([
-                    ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
-                    ('FONT', (0, 1), (0, -1), 'Helvetica-Bold', 9),
-                    ('FONT', (1, 1), (1, -1), 'Helvetica', 9),
-                    ('SPAN', (0, 0), (-1, 0)),
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#333333')),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#333333')),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#666666')),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ]))
-                story.append(labour_item_table)
-                story.append(Spacer(1, 3*mm))
-
-            story.append(Spacer(1, 5*mm))
-
         # Assigned Workers Section
         if requisition_data.get('assigned_workers') and len(requisition_data['assigned_workers']) > 0:
             # Workers section header and table - keep together on same page
@@ -330,54 +297,75 @@ class LabourAssignmentPDFGenerator:
 
             workers_section.append(Paragraph("Assigned Workers", self.styles['SectionHeader']))
 
-            # Workers table header
+            # Workers table header - matching the duty allocation format
             workers_table_data = [
-                ['#', 'Worker Code', 'Worker Name', 'Skills', 'Contact']
+                ['Sl No', 'EMP.NO', 'NAME', 'DESIGNATION', 'SITE/DUTY', 'TIME', 'PM']
             ]
 
             # Add worker rows
             for idx, worker in enumerate(requisition_data['assigned_workers'], 1):
-                # Wrap skills text to prevent overflow
+                # Format skills/designation
                 skills_list = worker.get('skills', [])
-                if skills_list:
-                    skills = ', '.join(skills_list)
-                else:
-                    skills = 'N/A'
+                designation = ', '.join(skills_list) if skills_list else 'Worker'
+
+                # Site/Duty info from requisition
+                site_duty = requisition_data.get('site_name', 'N/A')
+
+                # Work time
+                work_time = ''
+                if requisition_data.get('start_time'):
+                    work_time = requisition_data.get('start_time', '')
+
+                # PM/Manager assigned
+                pm_name = requisition_data.get('assigned_by_name', 'N/A')
 
                 workers_table_data.append([
                     str(idx),
                     worker.get('worker_code', 'N/A'),
                     worker.get('full_name', 'N/A'),
-                    Paragraph(skills, ParagraphStyle(
-                        'SkillsCell',
-                        parent=self.styles['Normal'],
-                        fontSize=8,
-                        fontName='Helvetica',
-                        textColor=colors.HexColor('#333333'),
-                        leading=10
-                    )),
-                    worker.get('phone', 'N/A')
+                    designation,
+                    site_duty,
+                    work_time,
+                    pm_name
                 ])
 
-            workers_table = Table(workers_table_data, colWidths=[10*mm, 25*mm, 40*mm, 60*mm, 35*mm])
+            # Create table with proper column widths (total 165mm to fit page)
+            # Wrapping text in Designation and Site/Duty columns using Paragraph
+            formatted_data = [workers_table_data[0]]  # Keep header as is
+            for row in workers_table_data[1:]:
+                formatted_row = [
+                    row[0],  # Sl No
+                    row[1],  # EMP.NO
+                    row[2],  # NAME
+                    Paragraph(row[3], ParagraphStyle('CellText', fontSize=7, fontName='Helvetica')),  # DESIGNATION
+                    Paragraph(row[4], ParagraphStyle('CellText', fontSize=7, fontName='Helvetica')),  # SITE/DUTY
+                    row[5],  # TIME
+                    Paragraph(row[6], ParagraphStyle('CellText', fontSize=7, fontName='Helvetica'))  # PM
+                ]
+                formatted_data.append(formatted_row)
+
+            workers_table = Table(formatted_data, colWidths=[10*mm, 18*mm, 25*mm, 30*mm, 32*mm, 18*mm, 32*mm])
             workers_table.setStyle(TableStyle([
                 # Header style
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#333333')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 7),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 # Data rows
-                ('FONT', (0, 1), (-1, -1), 'Helvetica', 8),
+                ('FONT', (0, 1), (-1, -1), 'Helvetica', 7),
                 ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#333333')),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('ALIGN', (0, 0), (0, -1), 'CENTER'),  # # column center
+                ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # Sl No column center
+                ('ALIGN', (1, 1), (1, -1), 'CENTER'),  # EMP.NO column center
+                ('ALIGN', (2, 1), (2, -1), 'LEFT'),    # NAME column left
+                ('ALIGN', (5, 1), (5, -1), 'CENTER'),  # TIME column center
                 ('BACKGROUND', (0, 1), (-1, -1), colors.white),
                 # Grid
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#666666')),
-                ('LEFTPADDING', (0, 0), (-1, -1), 4),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
             ]))
 
             workers_section.append(workers_table)
