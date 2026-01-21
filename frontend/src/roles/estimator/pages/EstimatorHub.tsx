@@ -1935,8 +1935,8 @@ const EstimatorHub: React.FC = () => {
     const isClientCancelled = status === 'client_cancelled';
     // Items Assigned: PM has assigned items to SE, view-only for estimator
     const isItemsAssigned = status === 'items_assigned';
-    // Can Edit: Estimator can edit BOQ if it's draft OR sent to client OR any revision status (but NOT after TD approval or items assigned)
-    const canEdit = (isDraft || isSentToClient || isUnderRevision || isPendingRevision) && !isItemsAssigned;
+    // Can Edit: Estimator can edit BOQ if it's draft OR sent to client OR any revision status (but NOT after PM approval, TD approval, or items assigned)
+    const canEdit = (isDraft || isSentToClient || isUnderRevision || isPendingRevision) && !isPMApproved && !isItemsAssigned;
 
     return (
       <div
@@ -2215,36 +2215,9 @@ const EstimatorHub: React.FC = () => {
               {isPendingTDApproval ? 'Pending TD Approval' : 'Sent to BOQ'}
             </div>
           ) : isPMApproved ? (
-            /* PM Approved - Can send to TD */
-            <>
-              <button
-                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
-                style={{ backgroundColor: 'rgb(34, 197, 94)' }}
-                onClick={async () => {
-                  setIsLoadingBoqForEdit(true);
-                  try {
-                    if (boq.boq_id) {
-                      const result = await estimatorService.getBOQById(boq.boq_id);
-                      if (result.success && result.data) {
-                        setEditingBoq(result.data);
-                        setSelectedProjectForBOQ(result.data.project || boq.project);
-                        setFullScreenBoqMode('edit');
-                        setShowFullScreenBOQ(true);
-                      } else {
-                        showError('Failed to load BOQ details');
-                      }
-                    }
-                  } finally {
-                    setIsLoadingBoqForEdit(false);
-                  }
-                }}
-              >
-                <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                <span className="hidden sm:inline">Edit BOQ</span>
-                <span className="sm:hidden">Edit</span>
-              </button>
-              <button
-                className="text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm"
+            /* PM Approved - Can only send to TD (NO EDIT) */
+            <button
+              className="col-span-2 text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm"
                 onClick={async () => {
                   setSendingToTD(true);
                   setSendingBOQId(boq.boq_id!);
@@ -2272,8 +2245,7 @@ const EstimatorHub: React.FC = () => {
                 <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 <span className="hidden sm:inline">{sendingBOQId === boq.boq_id ? 'Sending...' : 'Send to TD'}</span>
                 <span className="sm:hidden">{sendingBOQId === boq.boq_id ? '...' : 'TD'}</span>
-              </button>
-            </>
+            </button>
           ) : isPendingRevision ? (
             /* Revision sent to TD - waiting for approval */
             <div className="col-span-2 flex items-center justify-center text-xs text-red-700 font-medium">
@@ -2648,7 +2620,8 @@ const EstimatorHub: React.FC = () => {
                     </Button>
                     {(() => {
                       const status = boq.status?.toLowerCase() || '';
-                      const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled' && status !== 'client_rejected');
+                      const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled' && status !== 'client_rejected' && status !== 'pm_approved');
+                      const isPMApproved = status === 'pm_approved';
                       const isPendingRevision = status === 'pending_revision';
                       const isUnderRevision = status === 'under_revision';
                       const isApprovedByTD = status === 'approved';
@@ -2664,6 +2637,29 @@ const EstimatorHub: React.FC = () => {
                             <XCircleIcon className="h-4 w-4" />
                             Cancelled
                           </span>
+                        );
+                      } else if (isPMApproved) {
+                        // PM Approved - Can only send to TD (NO EDIT)
+                        return (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              const result = await estimatorService.sendBOQToTechnicalDirector(boq.boq_id!);
+                              if (result.success) {
+                                showSuccess('BOQ sent to Technical Director successfully!');
+                                await Promise.all([loadBOQs(), loadProjects(currentPage)]);
+                                useRealtimeUpdateStore.getState().triggerBOQUpdate();
+                              } else {
+                                showError(result.message);
+                              }
+                            }}
+                            className="h-8 px-3 text-blue-600 hover:text-blue-700"
+                            title="Send to Technical Director for final approval"
+                          >
+                            <Send className="h-4 w-4 mr-1" />
+                            <span className="text-xs">Send to TD</span>
+                          </Button>
                         );
                       } else if (isPendingRevision) {
                         return (

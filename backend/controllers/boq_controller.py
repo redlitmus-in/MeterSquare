@@ -1856,6 +1856,16 @@ def update_boq(boq_id):
         boq = BOQ.query.filter_by(boq_id=boq_id).first()
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
+
+        # Validate that BOQ can be edited based on status
+        # Cannot edit if PM has approved or items are assigned
+        restricted_statuses = ["PM_Approved", "Items_Assigned", "Approved"]
+        if boq.status in restricted_statuses:
+            return jsonify({
+                "error": f"Cannot edit BOQ with status '{boq.status}'. BOQ has been approved and is no longer editable.",
+                "status": boq.status
+            }), 403
+
         # Update BOQ basic details
         if "boq_name" in data:
             boq.boq_name = data["boq_name"]

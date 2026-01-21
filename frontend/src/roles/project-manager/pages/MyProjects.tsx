@@ -1149,20 +1149,32 @@ const MyProjects: React.FC = () => {
                        (project.boq_status?.toLowerCase() === 'approved' ||
                         project.boq_status?.toLowerCase() === 'pm_approved' ||
                         project.boq_status?.toLowerCase() === 'client_confirmed' ||
-                        project.boq_status?.toLowerCase() === 'items_assigned') && (
-                        <button
-                          onClick={() => {
-                            setSelectedProject(project);
-                            // Open modal with empty items array - modal will fetch items itself
-                            setSelectedItemIndices([]);
-                            setShowItemAssignmentModal(true);
-                          }}
-                          className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
-                          title="Assign Items to Site Engineer"
-                        >
-                          <UserPlusIcon className="w-5 h-5" />
-                        </button>
-                      )}
+                        project.boq_status?.toLowerCase() === 'items_assigned') && (() => {
+                        // Check if all items are already assigned
+                        const allItemsAssigned = project.total_boq_items &&
+                                                project.total_items_assigned === project.total_boq_items;
+
+                        return (
+                          <button
+                            onClick={() => {
+                              if (allItemsAssigned) return; // Prevent click when all items assigned
+                              setSelectedProject(project);
+                              // Open modal with empty items array - modal will fetch items itself
+                              setSelectedItemIndices([]);
+                              setShowItemAssignmentModal(true);
+                            }}
+                            disabled={allItemsAssigned}
+                            className={`p-2 rounded transition-all ${
+                              allItemsAssigned
+                                ? 'text-gray-300 bg-gray-100 cursor-not-allowed'
+                                : 'text-gray-400 hover:text-green-600 hover:bg-green-50'
+                            }`}
+                            title={allItemsAssigned ? "All items already assigned" : "Assign Items to Site Engineer"}
+                          >
+                            <UserPlusIcon className="w-5 h-5" />
+                          </button>
+                        );
+                      })()}
                       {/* Show completion confirmation tracking - hide in Approved tab */}
                       {filterStatus !== 'approved' &&
                        (project.site_supervisor_id ||

@@ -230,14 +230,16 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                       {/* Edit Button */}
                       {onEdit && (() => {
                         const status = displayData?.status?.toLowerCase() || '';
+                        // Can edit: draft, sent to client, or under revision (but NOT after PM approval or items assigned)
                         const canEdit = !status ||
                           status === 'draft' ||
                           status === 'sent_for_confirmation' ||
                           status === 'under_revision' ||
-                          status === 'pending_revision' ||
-                          status === 'pending_pm_approval' ||
-                          status === 'pending';
-                        return canEdit;
+                          status === 'pending_revision';
+                        // Explicitly exclude PM approved and items assigned statuses
+                        const isPMApproved = status === 'pm_approved';
+                        const isItemsAssigned = status === 'items_assigned';
+                        return canEdit && !isPMApproved && !isItemsAssigned;
                       })() && (
                         <button
                           onClick={onEdit}
