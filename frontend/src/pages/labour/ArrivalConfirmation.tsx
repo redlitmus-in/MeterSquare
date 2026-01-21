@@ -169,6 +169,77 @@ const ArrivalConfirmation: React.FC = () => {
   };
 
   // Open clock out confirmation modal
+  // Check if arrival/no-show buttons should be enabled based on shift time
+  const canMarkArrival = (arrival: LabourArrival): { canArrive: boolean; canNoShow: boolean; reason: string } => {
+    if (!arrival.requisition?.start_time || !arrival.requisition?.end_time) {
+      return { canArrive: true, canNoShow: true, reason: "" }; // No time restrictions if times not set
+    }
+
+    const now = new Date();
+    const currentTime = now.getHours() * 60 + now.getMinutes(); // Current time in minutes
+
+    // Parse shift times
+    const [startHour, startMin] = arrival.requisition.start_time.split(":").map(Number);
+    const [endHour, endMin] = arrival.requisition.end_time.split(":").map(Number);
+    const shiftStart = startHour * 60 + startMin;
+    const shiftEnd = endHour * 60 + endMin;
+
+    // Handle overnight shifts (end_time < start_time)
+    const isOvernightShift = shiftEnd < shiftStart;
+
+    // Grace periods (in minutes)
+    const BEFORE_SHIFT_GRACE = 30; // Can mark arrival 30 min before shift
+    const NO_SHOW_THRESHOLD = 60; // Mark no-show after 1 hour of shift start
+
+    let canArrive = false;
+    let canNoShow = false;
+    let reason = "";
+
+    if (isOvernightShift) {
+      // Overnight shift logic (e.g., 22:00 to 06:00)
+      // Can arrive: from (start - 30min) until end time
+      // Time is valid if: currentTime >= (start - 30) OR currentTime <= end
+      const graceStart = (shiftStart - BEFORE_SHIFT_GRACE + 1440) % 1440;
+      
+      if (currentTime >= shiftStart || currentTime <= shiftEnd) {
+        // During shift or after start
+        canArrive = true;
+      } else if (currentTime >= graceStart && currentTime < shiftStart) {
+        // Before shift within grace period
+        canArrive = true;
+      } else {
+        reason = `Shift has ended. Shift time: ${arrival.requisition.start_time} - ${arrival.requisition.end_time}`;
+      }
+
+      // No-show: Can mark after (start + 60min)
+      const noShowTime = (shiftStart + NO_SHOW_THRESHOLD) % 1440;
+      if (currentTime >= noShowTime || (shiftStart > shiftEnd && currentTime <= shiftEnd)) {
+        canNoShow = true;
+      }
+    } else {
+      // Same-day shift logic (e.g., 08:00 to 16:00)
+      const graceStart = shiftStart - BEFORE_SHIFT_GRACE;
+      
+      if (currentTime >= graceStart && currentTime <= shiftEnd) {
+        // Within grace period or during shift
+        canArrive = true;
+      } else if (currentTime < graceStart) {
+        reason = `Too early. Shift starts at ${arrival.requisition.start_time} (can mark 30min before)`;
+      } else {
+        reason = `Shift has ended. Shift time: ${arrival.requisition.start_time} - ${arrival.requisition.end_time}`;
+      }
+
+      // No-show: Can mark after (start + 60min) and before end
+      const noShowTime = shiftStart + NO_SHOW_THRESHOLD;
+      if (currentTime >= noShowTime && currentTime <= shiftEnd) {
+        canNoShow = true;
+      }
+    }
+
+    return { canArrive, canNoShow, reason };
+  };
+
+
   const handleDeparture = (arrivalId: number, workerName: string) => {
     setClockOutModal({ isOpen: true, arrivalId, workerName });
   };
@@ -793,54 +864,76 @@ const ArrivalConfirmation: React.FC = () => {
 
                       {/* Actions Column */}
                       <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                        {isPending || arrival.arrival_status === 'no_show' ? (
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleConfirm(arrival.arrival_id, workerName)}
-                              disabled={processing === arrival.arrival_id}
-                              className={`flex items-center gap-1 px-3 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-50 transition-colors ${
-                                arrival.arrival_status === 'no_show'
-                                  ? 'bg-orange-600 hover:bg-orange-700'
-                                  : 'bg-green-600 hover:bg-green-700'
-                              }`}
-                              title={arrival.arrival_status === 'no_show' ? 'Mark as arrived late' : 'Mark as arrived'}
-                            >
-                              {processing === arrival.arrival_id ? (
-                                <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
-                              ) : (
-                                <CheckCircleIcon className="w-4 h-4" />
-                              )}
-                              {arrival.arrival_status === 'no_show' ? 'Late Arrival' : 'Arrived'}
-                            </button>
-                            {isPending && (
+                        {(() => {
+                          const timeCheck = canMarkArrival(arrival);
+                          const isPending = arrival.arrival_status === 'assigned';
+
+                          if (isPending || arrival.arrival_status === 'no_show') {
+                            return (
+                              <div className="flex flex-col gap-2">
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => handleConfirm(arrival.arrival_id, workerName)}
+                                    disabled={processing === arrival.arrival_id || !timeCheck.canArrive}
+                                    className={`flex items-center gap-1 px-3 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
+                                      arrival.arrival_status === 'no_show'
+                                        ? 'bg-orange-600 hover:bg-orange-700'
+                                        : 'bg-green-600 hover:bg-green-700'
+                                    }`}
+                                    title={
+                                      !timeCheck.canArrive
+                                        ? timeCheck.reason
+                                        : (arrival.arrival_status === 'no_show' ? 'Mark as arrived late' : 'Mark as arrived')
+                                    }
+                                  >
+                                    {processing === arrival.arrival_id ? (
+                                      <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                                    ) : (
+                                      <CheckCircleIcon className="w-4 h-4" />
+                                    )}
+                                    {arrival.arrival_status === 'no_show' ? 'Late Arrival' : 'Arrived'}
+                                  </button>
+                                  {isPending && (
+                                    <button
+                                      onClick={() => handleNoShow(arrival.arrival_id, workerName)}
+                                      disabled={processing === arrival.arrival_id || !timeCheck.canNoShow}
+                                      className="flex items-center gap-1 px-3 py-1.5 border border-red-300 text-red-600 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                      title={
+                                        !timeCheck.canNoShow
+                                          ? "No-show can only be marked 1 hour after shift start"
+                                          : "Mark as no show"
+                                      }
+                                    >
+                                      <XCircleIcon className="w-4 h-4" />
+                                      No Show
+                                    </button>
+                                  )}
+                                </div>
+                                {timeCheck.reason && !timeCheck.canArrive && (
+                                  <span className="text-xs text-amber-600 italic">{timeCheck.reason}</span>
+                                )}
+                              </div>
+                            );
+                          } else if (arrival.arrival_status === 'confirmed') {
+                            return (
                               <button
-                                onClick={() => handleNoShow(arrival.arrival_id, workerName)}
+                                onClick={() => handleDeparture(arrival.arrival_id, workerName)}
                                 disabled={processing === arrival.arrival_id}
-                                className="flex items-center gap-1 px-3 py-1.5 border border-red-300 text-red-600 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
-                                title="Mark as no show"
+                                className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                                title="Clock out worker (overtime counted after shift end)"
                               >
-                                <XCircleIcon className="w-4 h-4" />
-                                No Show
+                                {processing === arrival.arrival_id ? (
+                                  <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                                ) : (
+                                  <ArrowRightOnRectangleIcon className="w-4 h-4" />
+                                )}
+                                Clock Out
                               </button>
-                            )}
-                          </div>
-                        ) : arrival.arrival_status === 'confirmed' ? (
-                          <button
-                            onClick={() => handleDeparture(arrival.arrival_id, workerName)}
-                            disabled={processing === arrival.arrival_id}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                            title="Clock out worker"
-                          >
-                            {processing === arrival.arrival_id ? (
-                              <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
-                            ) : (
-                              <ArrowRightOnRectangleIcon className="w-4 h-4" />
-                            )}
-                            Clock Out
-                          </button>
-                        ) : (
-                          <span className="text-xs text-gray-400">-</span>
-                        )}
+                            );
+                          } else {
+                            return <span className="text-xs text-gray-400">-</span>;
+                          }
+                        })()}
                       </td>
                     </motion.tr>
                       );

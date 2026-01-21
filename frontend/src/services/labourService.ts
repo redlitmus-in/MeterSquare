@@ -738,6 +738,42 @@ class LabourService {
   }
 
   /**
+   * Reassign workers from a requisition for a new date (duplicate with conflict checking)
+   * Creates new requisition with status 'send_to_pm' for PM approval
+   */
+  async reassignWorkers(requisitionId: number, data: {
+    required_date: string;
+    start_time?: string;
+    end_time?: string;
+    check_only?: boolean;
+  }): Promise<{
+    success: boolean;
+    message?: string;
+    data?: any;
+    available_workers?: number[];
+    unavailable_workers?: any[];
+    new_requisition?: LabourRequisition;
+  }> {
+    try {
+      const response = await apiClient.post(`/labour/requisitions/${requisitionId}/retain`, data);
+      return {
+        success: true,
+        message: response.data.message,
+        data: response.data,
+        available_workers: response.data.available_workers,
+        unavailable_workers: response.data.unavailable_workers,
+        new_requisition: response.data.new_requisition
+      };
+    } catch (error: any) {
+      console.error('Error reassigning workers:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to reassign workers'
+      };
+    }
+  }
+
+  /**
    * Download assignment PDF report
    */
   async downloadAssignmentPDF(requisitionId: number): Promise<void> {

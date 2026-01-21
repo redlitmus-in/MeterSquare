@@ -40,6 +40,7 @@ class LabourArrival(db.Model):
     )
 
     # Relationships
+    worker = db.relationship('Worker', foreign_keys=[worker_id], backref='arrivals', lazy='joined')
     project = db.relationship('Project', backref='labour_arrivals', lazy='joined')
     confirmed_by = db.relationship('User', foreign_keys=[confirmed_by_user_id], lazy='joined')
     requisition = db.relationship('LabourRequisition', foreign_keys=[requisition_id], back_populates='arrivals', lazy='joined')
@@ -84,7 +85,9 @@ class LabourArrival(db.Model):
             'work_description': self.requisition.work_description,
             'skill_required': self.requisition.skill_required,
             'workers_count': self.requisition.workers_count,
-            'site_name': self.requisition.site_name
+            'site_name': self.requisition.site_name,
+            'start_time': self.requisition.start_time.strftime('%H:%M') if self.requisition.start_time else None,
+            'end_time': self.requisition.end_time.strftime('%H:%M') if self.requisition.end_time else None
         } if self.requisition else None
 
         return {

@@ -165,7 +165,11 @@
       "Bash(./venv/bin/python:*)",
       "Bash(python test_labour_display.py:*)",
       "Bash(/usr/bin/python3:*)",
-      "Bash(python migrations/add_requester_role_to_labour_requisitions.py:*)"
+      "Bash(python migrations/add_requester_role_to_labour_requisitions.py:*)",
+      "Bash(npm install:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(export DATABASE_URL:*)",
+      "Bash(PGPASSWORD=\"Rameshdev$08\" psql:*)"
     ],
     "deny": [],
     "ask": []

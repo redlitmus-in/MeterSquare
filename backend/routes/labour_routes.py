@@ -186,11 +186,12 @@ def assign_workers(requisition_id):
     return assign_workers_to_requisition(requisition_id)
 
 
-@labour_routes.route('/requisitions/<int:requisition_id>/download_pdf', methods=['GET'])
+@labour_routes.route('/requisitions/<int:requisition_id>/retain', methods=['POST'])
+@labour_routes.route('/requisitions/<int:requisition_id>/reassign', methods=['POST'])
 @jwt_required
-def download_requisition_pdf(requisition_id):
-    """Download assignment PDF report for requisition"""
-    return download_assignment_pdf(requisition_id)
+def retain_workers(requisition_id):
+    """Reassign/duplicate requisition with same workers for a new date. Sends to PM for approval."""
+    return retain_workers_for_next_day(requisition_id)
 
 
 # ============================================================================

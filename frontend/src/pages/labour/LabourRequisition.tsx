@@ -8,6 +8,7 @@ import { motion } from 'framer-motion';
 import { labourService, LabourRequisition as RequisitionType, CreateRequisitionData } from '@/services/labourService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import { apiClient } from '@/api/config';
+import { TimePicker } from '@/components/TimePicker';
 import {
   PlusIcon,
   ClipboardDocumentListIcon,
@@ -118,6 +119,27 @@ interface SelectedLabour extends LabourItem {
   requisition_status?: 'pending' | 'approved' | 'rejected' | 'assigned' | 'completed';
 }
 
+// Reassign Workers types
+interface WorkerConflict {
+  worker_id: number;
+  full_name: string;
+  reason: string;
+  conflicting_requisition?: string;
+  time_range?: string;
+}
+
+interface ConflictCheckResult {
+  available_workers: number[];
+  unavailable_workers: WorkerConflict[];
+  message?: string;
+}
+
+interface ReassignFormData {
+  required_date: string;
+  start_time: string;
+  end_time: string;
+}
+
 // Tab configuration
 type TabType = 'pending' | 'approved' | 'rejected' | 'assigned';
 
@@ -201,6 +223,18 @@ const LabourRequisition: React.FC = () => {
   });
   const [editLabourItems, setEditLabourItems] = useState<any[]>([]);
   const [resubmitting, setResubmitting] = useState(false);
+
+  // Reassign Workers modal
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignRequisition, setReassignRequisition] = useState<RequisitionType | null>(null);
+  const [reassignFormData, setReassignFormData] = useState<ReassignFormData>({
+    required_date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
+    start_time: '',
+    end_time: ''
+  });
+  const [reassigning, setReassigning] = useState(false);
+  const [conflictCheck, setConflictCheck] = useState<ConflictCheckResult | null>(null);
+  const [timeError, setTimeError] = useState<string | null>(null);
 
   // Projects and BOQ data
   const [projects, setProjects] = useState<Project[]>([]);
@@ -596,6 +630,20 @@ const LabourRequisition: React.FC = () => {
     fetchRequisitions();
   }, [activeTab, currentPage]);
 
+  // Keyboard support for modals (Escape to close)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showReassignModal) {
+          handleCloseReassignModal();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showReassignModal]);
+
   // When project is selected - auto-fill form with project data
   const handleProjectSelect = async (projectId: number) => {
     const project = projects.find(p => p.project_id === projectId);
@@ -890,6 +938,166 @@ const LabourRequisition: React.FC = () => {
     }
   };
 
+  // Reassign Workers handlers
+  const handleCloseReassignModal = () => {
+    setShowReassignModal(false);
+    setReassignRequisition(null);
+    setConflictCheck(null);
+    setTimeError(null);
+    setReassignFormData({
+      required_date: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+      start_time: '',
+      end_time: ''
+    });
+  };
+
+  const validateTimeRange = (start: string, end: string): boolean => {
+    if (!start || !end) {
+      setTimeError(null);
+      return true; // Optional fields
+    }
+
+    // Convert time strings to minutes for proper comparison
+    const [startHours, startMinutes] = start.split(':').map(Number);
+    const [endHours, endMinutes] = end.split(':').map(Number);
+    const startTotalMinutes = startHours * 60 + startMinutes;
+    const endTotalMinutes = endHours * 60 + endMinutes;
+
+    // Allow overnight shifts (e.g., 22:00 to 02:00 next day)
+    // If end time is less than start time, it means it crosses midnight
+    // This is valid for overnight shifts
+    if (startTotalMinutes === endTotalMinutes) {
+      setTimeError('End time must be different from start time');
+      return false;
+    }
+
+    setTimeError(null);
+    return true;
+  };
+
+  const handleReassignWorkers = (requisition: RequisitionType) => {
+    setReassignRequisition(requisition);
+    setReassignFormData({
+      required_date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
+      start_time: requisition.start_time || '',
+      end_time: requisition.end_time || ''
+    });
+    setConflictCheck(null);
+    setTimeError(null);
+    setShowReassignModal(true);
+  };
+
+  const handleReassignFormChange = (field: keyof ReassignFormData, value: string) => {
+    const newData = { ...reassignFormData, [field]: value };
+    setReassignFormData(newData);
+
+    // Validate times when either time field changes
+    if (field === 'start_time' || field === 'end_time') {
+      validateTimeRange(newData.start_time, newData.end_time);
+    }
+  };
+
+  const handleCheckConflicts = async () => {
+    if (!reassignRequisition) return;
+
+    // Validate inputs
+    if (!reassignFormData.required_date) {
+      showError('Please select a date');
+      return;
+    }
+
+    // Validate time range
+    if (!validateTimeRange(reassignFormData.start_time, reassignFormData.end_time)) {
+      return;
+    }
+
+    setReassigning(true);
+    try {
+      const result = await labourService.reassignWorkers(reassignRequisition.requisition_id, {
+        required_date: reassignFormData.required_date,
+        start_time: reassignFormData.start_time || undefined,
+        end_time: reassignFormData.end_time || undefined,
+        check_only: true // Preview mode
+      });
+
+      if (result.success && result.data) {
+        const checkResult: ConflictCheckResult = {
+          available_workers: result.data.available_workers || [],
+          unavailable_workers: result.data.unavailable_workers || [],
+          message: result.message
+        };
+        setConflictCheck(checkResult);
+
+        if (checkResult.unavailable_workers.length > 0) {
+          showError(`${checkResult.unavailable_workers.length} worker(s) have conflicts`);
+        } else {
+          showSuccess('All workers are available!');
+        }
+      } else {
+        showError(result.message || 'Failed to check conflicts');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to check conflicts';
+      showError(errorMessage);
+    } finally {
+      setReassigning(false);
+    }
+  };
+
+  const buildReassignSuccessMessage = (availableCount: number, unavailableCount: number): string => {
+    let message = `✓ New requisition created with ${availableCount} worker(s)`;
+    if (unavailableCount > 0) {
+      message += ` (${unavailableCount} worker(s) had conflicts and were not assigned)`;
+    }
+    return message;
+  };
+
+  const handleConfirmReassign = async () => {
+    if (!reassignRequisition) return;
+
+    // Prevent duplicate submissions
+    if (reassigning) return;
+
+    // Validate inputs
+    if (!reassignFormData.required_date) {
+      showError('Please select a date');
+      return;
+    }
+
+    // Validate time range
+    if (!validateTimeRange(reassignFormData.start_time, reassignFormData.end_time)) {
+      return;
+    }
+
+    setReassigning(true);
+    try {
+      const result = await labourService.reassignWorkers(reassignRequisition.requisition_id, {
+        required_date: reassignFormData.required_date,
+        start_time: reassignFormData.start_time || undefined,
+        end_time: reassignFormData.end_time || undefined,
+        check_only: false // Create actual requisition
+      });
+
+      if (result.success) {
+        const availableCount = result.available_workers?.length || 0;
+        const unavailableCount = result.unavailable_workers?.length || 0;
+        const message = buildReassignSuccessMessage(availableCount, unavailableCount);
+
+        showSuccess(message);
+        handleCloseReassignModal();
+        fetchRequisitions();
+        fetchTabCounts();
+      } else {
+        showError(result.message || 'Failed to reassign workers');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to reassign workers';
+      showError(errorMessage);
+    } finally {
+      setReassigning(false);
+    }
+  };
+
   // Get status info for a labour item
   const getLabourItemStatus = (labour: LabourItem): LabourItemStatus | null => {
     const labourId = labour.labour_id ? String(labour.labour_id) : null;
@@ -1088,6 +1296,20 @@ const LabourRequisition: React.FC = () => {
                     <EyeIcon className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">View</span>
                   </button>
+
+                  {/* Reassign Workers button for assigned requisitions */}
+                  {req.status === 'approved' && req.assignment_status === 'assigned' && (
+                    <button
+                      onClick={() => handleReassignWorkers(req)}
+                      className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-teal-600 border border-teal-200 rounded hover:bg-teal-50 transition-colors"
+                      title="Reassign Workers for Another Day"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                      </svg>
+                      <span className="hidden sm:inline">Reassign</span>
+                    </button>
+                  )}
 
                   {/* Actions for pending requisitions */}
                   {req.status === 'pending' && (
@@ -1296,25 +1518,24 @@ const LabourRequisition: React.FC = () => {
                   />
                 </div>
 
+                {/* Work Shift Times */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
-                    <input
-                      type="time"
+                    <TimePicker
                       value={formData.start_time || ''}
-                      onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white"
+                      onChange={(value) => setFormData({ ...formData, start_time: value })}
                       placeholder="HH:MM"
+                      className="w-full"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
-                    <input
-                      type="time"
+                    <TimePicker
                       value={formData.end_time || ''}
-                      onChange={(e) => setFormData({ ...formData, end_time: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white"
+                      onChange={(value) => setFormData({ ...formData, end_time: value })}
                       placeholder="HH:MM"
+                      className="w-full"
                     />
                   </div>
                 </div>
@@ -2105,22 +2326,20 @@ const LabourRequisition: React.FC = () => {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
-                    <input
-                      type="time"
-                      value={editFormData.start_time}
-                      onChange={(e) => setEditFormData({ ...editFormData, start_time: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    <TimePicker
+                      value={editFormData.start_time || ''}
+                      onChange={(value) => setEditFormData({ ...editFormData, start_time: value })}
                       placeholder="HH:MM"
+                      className="w-full"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
-                    <input
-                      type="time"
-                      value={editFormData.end_time}
-                      onChange={(e) => setEditFormData({ ...editFormData, end_time: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    <TimePicker
+                      value={editFormData.end_time || ''}
+                      onChange={(value) => setEditFormData({ ...editFormData, end_time: value })}
                       placeholder="HH:MM"
+                      className="w-full"
                     />
                   </div>
                 </div>
@@ -2239,6 +2458,247 @@ const LabourRequisition: React.FC = () => {
                   )}
                 </button>
               </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Reassign Workers Modal */}
+      {showReassignModal && reassignRequisition && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reassign-modal-title"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden"
+          >
+            {/* Header */}
+            <div className="p-6 bg-gradient-to-r from-teal-600 to-teal-700">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 id="reassign-modal-title" className="text-xl font-semibold text-white">Reassign Workers</h3>
+                  <p className="text-teal-100 text-sm mt-1">
+                    Duplicate requisition {reassignRequisition.requisition_code} with{' '}
+                    <strong className="text-white">
+                      {reassignRequisition.assigned_worker_ids?.length || 0} worker(s)
+                    </strong>
+                  </p>
+                </div>
+                <button
+                  onClick={handleCloseReassignModal}
+                  aria-label="Close modal"
+                  className="text-white/80 hover:text-white transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-6">
+              {/* Original Requisition Info */}
+              <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                <h4 className="font-medium text-gray-900 text-sm">Original Requisition</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-500">Date:</span>
+                    <span className="ml-2 text-gray-900 font-medium">
+                      {new Date(reassignRequisition.required_date).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Workers:</span>
+                    <span className="ml-2 text-gray-900 font-medium">
+                      {reassignRequisition.assigned_worker_ids?.length || 0}
+                    </span>
+                  </div>
+                  {reassignRequisition.start_time && reassignRequisition.end_time && (
+                    <div className="col-span-2">
+                      <span className="text-gray-500">Time:</span>
+                      <span className="ml-2 text-gray-900 font-medium">
+                        {reassignRequisition.start_time} - {reassignRequisition.end_time}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* New Requisition Form */}
+              <div className="space-y-4">
+                <h4 className="font-medium text-gray-900 text-sm">New Requisition Details</h4>
+
+                {/* Date Input */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Required Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={reassignFormData.required_date}
+                    onChange={(e) => handleReassignFormChange('required_date', e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  />
+                </div>
+
+                {/* Work Shift Times */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Start Time
+                    </label>
+                    <TimePicker
+                      value={reassignFormData.start_time || ''}
+                      onChange={(value) => handleReassignFormChange('start_time', value)}
+                      placeholder="HH:MM"
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      End Time
+                    </label>
+                    <TimePicker
+                      value={reassignFormData.end_time || ''}
+                      onChange={(value) => handleReassignFormChange('end_time', value)}
+                      placeholder="HH:MM"
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                {/* Overnight shift hint */}
+                {!timeError && reassignFormData.start_time && reassignFormData.end_time && (
+                  <div className="text-xs text-gray-500 -mt-2">
+                    <svg className="inline w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {reassignFormData.start_time > reassignFormData.end_time
+                      ? "Overnight shift (end time is next day)"
+                      : "Same-day shift"}
+                  </div>
+                )}
+
+
+                {/* Time Error */}
+                {timeError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+                    <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-sm text-red-700">{timeError}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Check Conflicts Button */}
+              <button
+                onClick={handleCheckConflicts}
+                disabled={reassigning || !reassignFormData.required_date || !!timeError}
+                className="w-full px-4 py-2.5 text-sm font-medium text-teal-700 bg-teal-50 border border-teal-200 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {reassigning && (
+                  <svg className="animate-spin h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                )}
+                {reassigning ? 'Checking...' : 'Check Worker Availability'}
+              </button>
+
+              {/* Conflict Check Results */}
+              {conflictCheck && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-3"
+                >
+                  {/* Available Workers */}
+                  {conflictCheck.available_workers && conflictCheck.available_workers.length > 0 && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <h5 className="font-medium text-green-900 text-sm">
+                          Available Workers ({conflictCheck.available_workers.length})
+                        </h5>
+                      </div>
+                      <p className="text-sm text-green-700">
+                        These workers will be assigned to the new requisition
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Unavailable Workers */}
+                  {conflictCheck.unavailable_workers && conflictCheck.unavailable_workers.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <h5 className="font-medium text-amber-900 text-sm">
+                          Unavailable Workers ({conflictCheck.unavailable_workers.length})
+                        </h5>
+                      </div>
+                      <div className="space-y-2">
+                        {conflictCheck.unavailable_workers.map((worker: any, idx: number) => (
+                          <div key={idx} className="bg-white rounded p-3 text-sm">
+                            <div className="font-medium text-gray-900">{worker.full_name}</div>
+                            <div className="text-amber-700 mt-1">{worker.reason}</div>
+                            {worker.conflicting_requisition && (
+                              <div className="text-gray-600 text-xs mt-1">
+                                Conflict: {worker.conflicting_requisition}
+                                {worker.time_range && ` (${worker.time_range})`}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Summary for confirmation */}
+                  {conflictCheck.available_workers.length > 0 && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <p className="text-sm text-blue-900 font-medium">
+                        Ready to create requisition with {conflictCheck.available_workers.length} worker(s)
+                        {conflictCheck.unavailable_workers.length > 0 &&
+                          ` (${conflictCheck.unavailable_workers.length} excluded due to conflicts)`
+                        }
+                      </p>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 flex gap-3 justify-end border-t border-gray-200">
+              <button
+                onClick={handleCloseReassignModal}
+                className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmReassign}
+                disabled={reassigning || !reassignFormData.required_date || !!timeError}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-teal-600 to-teal-700 rounded-lg hover:from-teal-700 hover:to-teal-800 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {reassigning && (
+                  <svg className="animate-spin h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                )}
+                {reassigning ? 'Sending to PM...' : 'Send to PM for Approval'}
+              </button>
             </div>
           </motion.div>
         </div>

@@ -77,13 +77,17 @@ class DailyAttendance(db.Model):
 
     # Relationships
     project = db.relationship('Project', backref='daily_attendance_records', lazy='joined')
+    requisition = db.relationship('LabourRequisition', foreign_keys=[requisition_id], lazy='joined')
     entered_by = db.relationship('User', foreign_keys=[entered_by_user_id], lazy='joined')
     approved_by = db.relationship('User', foreign_keys=[approved_by_user_id], lazy='joined')
     corrected_by = db.relationship('User', foreign_keys=[corrected_by_user_id], lazy='joined')
     approval_history = db.relationship('AttendanceApprovalHistory', backref='attendance', lazy='dynamic')
 
     def calculate_hours_and_cost(self):
-        """Calculate total hours and cost based on clock times"""
+        """
+        Calculate total hours and cost based on clock times and shift schedule.
+        Overtime is calculated ONLY after the shift end_time, not after 8 hours.
+        """
         if self.clock_in_time and self.clock_out_time:
             duration = self.clock_out_time - self.clock_in_time
             total_minutes = duration.total_seconds() / 60
@@ -93,13 +97,39 @@ class DailyAttendance(db.Model):
 
             self.total_hours = round(total_minutes / 60, 2) if total_minutes >= 0 else 0.0
 
-            # Calculate regular and overtime (8 hours is regular)
-            if self.total_hours > 8:
-                self.regular_hours = 8.0
-                self.overtime_hours = round(self.total_hours - 8, 2)
+            # Calculate regular and overtime based on shift schedule
+            # If requisition has start/end times, use those for overtime calculation
+            if self.requisition and self.requisition.start_time and self.requisition.end_time:
+                # Get shift end time for this date
+                shift_end_datetime = datetime.combine(
+                    self.attendance_date,
+                    self.requisition.end_time
+                )
+
+                # Handle overnight shifts (end_time < start_time)
+                if self.requisition.end_time < self.requisition.start_time:
+                    # Shift ends next day
+                    from datetime import timedelta
+                    shift_end_datetime += timedelta(days=1)
+
+                # Calculate overtime: hours worked AFTER shift end time
+                if self.clock_out_time > shift_end_datetime:
+                    overtime_duration = self.clock_out_time - shift_end_datetime
+                    overtime_minutes = overtime_duration.total_seconds() / 60
+                    self.overtime_hours = round(overtime_minutes / 60, 2)
+                    self.regular_hours = round(self.total_hours - self.overtime_hours, 2)
+                else:
+                    # Clocked out before or at shift end - no overtime
+                    self.regular_hours = self.total_hours
+                    self.overtime_hours = 0.0
             else:
-                self.regular_hours = self.total_hours
-                self.overtime_hours = 0.0
+                # Fallback: Use 8-hour threshold if no shift times defined
+                if self.total_hours > 8:
+                    self.regular_hours = 8.0
+                    self.overtime_hours = round(self.total_hours - 8, 2)
+                else:
+                    self.regular_hours = self.total_hours
+                    self.overtime_hours = 0.0
 
             # Calculate cost (with null safety)
             hourly_rate = float(self.hourly_rate) if self.hourly_rate is not None else 0.0

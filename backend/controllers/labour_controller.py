@@ -411,9 +411,10 @@ def create_requisition():
                     except ValueError:
                         return jsonify({"error": "Invalid time format for end_time. Use HH:MM"}), 400
 
-                # Validate: end_time must be after start_time if both provided
-                if start_time and end_time and end_time <= start_time:
-                    return jsonify({"error": "End time must be after start time"}), 400
+                # Validate times (allow overnight shifts where end_time < start_time, e.g., 22:00 to 06:00)
+                # Only reject if times are exactly the same
+                if start_time and end_time and start_time == end_time:
+                    return jsonify({"error": "End time must be different from start time"}), 400
 
                 requisition = LabourRequisition(
                     requisition_code=requisition_code,
@@ -718,9 +719,10 @@ def resubmit_requisition(requisition_id):
             else:
                 requisition.end_time = None
 
-        # Validate: end_time must be after start_time if both exist
-        if requisition.start_time and requisition.end_time and requisition.end_time <= requisition.start_time:
-            return jsonify({"error": "End time must be after start time"}), 400
+        # Validate times (allow overnight shifts where end_time < start_time, e.g., 22:00 to 06:00)
+        # Only reject if times are exactly the same
+        if requisition.start_time and requisition.end_time and requisition.start_time == requisition.end_time:
+            return jsonify({"error": "End time must be different from start time"}), 400
 
         # Update preferred_workers_notes if provided
         # Update preferred_worker_ids if provided
@@ -1178,6 +1180,37 @@ def approve_requisition(requisition_id):
         requisition.approval_date = datetime.utcnow()
         requisition.last_modified_by = current_user.get('full_name', 'System')
 
+        # Auto-assign preferred workers for reassignment requisitions
+        # This allows reassigned requisitions to skip Production Manager assignment step
+        if requisition.preferred_worker_ids and len(requisition.preferred_worker_ids) > 0:
+            # Auto-assign the preferred workers
+            requisition.assigned_worker_ids = requisition.preferred_worker_ids
+            requisition.assignment_status = 'assigned'
+            requisition.assigned_by_user_id = current_user.get('user_id')
+            requisition.assigned_by_name = current_user.get('full_name', 'System')
+            requisition.assignment_date = datetime.utcnow()
+
+            # Create labour arrival records for auto-assigned workers
+            for worker_id in requisition.preferred_worker_ids:
+                # Check if arrival record already exists
+                existing_arrival = LabourArrival.query.filter_by(
+                    requisition_id=requisition.requisition_id,
+                    worker_id=worker_id,
+                    arrival_date=requisition.required_date,
+                    is_deleted=False
+                ).first()
+
+                if not existing_arrival:
+                    arrival = LabourArrival(
+                        requisition_id=requisition.requisition_id,
+                        worker_id=worker_id,
+                        project_id=requisition.project_id,
+                        arrival_date=requisition.required_date,
+                        arrival_status='assigned',
+                        created_by=current_user.get('full_name', 'System')
+                    )
+                    db.session.add(arrival)
+
         db.session.commit()
 
         log.info(f"Requisition approved: {requisition.requisition_code} by {current_user.get('full_name')}")
@@ -1186,8 +1219,13 @@ def approve_requisition(requisition_id):
 
         return jsonify({
             "success": True,
-            "message": "Requisition approved successfully",
-            "requisition": requisition.to_dict()
+            "message": "Requisition approved successfully" + (
+                f" and {len(requisition.preferred_worker_ids)} worker(s) auto-assigned"
+                if requisition.preferred_worker_ids and len(requisition.preferred_worker_ids) > 0
+                else ""
+            ),
+            "requisition": requisition.to_dict(),
+            "auto_assigned": bool(requisition.preferred_worker_ids and len(requisition.preferred_worker_ids) > 0)
         }), 200
 
     except Exception as e:
@@ -1659,6 +1697,192 @@ _MeterSquare Interiors LLC_"""
     except Exception as e:
         db.session.rollback()
         log.error(f"Error assigning workers: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+def retain_workers_for_next_day(requisition_id):
+    """
+    Reassign/duplicate a requisition with same workers for a new date.
+    Validates worker availability and time conflicts before creating new requisition.
+    Creates requisition with status 'send_to_pm' for PM approval (not auto-approved).
+    """
+    try:
+        # g.user is a dictionary, not a User object
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_name = current_user.get('full_name', current_user.get('email', 'Unknown'))
+
+        # Normalize role to 'SE' or 'PM' (max 10 chars for DB column)
+        raw_role = current_user.get('role', 'SE')
+        if 'pm' in raw_role.lower() or 'project' in raw_role.lower():
+            user_role = 'PM'
+        else:
+            user_role = 'SE'
+
+        data = request.get_json()
+
+        # Validate required fields
+        required_date = data.get('required_date')
+        start_time_str = data.get('start_time')
+        end_time_str = data.get('end_time')
+
+        if not required_date:
+            return jsonify({"error": "Required date is mandatory"}), 400
+
+        # Get original requisition
+        original_req = LabourRequisition.query.get(requisition_id)
+        if not original_req:
+            return jsonify({"error": "Original requisition not found"}), 404
+
+        # Check if original requisition has assigned workers
+        if not original_req.assigned_worker_ids or len(original_req.assigned_worker_ids) == 0:
+            return jsonify({"error": "Original requisition has no assigned workers"}), 400
+
+        # Parse date and times
+        target_date = datetime.strptime(required_date, '%Y-%m-%d').date()
+        start_time = datetime.strptime(start_time_str, '%H:%M').time() if start_time_str else None
+        end_time = datetime.strptime(end_time_str, '%H:%M').time() if end_time_str else None
+
+        # Validate times (allow overnight shifts where end_time < start_time, e.g., 22:00 to 06:00)
+        # Only reject if times are exactly the same
+        if start_time and end_time and start_time == end_time:
+            return jsonify({"error": "End time must be different from start time"}), 400
+
+        # Check worker availability and conflicts
+        today = datetime.utcnow().date()
+        unavailable_workers = []
+        available_workers = []
+
+        if target_date <= today and start_time and end_time:
+            # Only check conflicts for today/past dates with time specified
+            for worker_id in original_req.assigned_worker_ids:
+                # Find existing assignments on target date
+                existing_reqs = db.session.query(LabourRequisition).filter(
+                    LabourRequisition.assigned_worker_ids.contains([worker_id]),
+                    LabourRequisition.required_date == target_date,
+                    LabourRequisition.is_deleted == False,
+                    LabourRequisition.assignment_status == 'assigned'
+                ).all()
+
+                has_conflict = False
+                conflict_details = None
+
+                for existing_req in existing_reqs:
+                    if existing_req.start_time and existing_req.end_time:
+                        # Check time overlap (handle overnight shifts)
+                        # Overnight shift: start_time > end_time (e.g., 22:00 to 06:00)
+                        new_is_overnight = start_time > end_time
+                        existing_is_overnight = existing_req.start_time > existing_req.end_time
+
+                        # Check for overlap based on shift types
+                        has_overlap = False
+                        if new_is_overnight and existing_is_overnight:
+                            # Both overnight: always overlap
+                            has_overlap = True
+                        elif new_is_overnight:
+                            # New shift is overnight: overlaps if existing starts before new ends or ends after new starts
+                            has_overlap = (existing_req.start_time <= end_time or existing_req.end_time >= start_time)
+                        elif existing_is_overnight:
+                            # Existing shift is overnight: overlaps if new starts before existing ends or ends after existing starts
+                            has_overlap = (start_time <= existing_req.end_time or end_time >= existing_req.start_time)
+                        else:
+                            # Both same-day shifts: standard overlap check
+                            has_overlap = (start_time < existing_req.end_time and end_time > existing_req.start_time)
+
+                        if has_overlap:
+                            has_conflict = True
+                            conflict_details = {
+                                'requisition_code': existing_req.requisition_code,
+                                'time_range': f"{existing_req.start_time.strftime('%H:%M')} - {existing_req.end_time.strftime('%H:%M')}"
+                            }
+                            break
+
+                worker = Worker.query.get(worker_id)
+                if has_conflict:
+                    unavailable_workers.append({
+                        'worker_id': worker_id,
+                        'worker_name': worker.full_name if worker else 'Unknown',
+                        'worker_code': worker.worker_code if worker else 'N/A',
+                        'conflict': conflict_details
+                    })
+                else:
+                    available_workers.append(worker_id)
+        else:
+            # Future date or no time specified - all workers available
+            available_workers = original_req.assigned_worker_ids.copy()
+
+        # If check_only flag is set, return availability without creating
+        if data.get('check_only'):
+            return jsonify({
+                "success": True,
+                "check_only": True,
+                "available_workers": available_workers,
+                "unavailable_workers": unavailable_workers,
+                "total_workers": len(original_req.assigned_worker_ids),
+                "available_count": len(available_workers),
+                "conflict_count": len(unavailable_workers)
+            }), 200
+
+        # Create new requisition with available workers only
+        if len(available_workers) == 0:
+            return jsonify({"error": "No workers available for the selected date and time. All have conflicts."}), 400
+
+        # Generate new requisition code
+        new_req_code = LabourRequisition.generate_requisition_code()
+
+        # Build preferred workers notes with available workers
+        worker_names = []
+        for worker_id in available_workers:
+            worker = Worker.query.get(worker_id)
+            if worker:
+                worker_names.append(f"{worker.full_name} ({worker.worker_code})")
+
+        preferred_notes = f"Reassigning from {original_req.requisition_code}: " + ", ".join(worker_names)
+
+        # Create new requisition - send to PM for approval
+        new_requisition = LabourRequisition(
+            requisition_code=new_req_code,
+            project_id=original_req.project_id,
+            site_name=original_req.site_name,
+            required_date=target_date,
+            start_time=start_time,
+            end_time=end_time,
+            labour_items=original_req.labour_items,  # Copy labour items
+            work_description=original_req.work_description,
+            skill_required=original_req.skill_required,
+            workers_count=len(available_workers),  # Update count
+            boq_id=original_req.boq_id,
+            item_id=original_req.item_id,
+            labour_id=original_req.labour_id,
+            requested_by_user_id=user_id,
+            requested_by_name=user_name,
+            requester_role=user_role,
+            status='send_to_pm',  # Send to PM for approval (not auto-approved)
+            assignment_status='pending',  # Not yet assigned
+            preferred_worker_ids=available_workers,  # Store as preferred workers
+            preferred_workers_notes=preferred_notes,
+            created_by=user_name
+        )
+
+        db.session.add(new_requisition)
+        db.session.flush()  # Get requisition_id
+
+        # No labour arrivals created yet - PM will assign workers after approval
+
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": f"Reassignment requisition created with {len(available_workers)} preferred worker(s). Sent to PM for approval.",
+            "new_requisition": new_requisition.to_dict(),
+            "unavailable_workers": unavailable_workers,
+            "preferred_workers_count": len(available_workers),
+            "conflict_count": len(unavailable_workers)
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error reassigning workers: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 

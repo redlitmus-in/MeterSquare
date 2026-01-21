@@ -41,7 +41,7 @@ class Worker(db.Model):
     # Relationships
     assignments = db.relationship('WorkerAssignment', backref='worker', lazy='dynamic')
     attendance_records = db.relationship('DailyAttendance', backref='worker', lazy='dynamic')
-    arrivals = db.relationship('LabourArrival', backref='worker', lazy='dynamic')
+    # arrivals relationship is defined in LabourArrival model with backref='arrivals'
 
     def to_dict(self):
         """Serialize worker to dictionary for JSON responses"""
