@@ -66,6 +66,14 @@ class InventoryTransaction(db.Model):
     project_id = db.Column(db.Integer, nullable=True)
     notes = db.Column(db.Text, nullable=True)
     delivery_note_url = db.Column(db.Text, nullable=True)  # URL to delivery note/invoice file
+
+    # Transport/Delivery fields (for vendor deliveries - Production Manager role)
+    driver_name = db.Column(db.Text, nullable=True)
+    vehicle_number = db.Column(db.Text, nullable=True)
+    transport_fee = db.Column(db.Float, nullable=True, default=0.0)
+    # transport_notes = db.Column(db.Text, nullable=True)
+    delivery_batch_ref = db.Column(db.Text, nullable=True, index=True)  # e.g., "DB-2026-001"
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
 
@@ -81,6 +89,12 @@ class InventoryTransaction(db.Model):
             'project_id': self.project_id,
             'notes': self.notes,
             'delivery_note_url': self.delivery_note_url,
+            # Transport/Delivery fields
+            'driver_name': self.driver_name,
+            'vehicle_number': self.vehicle_number,
+            'transport_fee': self.transport_fee,
+            # 'transport_notes': self.transport_notes,
+            'delivery_batch_ref': self.delivery_batch_ref,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by
         }
@@ -253,6 +267,7 @@ class MaterialDeliveryNote(db.Model):
     vehicle_number = db.Column(db.String(100), nullable=True)
     driver_name = db.Column(db.String(255), nullable=True)
     driver_contact = db.Column(db.String(50), nullable=True)
+    transport_fee = db.Column(db.Float, nullable=True, default=0.0)  # Transport cost for delivery
     prepared_by = db.Column(db.String(255), nullable=False)
     checked_by = db.Column(db.String(255), nullable=True)
     status = db.Column(db.String(20), default='DRAFT')  # DRAFT, ISSUED, IN_TRANSIT, DELIVERED, PARTIAL, CANCELLED
@@ -289,6 +304,7 @@ class MaterialDeliveryNote(db.Model):
             'vehicle_number': self.vehicle_number,
             'driver_name': self.driver_name,
             'driver_contact': self.driver_contact,
+            'transport_fee': self.transport_fee,
             'prepared_by': self.prepared_by,
             'checked_by': self.checked_by,
             'status': self.status,

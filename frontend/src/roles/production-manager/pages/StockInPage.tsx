@@ -20,6 +20,12 @@ interface PurchaseTransaction {
   reference_number?: string;
   notes?: string;
   delivery_note_url?: string;  // URL to delivery note file
+  // Transport/Delivery fields
+  driver_name?: string;
+  vehicle_number?: string;
+  transport_fee?: number;
+  transport_notes?: string;
+  delivery_batch_ref?: string;  // e.g., "DB-2026-001"
   created_at?: string;
   created_by?: string;
 }
@@ -115,6 +121,35 @@ const StockInPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [expandedMaterials, setExpandedMaterials] = useState<Set<number>>(new Set());
 
+  // Last transport details for "Copy from Last Entry" feature
+  const [lastTransportDetails, setLastTransportDetails] = useState<{
+    driver_name: string;
+    vehicle_number: string;
+    transport_fee: number;
+    transport_notes: string;
+    delivery_batch_ref: string;
+    delivery_note_url?: string;
+  } | null>(null);
+
+  // Delivery batch selection
+  const [showBatchListModal, setShowBatchListModal] = useState(false);
+  const [recentBatches, setRecentBatches] = useState<Array<{
+    delivery_batch_ref: string;
+    driver_name: string;
+    vehicle_number: string;
+    transport_fee: number;
+    transport_notes: string;
+    created_at: string;
+    material_count: number;
+    delivery_note_url?: string;
+  }>>([]);
+
+  // Reference info from selected batch (for display only, not saved)
+  const [selectedBatchReference, setSelectedBatchReference] = useState<{
+    original_fee: number;
+    delivery_note_url?: string;
+  } | null>(null);
+
   // Purchase form data
   const [purchaseFormData, setPurchaseFormData] = useState<PurchaseTransaction>({
     inventory_material_id: 0,
@@ -123,7 +158,13 @@ const StockInPage: React.FC = () => {
     unit_price: 0,
     total_amount: 0,
     reference_number: '',
-    notes: ''
+    notes: '',
+    // Transport fields
+    driver_name: '',
+    vehicle_number: '',
+    transport_fee: 0,
+    transport_notes: '',
+    delivery_batch_ref: ''
   });
   const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null);
 
@@ -174,6 +215,7 @@ const StockInPage: React.FC = () => {
 
   useEffect(() => {
     filterTransactions();
+    extractRecentBatches(); // Extract delivery batches when transactions change
   }, [searchTerm, purchaseTransactions]);
 
   // Filter materials based on search term using useMemo for better performance
@@ -250,6 +292,56 @@ const StockInPage: React.FC = () => {
     setFilteredTransactions(filtered);
   };
 
+  // Extract recent delivery batches from transactions
+  const extractRecentBatches = () => {
+    const batchMap = new Map<string, {
+      delivery_batch_ref: string;
+      driver_name: string;
+      vehicle_number: string;
+      transport_fee: number;
+      transport_notes: string;
+      created_at: string;
+      material_count: number;
+      delivery_note_url?: string;
+    }>();
+
+    // Group transactions by delivery_batch_ref
+    purchaseTransactions.forEach(txn => {
+      if (txn.delivery_batch_ref) {
+        if (!batchMap.has(txn.delivery_batch_ref)) {
+          batchMap.set(txn.delivery_batch_ref, {
+            delivery_batch_ref: txn.delivery_batch_ref,
+            driver_name: txn.driver_name || '',
+            vehicle_number: txn.vehicle_number || '',
+            transport_fee: txn.transport_fee || 0,
+            transport_notes: txn.transport_notes || '',
+            created_at: txn.created_at || '',
+            material_count: 1,
+            delivery_note_url: txn.delivery_note_url // Keep the first delivery note
+          });
+        } else {
+          const existing = batchMap.get(txn.delivery_batch_ref)!;
+          existing.material_count += 1;
+          // Keep the MAXIMUM transport fee (the one that was actually paid)
+          if (txn.transport_fee && txn.transport_fee > existing.transport_fee) {
+            existing.transport_fee = txn.transport_fee;
+          }
+          // Keep delivery note URL if current one is empty but transaction has one
+          if (!existing.delivery_note_url && txn.delivery_note_url) {
+            existing.delivery_note_url = txn.delivery_note_url;
+          }
+        }
+      }
+    });
+
+    // Convert to array and sort by date (most recent first)
+    const batches = Array.from(batchMap.values()).sort((a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    setRecentBatches(batches.slice(0, 10)); // Keep only 10 most recent batches
+  };
+
   // Group transactions by material
   const groupedTransactions = useMemo(() => {
     const groups = new Map<number, {
@@ -315,13 +407,20 @@ const StockInPage: React.FC = () => {
       unit_price: 0,
       total_amount: 0,
       reference_number: '',
-      notes: ''
+      notes: '',
+      // Reset transport fields
+      driver_name: '',
+      vehicle_number: '',
+      transport_fee: 0,
+      transport_notes: '',
+      delivery_batch_ref: ''
     });
     setSelectedMaterial(null);
     setMaterialSearchTerm('');
     setShowMaterialDropdown(false);
     setShowNewMaterialModal(false); // Ensure Add Material modal is closed
     setDeliveryNoteFile(null); // Clear any previously uploaded file
+    setSelectedBatchReference(null); // Clear batch reference info
     setShowPurchaseModal(true);
   };
 
@@ -560,10 +659,30 @@ const StockInPage: React.FC = () => {
         alert('Please enter a valid unit price');
         return;
       }
-      if (!deliveryNoteFile) {
+      // Check if delivery note is provided (either new file OR existing URL from batch)
+      if (!deliveryNoteFile && !selectedBatchReference?.delivery_note_url) {
         alert('Please upload a delivery note from vendor');
         return;
       }
+
+      // Auto-generate delivery batch reference if transport details provided and no existing batch ref
+      let finalBatchRef = purchaseFormData.delivery_batch_ref;
+
+      if (!finalBatchRef && (purchaseFormData.driver_name || purchaseFormData.vehicle_number)) {
+        // First material in a new delivery - generate new batch ref
+        const year = new Date().getFullYear();
+        const randomNum = Math.floor(Math.random() * 1000);
+        finalBatchRef = `DB-${year}-${String(randomNum).padStart(3, '0')}`;
+      }
+
+      const transactionToSave = {
+        ...purchaseFormData,
+        delivery_batch_ref: finalBatchRef,
+        // Use existing delivery note URL if no new file uploaded
+        delivery_note_url: !deliveryNoteFile && selectedBatchReference?.delivery_note_url
+          ? selectedBatchReference.delivery_note_url
+          : undefined
+      };
 
       setConfirmModal({
         show: true,
@@ -572,8 +691,21 @@ const StockInPage: React.FC = () => {
         onConfirm: async () => {
           setSaving(true);
           try {
-            // Use createTransactionWithFile to handle file upload
-            await inventoryService.createTransactionWithFile(purchaseFormData, deliveryNoteFile);
+            // Use createTransactionWithFile to handle file upload or existing URL
+            const result = await inventoryService.createTransactionWithFile(transactionToSave, deliveryNoteFile);
+
+            // Save transport details INCLUDING batch ref and delivery note URL for quick reuse
+            if (purchaseFormData.driver_name || purchaseFormData.vehicle_number || purchaseFormData.transport_fee) {
+              setLastTransportDetails({
+                driver_name: purchaseFormData.driver_name || '',
+                vehicle_number: purchaseFormData.vehicle_number || '',
+                transport_fee: purchaseFormData.transport_fee || 0,
+                transport_notes: purchaseFormData.transport_notes || '',
+                delivery_batch_ref: finalBatchRef || '',
+                delivery_note_url: result.delivery_note_url || transactionToSave.delivery_note_url
+              });
+            }
+
             alert('Stock In recorded successfully!');
             setShowPurchaseModal(false);
             setDeliveryNoteFile(null); // Clear uploaded file
@@ -735,6 +867,9 @@ const StockInPage: React.FC = () => {
                               <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
                               <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
                               <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">Delivery Note</th>
+                              <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">Driver</th>
+                              <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vehicle</th>
+                              <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">Transport Fee</th>
                               <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
                             </tr>
                           </thead>
@@ -773,8 +908,29 @@ const StockInPage: React.FC = () => {
                                     <span className="text-gray-400">-</span>
                                   )}
                                 </td>
-                                <td className="px-6 py-3 text-sm text-gray-600 max-w-xs truncate" title={txn.notes}>
-                                  {txn.notes || '-'}
+                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
+                                  {txn.driver_name || '-'}
+                                </td>
+                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
+                                  {txn.vehicle_number || '-'}
+                                </td>
+                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">
+                                  {txn.transport_fee ? formatCurrency(txn.transport_fee) : '-'}
+                                </td>
+                                <td className="px-6 py-3 text-sm text-gray-600 max-w-xs">
+                                  <div className="space-y-1">
+                                    {txn.notes && (
+                                      <div className="truncate" title={txn.notes}>
+                                        <span className="font-medium text-gray-700">Notes:</span> {txn.notes}
+                                      </div>
+                                    )}
+                                    {txn.transport_notes && (
+                                      <div className="truncate text-blue-600" title={txn.transport_notes}>
+                                        <span className="font-medium">Delivery:</span> {txn.transport_notes}
+                                      </div>
+                                    )}
+                                    {!txn.notes && !txn.transport_notes && '-'}
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -1019,32 +1175,191 @@ const StockInPage: React.FC = () => {
                 />
               </div>
 
+              {/* Transport & Delivery Details */}
+              <div className="border-t pt-6 mt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-gray-900 flex items-center">
+                    <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
+                    </svg>
+                    Transport & Delivery Details
+                  </h3>
+                  {recentBatches.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowBatchListModal(true)}
+                      className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm flex items-center space-x-1"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                      </svg>
+                      <span>Recent Deliveries</span>
+                    </button>
+                  )}
+                </div>
+
+                {lastTransportDetails && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-blue-800">
+                        <strong>Last Delivery:</strong> {lastTransportDetails.driver_name} • {lastTransportDetails.vehicle_number}
+                        {lastTransportDetails.delivery_batch_ref && (
+                          <span className="ml-2 px-2 py-0.5 bg-blue-100 rounded text-xs font-mono">
+                            {lastTransportDetails.delivery_batch_ref}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Set reference info to show fee and delivery note
+                          setSelectedBatchReference({
+                            original_fee: lastTransportDetails.transport_fee || 0,
+                            delivery_note_url: lastTransportDetails.delivery_note_url
+                          });
+
+                          setPurchaseFormData(prev => ({
+                            ...prev,
+                            driver_name: lastTransportDetails.driver_name,
+                            vehicle_number: lastTransportDetails.vehicle_number,
+                            transport_fee: 0,  // Set to 0 for same batch (fee was already paid on first material)
+                            transport_notes: lastTransportDetails.transport_notes,
+                            delivery_batch_ref: lastTransportDetails.delivery_batch_ref
+                          }));
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex items-center space-x-1"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        <span>Last Delivery</span>
+                      </button>
+                    </div>
+                    <p className="text-xs text-blue-600 mt-2">
+                      Materials from the same delivery will share the batch reference and transport details. Only the first material should have the transport fee.
+                    </p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Driver Name */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Driver Name
+                    </label>
+                    <input
+                      type="text"
+                      value={purchaseFormData.driver_name || ''}
+                      onChange={(e) => setPurchaseFormData({ ...purchaseFormData, driver_name: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      placeholder="Enter driver name"
+                    />
+                  </div>
+
+                  {/* Vehicle Number */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Vehicle Number
+                    </label>
+                    <input
+                      type="text"
+                      value={purchaseFormData.vehicle_number || ''}
+                      onChange={(e) => setPurchaseFormData({ ...purchaseFormData, vehicle_number: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      placeholder="Enter vehicle number"
+                    />
+                  </div>
+                </div>
+
+                {/* Transport Fee */}
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Transport Fee (AED)
+                  </label>
+
+                  {/* Show reference info if batch was selected */}
+                  {selectedBatchReference && selectedBatchReference.original_fee > 0 && (
+                    <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-amber-800 font-medium text-sm">
+                        Reference: Original transport fee for this batch was: <span className="font-bold">AED {selectedBatchReference.original_fee.toFixed(2)}</span>
+                      </p>
+                      <p className="text-amber-700 text-xs mt-2">
+                        You can edit the fee below if there was an additional charge for this specific material.
+                      </p>
+                    </div>
+                  )}
+
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={purchaseFormData.transport_fee || ''}
+                    onChange={(e) => setPurchaseFormData({ ...purchaseFormData, transport_fee: Number(e.target.value) })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    placeholder="Enter transport fee for this delivery"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Enter the transport fee paid for delivering these materials from vendor to store
+                  </p>
+                </div>
+              </div>
+
               {/* Delivery Note Upload */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   <FileText className="w-4 h-4 inline mr-1" />
                   Delivery Note from Vendor <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      // Check file size (max 10MB)
-                      if (file.size > 10 * 1024 * 1024) {
-                        alert('File size must be less than 10MB');
-                        e.target.value = '';
-                        return;
+
+                {/* Show reference to original batch delivery note - allow using it */}
+                {selectedBatchReference && selectedBatchReference.delivery_note_url && !deliveryNoteFile && (
+                  <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="text-xs">
+                      <p className="text-blue-800 font-semibold mb-2">
+                        📋 Using Original Batch Delivery Note:
+                      </p>
+                      <a
+                        href={selectedBatchReference.delivery_note_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center space-x-1 text-xs text-blue-600 hover:text-blue-800 underline font-medium mb-2"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Click to View Original Delivery Note</span>
+                      </a>
+                      <p className="text-blue-700 mt-2">
+                        ✓ This material will use the same delivery note as the original batch. You can upload a different file below if this material has a separate delivery note.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* File input with conditional border */}
+                <div className={selectedBatchReference && selectedBatchReference.delivery_note_url ? '' : 'border border-gray-300 rounded-lg p-3'}>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        // Check file size (max 10MB)
+                        if (file.size > 10 * 1024 * 1024) {
+                          alert('File size must be less than 10MB');
+                          e.target.value = '';
+                          return;
+                        }
+                        setDeliveryNoteFile(file);
                       }
-                      setDeliveryNoteFile(file);
-                    }
-                  }}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)
-                </p>
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {selectedBatchReference && selectedBatchReference.delivery_note_url
+                      ? 'Upload a new file only if this material has a different delivery note. Otherwise, the batch delivery note will be used.'
+                      : 'Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)'}
+                  </p>
+                </div>
+
                 {deliveryNoteFile && (
                   <div className="mt-2 flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-3">
                     <div className="flex items-center space-x-2">
@@ -1277,6 +1592,129 @@ const StockInPage: React.FC = () => {
                     <span>Create Material</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recent Delivery Batches Modal */}
+      {showBatchListModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-6 py-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold flex items-center">
+                <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+                Recent Delivery Batches
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowBatchListModal(false)}
+                className="text-white hover:bg-purple-800 rounded-lg p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto max-h-[calc(80vh-180px)]">
+              <p className="text-sm text-gray-600 mb-4">
+                Select a recent delivery to copy transport and driver details to the form. Click on any batch to auto-fill the form.
+              </p>
+
+              <div className="space-y-3">
+                {recentBatches.map((batch, index) => (
+                  <div
+                    key={batch.delivery_batch_ref}
+                    onClick={() => {
+                      // Store reference info for display
+                      setSelectedBatchReference({
+                        original_fee: batch.transport_fee || 0,
+                        delivery_note_url: batch.delivery_note_url
+                      });
+
+                      // Populate form with batch details, but fee = 0 (already paid)
+                      setPurchaseFormData(prev => ({
+                        ...prev,
+                        driver_name: batch.driver_name,
+                        vehicle_number: batch.vehicle_number,
+                        transport_fee: 0, // Set to 0 - fee already paid on first material
+                        transport_notes: batch.transport_notes,
+                        delivery_batch_ref: batch.delivery_batch_ref
+                      }));
+
+                      // Do NOT copy the file - each material needs its own delivery note
+                      setDeliveryNoteFile(null);
+
+                      setShowBatchListModal(false);
+                    }}
+                    className="border border-gray-200 rounded-lg p-4 hover:bg-purple-50 hover:border-purple-300 cursor-pointer transition-all"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-sm font-mono font-semibold">
+                            {batch.delivery_batch_ref}
+                          </span>
+                          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+                            {batch.material_count} material{batch.material_count > 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <span className="text-gray-600">Driver:</span>
+                            <span className="ml-2 font-medium text-gray-900">{batch.driver_name || 'N/A'}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Vehicle:</span>
+                            <span className="ml-2 font-medium text-gray-900">{batch.vehicle_number || 'N/A'}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Transport Fee:</span>
+                            <span className="ml-2 font-medium text-gray-900">AED {batch.transport_fee?.toFixed(2) || '0.00'}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Date:</span>
+                            <span className="ml-2 font-medium text-gray-900">
+                              {new Date(batch.created_at).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                        {batch.transport_notes && (
+                          <div className="mt-2 text-xs text-gray-600 bg-gray-50 rounded p-2">
+                            <strong>Notes:</strong> {batch.transport_notes}
+                          </div>
+                        )}
+                      </div>
+                      <ChevronDown className="w-5 h-5 text-purple-600 transform -rotate-90" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {recentBatches.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  <Package className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                  <p>No recent delivery batches found</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 flex justify-end border-t">
+              <button
+                type="button"
+                onClick={() => setShowBatchListModal(false)}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+              >
+                Close
               </button>
             </div>
           </div>

@@ -35,6 +35,12 @@ export interface InventoryTransaction {
   project_id?: number;
   notes?: string;
   delivery_note_url?: string;  // URL to delivery note/invoice file
+  // Transport/Delivery fields (for vendor deliveries - Production Manager role)
+  driver_name?: string;
+  vehicle_number?: string;
+  transport_fee?: number;
+  transport_notes?: string;
+  delivery_batch_ref?: string;  // e.g., "DB-2026-001"
   created_at?: string;
   created_by?: string;
 }
@@ -227,6 +233,7 @@ export interface MaterialDeliveryNote {
   vehicle_number?: string;
   driver_name?: string;
   driver_contact?: string;
+  transport_fee?: number;
   prepared_by?: string;
   checked_by?: string;
   status?: DeliveryNoteStatus;
@@ -267,6 +274,7 @@ export interface CreateDeliveryNoteData {
   vehicle_number?: string;
   driver_name?: string;
   driver_contact?: string;
+  transport_fee?: number;
   checked_by?: string;
   notes?: string;
 }
@@ -598,7 +606,7 @@ class InventoryService {
    * Uploads delivery note to Supabase Storage and creates transaction with file URL
    */
   async createTransactionWithFile(
-    transaction: Omit<InventoryTransaction, 'inventory_transaction_id' | 'delivery_note_url'>,
+    transaction: Omit<InventoryTransaction, 'inventory_transaction_id'>,
     deliveryNoteFile: File | null
   ): Promise<InventoryTransaction> {
     try {
@@ -619,9 +627,29 @@ class InventoryService {
         formData.append('notes', transaction.notes);
       }
 
-      // Add file if provided
+      // Add transport/delivery fields if provided
+      if (transaction.driver_name) {
+        formData.append('driver_name', transaction.driver_name);
+      }
+      if (transaction.vehicle_number) {
+        formData.append('vehicle_number', transaction.vehicle_number);
+      }
+      if (transaction.transport_fee !== undefined && transaction.transport_fee !== null) {
+        formData.append('transport_fee', transaction.transport_fee.toString());
+      }
+      if (transaction.transport_notes) {
+        formData.append('transport_notes', transaction.transport_notes);
+      }
+      if (transaction.delivery_batch_ref) {
+        formData.append('delivery_batch_ref', transaction.delivery_batch_ref);
+      }
+
+      // Add file if provided, OR use existing URL
       if (deliveryNoteFile) {
         formData.append('delivery_note_file', deliveryNoteFile);
+      } else if (transaction.delivery_note_url) {
+        // Use existing delivery note URL from batch
+        formData.append('delivery_note_url', transaction.delivery_note_url);
       }
 
       // Send to backend - backend will handle Supabase upload

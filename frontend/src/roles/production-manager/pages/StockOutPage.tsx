@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Package, CheckCircle, X, Save, FileText,
-  ArrowUpCircle, RefreshCw, Download, Printer
+  ArrowUpCircle, RefreshCw, Download, Printer, DollarSign
 } from 'lucide-react';
 import {
   inventoryService,
@@ -121,6 +121,7 @@ const StockOutPage: React.FC = () => {
     vehicle_number: '',
     driver_name: '',
     driver_contact: '',
+    transport_fee: 0,
     notes: ''
   });
 
@@ -574,6 +575,7 @@ const StockOutPage: React.FC = () => {
       vehicle_number: '',
       driver_name: '',
       driver_contact: '',
+      transport_fee: 0,
       notes: ''
     });
     setDnItems([]);
@@ -1547,6 +1549,27 @@ const StockOutPage: React.FC = () => {
                     aria-label="Driver contact"
                   />
                 </div>
+              </div>
+
+              {/* Transport Fee */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <DollarSign className="w-4 h-4 inline mr-1" />
+                  Transport Fee (AED)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={dnFormData.transport_fee || ''}
+                  onChange={(e) => setDnFormData({ ...dnFormData, transport_fee: Number(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                  placeholder="Enter transport fee for this delivery"
+                  aria-label="Transport fee"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter the transport fee paid for delivering materials to the site
+                </p>
               </div>
 
               <div>

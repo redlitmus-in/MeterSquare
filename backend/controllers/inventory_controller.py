@@ -564,6 +564,12 @@ def create_inventory_transaction():
         # Calculate total amount
         total_amount = quantity * unit_price
 
+        # Extract transport/delivery fields (optional - for Production Manager role)
+        driver_name = data.get('driver_name', None)
+        vehicle_number = data.get('vehicle_number', None)
+        transport_fee = float(data.get('transport_fee', 0.0)) if data.get('transport_fee') else None
+        # transport_notes = data.get('transport_notes', None)
+        delivery_batch_ref = data.get('delivery_batch_ref', None)
         # Handle file upload to Supabase if provided
         delivery_note_url = None
         if delivery_note_file:
@@ -585,11 +591,6 @@ def create_inventory_transaction():
                 if not supabase_url or not supabase_key:
                     raise Exception('Supabase credentials must be set in environment variables')
 
-                # Create Supabase client with service role key
-                print(f"[DEBUG] Environment: {environment}")
-                print(f"[DEBUG] Supabase URL: {supabase_url}")
-                print(f"[DEBUG] Using service role key: {supabase_key[:20]}...")
-
                 supabase = create_client(supabase_url, supabase_key)
 
                 # Generate unique filename
@@ -597,9 +598,6 @@ def create_inventory_transaction():
                 original_filename = delivery_note_file.filename
                 file_extension = os.path.splitext(original_filename)[1]
                 unique_filename = f"delivery-notes/{timestamp}_{original_filename}"
-
-                print(f"[DEBUG] Uploading file: {unique_filename}")
-                print(f"[DEBUG] Content type: {delivery_note_file.content_type}")
 
                 # Upload to Supabase Storage
                 file_data = delivery_note_file.read()
@@ -614,15 +612,11 @@ def create_inventory_transaction():
                         file_data,  # file bytes (positional)
                         {"content-type": delivery_note_file.content_type, "upsert": "false"}  # file_options (positional)
                     )
-                    print(f"[DEBUG] Upload response: {response}")
                 except Exception as e:
-                    print(f"[DEBUG] Upload error details: {e}")
-                    print(f"[DEBUG] Error type: {type(e)}")
                     raise
 
                 # Get public URL
                 delivery_note_url = bucket.get_public_url(unique_filename)
-                print(f"[DEBUG] Public URL: {delivery_note_url}")
 
             except Exception as upload_error:
                 return jsonify({'error': f'File upload failed: {str(upload_error)}'}), 500
@@ -638,6 +632,12 @@ def create_inventory_transaction():
             project_id=data.get('project_id'),
             notes=data.get('notes'),
             delivery_note_url=delivery_note_url,
+            # Transport/Delivery fields
+            driver_name=driver_name,
+            vehicle_number=vehicle_number,
+            transport_fee=transport_fee,
+            # transport_notes=transport_notes,
+            delivery_batch_ref=delivery_batch_ref,
             created_by=current_user
         )
 
@@ -2970,6 +2970,7 @@ def create_delivery_note():
             vehicle_number=data.get('vehicle_number'),
             driver_name=data.get('driver_name'),
             driver_contact=data.get('driver_contact'),
+            transport_fee=float(data.get('transport_fee', 0.0)) if data.get('transport_fee') else None,
             prepared_by=prepared_by_name,
             checked_by=data.get('checked_by'),
             status='DRAFT',
@@ -3135,6 +3136,8 @@ def update_delivery_note(delivery_note_id):
             note.driver_name = data['driver_name']
         if 'driver_contact' in data:
             note.driver_contact = data['driver_contact']
+        if 'transport_fee' in data:
+            note.transport_fee = float(data['transport_fee']) if data['transport_fee'] else None
         if 'checked_by' in data:
             note.checked_by = data['checked_by']
         if 'notes' in data:
