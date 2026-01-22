@@ -554,7 +554,7 @@ const ReceiveReturns: React.FC = () => {
                         {rdn.vehicle_number && (
                           <div className="mb-3 pb-3 border-b border-gray-200">
                             <p className="text-xs text-gray-500 mb-2 font-medium">Transport Details:</p>
-                            <div className="grid grid-cols-3 gap-4 text-xs">
+                            <div className="grid grid-cols-4 gap-4 text-xs">
                               <div>
                                 <span className="text-gray-500">Vehicle:</span>
                                 <span className="ml-1 text-gray-900 font-medium">{rdn.vehicle_number}</span>
@@ -571,7 +571,28 @@ const ReceiveReturns: React.FC = () => {
                                   <span className="ml-1 text-gray-900 font-medium">{rdn.driver_contact}</span>
                                 </div>
                               )}
+                              {rdn.transport_fee !== undefined && rdn.transport_fee !== null && (
+                                <div>
+                                  <span className="text-gray-500">Transport Fee:</span>
+                                  <span className="ml-1 text-gray-900 font-medium">
+                                    AED {Number(rdn.transport_fee).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                              )}
                             </div>
+                            {rdn.delivery_note_url && (
+                              <div className="mt-2">
+                                <a
+                                  href={rdn.delivery_note_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                                >
+                                  <DocumentTextIcon className="h-4 w-4 mr-1" />
+                                  View Delivery Note Document
+                                </a>
+                              </div>
+                            )}
                           </div>
                         )}
 

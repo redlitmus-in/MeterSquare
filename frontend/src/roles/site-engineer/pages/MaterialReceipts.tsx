@@ -942,7 +942,7 @@ const MaterialReceipts: React.FC = () => {
                               {rdn.vehicle_number && (
                                 <div className="mt-3 pt-3 border-t border-gray-200">
                                   <p className="text-xs text-gray-500 mb-1 font-medium">Transport Details:</p>
-                                  <div className="grid grid-cols-3 gap-4 text-xs">
+                                  <div className="grid grid-cols-4 gap-4 text-xs">
                                     <div>
                                       <span className="text-gray-500">Vehicle:</span>
                                       <span className="ml-1 text-gray-900 font-medium">{rdn.vehicle_number}</span>
@@ -959,7 +959,28 @@ const MaterialReceipts: React.FC = () => {
                                         <span className="ml-1 text-gray-900 font-medium">{rdn.driver_contact}</span>
                                       </div>
                                     )}
+                                    {rdn.transport_fee !== undefined && rdn.transport_fee !== null && (
+                                      <div>
+                                        <span className="text-gray-500">Transport Fee:</span>
+                                        <span className="ml-1 text-gray-900 font-medium">
+                                          AED {Number(rdn.transport_fee).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                      </div>
+                                    )}
                                   </div>
+                                  {rdn.delivery_note_url && (
+                                    <div className="mt-2">
+                                      <a
+                                        href={rdn.delivery_note_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                                      >
+                                        <DocumentTextIcon className="h-4 w-4 mr-1" />
+                                        View Delivery Note Document
+                                      </a>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -1570,7 +1591,7 @@ const MaterialReceipts: React.FC = () => {
         onClose={() => setShowRDNModal(false)}
         selectedMaterials={selectedMaterialsCart}
         creating={creatingRDN}
-        onCreateRDN={async (rdnData) => {
+        onCreateRDN={async (rdnData, deliveryNoteFile) => {
           setCreatingRDN(true);
           try {
             const firstMaterial = selectedMaterialsCart[0];
@@ -1578,14 +1599,22 @@ const MaterialReceipts: React.FC = () => {
               throw new Error('No materials selected');
             }
 
-            const response = await apiClient.post('/return_delivery_notes', {
-              project_id: firstMaterial.project_id,
-              return_date: rdnData.return_date,
-              vehicle_number: rdnData.vehicle_number,
-              driver_name: rdnData.driver_name,
-              driver_contact: rdnData.driver_contact,
-              notes: rdnData.notes,
-            });
+            // Prepare FormData for file upload
+            const formData = new FormData();
+            formData.append('project_id', firstMaterial.project_id.toString());
+            formData.append('return_date', rdnData.return_date);
+            formData.append('vehicle_number', rdnData.vehicle_number);
+            formData.append('driver_name', rdnData.driver_name);
+            formData.append('driver_contact', rdnData.driver_contact);
+            formData.append('notes', rdnData.notes);
+            formData.append('transport_fee', (rdnData.transport_fee || 0).toString());
+            formData.append('materials_data', JSON.stringify(selectedMaterialsCart));
+
+            if (deliveryNoteFile) {
+              formData.append('delivery_note', deliveryNoteFile);
+            }
+
+            const response = await apiClient.post('/return_delivery_notes', formData);
 
             const rdnId = response.data.return_delivery_note.return_note_id;
 

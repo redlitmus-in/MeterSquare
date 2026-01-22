@@ -11,6 +11,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { showError, showSuccess, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { FileText } from 'lucide-react';
 
 interface Material {
   delivery_note_item_id: number;
@@ -65,7 +66,8 @@ interface RDNCreationModalProps {
     driver_name: string;
     driver_contact: string;
     notes: string;
-  }) => Promise<void>;
+    transport_fee?: number;
+  }, deliveryNoteFile?: File | null) => Promise<void>;
   creating: boolean;
 }
 
@@ -369,7 +371,9 @@ export const RDNCreationModal: React.FC<RDNCreationModalProps> = ({
     driver_name: '',
     driver_contact: '',
     notes: '',
+    transport_fee: 0,
   });
+  const [deliveryNoteFile, setDeliveryNoteFile] = React.useState<File | null>(null);
 
   const handleSubmit = async () => {
     if (!rdnForm.driver_name) {
@@ -377,7 +381,12 @@ export const RDNCreationModal: React.FC<RDNCreationModalProps> = ({
       return;
     }
 
-    await onCreateRDN(rdnForm);
+    if (!deliveryNoteFile) {
+      showError('Please upload a delivery note');
+      return;
+    }
+
+    await onCreateRDN(rdnForm, deliveryNoteFile);
   };
 
   return (
@@ -483,6 +492,69 @@ export const RDNCreationModal: React.FC<RDNCreationModalProps> = ({
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 disabled:opacity-50"
                   />
                 </div>
+              </div>
+
+              {/* Transport Fee */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Transport Fee (AED)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={rdnForm.transport_fee || ''}
+                  onChange={(e) => setRdnForm({ ...rdnForm, transport_fee: parseFloat(e.target.value) || 0 })}
+                  placeholder="Enter transport fee for this delivery"
+                  disabled={creating}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter the transport fee paid for delivering these materials from vendor to store
+                </p>
+              </div>
+
+              {/* Delivery Note Upload */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <FileText className="w-4 h-4 inline mr-1" />
+                  Delivery Note from Vendor <span className="text-red-500">*</span>
+                </label>
+
+                <div className="flex items-center gap-3 p-3 border border-gray-300 rounded-lg bg-white">
+                  <label
+                    htmlFor="rdn-delivery-note-upload"
+                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded cursor-pointer transition-colors text-sm font-medium"
+                  >
+                    Browse...
+                  </label>
+                  <input
+                    type="file"
+                    id="rdn-delivery-note-upload"
+                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        // Check file size (max 10MB)
+                        if (file.size > 10 * 1024 * 1024) {
+                          showError('File size must be less than 10MB');
+                          e.target.value = '';
+                          return;
+                        }
+                        setDeliveryNoteFile(file);
+                      }
+                    }}
+                    disabled={creating}
+                    className="hidden"
+                  />
+                  <span className="text-sm text-gray-600 flex-1">
+                    {deliveryNoteFile ? deliveryNoteFile.name : 'No file selected.'}
+                  </span>
+                </div>
+
+                <p className="text-xs text-gray-500 mt-1">
+                  Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)
+                </p>
               </div>
 
               {/* Notes */}

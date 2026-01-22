@@ -668,11 +668,35 @@ const StockInPage: React.FC = () => {
       // Auto-generate delivery batch reference if transport details provided and no existing batch ref
       let finalBatchRef = purchaseFormData.delivery_batch_ref;
 
+      // Check if user made changes that require a new batch ref (different delivery)
+      const hasTransportFeeChange = selectedBatchReference &&
+        purchaseFormData.transport_fee !== 0 &&
+        purchaseFormData.transport_fee !== selectedBatchReference.original_fee;
+
+      const hasNewDeliveryNote = deliveryNoteFile !== null && selectedBatchReference?.delivery_note_url;
+
+      // If user changed transport fee or uploaded new delivery note, this is a different delivery - create new batch
+      if (finalBatchRef && (hasTransportFeeChange || hasNewDeliveryNote)) {
+        finalBatchRef = ''; // Clear batch ref to force generation of new one
+      }
+
       if (!finalBatchRef && (purchaseFormData.driver_name || purchaseFormData.vehicle_number)) {
-        // First material in a new delivery - generate new batch ref
-        const year = new Date().getFullYear();
-        const randomNum = Math.floor(Math.random() * 1000);
-        finalBatchRef = `DB-${year}-${String(randomNum).padStart(3, '0')}`;
+        // First material in a new delivery - generate new batch ref like MSQ-IN-01
+        // Count existing transactions to get next sequence number
+        const existingBatchRefs = purchaseTransactions
+          .map(txn => txn.delivery_batch_ref)
+          .filter(ref => ref && ref.startsWith('MSQ-IN-'));
+
+        const sequenceNumbers = existingBatchRefs.map(ref => {
+          const match = ref.match(/MSQ-IN-(\d+)/);
+          return match ? parseInt(match[1]) : 0;
+        });
+
+        const nextSequence = sequenceNumbers.length > 0
+          ? Math.max(...sequenceNumbers) + 1
+          : 1;
+
+        finalBatchRef = `MSQ-IN-${String(nextSequence).padStart(2, '0')}`;
       }
 
       const transactionToSave = {
@@ -1198,34 +1222,41 @@ const StockInPage: React.FC = () => {
                   )}
                 </div>
 
-                {lastTransportDetails && (
+                {recentBatches.length > 0 && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
                     <div className="flex items-center justify-between">
                       <div className="text-sm text-blue-800">
-                        <strong>Last Delivery:</strong> {lastTransportDetails.driver_name} • {lastTransportDetails.vehicle_number}
-                        {lastTransportDetails.delivery_batch_ref && (
+                        <strong>Last Delivery:</strong> {recentBatches[0].driver_name} • {recentBatches[0].vehicle_number}
+                        {recentBatches[0].delivery_batch_ref && (
                           <span className="ml-2 px-2 py-0.5 bg-blue-100 rounded text-xs font-mono">
-                            {lastTransportDetails.delivery_batch_ref}
+                            {recentBatches[0].delivery_batch_ref}
                           </span>
                         )}
                       </div>
                       <button
                         type="button"
                         onClick={() => {
-                          // Set reference info to show fee and delivery note
-                          setSelectedBatchReference({
-                            original_fee: lastTransportDetails.transport_fee || 0,
-                            delivery_note_url: lastTransportDetails.delivery_note_url
-                          });
+                          // Use the most recent batch from recentBatches instead of lastTransportDetails
+                          // This ensures we always have the delivery_note_url from the database
+                          const mostRecentBatch = recentBatches[0];
+                          if (mostRecentBatch) {
+                            console.log('Last Delivery clicked. Using most recent batch:', mostRecentBatch);
+                            console.log('Delivery note URL:', mostRecentBatch.delivery_note_url);
 
-                          setPurchaseFormData(prev => ({
-                            ...prev,
-                            driver_name: lastTransportDetails.driver_name,
-                            vehicle_number: lastTransportDetails.vehicle_number,
-                            transport_fee: 0,  // Set to 0 for same batch (fee was already paid on first material)
-                            transport_notes: lastTransportDetails.transport_notes,
-                            delivery_batch_ref: lastTransportDetails.delivery_batch_ref
-                          }));
+                            setSelectedBatchReference({
+                              original_fee: mostRecentBatch.transport_fee || 0,
+                              delivery_note_url: mostRecentBatch.delivery_note_url
+                            });
+
+                            setPurchaseFormData(prev => ({
+                              ...prev,
+                              driver_name: mostRecentBatch.driver_name,
+                              vehicle_number: mostRecentBatch.vehicle_number,
+                              transport_fee: 0,  // Set to 0 for same batch (fee was already paid on first material)
+                              transport_notes: mostRecentBatch.transport_notes,
+                              delivery_batch_ref: mostRecentBatch.delivery_batch_ref
+                            }));
+                          }
                         }}
                         className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex items-center space-x-1"
                       >
@@ -1312,50 +1343,81 @@ const StockInPage: React.FC = () => {
                 </label>
 
                 {/* Show reference to original batch delivery note - allow using it */}
-                {selectedBatchReference && selectedBatchReference.delivery_note_url && !deliveryNoteFile && (
-                  <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <div className="text-xs">
-                      <p className="text-blue-800 font-semibold mb-2">
-                        📋 Using Original Batch Delivery Note:
-                      </p>
-                      <a
-                        href={selectedBatchReference.delivery_note_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center space-x-1 text-xs text-blue-600 hover:text-blue-800 underline font-medium mb-2"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        <span>Click to View Original Delivery Note</span>
-                      </a>
-                      <p className="text-blue-700 mt-2">
-                        ✓ This material will use the same delivery note as the original batch. You can upload a different file below if this material has a separate delivery note.
-                      </p>
+                {selectedBatchReference && !deliveryNoteFile ? (
+                  selectedBatchReference.delivery_note_url ? (
+                    <div className="mb-3 bg-green-50 border-2 border-green-300 rounded-lg p-4">
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-shrink-0">
+                          <CheckCircle className="w-6 h-6 text-green-600" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-green-800 font-semibold mb-2 text-sm">
+                            ✓ Delivery Note Available from Batch
+                          </p>
+                          <a
+                            href={selectedBatchReference.delivery_note_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800 underline font-medium mb-3"
+                          >
+                            <FileText className="w-4 h-4" />
+                            <span>View Batch Delivery Note</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                          <p className="text-green-700 text-xs leading-relaxed">
+                            This material will use the delivery note from the selected batch. You can upload a different file below if this specific material has a separate delivery note.
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <div className="mb-3 bg-orange-50 border-2 border-orange-300 rounded-lg p-4">
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-shrink-0">
+                          <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-orange-800 font-semibold mb-2 text-sm">
+                            ⚠ No Delivery Note in Selected Batch
+                          </p>
+                          <p className="text-orange-700 text-xs leading-relaxed mb-2">
+                            The first material from this batch ({purchaseFormData.delivery_batch_ref}) was received without uploading a delivery note. You must upload a delivery note for this material.
+                          </p>
+                          <p className="text-orange-600 text-xs font-medium">
+                            Please upload the delivery note below before proceeding.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                ) : null}
 
-                {/* File input with conditional border */}
-                <div className={selectedBatchReference && selectedBatchReference.delivery_note_url ? '' : 'border border-gray-300 rounded-lg p-3'}>
-                  <input
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        // Check file size (max 10MB)
-                        if (file.size > 10 * 1024 * 1024) {
-                          alert('File size must be less than 10MB');
-                          e.target.value = '';
-                          return;
+                {/* File input */}
+                <div>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          // Check file size (max 10MB)
+                          if (file.size > 10 * 1024 * 1024) {
+                            alert('File size must be less than 10MB');
+                            e.target.value = '';
+                            return;
+                          }
+                          setDeliveryNoteFile(file);
                         }
-                        setDeliveryNoteFile(file);
-                      }
-                    }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
-                  />
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+                    />
+                  </div>
                   <p className="text-xs text-gray-500 mt-1">
                     {selectedBatchReference && selectedBatchReference.delivery_note_url
-                      ? 'Upload a new file only if this material has a different delivery note. Otherwise, the batch delivery note will be used.'
+                      ? '(Optional) Upload a new file only if this material has a different delivery note'
                       : 'Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)'}
                   </p>
                 </div>

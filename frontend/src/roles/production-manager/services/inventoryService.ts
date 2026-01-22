@@ -233,7 +233,7 @@ export interface MaterialDeliveryNote {
   vehicle_number?: string;
   driver_name?: string;
   driver_contact?: string;
-  transport_fee?: number;
+  delivery_note_url?: string;
   prepared_by?: string;
   checked_by?: string;
   status?: DeliveryNoteStatus;
@@ -251,6 +251,9 @@ export interface MaterialDeliveryNote {
   dispatched_by?: string;
   items?: DeliveryNoteItem[];
   total_items?: number;
+  // Transport fields
+  transport_fee?: number;
+  delivery_batch_ref?: string;
   project_details?: {
     project_id: number;
     project_name: string;
@@ -274,9 +277,11 @@ export interface CreateDeliveryNoteData {
   vehicle_number?: string;
   driver_name?: string;
   driver_contact?: string;
-  transport_fee?: number;
   checked_by?: string;
   notes?: string;
+  // Transport fields
+  transport_fee?: number;
+  delivery_batch_ref?: string;
 }
 
 export interface AddDeliveryNoteItemData {
@@ -1415,14 +1420,40 @@ class InventoryService {
   /**
    * Create a new delivery note
    */
-  async createDeliveryNote(data: CreateDeliveryNoteData): Promise<MaterialDeliveryNote> {
+  async createDeliveryNote(data: CreateDeliveryNoteData, file?: File | null): Promise<MaterialDeliveryNote> {
     try {
-      const response = await apiClient.post(
-        `/delivery_notes`,
-        data,
-        { headers: this.getAuthHeader() }
-      );
-      return response.data.delivery_note;
+      // If file is provided, use FormData
+      if (file) {
+        const formData = new FormData();
+        formData.append('delivery_note_file', file);
+
+        // Append all data fields
+        Object.entries(data).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            formData.append(key, String(value));
+          }
+        });
+
+        const response = await apiClient.post(
+          `/delivery_notes`,
+          formData,
+          {
+            headers: {
+              ...this.getAuthHeader(),
+              'Content-Type': 'multipart/form-data'
+            }
+          }
+        );
+        return response.data.delivery_note;
+      } else {
+        // Regular JSON request
+        const response = await apiClient.post(
+          `/delivery_notes`,
+          data,
+          { headers: this.getAuthHeader() }
+        );
+        return response.data.delivery_note;
+      }
     } catch (error) {
       const axiosError = error as AxiosError;
       console.error('Error creating delivery note:', axiosError);

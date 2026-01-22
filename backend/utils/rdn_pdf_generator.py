@@ -195,6 +195,13 @@ class RDNPDFGenerator:
         else:
             vehicle_driver = f"{vehicle_no} / {driver_name}"
 
+        # Format transport fee
+        transport_fee = rdn_data.get('transport_fee')
+        if transport_fee is not None:
+            transport_fee_str = f"AED {float(transport_fee):,.2f}"
+        else:
+            transport_fee_str = "AED 0.00"
+
         # Create info grid with proper formatting
         info_data = [
             [
@@ -212,8 +219,14 @@ class RDNPDFGenerator:
             [
                 Paragraph('<b>Vehicle & Driver:</b>', self.styles['RDNLabel']),
                 Paragraph(vehicle_driver, self.styles['RDNNormal']),
+                Paragraph('<b>Transport Fee:</b>', self.styles['RDNLabel']),
+                Paragraph(transport_fee_str, self.styles['RDNNormal']),
+            ],
+            [
                 Paragraph('<b>Name & Signature:</b>', self.styles['RDNLabel']),
                 Paragraph('', self.styles['RDNNormal']),
+                '',
+                '',
             ],
         ]
 
@@ -223,9 +236,13 @@ class RDNPDFGenerator:
         info_table.setStyle(TableStyle([
             # Grid lines
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-            # Background for label columns
-            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F5F5F5')),
-            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#F5F5F5')),
+            # Background for label columns (rows 0-2 for left column, rows 0-2 for right column label)
+            ('BACKGROUND', (0, 0), (0, 2), colors.HexColor('#F5F5F5')),
+            ('BACKGROUND', (2, 0), (2, 2), colors.HexColor('#F5F5F5')),
+            # Last row - only first column (Name & Signature label) has background
+            ('BACKGROUND', (0, 3), (0, 3), colors.HexColor('#F5F5F5')),
+            # Span the last row across columns 1-3 for the signature value
+            ('SPAN', (1, 3), (3, 3)),
             # Padding
             ('LEFTPADDING', (0, 0), (-1, -1), 6),
             ('RIGHTPADDING', (0, 0), (-1, -1), 6),

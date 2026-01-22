@@ -2927,7 +2927,17 @@ def generate_delivery_note_number():
 def create_delivery_note():
     """Create a new material delivery note"""
     try:
-        data = request.get_json()
+        # Check if request contains files (multipart/form-data)
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # Get form data
+            data = request.form.to_dict()
+            # Get file
+            delivery_note_file = request.files.get('delivery_note_file')
+        else:
+            # Regular JSON request
+            data = request.get_json()
+            delivery_note_file = None
+
         current_user_email = g.user.get('email', 'system')
         current_user_id = g.user.get('user_id')
 
@@ -2945,7 +2955,7 @@ def create_delivery_note():
                 return jsonify({'error': f'{field} is required'}), 400
 
         # Validate project exists
-        project = Project.query.get(data['project_id'])
+        project = Project.query.get(int(data['project_id']))
         if not project:
             return jsonify({'error': 'Project not found'}), 404
 
@@ -2959,9 +2969,57 @@ def create_delivery_note():
         if data.get('request_date'):
             request_date = datetime.fromisoformat(data['request_date'].replace('Z', '+00:00')) if isinstance(data['request_date'], str) else data['request_date']
 
+        # Handle file upload to Supabase if provided, or use existing URL from batch
+        delivery_note_url = data.get('delivery_note_url')  # Check if URL provided (for reuse from batch)
+        if delivery_note_file:
+            try:
+                import os
+                from datetime import datetime as dt
+                from supabase import create_client
+
+                # Get Supabase credentials based on environment
+                environment = os.environ.get('ENVIRONMENT', 'production')
+                if environment == 'development':
+                    supabase_url = os.environ.get('DEV_SUPABASE_URL')
+                    supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
+                else:
+                    supabase_url = os.environ.get('SUPABASE_URL')
+                    supabase_key = os.environ.get('SUPABASE_ANON_KEY')
+
+                if not supabase_url or not supabase_key:
+                    raise Exception('Supabase credentials must be set in environment variables')
+
+                supabase = create_client(supabase_url, supabase_key)
+
+                # Generate unique filename
+                timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
+                original_filename = delivery_note_file.filename
+                file_extension = os.path.splitext(original_filename)[1]
+                unique_filename = f"delivery-notes/{timestamp}_{original_filename}"
+
+                # Upload to Supabase Storage
+                file_data = delivery_note_file.read()
+
+                bucket = supabase.storage.from_('inventory-files')
+
+                try:
+                    response = bucket.upload(
+                        unique_filename,
+                        file_data,
+                        {"content-type": delivery_note_file.content_type, "upsert": "false"}
+                    )
+                except Exception as e:
+                    raise
+
+                # Get public URL
+                delivery_note_url = bucket.get_public_url(unique_filename)
+
+            except Exception as upload_error:
+                return jsonify({'error': f'File upload failed: {str(upload_error)}'}), 500
+
         new_note = MaterialDeliveryNote(
             delivery_note_number=delivery_note_number,
-            project_id=data['project_id'],
+            project_id=int(data['project_id']),
             delivery_date=delivery_date,
             attention_to=data.get('attention_to'),
             delivery_from=data.get('delivery_from', get_store_name()),
@@ -2970,11 +3028,14 @@ def create_delivery_note():
             vehicle_number=data.get('vehicle_number'),
             driver_name=data.get('driver_name'),
             driver_contact=data.get('driver_contact'),
-            transport_fee=float(data.get('transport_fee', 0.0)) if data.get('transport_fee') else None,
+            delivery_note_url=delivery_note_url,
             prepared_by=prepared_by_name,
             checked_by=data.get('checked_by'),
             status='DRAFT',
             notes=data.get('notes'),
+            # Transport tracking fields
+            transport_fee=float(data.get('transport_fee', 0.0)) if data.get('transport_fee') else None,
+            delivery_batch_ref=data.get('delivery_batch_ref'),
             created_by=current_user_email
         )
 
@@ -3962,7 +4023,30 @@ def generate_return_note_number():
 def create_return_delivery_note():
     """STEP 1: Create a new return delivery note (RDN) - SE creates DRAFT"""
     try:
-        data = request.get_json()
+        # Handle both JSON and multipart/form-data
+        delivery_note_file = None
+
+        # Check if this is a multipart request (has files)
+        if request.files and len(request.files) > 0:
+            # Get form data
+            data = request.form.to_dict()
+            # Handle materials_data (JSON string)
+            if 'materials_data' in data:
+                import json
+                data['materials_data'] = json.loads(data['materials_data'])
+            # Convert numeric fields
+            if 'project_id' in data:
+                data['project_id'] = int(data['project_id'])
+            if 'transport_fee' in data:
+                data['transport_fee'] = float(data['transport_fee']) if data['transport_fee'] else 0
+            # Get file
+            delivery_note_file = request.files.get('delivery_note')
+        else:
+            # Try to get JSON data
+            data = request.get_json(silent=True) or {}
+            if not data:
+                return jsonify({'error': 'No data provided'}), 400
+
         current_user_email = g.user.get('email', 'system')
         current_user_id = g.user.get('user_id')
 
@@ -3990,6 +4074,48 @@ def create_return_delivery_note():
         # Parse return date
         return_date = datetime.fromisoformat(data['return_date'].replace('Z', '+00:00')) if isinstance(data['return_date'], str) else data['return_date']
 
+        # Upload delivery note file if provided
+        delivery_note_url = None
+        if delivery_note_file:
+            try:
+                import os
+                from supabase import create_client
+
+                # Get Supabase credentials
+                is_dev = os.environ.get('FLASK_ENV') == 'development'
+                if is_dev:
+                    supabase_url = os.environ.get('DEV_SUPABASE_URL')
+                    supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
+                else:
+                    supabase_url = os.environ.get('SUPABASE_URL')
+                    supabase_key = os.environ.get('SUPABASE_ANON_KEY')
+
+                if not supabase_url or not supabase_key:
+                    raise Exception("Supabase configuration not found")
+
+                supabase = create_client(supabase_url, supabase_key)
+
+                # Generate unique filename
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                original_filename = delivery_note_file.filename
+                unique_filename = f"return-delivery-notes/{timestamp}_{original_filename}"
+
+                # Upload to Supabase Storage
+                file_data = delivery_note_file.read()
+                bucket = supabase.storage.from_('inventory-files')
+
+                response = bucket.upload(
+                    unique_filename,
+                    file_data,
+                    {"content-type": delivery_note_file.content_type, "upsert": "false"}
+                )
+
+                # Get public URL
+                delivery_note_url = bucket.get_public_url(unique_filename)
+
+            except Exception as upload_error:
+                return jsonify({'error': f'File upload failed: {str(upload_error)}'}), 500
+
         # Create RDN
         new_rdn = ReturnDeliveryNote(
             return_note_number=return_note_number,
@@ -4005,6 +4131,8 @@ def create_return_delivery_note():
             checked_by=data.get('checked_by'),
             status='DRAFT',
             notes=data.get('notes'),
+            transport_fee=data.get('transport_fee', 0),
+            delivery_note_url=delivery_note_url,
             created_by=current_user_email
         )
 
@@ -5080,6 +5208,19 @@ def download_dn_pdf(delivery_note_id):
         settings = SystemSettings.query.first()
         company_name = getattr(settings, 'company_name', None) or DefaultValues.DEFAULT_COMPANY_NAME
 
+        # If this DN has a batch reference and transport_fee is 0, lookup the batch's original transport fee
+        display_transport_fee = dn.transport_fee
+        if dn.delivery_batch_ref and (dn.transport_fee is None or dn.transport_fee == 0):
+            # Find the first DN in this batch that has a non-zero transport fee
+            batch_dn_with_fee = MaterialDeliveryNote.query.filter(
+                MaterialDeliveryNote.delivery_batch_ref == dn.delivery_batch_ref,
+                MaterialDeliveryNote.transport_fee.isnot(None),
+                MaterialDeliveryNote.transport_fee > 0
+            ).order_by(MaterialDeliveryNote.created_at.asc()).first()
+
+            if batch_dn_with_fee:
+                display_transport_fee = batch_dn_with_fee.transport_fee
+
         # Prepare DN data using centralized defaults (no hardcoded values!)
         dn_data = {
             'delivery_note_number': dn.delivery_note_number,
@@ -5090,6 +5231,7 @@ def download_dn_pdf(delivery_note_id):
             'vehicle_number': dn.vehicle_number,
             'driver_name': dn.driver_name,
             'driver_contact': dn.driver_contact,
+            'transport_fee': display_transport_fee,
             'notes': dn.notes,
             'prepared_by': dn.prepared_by,
             'created_by': dn.created_by,
@@ -5239,6 +5381,7 @@ def download_rdn_pdf(return_note_id):
             'status': rdn.status,
             'return_date': rdn.return_date.strftime('%d %B %Y') if rdn.return_date else 'N/A',
             'created_by': created_by_name,
+            'returned_by': rdn.returned_by,
             'issued_at': rdn.issued_at.strftime('%d %B %Y %I:%M %p') if rdn.issued_at else None,
             'issued_by': rdn.issued_by,
             'dispatched_at': rdn.dispatched_at.strftime('%d %B %Y %I:%M %p') if rdn.dispatched_at else None,
@@ -5246,6 +5389,7 @@ def download_rdn_pdf(return_note_id):
             'vehicle_number': rdn.vehicle_number,
             'driver_name': rdn.driver_name,
             'driver_contact': rdn.driver_contact,
+            'transport_fee': float(rdn.transport_fee) if rdn.transport_fee else 0,
             'notes': rdn.notes,
         }
 
@@ -5279,6 +5423,12 @@ def download_rdn_pdf(return_note_id):
             })
 
         # Generate PDF
+        # Debug: Log transport fee value
+        print(f"DEBUG - RDN PDF Generation:")
+        print(f"  RDN Number: {rdn_data.get('return_note_number')}")
+        print(f"  Transport Fee: {rdn_data.get('transport_fee')} (type: {type(rdn_data.get('transport_fee'))})")
+        print(f"  Vehicle: {rdn_data.get('vehicle_number')}")
+
         pdf_generator = RDNPDFGenerator()
         pdf_buffer = pdf_generator.generate_pdf(rdn_data, project_data, items_data, company_name)
 

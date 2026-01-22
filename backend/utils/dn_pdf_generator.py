@@ -188,6 +188,13 @@ class DNPDFGenerator:
         request_date = self._format_date(dn_data.get('request_date')) if dn_data.get('request_date') else '-'
         vehicle_driver = f"{self._escape_html(dn_data.get('vehicle_number', '-'))} / {self._escape_html(dn_data.get('driver_name', '-'))}"
 
+        # Format transport fee
+        transport_fee = dn_data.get('transport_fee')
+        if transport_fee is not None:
+            transport_fee_str = f"AED {float(transport_fee):.2f}"
+        else:
+            transport_fee_str = '-'
+
         # Create info grid with proper formatting
         info_data = [
             [
@@ -213,6 +220,12 @@ class DNPDFGenerator:
                 Paragraph(request_date, self.styles['DNNormal']),
                 Paragraph('<b>Vehicle & Driver:</b>', self.styles['DNLabel']),
                 Paragraph(vehicle_driver, self.styles['DNNormal']),
+            ],
+            [
+                Paragraph('<b>Transport Fee:</b>', self.styles['DNLabel']),
+                Paragraph(transport_fee_str, self.styles['DNNormal']),
+                '',
+                '',
             ],
         ]
 

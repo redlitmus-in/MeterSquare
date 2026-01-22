@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Package, CheckCircle, X, Save, FileText,
-  ArrowUpCircle, RefreshCw, Download, Printer, DollarSign
+  ArrowUpCircle, RefreshCw, Download, Printer, DollarSign, ChevronDown
 } from 'lucide-react';
 import {
   inventoryService,
@@ -121,9 +121,41 @@ const StockOutPage: React.FC = () => {
     vehicle_number: '',
     driver_name: '',
     driver_contact: '',
+    notes: '',
     transport_fee: 0,
-    notes: ''
+    delivery_batch_ref: ''
   });
+
+  // File upload state
+  const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null);
+
+  // Last transport details for "Copy from Last Entry" feature
+  const [lastTransportDetails, setLastTransportDetails] = useState<{
+    driver_name: string;
+    driver_contact: string;
+    vehicle_number: string;
+    transport_fee: number;
+    delivery_batch_ref: string;
+    delivery_note_url: string;
+  } | null>(null);
+
+  // Delivery batch selection
+  const [showBatchListModal, setShowBatchListModal] = useState(false);
+  const [recentBatches, setRecentBatches] = useState<Array<{
+    delivery_batch_ref: string;
+    driver_name: string;
+    driver_contact: string;
+    vehicle_number: string;
+    transport_fee: number;
+    delivery_note_url: string;
+    created_at: string;
+    material_count: number;
+  }>>([]);
+
+  // Reference info from selected batch (for display only, not saved)
+  const [selectedBatchReference, setSelectedBatchReference] = useState<{
+    original_fee: number;
+  } | null>(null);
 
   // Items to add to the delivery note
   const [dnItems, setDnItems] = useState<Array<{
@@ -235,11 +267,78 @@ const StockOutPage: React.FC = () => {
     try {
       const deliveryNotesResult = await inventoryService.getAllDeliveryNotes();
       setDeliveryNotes(deliveryNotesResult.delivery_notes || []);
+      extractRecentBatchesFromDNs(deliveryNotesResult.delivery_notes || []);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to fetch delivery notes';
       showError(errorMessage);
     }
   }, []);
+
+  // Extract recent delivery batches from delivery notes (for batch reference system)
+  const extractRecentBatchesFromDNs = (notes: MaterialDeliveryNote[]) => {
+    const batchMap = new Map<string, {
+      delivery_batch_ref: string;
+      driver_name: string;
+      driver_contact: string;
+      vehicle_number: string;
+      transport_fee: number;
+      delivery_note_url: string;
+      created_at: string;
+      material_count: number;
+    }>();
+
+    // Group delivery notes by delivery_batch_ref (if they have transport details)
+    notes.forEach(dn => {
+      // Create batch reference from common transport details if no explicit batch ref
+      const batchKey = dn.delivery_batch_ref ||
+        (dn.driver_name && dn.vehicle_number ? `${dn.driver_name}-${dn.vehicle_number}` : null);
+
+      if (batchKey && (dn.driver_name || dn.vehicle_number)) {
+        if (!batchMap.has(batchKey)) {
+          batchMap.set(batchKey, {
+            delivery_batch_ref: dn.delivery_batch_ref || batchKey,
+            driver_name: dn.driver_name || '',
+            driver_contact: dn.driver_contact || '',
+            vehicle_number: dn.vehicle_number || '',
+            transport_fee: dn.transport_fee || 0,
+            delivery_note_url: dn.delivery_note_url || '',
+            created_at: dn.created_at || '',
+            material_count: 1
+          });
+        } else {
+          const existing = batchMap.get(batchKey)!;
+          existing.material_count += 1;
+          // Keep the MAXIMUM transport fee (the one that was actually paid)
+          if (dn.transport_fee && dn.transport_fee > existing.transport_fee) {
+            existing.transport_fee = dn.transport_fee;
+          }
+          // Keep delivery note URL if not already set
+          if (!existing.delivery_note_url && dn.delivery_note_url) {
+            existing.delivery_note_url = dn.delivery_note_url;
+          }
+        }
+      }
+    });
+
+    // Convert to array and sort by date (most recent first)
+    const batches = Array.from(batchMap.values()).sort((a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    setRecentBatches(batches.slice(0, 10)); // Keep only 10 most recent batches
+
+    // Set the most recent batch as last transport details for quick access
+    if (batches.length > 0) {
+      setLastTransportDetails({
+        driver_name: batches[0].driver_name,
+        driver_contact: batches[0].driver_contact,
+        vehicle_number: batches[0].vehicle_number,
+        transport_fee: batches[0].transport_fee,
+        delivery_batch_ref: batches[0].delivery_batch_ref,
+        delivery_note_url: batches[0].delivery_note_url
+      });
+    }
+  };
 
   // Load initial data on mount
   useEffect(() => {
@@ -448,6 +547,7 @@ const StockOutPage: React.FC = () => {
       driver_contact: '',
       notes: `Material request #${request.request_number || request.request_id}${destinationNote}`
     });
+    setDeliveryNoteFile(null);
 
     // For vendor delivery requests, store material info since it's not in inventory
     // Match inventory by sub-item (brand) name, not item name
@@ -524,9 +624,71 @@ const StockOutPage: React.FC = () => {
       return;
     }
 
+    // Check if file is required (not required if reusing from last delivery batch)
+    const isReusingBatch = dnFormData.delivery_batch_ref && lastTransportDetails?.delivery_note_url;
+    if (!deliveryNoteFile && !isReusingBatch) {
+      showWarning('Please upload a delivery note file');
+      return;
+    }
+
     setSaving(true);
     try {
-      const newNote = await inventoryService.createDeliveryNote(dnFormData);
+      // Auto-generate delivery batch reference if transport details provided and no existing batch ref
+      let finalBatchRef = dnFormData.delivery_batch_ref;
+
+      // Check if user made changes that require a new batch ref (different delivery)
+      const hasTransportFeeChange = selectedBatchReference &&
+        dnFormData.transport_fee !== 0 &&
+        dnFormData.transport_fee !== selectedBatchReference.original_fee;
+
+      const hasNewDeliveryNote = deliveryNoteFile !== null && selectedBatchReference?.delivery_note_url;
+
+      // If user changed transport fee or uploaded new delivery note, this is a different delivery - create new batch
+      if (finalBatchRef && (hasTransportFeeChange || hasNewDeliveryNote)) {
+        finalBatchRef = ''; // Clear batch ref to force generation of new one
+      }
+
+      if (!finalBatchRef && (dnFormData.driver_name || dnFormData.vehicle_number)) {
+        // First material in a new delivery - generate new batch ref like MSQ-OUT-01
+        // Count existing delivery notes to get next sequence number
+        const existingBatchRefs = deliveryNotes
+          .map(dn => dn.delivery_batch_ref)
+          .filter(ref => ref && ref.startsWith('MSQ-OUT-'));
+
+        const sequenceNumbers = existingBatchRefs.map(ref => {
+          const match = ref.match(/MSQ-OUT-(\d+)/);
+          return match ? parseInt(match[1]) : 0;
+        });
+
+        const nextSequence = sequenceNumbers.length > 0
+          ? Math.max(...sequenceNumbers) + 1
+          : 1;
+
+        finalBatchRef = `MSQ-OUT-${String(nextSequence).padStart(2, '0')}`;
+      }
+
+      const formDataWithTransport = {
+        ...dnFormData,
+        delivery_batch_ref: finalBatchRef,
+        // If reusing batch and no new file, pass the existing delivery_note_url
+        delivery_note_url: (!deliveryNoteFile && isReusingBatch && lastTransportDetails?.delivery_note_url)
+          ? lastTransportDetails.delivery_note_url
+          : undefined
+      };
+
+      const newNote = await inventoryService.createDeliveryNote(formDataWithTransport, deliveryNoteFile);
+
+      // Save transport details for quick reuse (including batch ref)
+      if (dnFormData.driver_name || dnFormData.vehicle_number || dnFormData.transport_fee) {
+        setLastTransportDetails({
+          driver_name: dnFormData.driver_name || '',
+          driver_contact: dnFormData.driver_contact || '',
+          vehicle_number: dnFormData.vehicle_number || '',
+          transport_fee: dnFormData.transport_fee || 0,
+          delivery_batch_ref: finalBatchRef || '',
+          delivery_note_url: newNote.delivery_note_url || ''
+        });
+      }
 
       // Use bulk endpoint to add all items in a single request (eliminates N+1 API calls)
       // Include vendor delivery info for items that need inventory creation
@@ -575,11 +737,14 @@ const StockOutPage: React.FC = () => {
       vehicle_number: '',
       driver_name: '',
       driver_contact: '',
+      notes: '',
       transport_fee: 0,
-      notes: ''
+      delivery_batch_ref: ''
     });
     setDnItems([]);
     setSelectedRequestForDN(null);
+    setDeliveryNoteFile(null);
+    setSelectedBatchReference(null);
   };
 
   const handleDnItemChange = (index: number, field: string, value: unknown) => {
@@ -1516,59 +1681,216 @@ const StockOutPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number *</label>
-                  <input
-                    type="text"
-                    value={dnFormData.vehicle_number}
-                    onChange={(e) => setDnFormData({ ...dnFormData, vehicle_number: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                    required
-                    aria-label="Vehicle number"
-                  />
+              {/* Transport & Delivery Details */}
+              <div className="border-t pt-6 mt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-gray-900 flex items-center">
+                    <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
+                    </svg>
+                    Transport & Delivery Details
+                  </h3>
+                  {recentBatches.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowBatchListModal(true)}
+                      className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm flex items-center space-x-1"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                      </svg>
+                      <span>Recent Deliveries</span>
+                    </button>
+                  )}
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name *</label>
-                  <input
-                    type="text"
-                    value={dnFormData.driver_name}
-                    onChange={(e) => setDnFormData({ ...dnFormData, driver_name: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                    required
-                    aria-label="Driver name"
-                  />
+
+                {recentBatches.length > 0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-blue-800">
+                        <strong>Last Delivery:</strong> {recentBatches[0].driver_name} • {recentBatches[0].vehicle_number}
+                        {recentBatches[0].delivery_batch_ref && (
+                          <span className="ml-2 px-2 py-0.5 bg-blue-100 rounded text-xs font-mono">
+                            {recentBatches[0].delivery_batch_ref}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const mostRecentBatch = recentBatches[0];
+                          if (mostRecentBatch) {
+                            setSelectedBatchReference({
+                              original_fee: mostRecentBatch.transport_fee || 0
+                            });
+
+                            setDnFormData(prev => ({
+                              ...prev,
+                              driver_name: mostRecentBatch.driver_name,
+                              driver_contact: mostRecentBatch.driver_contact,
+                              vehicle_number: mostRecentBatch.vehicle_number,
+                              transport_fee: 0,  // Set to 0 for subsequent materials (only first material should have the fee)
+                              delivery_batch_ref: mostRecentBatch.delivery_batch_ref
+                            }));
+
+                            // If there's a delivery note URL, indicate it's reused (no need to upload new file)
+                            if (mostRecentBatch.delivery_note_url) {
+                              // Note: File upload will be optional since we'll reuse the URL
+                              setDeliveryNoteFile(null);
+                            }
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex items-center space-x-1"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        <span>Last Delivery</span>
+                      </button>
+                    </div>
+                    <p className="text-xs text-blue-600 mt-2">
+                      Materials from the same delivery trip will share the batch reference and transport details. Only the first material should have the transport fee.
+                    </p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Driver Name */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Driver Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={dnFormData.driver_name}
+                      onChange={(e) => setDnFormData({ ...dnFormData, driver_name: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                      placeholder="Enter driver name"
+                      required
+                    />
+                  </div>
+
+                  {/* Vehicle Number */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Vehicle Number *
+                    </label>
+                    <input
+                      type="text"
+                      value={dnFormData.vehicle_number}
+                      onChange={(e) => setDnFormData({ ...dnFormData, vehicle_number: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                      placeholder="Enter vehicle number"
+                      required
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Driver Contact</label>
+
+                {/* Driver Contact */}
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Driver Contact
+                  </label>
                   <input
                     type="text"
                     value={dnFormData.driver_contact}
                     onChange={(e) => setDnFormData({ ...dnFormData, driver_contact: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                    aria-label="Driver contact"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                    placeholder="Enter driver contact number"
                   />
+                </div>
+
+                {/* Transport Fee */}
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Transport Fee (AED)
+                  </label>
+
+                  {/* Show reference info if batch was selected */}
+                  {selectedBatchReference && selectedBatchReference.original_fee > 0 && (
+                    <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-amber-800 font-medium text-sm">
+                        Reference: Original transport fee for this batch was: <span className="font-bold">AED {selectedBatchReference.original_fee.toFixed(2)}</span>
+                      </p>
+                      <p className="text-amber-700 text-xs mt-2">
+                        You can edit the fee below if there was an additional charge for this specific material.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={dnFormData.transport_fee ?? ''}
+                      onChange={(e) => setDnFormData({ ...dnFormData, transport_fee: Number(e.target.value) })}
+                      className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                      placeholder="Enter transport fee for this delivery"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Enter the transport fee paid for delivering these materials from vendor to store
+                  </p>
                 </div>
               </div>
 
-              {/* Transport Fee */}
+              {/* Delivery Note from Vendor - File Upload */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  <DollarSign className="w-4 h-4 inline mr-1" />
-                  Transport Fee (AED)
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <FileText className="w-4 h-4 inline mr-1" />
+                  Delivery Note from Vendor {!lastTransportDetails?.delivery_note_url && <span className="text-red-500">*</span>}
                 </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={dnFormData.transport_fee || ''}
-                  onChange={(e) => setDnFormData({ ...dnFormData, transport_fee: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                  placeholder="Enter transport fee for this delivery"
-                  aria-label="Transport fee"
-                />
+
+                {/* Show delivery note available from batch */}
+                {lastTransportDetails?.delivery_note_url && dnFormData.delivery_batch_ref && (
+                  <div className="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
+                    <div className="flex items-start">
+                      <CheckCircle className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-green-800 font-medium text-sm">
+                          ✓ Delivery Note Available from Batch
+                        </p>
+                        <a
+                          href={lastTransportDetails.delivery_note_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline text-sm mt-1 inline-flex items-center"
+                        >
+                          <FileText className="w-4 h-4 mr-1" />
+                          View Batch Delivery Note
+                        </a>
+                        <p className="text-green-700 text-xs mt-2">
+                          This material will use the delivery note from the selected batch. You can upload a different file below if this specific material has a separate delivery note.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="border border-gray-300 rounded-lg p-3">
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        // Check file size (max 10MB)
+                        if (file.size > 10 * 1024 * 1024) {
+                          showError('File size must be less than 10MB');
+                          e.target.value = '';
+                          return;
+                        }
+                        setDeliveryNoteFile(file);
+                      }
+                    }}
+                    className="w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100 cursor-pointer"
+                  />
+                </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Enter the transport fee paid for delivering materials to the site
+                  {lastTransportDetails?.delivery_note_url && dnFormData.delivery_batch_ref
+                    ? '(Optional) Upload a new file only if this material has a different delivery note'
+                    : 'Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)'}
                 </p>
               </div>
 
@@ -1635,11 +1957,12 @@ const StockOutPage: React.FC = () => {
                 <button
                   onClick={handleCreateDeliveryNote}
                   className="px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  disabled={saving || !dnFormData.attention_to || !dnFormData.vehicle_number || !dnFormData.driver_name}
+                  disabled={saving || !dnFormData.attention_to || !dnFormData.vehicle_number || !dnFormData.driver_name || (!deliveryNoteFile && !(dnFormData.delivery_batch_ref && lastTransportDetails?.delivery_note_url))}
                   title={
                     !dnFormData.attention_to ? 'Please select a Site Engineer first' :
                     !dnFormData.vehicle_number ? 'Please enter Vehicle Number' :
-                    !dnFormData.driver_name ? 'Please enter Driver Name' : ''
+                    !dnFormData.driver_name ? 'Please enter Driver Name' :
+                    (!deliveryNoteFile && !(dnFormData.delivery_batch_ref && lastTransportDetails?.delivery_note_url)) ? 'Please upload a delivery note file' : ''
                   }
                 >
                   {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -1820,6 +2143,129 @@ const StockOutPage: React.FC = () => {
               <button
                 onClick={() => setMaterialsViewModal({ show: false, materials: [], requestNumber: null })}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recent Delivery Batches Modal */}
+      {showBatchListModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-6 py-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold flex items-center">
+                <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+                Recent Delivery Batches
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowBatchListModal(false)}
+                className="text-white hover:bg-purple-800 rounded-lg p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto max-h-[calc(80vh-180px)]">
+              <p className="text-sm text-gray-600 mb-4">
+                Select a recent delivery to copy transport and driver details to the form. Click on any batch to auto-fill the form.
+              </p>
+
+              <div className="space-y-3">
+                {recentBatches.map((batch, index) => (
+                  <div
+                    key={batch.delivery_batch_ref}
+                    onClick={() => {
+                      // Store reference info for display
+                      setSelectedBatchReference({
+                        original_fee: batch.transport_fee || 0
+                      });
+
+                      // Populate form with batch details - set transport_fee to 0 (only first material should have the fee)
+                      setDnFormData(prev => ({
+                        ...prev,
+                        driver_name: batch.driver_name,
+                        driver_contact: batch.driver_contact,
+                        vehicle_number: batch.vehicle_number,
+                        transport_fee: 0, // Set to 0 for subsequent materials (only first material should have the fee)
+                        delivery_batch_ref: batch.delivery_batch_ref
+                      }));
+
+                      // If there's a delivery note URL, clear file input (will reuse URL)
+                      if (batch.delivery_note_url) {
+                        setDeliveryNoteFile(null);
+                      }
+
+                      setShowBatchListModal(false);
+                    }}
+                    className="border border-gray-200 rounded-lg p-4 hover:bg-purple-50 hover:border-purple-300 cursor-pointer transition-all"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-sm font-mono font-semibold">
+                            {batch.delivery_batch_ref}
+                          </span>
+                          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+                            {batch.material_count} material{batch.material_count > 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <span className="text-gray-600">Driver:</span>
+                            <span className="ml-2 font-medium text-gray-900">{batch.driver_name || 'N/A'}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Contact:</span>
+                            <span className="ml-2 font-medium text-gray-900">{batch.driver_contact || 'N/A'}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Vehicle:</span>
+                            <span className="ml-2 font-medium text-gray-900">{batch.vehicle_number || 'N/A'}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Transport Fee:</span>
+                            <span className="ml-2 font-medium text-gray-900">AED {batch.transport_fee?.toFixed(2) || '0.00'}</span>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-gray-600">Date:</span>
+                            <span className="ml-2 font-medium text-gray-900">
+                              {new Date(batch.created_at).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronDown className="w-5 h-5 text-purple-600 transform -rotate-90" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {recentBatches.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  <Package className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                  <p>No recent delivery batches found</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 flex justify-end border-t">
+              <button
+                type="button"
+                onClick={() => setShowBatchListModal(false)}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
               >
                 Close
               </button>
