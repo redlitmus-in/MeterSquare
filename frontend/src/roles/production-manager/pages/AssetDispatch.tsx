@@ -125,6 +125,8 @@ const AssetDispatch: React.FC = () => {
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [driverName, setDriverName] = useState('');
   const [driverContact, setDriverContact] = useState('');
+  const [transportFee, setTransportFee] = useState<number>(0);
+  const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null);
   const [notes, setNotes] = useState('');
   const [dispatchItems, setDispatchItems] = useState<DispatchItem[]>([]);
   const [quantityExpanded, setQuantityExpanded] = useState(true);
@@ -603,6 +605,10 @@ const AssetDispatch: React.FC = () => {
       showError('Please add at least one item to dispatch');
       return;
     }
+    if (!deliveryNoteFile) {
+      showError('Please upload a delivery note file');
+      return;
+    }
     for (const item of dispatchItems) {
       if (item.quantity > item.available) {
         showError(`Quantity exceeds available stock for ${item.category_name}`);
@@ -619,6 +625,7 @@ const AssetDispatch: React.FC = () => {
         vehicle_number: vehicleNumber || undefined,
         driver_name: driverName || undefined,
         driver_contact: driverContact || undefined,
+        transport_fee: transportFee || undefined,
         notes: notes || undefined,
         requisition_id: linkedRequisitionId || undefined,
         items: dispatchItems.map(item => ({
@@ -696,6 +703,8 @@ const AssetDispatch: React.FC = () => {
     setVehicleNumber('');
     setDriverName('');
     setDriverContact('');
+    setTransportFee(0);
+    setDeliveryNoteFile(null);
     setNotes('');
     setDispatchItems([]);
     setShowForm(false);
@@ -1259,6 +1268,85 @@ const AssetDispatch: React.FC = () => {
                       />
                     </div>
                   </div>
+
+                  {/* Transport Fee */}
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Transport Fee (AED)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={transportFee}
+                      onChange={(e) => setTransportFee(Number(e.target.value))}
+                      placeholder="Enter transport fee for this delivery"
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Enter the transport fee paid for delivering these materials from vendor to store
+                    </p>
+                  </div>
+
+                  {/* Delivery Note from Vendor - File Upload */}
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Delivery Note from Vendor <span className="text-red-500">*</span>
+                    </label>
+                    <div className="border border-gray-300 rounded-lg overflow-hidden">
+                      <label className="flex items-center justify-center w-full px-4 py-3 bg-white border-dashed border-2 border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                        <div className="flex flex-col items-center w-full">
+                          {deliveryNoteFile ? (
+                            <div className="flex items-center gap-2 w-full justify-center">
+                              <FileText className="w-5 h-5 text-green-600" />
+                              <span className="text-sm text-gray-700 font-medium">{deliveryNoteFile.name}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setDeliveryNoteFile(null);
+                                }}
+                                className="ml-2 text-red-600 hover:text-red-800"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2 text-gray-600 mb-1">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                </svg>
+                                <span className="text-sm font-medium">Browse...</span>
+                              </div>
+                              <span className="text-xs text-gray-500">No file selected.</span>
+                            </>
+                          )}
+                        </div>
+                        <input
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              // Check file size (max 10MB)
+                              if (file.size > 10 * 1024 * 1024) {
+                                showError('File size must be less than 10MB');
+                                e.target.value = '';
+                                return;
+                              }
+                              setDeliveryNoteFile(file);
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)
+                    </p>
+                  </div>
                 </div>
 
                 {/* Asset Selection - Only show if NOT creating from requisition */}
@@ -1516,6 +1604,7 @@ const AssetDispatch: React.FC = () => {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Site Engineer</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Vehicle</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transport Fee</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -1524,7 +1613,7 @@ const AssetDispatch: React.FC = () => {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {currentDNs.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-6 py-12 text-center">
+                        <td colSpan={9} className="px-6 py-12 text-center">
                           <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                           <p className="text-gray-500">No {dnStatusFilter.toLowerCase()} delivery notes found</p>
                         </td>
@@ -1557,6 +1646,11 @@ const AssetDispatch: React.FC = () => {
                               <td className="px-4 py-4 text-sm">
                                 <div className="text-gray-900">{dn.vehicle_number || '-'}</div>
                                 {dn.driver_name && <div className="text-xs text-gray-500">{dn.driver_name}</div>}
+                              </td>
+                              <td className="px-4 py-4 text-sm">
+                                <div className="text-gray-900 font-medium">
+                                  {dn.transport_fee ? `AED ${Number(dn.transport_fee).toFixed(2)}` : '-'}
+                                </div>
                               </td>
                               <td className="px-4 py-4">
                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${DN_STATUS_COLORS[dn.status]}`}>
@@ -1600,7 +1694,7 @@ const AssetDispatch: React.FC = () => {
                             </tr>
                             {expandedDN === dn.adn_id && (
                               <tr>
-                                <td colSpan={8} className="bg-gray-50 px-6 py-4">
+                                <td colSpan={9} className="bg-gray-50 px-6 py-4">
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
                                     <div>
                                       <span className="text-gray-500 text-xs uppercase">Delivery Date</span>

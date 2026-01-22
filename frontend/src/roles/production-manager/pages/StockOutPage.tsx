@@ -1681,6 +1681,128 @@ const StockOutPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* Transport Fee */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Transport Fee (AED)
+                </label>
+
+                {/* Show reference info if batch was selected */}
+                {selectedBatchReference && selectedBatchReference.original_fee > 0 && (
+                  <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <p className="text-amber-800 font-medium text-sm">
+                      Reference: Original transport fee for this batch was: <span className="font-bold">AED {selectedBatchReference.original_fee.toFixed(2)}</span>
+                    </p>
+                    <p className="text-amber-700 text-xs mt-2">
+                      You can edit the fee below if there was an additional charge for this specific material.
+                    </p>
+                  </div>
+                )}
+
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={dnFormData.transport_fee ?? ''}
+                    onChange={(e) => setDnFormData({ ...dnFormData, transport_fee: Number(e.target.value) })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                    placeholder="Enter transport fee for this delivery"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter the transport fee paid for delivering these materials from vendor to store
+                </p>
+              </div>
+
+              {/* Delivery Note from Vendor - File Upload */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Delivery Note from Vendor {!lastTransportDetails?.delivery_note_url && <span className="text-red-500">*</span>}
+                </label>
+
+                {/* Show delivery note available from batch */}
+                {lastTransportDetails?.delivery_note_url && dnFormData.delivery_batch_ref && (
+                  <div className="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
+                    <div className="flex items-start">
+                      <CheckCircle className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-green-800 font-medium text-sm">
+                          ✓ Delivery Note Available from Batch
+                        </p>
+                        <a
+                          href={lastTransportDetails.delivery_note_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline text-sm mt-1 inline-flex items-center"
+                        >
+                          <FileText className="w-4 h-4 mr-1" />
+                          View Batch Delivery Note
+                        </a>
+                        <p className="text-green-700 text-xs mt-2">
+                          This material will use the delivery note from the selected batch. You can upload a different file below if this specific material has a separate delivery note.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="border border-gray-300 rounded-lg overflow-hidden">
+                  <label className="flex items-center justify-center w-full px-4 py-3 bg-white border-dashed border-2 border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                    <div className="flex flex-col items-center">
+                      {deliveryNoteFile ? (
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-5 h-5 text-green-600" />
+                          <span className="text-sm text-gray-700 font-medium">{deliveryNoteFile.name}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setDeliveryNoteFile(null);
+                            }}
+                            className="ml-2 text-red-600 hover:text-red-800"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2 text-gray-600 mb-1">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                            </svg>
+                            <span className="text-sm font-medium">Browse...</span>
+                          </div>
+                          <span className="text-xs text-gray-500">No file selected.</span>
+                        </>
+                      )}
+                    </div>
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          // Check file size (max 10MB)
+                          if (file.size > 10 * 1024 * 1024) {
+                            showError('File size must be less than 10MB');
+                            e.target.value = '';
+                            return;
+                          }
+                          setDeliveryNoteFile(file);
+                        }
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {lastTransportDetails?.delivery_note_url && dnFormData.delivery_batch_ref
+                    ? '(Optional) Upload a new file only if this material has a different delivery note'
+                    : 'Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)'}
+                </p>
+              </div>
+
               {/* Transport & Delivery Details */}
               <div className="border-t pt-6 mt-6">
                 <div className="flex items-center justify-between mb-4">
@@ -1799,99 +1921,6 @@ const StockOutPage: React.FC = () => {
                     placeholder="Enter driver contact number"
                   />
                 </div>
-
-                {/* Transport Fee */}
-                <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Transport Fee (AED)
-                  </label>
-
-                  {/* Show reference info if batch was selected */}
-                  {selectedBatchReference && selectedBatchReference.original_fee > 0 && (
-                    <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                      <p className="text-amber-800 font-medium text-sm">
-                        Reference: Original transport fee for this batch was: <span className="font-bold">AED {selectedBatchReference.original_fee.toFixed(2)}</span>
-                      </p>
-                      <p className="text-amber-700 text-xs mt-2">
-                        You can edit the fee below if there was an additional charge for this specific material.
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="relative">
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={dnFormData.transport_fee ?? ''}
-                      onChange={(e) => setDnFormData({ ...dnFormData, transport_fee: Number(e.target.value) })}
-                      className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
-                      placeholder="Enter transport fee for this delivery"
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Enter the transport fee paid for delivering these materials from vendor to store
-                  </p>
-                </div>
-              </div>
-
-              {/* Delivery Note from Vendor - File Upload */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <FileText className="w-4 h-4 inline mr-1" />
-                  Delivery Note from Vendor {!lastTransportDetails?.delivery_note_url && <span className="text-red-500">*</span>}
-                </label>
-
-                {/* Show delivery note available from batch */}
-                {lastTransportDetails?.delivery_note_url && dnFormData.delivery_batch_ref && (
-                  <div className="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
-                    <div className="flex items-start">
-                      <CheckCircle className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-green-800 font-medium text-sm">
-                          ✓ Delivery Note Available from Batch
-                        </p>
-                        <a
-                          href={lastTransportDetails.delivery_note_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline text-sm mt-1 inline-flex items-center"
-                        >
-                          <FileText className="w-4 h-4 mr-1" />
-                          View Batch Delivery Note
-                        </a>
-                        <p className="text-green-700 text-xs mt-2">
-                          This material will use the delivery note from the selected batch. You can upload a different file below if this specific material has a separate delivery note.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="border border-gray-300 rounded-lg p-3">
-                  <input
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        // Check file size (max 10MB)
-                        if (file.size > 10 * 1024 * 1024) {
-                          showError('File size must be less than 10MB');
-                          e.target.value = '';
-                          return;
-                        }
-                        setDeliveryNoteFile(file);
-                      }
-                    }}
-                    className="w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100 cursor-pointer"
-                  />
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  {lastTransportDetails?.delivery_note_url && dnFormData.delivery_batch_ref
-                    ? '(Optional) Upload a new file only if this material has a different delivery note'
-                    : 'Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)'}
-                </p>
               </div>
 
               <div>

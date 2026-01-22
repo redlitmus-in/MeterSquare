@@ -212,6 +212,10 @@ const SiteAssets: React.FC = () => {
   const [dispatchDriverName, setDispatchDriverName] = useState('');
   const [dispatchVehicleNumber, setDispatchVehicleNumber] = useState('');
   const [dispatchDriverContact, setDispatchDriverContact] = useState('');
+  const [dispatchTransportFee, setDispatchTransportFee] = useState('');
+  const [dispatchNotes, setDispatchNotes] = useState('');
+  const [dispatchDeliveryNoteFile, setDispatchDeliveryNoteFile] = useState<File | null>(null);
+  const [uploadingDeliveryNote, setUploadingDeliveryNote] = useState(false);
 
   // Asset Requisition state
   const [requisitions, setRequisitions] = useState<AssetRequisition[]>([]);
@@ -708,6 +712,9 @@ const SiteAssets: React.FC = () => {
     setDispatchDriverName(ardn.driver_name || '');
     setDispatchVehicleNumber(ardn.vehicle_number || '');
     setDispatchDriverContact(ardn.driver_contact || '');
+    setDispatchTransportFee(ardn.transport_fee ? String(ardn.transport_fee) : '');
+    setDispatchNotes(ardn.notes || '');
+    setDispatchDeliveryNoteFile(null);
     setShowDispatchModal(true);
   };
 
@@ -731,10 +738,33 @@ const SiteAssets: React.FC = () => {
 
     setProcessingARDN(dispatchARDN.ardn_id);
     try {
+      let deliveryNoteUrl = '';
+
+      // Upload delivery note file if provided
+      if (dispatchDeliveryNoteFile) {
+        setUploadingDeliveryNote(true);
+        const formData = new FormData();
+        formData.append('file', dispatchDeliveryNoteFile);
+        formData.append('ardn_id', String(dispatchARDN.ardn_id));
+
+        const uploadResponse = await apiClient.post('/assets/return-notes/upload-delivery-note', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        if (uploadResponse.data.success) {
+          deliveryNoteUrl = uploadResponse.data.data.delivery_note_url;
+        }
+        setUploadingDeliveryNote(false);
+      }
+
+      // Dispatch the return note
       await apiClient.put(`/assets/return-notes/${dispatchARDN.ardn_id}/dispatch`, {
         vehicle_number: dispatchVehicleNumber,
         driver_name: dispatchDriverName,
-        driver_contact: dispatchDriverContact
+        driver_contact: dispatchDriverContact,
+        transport_fee: dispatchTransportFee ? parseFloat(dispatchTransportFee) : 0,
+        notes: dispatchNotes,
+        delivery_note_url: deliveryNoteUrl
       });
       showSuccess(`Return note ${dispatchARDN.ardn_number} dispatched`);
       setShowDispatchModal(false);
@@ -745,6 +775,7 @@ const SiteAssets: React.FC = () => {
       showError(error.response?.data?.error || 'Failed to dispatch return note');
     } finally {
       setProcessingARDN(null);
+      setUploadingDeliveryNote(false);
     }
   };
 
@@ -2639,7 +2670,7 @@ const SiteAssets: React.FC = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+              className="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
@@ -2711,6 +2742,79 @@ const SiteAssets: React.FC = () => {
                     placeholder="Enter driver phone number"
                     required
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+                  />
+                </div>
+
+                {/* Transport Fee */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Transport Fee (AED)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={dispatchTransportFee}
+                    onChange={(e) => setDispatchTransportFee(e.target.value)}
+                    placeholder="Enter transport fee for this delivery"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Enter the transport fee paid for delivering these materials from vendor to store</p>
+                </div>
+
+                {/* Delivery Note from Vendor */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Delivery Note from Vendor
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      id="delivery-note-upload"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          // Validate file size (max 10MB)
+                          if (file.size > 10 * 1024 * 1024) {
+                            showError('File too large. Maximum size is 10MB');
+                            e.target.value = '';
+                            return;
+                          }
+                          setDispatchDeliveryNoteFile(file);
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="delivery-note-upload"
+                      className="flex items-center justify-between w-full px-3 py-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                    >
+                      <span className="text-sm text-gray-600">
+                        {dispatchDeliveryNoteFile ? dispatchDeliveryNoteFile.name : 'No file selected.'}
+                      </span>
+                      <button
+                        type="button"
+                        className="px-3 py-1 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200 transition-colors"
+                      >
+                        Browse...
+                      </button>
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)</p>
+                </div>
+
+                {/* Delivery Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Delivery Notes
+                  </label>
+                  <textarea
+                    value={dispatchNotes}
+                    onChange={(e) => setDispatchNotes(e.target.value)}
+                    placeholder="Enter any additional notes about the return delivery"
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 resize-none"
                   />
                 </div>
 

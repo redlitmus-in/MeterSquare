@@ -110,6 +110,8 @@ export interface AssetDeliveryNote {
   vehicle_number?: string;
   driver_name?: string;
   driver_contact?: string;
+  transport_fee?: number;
+  delivery_note_url?: string;
   status: ADNStatus;
   notes?: string;
   requisition_id?: number;
@@ -168,6 +170,8 @@ export interface AssetReturnDeliveryNote {
   vehicle_number?: string;
   driver_name?: string;
   driver_contact?: string;
+  transport_fee?: number;
+  delivery_note_url?: string;
   status: ARDNStatus;
   return_reason?: string;
   notes?: string;
@@ -264,6 +268,7 @@ export const createDeliveryNote = async (data: {
   vehicle_number?: string;
   driver_name?: string;
   driver_contact?: string;
+  transport_fee?: number;
   notes?: string;
   requisition_id?: number; // Link to asset requisition
   items: Array<{

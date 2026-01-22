@@ -182,6 +182,8 @@ class AssetDNPDFGenerator:
         attention_to = self._escape_html(adn_data.get('attention_to', '-'))
         delivery_from = self._escape_html(adn_data.get('delivery_from', 'M2 Store'))
         vehicle_driver = f"{self._escape_html(adn_data.get('vehicle_number', '-'))} / {self._escape_html(adn_data.get('driver_name', '-'))}"
+        transport_fee = adn_data.get('transport_fee', 0.0)
+        transport_fee_text = f"AED {transport_fee:.2f}" if transport_fee else "-"
 
         # Create info grid with proper formatting
         info_data = [
@@ -200,7 +202,13 @@ class AssetDNPDFGenerator:
             [
                 Paragraph('<b>Vehicle & Driver:</b>', self.styles['ADNLabel']),
                 Paragraph(vehicle_driver, self.styles['ADNNormal']),
+                Paragraph('<b>Transport Fee:</b>', self.styles['ADNLabel']),
+                Paragraph(transport_fee_text, self.styles['ADNNormal']),
+            ],
+            [
                 Paragraph('<b>Name & Signature:</b>', self.styles['ADNLabel']),
+                Paragraph('', self.styles['ADNNormal']),
+                Paragraph('', self.styles['ADNLabel']),
                 Paragraph('', self.styles['ADNNormal']),
             ],
         ]

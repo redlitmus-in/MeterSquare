@@ -405,23 +405,48 @@ const AssetReceiveReturns: React.FC = () => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
             {/* Modal Header */}
-            <div className={`p-4 border-b flex items-center justify-between ${
+            <div className={`p-4 border-b ${
               selectedReturn.status === 'PROCESSED' ? 'bg-green-50' : 'bg-purple-50'
             }`}>
-              <div>
-                <h2 className="text-lg font-semibold">
-                  {selectedReturn.status === 'PROCESSED' ? 'Return Details' : 'Process Return'}: {selectedReturn.ardn_number}
-                </h2>
-                <p className="text-sm text-gray-500">
-                  {selectedReturn.project_name || `Project #${selectedReturn.project_id}`} • {selectedReturn.total_items} items
-                  {selectedReturn.status === 'PROCESSED' && selectedReturn.processed_at && (
-                    <span className="ml-2">• Processed: {new Date(selectedReturn.processed_at).toLocaleDateString()}</span>
-                  )}
-                </p>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-lg font-semibold">
+                    {selectedReturn.status === 'PROCESSED' ? 'Return Details' : 'Process Return'}: {selectedReturn.ardn_number}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    {selectedReturn.project_name || `Project #${selectedReturn.project_id}`} • {selectedReturn.total_items} items
+                    {selectedReturn.status === 'PROCESSED' && selectedReturn.processed_at && (
+                      <span className="ml-2">• Processed: {new Date(selectedReturn.processed_at).toLocaleDateString()}</span>
+                    )}
+                  </p>
+                </div>
+                <button onClick={closeModal} className="p-2 hover:bg-gray-200 rounded-lg">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button onClick={closeModal} className="p-2 hover:bg-gray-200 rounded-lg">
-                <X className="w-5 h-5" />
-              </button>
+
+              {/* Transport & Delivery Info */}
+              <div className="grid grid-cols-2 gap-4 mt-3 pt-3 border-t border-gray-200">
+                <div>
+                  <span className="text-xs text-gray-500 font-medium">Transport Fee:</span>
+                  <span className="ml-2 text-sm font-semibold text-gray-700">
+                    {selectedReturn.transport_fee ? `AED ${selectedReturn.transport_fee.toFixed(2)}` : 'AED 0.00'}
+                  </span>
+                </div>
+                {selectedReturn.delivery_note_url && (
+                  <div>
+                    <span className="text-xs text-gray-500 font-medium">Delivery Note:</span>
+                    <a
+                      href={selectedReturn.delivery_note_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-2 text-sm text-blue-600 hover:text-blue-700 underline"
+                    >
+                      View Document
+                    </a>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Modal Body */}

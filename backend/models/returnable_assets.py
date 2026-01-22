@@ -285,6 +285,8 @@ class AssetDeliveryNote(db.Model):
     vehicle_number = db.Column(db.String(100), nullable=True)
     driver_name = db.Column(db.String(255), nullable=True)
     driver_contact = db.Column(db.String(50), nullable=True)
+    transport_fee = db.Column(db.Float, default=0.0, nullable=True)
+    delivery_note_url = db.Column(db.Text, nullable=True)
 
     # Status tracking
     status = db.Column(db.String(20), default='DRAFT')  # DRAFT, ISSUED, IN_TRANSIT, DELIVERED, PARTIAL, CANCELLED
@@ -329,6 +331,8 @@ class AssetDeliveryNote(db.Model):
             'vehicle_number': self.vehicle_number,
             'driver_name': self.driver_name,
             'driver_contact': self.driver_contact,
+            'transport_fee': self.transport_fee,
+            'delivery_note_url': self.delivery_note_url,
             'status': self.status,
             'notes': self.notes,
             'received_by': self.received_by,
@@ -431,6 +435,8 @@ class AssetReturnDeliveryNote(db.Model):
     vehicle_number = db.Column(db.String(100), nullable=True)
     driver_name = db.Column(db.String(255), nullable=True)
     driver_contact = db.Column(db.String(50), nullable=True)
+    transport_fee = db.Column(db.Float, default=0.0, nullable=True)
+    delivery_note_url = db.Column(db.Text, nullable=True)
 
     # Status tracking
     status = db.Column(db.String(20), default='DRAFT')  # DRAFT, ISSUED, IN_TRANSIT, RECEIVED, PROCESSED, CANCELLED
@@ -483,6 +489,8 @@ class AssetReturnDeliveryNote(db.Model):
             'vehicle_number': self.vehicle_number,
             'driver_name': self.driver_name,
             'driver_contact': self.driver_contact,
+            'transport_fee': self.transport_fee,
+            'delivery_note_url' : self.delivery_note_url,
             'status': self.status,
             'return_reason': self.return_reason,
             'notes': self.notes,

@@ -340,6 +340,8 @@ def create_delivery_note():
             vehicle_number=data.get('vehicle_number'),
             driver_name=data.get('driver_name'),
             driver_contact=data.get('driver_contact'),
+            transport_fee=data.get('transport_fee', 0.0),
+            delivery_note_url=data.get('delivery_note_url'),
             status='DRAFT',
             notes=data.get('notes'),
             created_by=user_name
@@ -850,6 +852,18 @@ def dispatch_return_note(ardn_id):
         if data.get('driver_contact'):
             ardn.driver_contact = data['driver_contact']
 
+        # Update transport fee if provided
+        if 'transport_fee' in data:
+            ardn.transport_fee = float(data['transport_fee']) if data['transport_fee'] else 0.0
+
+        # Update notes if provided
+        if data.get('notes'):
+            ardn.notes = data['notes']
+
+        # Update delivery note URL if provided
+        if data.get('delivery_note_url'):
+            ardn.delivery_note_url = data['delivery_note_url']
+
         ardn.status = 'IN_TRANSIT'
         ardn.dispatched_at = datetime.utcnow()
         ardn.dispatched_by = user_name
@@ -861,6 +875,114 @@ def dispatch_return_note(ardn_id):
             'message': f'Return note {ardn.ardn_number} dispatched',
             'data': ardn.to_dict()
         })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def upload_return_note_delivery_note():
+    """Upload delivery note document for ARDN (from vendor/transporter)"""
+    try:
+        from werkzeug.utils import secure_filename
+        from supabase import create_client
+        import uuid
+        import os
+
+        # Get ARDN ID from request
+        ardn_id = request.form.get('ardn_id')
+        if not ardn_id:
+            return jsonify({'success': False, 'error': 'ARDN ID is required'}), 400
+
+        # Get the ARDN record
+        ardn = AssetReturnDeliveryNote.query.get(ardn_id)
+        if not ardn:
+            return jsonify({'success': False, 'error': 'Return note not found'}), 404
+
+        # Get file from request
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+        # Validate file type
+        filename = secure_filename(file.filename)
+        allowed_extensions = {'pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'}
+        ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+        if ext not in allowed_extensions:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid file type. Allowed: PDF, DOC, DOCX, JPG, PNG (Max 10MB)'
+            }), 400
+
+        # Read file content
+        file_content = file.read()
+        file_size = len(file_content)
+
+        # Check file size (max 10MB)
+        max_size = 10 * 1024 * 1024
+        if file_size > max_size:
+            return jsonify({
+                'success': False,
+                'error': 'File too large. Maximum size is 10MB'
+            }), 400
+
+        if file_size == 0:
+            return jsonify({'success': False, 'error': 'File is empty'}), 400
+
+        # Create unique filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_id = str(uuid.uuid4())[:8]
+        unique_filename = f"asset-return-notes/{ardn.ardn_number}/{timestamp}_{unique_id}_{filename}"
+
+        # Get content type
+        content_type = file.content_type or 'application/octet-stream'
+
+        # Initialize Supabase client based on ENVIRONMENT variable
+        environment = os.environ.get('ENVIRONMENT', 'production')
+        if environment == 'development':
+            supabase_url = os.environ.get('DEV_SUPABASE_URL')
+            supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
+        else:
+            supabase_url = os.environ.get('SUPABASE_URL')
+            supabase_key = os.environ.get('SUPABASE_ANON_KEY')
+
+        if not supabase_url or not supabase_key:
+            return jsonify({'success': False, 'error': 'Storage configuration missing'}), 500
+
+        supabase = create_client(supabase_url, supabase_key)
+
+        # Upload to inventory-files bucket
+        bucket = supabase.storage.from_('inventory-files')
+        try:
+            response = bucket.upload(
+                unique_filename,
+                file_content,
+                {"content-type": content_type, "upsert": "false"}
+            )
+        except Exception as upload_error:
+            return jsonify({'success': False, 'error': f'Upload failed: {str(upload_error)}'}), 500
+
+        # Get public URL
+        public_url = bucket.get_public_url(unique_filename)
+
+        # Update ARDN record with delivery note URL
+        ardn.delivery_note_url = public_url
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Delivery note uploaded successfully',
+            'data': {
+                'ardn_id': ardn_id,
+                'ardn_number': ardn.ardn_number,
+                'delivery_note_url': public_url,
+                'filename': filename,
+                'file_size': file_size
+            }
+        }), 200
 
     except Exception as e:
         db.session.rollback()
@@ -1362,6 +1484,7 @@ def download_asset_delivery_note(adn_id):
             'delivery_from': adn.delivery_from or 'M2 Store',
             'vehicle_number': adn.vehicle_number,
             'driver_name': adn.driver_name,
+            'transport_fee': adn.transport_fee,
             'notes': adn.notes,
         }
 
@@ -1449,6 +1572,7 @@ def download_asset_return_note(ardn_id):
             'vehicle_number': ardn.vehicle_number,
             'driver_name': ardn.driver_name,
             'driver_contact': ardn.driver_contact,
+            'transport_fee': ardn.transport_fee,
             'notes': ardn.notes,
         }
 
