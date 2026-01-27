@@ -448,10 +448,11 @@ class LabourService {
    * @param page - Page number (default: 1)
    * @param perPage - Items per page (default: 15)
    */
-  async getMyRequisitions(status?: string, page: number = 1, perPage: number = 15): Promise<{ success: boolean; data: LabourRequisition[]; pagination?: any; message?: string }> {
+  async getMyRequisitions(status?: string, page: number = 1, perPage: number = 15, assignmentStatus?: string): Promise<{ success: boolean; data: LabourRequisition[]; pagination?: any; message?: string }> {
     try {
       const params: Record<string, string | number> = { page, per_page: perPage };
       if (status) params.status = status;
+      if (assignmentStatus) params.assignment_status = assignmentStatus;
       const response = await apiClient.get('/labour/requisitions/my-requests', { params });
       return {
         success: true,

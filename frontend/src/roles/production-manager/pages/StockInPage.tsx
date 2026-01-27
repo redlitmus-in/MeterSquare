@@ -1,7 +1,35 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ArrowDownCircle, Package, Plus, Search, FileText, CheckCircle, DollarSign, ChevronDown, X, Download, ExternalLink } from 'lucide-react';
+import { ArrowDownCircle, Package, Plus, Search, FileText, CheckCircle, DollarSign, ChevronDown, X, Download, ExternalLink, Truck, Bell } from 'lucide-react';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { inventoryService, InventoryMaterial, CustomUnit } from '../services/inventoryService';
+import { apiClient } from '@/api/config';
+
+// Buyer Transfer Interface
+interface BuyerTransfer {
+  delivery_note_id: number;
+  delivery_note_number: string;
+  project_name: string;
+  delivery_date: string | null;
+  vehicle_number: string | null;
+  driver_name: string | null;
+  driver_contact: string | null;
+  transport_fee: number | null;
+  notes: string | null;
+  status: string;
+  created_by: string;
+  created_at: string | null;
+  items: {
+    item_id: number;
+    inventory_material_id: number;
+    material_name: string;
+    material_code: string | null;
+    quantity: number;
+    unit: string;
+    unit_price: number | null;
+  }[];
+  total_items: number;
+  total_quantity: number;
+}
 import ConfirmationModal from '../components/ConfirmationModal';
 
 interface PurchaseTransaction {
@@ -209,6 +237,12 @@ const StockInPage: React.FC = () => {
     confirmText: 'Confirm'
   });
 
+  // Buyer Transfers state
+  const [showBuyerTransfersModal, setShowBuyerTransfersModal] = useState(false);
+  const [buyerTransfers, setBuyerTransfers] = useState<BuyerTransfer[]>([]);
+  const [loadingBuyerTransfers, setLoadingBuyerTransfers] = useState(false);
+  const [receivingTransferId, setReceivingTransferId] = useState<number | null>(null);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -290,6 +324,81 @@ const StockInPage: React.FC = () => {
     }
 
     setFilteredTransactions(filtered);
+  };
+
+  // Fetch pending buyer transfers
+  const fetchBuyerTransfers = async () => {
+    setLoadingBuyerTransfers(true);
+    try {
+      const response = await apiClient.get('/inventory/buyer-transfers/pending', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+      if (response.data.success) {
+        setBuyerTransfers(response.data.transfers || []);
+      }
+    } catch (error) {
+      console.error('Error fetching buyer transfers:', error);
+      setBuyerTransfers([]);
+    } finally {
+      setLoadingBuyerTransfers(false);
+    }
+  };
+
+  // Receive a buyer transfer
+  const handleReceiveBuyerTransfer = async (deliveryNoteId: number) => {
+    setReceivingTransferId(deliveryNoteId);
+    try {
+      const response = await apiClient.post(`/inventory/buyer-transfers/${deliveryNoteId}/receive`, {}, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+      if (response.data.success) {
+        alert(`Transfer ${response.data.delivery_note_number} received successfully! Materials added to inventory.`);
+        // Refresh both buyer transfers and main data
+        fetchBuyerTransfers();
+        fetchData();
+      }
+    } catch (error: any) {
+      console.error('Error receiving transfer:', error);
+      alert(error.response?.data?.error || 'Failed to receive transfer');
+    } finally {
+      setReceivingTransferId(null);
+    }
+  };
+
+  // Download buyer transfer DN as PDF
+  const handleDownloadBuyerTransferPDF = async (deliveryNoteId: number, deliveryNoteNumber: string) => {
+    try {
+      const response = await apiClient.get(`/inventory/delivery_note/${deliveryNoteId}/download`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        },
+        responseType: 'blob'
+      });
+
+      // Create download link
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${deliveryNoteNumber}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('Error downloading PDF:', error);
+      alert(error.response?.data?.error || 'Failed to download PDF');
+    }
+  };
+
+  // Open buyer transfers modal
+  const handleOpenBuyerTransfersModal = () => {
+    setShowBuyerTransfersModal(true);
+    fetchBuyerTransfers();
   };
 
   // Extract recent delivery batches from transactions
@@ -781,13 +890,23 @@ const StockInPage: React.FC = () => {
             <p className="text-sm text-gray-500">Record material receipts from vendors</p>
           </div>
         </div>
-        <button
-          onClick={handleOpenPurchaseModal}
-          className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
-        >
-          <ArrowDownCircle className="w-5 h-5" />
-          <span>Record Stock In</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          {/* Buyer Transfers Button */}
+          <button
+            onClick={handleOpenBuyerTransfersModal}
+            className="relative flex items-center space-x-2 bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition-colors"
+          >
+            <Truck className="w-5 h-5" />
+            <span>Buyer Transfers</span>
+          </button>
+          <button
+            onClick={handleOpenPurchaseModal}
+            className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+          >
+            <ArrowDownCircle className="w-5 h-5" />
+            <span>Record Stock In</span>
+          </button>
+        </div>
       </div>
 
       {/* Search and Filters */}
@@ -1794,6 +1913,131 @@ const StockInPage: React.FC = () => {
           confirmText={confirmModal.confirmText}
           confirmColor="APPROVE"
         />
+      )}
+
+      {/* Buyer Transfers Modal */}
+      {showBuyerTransfersModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[80vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-orange-50">
+              <div className="flex items-center space-x-3">
+                <Truck className="w-6 h-6 text-orange-600" />
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Buyer Transfers</h2>
+                  <p className="text-sm text-gray-500">Receive materials sent by buyers to M2 Store</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowBuyerTransfersModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              {loadingBuyerTransfers ? (
+                <div className="flex items-center justify-center py-12">
+                  <ModernLoadingSpinners size="md" />
+                </div>
+              ) : buyerTransfers.length === 0 ? (
+                <div className="text-center py-12">
+                  <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500">No pending buyer transfers</p>
+                  <p className="text-sm text-gray-400 mt-1">All transfers have been received</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {buyerTransfers.map((transfer) => (
+                    <div
+                      key={transfer.delivery_note_id}
+                      className="border border-gray-200 rounded-lg p-4 hover:border-orange-300 transition-colors"
+                    >
+                      {/* Transfer Header */}
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-semibold text-orange-600">{transfer.delivery_note_number}</span>
+                            <span className={`px-2 py-0.5 text-xs rounded-full ${
+                              transfer.status === 'DRAFT' ? 'bg-yellow-100 text-yellow-700' :
+                              transfer.status === 'ISSUED' ? 'bg-blue-100 text-blue-700' :
+                              'bg-purple-100 text-purple-700'
+                            }`}>
+                              {transfer.status}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-500 mt-1">From: {transfer.created_by}</p>
+                          {transfer.delivery_date && (
+                            <p className="text-xs text-gray-400">
+                              Date: {new Date(transfer.delivery_date).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleReceiveBuyerTransfer(transfer.delivery_note_id)}
+                          disabled={receivingTransferId === transfer.delivery_note_id}
+                          className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-white transition-colors ${
+                            receivingTransferId === transfer.delivery_note_id
+                              ? 'bg-gray-400 cursor-not-allowed'
+                              : 'bg-green-600 hover:bg-green-700'
+                          }`}
+                        >
+                          {receivingTransferId === transfer.delivery_note_id ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <span>Receiving...</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="w-4 h-4" />
+                              <span>Receive</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Materials List */}
+                      <div className="bg-gray-50 rounded-lg p-3 mt-3">
+                        <p className="text-xs font-medium text-gray-500 mb-2">Materials ({transfer.total_items})</p>
+                        <div className="space-y-1">
+                          {transfer.items.map((item, idx) => (
+                            <div key={item.item_id || idx} className="flex justify-between text-sm">
+                              <span className="text-gray-700">{item.material_name}</span>
+                              <span className="text-gray-500 font-medium">{item.quantity} {item.unit}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Transport Info */}
+                      {(transfer.vehicle_number || transfer.driver_name) && (
+                        <div className="flex items-center space-x-4 mt-3 text-xs text-gray-500">
+                          {transfer.vehicle_number && <span>Vehicle: {transfer.vehicle_number}</span>}
+                          {transfer.driver_name && <span>Driver: {transfer.driver_name}</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+              <p className="text-sm text-gray-500">
+                {buyerTransfers.length} pending transfer{buyerTransfers.length !== 1 ? 's' : ''}
+              </p>
+              <button
+                onClick={() => setShowBuyerTransfersModal(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

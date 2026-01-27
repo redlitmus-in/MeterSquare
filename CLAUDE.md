@@ -115,12 +115,252 @@ MeterSquare/
 - `delivery_notes` - Material delivery tracking
 
 ### Role Types
-- **PM** (Project Manager)
+- **PM** (Project Manager / Production Manager)
 - **TD** (Technical Director)
 - **SE** (Site Engineer/Site Supervisor)
 - **Estimator**
 - **Buyer**
 - **Vendor**
+
+---
+
+## Material Delivery Workflow (Enforced Store-Based Routing)
+
+### Overview
+**All materials purchased by buyers MUST route through M2 Store warehouse** for quality control and consolidated dispatch to sites. Direct-to-site delivery is deprecated.
+
+### Complete Material Journey
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  PHASE 1: PURCHASE COMPLETION (Buyer)                           │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Buyer completes CR purchase                                  │
+│    ✓ System checks M2 Store availability (optional warning)     │
+│    ✓ Sets delivery_routing = 'via_production_manager'           │
+│    ✓ Sets store_request_status = 'pending_vendor_delivery'      │
+│    ✓ Sets CR status = 'routed_to_store'                         │
+│    ✓ Auto-creates Internal Material Request (IMR)               │
+│    ✓ Notifies Production Manager about incoming delivery        │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  PHASE 2: VENDOR DELIVERY TO STORE (External)                   │
+├─────────────────────────────────────────────────────────────────┤
+│ 2. Vendor delivers materials to M2 Store warehouse              │
+│ 3. Production Manager receives & inspects delivery              │
+│    ✓ Updates vendor_delivered_to_store = True                   │
+│    ✓ Updates store_request_status = 'delivered_to_store'        │
+│    ✓ Notifies Buyer (milestone notification)                    │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  PHASE 3: STORE TO SITE DISPATCH (Production Manager)           │
+├─────────────────────────────────────────────────────────────────┤
+│ 4. PM approves Internal Material Request                        │
+│ 5. PM creates Material Delivery Note (DN) for site              │
+│    ✓ Allocates materials from inventory_materials table         │
+│    ✓ Records driver, vehicle, transport fee                     │
+│ 6. PM issues DN (deducts from current_stock)                    │
+│ 7. PM dispatches DN (status: IN_TRANSIT)                        │
+│    ✓ Updates store_request_status = 'dispatched_to_site'        │
+│    ✓ Notifies Buyer & Site Engineer                             │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  PHASE 4: SITE DELIVERY & CONFIRMATION (Site Engineer)          │
+├─────────────────────────────────────────────────────────────────┤
+│ 8. Site Engineer receives delivery                              │
+│ 9. SE confirms receipt (DN status = DELIVERED)                  │
+│    ✓ Updates store_request_status = 'delivered_to_site'         │
+│    ✓ Updates IMR status = 'FULFILLED'                           │
+│    ✓ Notifies Buyer (completion notification)                   │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  PHASE 5: RETURNS (Optional - Site Engineer)                    │
+├─────────────────────────────────────────────────────────────────┤
+│ 10. SE creates Return Delivery Note (RDN) for unused materials  │
+│     ✓ Specifies condition: Good/Damaged/Defective               │
+│ 11. Driver transports returns to M2 Store                       │
+│ 12. PM confirms receipt (RDN status = RECEIVED)                 │
+│     ✓ Good → Add to current_stock                               │
+│     ✓ Damaged → Add to backup_stock                             │
+│     ✓ Defective → Trigger disposal workflow                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Key Status Tracking Fields
+
+**Change Request (change_requests table):**
+- `delivery_routing` - Always 'via_production_manager' (enforced)
+- `store_request_status` - Milestone tracking:
+  - `pending_vendor_delivery` - Awaiting vendor to deliver to store
+  - `delivered_to_store` - Vendor delivered, awaiting PM dispatch
+  - `dispatched_to_site` - In transit to construction site
+  - `delivered_to_site` - Completed delivery
+- `vendor_delivered_to_store` - Boolean flag for vendor delivery confirmation
+- `vendor_delivery_date` - When vendor delivered to warehouse
+- `buyer_completion_notes` - Buyer notes at purchase completion
+
+**Internal Material Request (internal_inventory_material_requests table):**
+- `source_type` - 'from_vendor_delivery' (auto-created by buyer)
+- `status` - 'awaiting_vendor_delivery' → 'PENDING' → 'APPROVED' → 'DISPATCHED' → 'FULFILLED'
+- `vendor_delivery_confirmed` - Boolean flag
+- `final_destination_site` - Which project site receives materials
+- `routed_by_buyer_id` - Buyer who routed materials
+- `routed_to_store_at` - Timestamp of routing
+
+**Material Delivery Note (material_delivery_notes table):**
+- `status` - DRAFT → ISSUED → IN_TRANSIT → DELIVERED (or PARTIAL)
+- `delivery_note_number` - Sequential (MDN-2026-001 format)
+- `vehicle_number`, `driver_name`, `driver_contact` - Transport tracking
+- `transport_fee` - Transportation cost
+- `dispatched_by`, `dispatched_at` - PM dispatch tracking
+- `received_by`, `received_at`, `receiver_notes` - Site confirmation
+
+**Return Delivery Note (return_delivery_notes table):**
+- `status` - DRAFT → ISSUED → IN_TRANSIT → RECEIVED (or PARTIAL)
+- `return_note_number` - Sequential (RDN-2026-001 format)
+- `condition` - Good / Damaged / Defective
+- `disposal_status` - For damaged items (pending_approval → disposed / repaired)
+
+### API Endpoints for Material Flow
+
+**Buyer Endpoints:**
+- `POST /api/buyer/complete-purchase` - Complete purchase, auto-route to store
+- `POST /api/inventory/check-availability` - Check M2 Store stock before completion
+- `GET /api/buyer/material-status/<cr_id>` - Track material journey milestones *(planned)*
+
+**Production Manager Endpoints:**
+- `GET /api/inventory/internal_material_requests` - View pending material requests
+- `POST /api/inventory/internal_material/<request_id>/approve` - Approve IMR
+- `POST /api/inventory/delivery_notes` - Create Delivery Note for site dispatch
+- `POST /api/inventory/delivery_note/<id>/issue` - Issue DN (deduct stock)
+- `POST /api/inventory/delivery_note/<id>/dispatch` - Mark as dispatched
+- `POST /api/inventory/return_delivery_note/<id>/confirm` - Confirm return receipt
+
+**Site Engineer Endpoints:**
+- `GET /api/inventory/my-delivery-notes` - View deliveries for assigned projects
+- `POST /api/inventory/delivery_note/<id>/confirm` - Confirm delivery receipt
+- `POST /api/inventory/return_delivery_notes` - Create return delivery note
+- `GET /api/inventory/my-returnable-materials` - View returnable materials
+
+### Availability Check Feature (NEW - Jan 2026)
+
+**Purpose:** Before completing purchase, buyer can check if materials are available in M2 Store
+
+**Endpoint:** `POST /api/inventory/check-availability`
+
+**Request:**
+```json
+{
+  "materials": [
+    {
+      "material_name": "Cement 50kg",
+      "brand": "UltraTech",
+      "size": "50kg",
+      "quantity": 100
+    }
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "overall_available": false,
+  "total_materials": 1,
+  "available_count": 0,
+  "unavailable_count": 1,
+  "materials": [
+    {
+      "material_name": "Cement 50kg",
+      "brand": "UltraTech",
+      "size": "50kg",
+      "requested_quantity": 100,
+      "available_quantity": 75,
+      "is_available": false,
+      "shortfall": 25,
+      "status": "insufficient_stock",
+      "inventory_material_id": 42,
+      "material_code": "MAT-2026-042"
+    }
+  ]
+}
+```
+
+**Implementation:**
+- Shows warning if materials unavailable, but allows completion (PM handles procurement)
+- Supports fuzzy matching on material name
+- Exact matching on brand/size if provided
+- Returns inventory_material_id for linking
+
+### Database Tables Reference
+
+**Core Inventory Tables:**
+- `inventory_materials` - Central material catalog with stock levels
+  - `current_stock` - Primary usable stock
+  - `backup_stock` - Damaged/partially usable stock
+  - `min_stock_level` - Reorder trigger threshold
+
+- `inventory_transactions` - All stock movements (PURCHASE, WITHDRAWAL)
+  - Links to delivery_batch_ref for tracing
+  - Records driver, vehicle, transport fee
+
+- `material_delivery_notes` - Outbound deliveries (store → site)
+- `delivery_note_items` - Individual materials in each DN
+
+- `return_delivery_notes` - Return deliveries (site → store)
+- `return_delivery_note_items` - Individual materials in each RDN
+
+- `material_returns` - Legacy return tracking (being replaced by RDN system)
+
+### Business Rules
+
+1. **Mandatory Store Routing**: All new purchases route via M2 Store (no exceptions)
+2. **Availability is Advisory**: Low stock shows warning but doesn't block completion
+3. **Quality Control**: Production Manager inspects all vendor deliveries before dispatch
+4. **Material Grouping**: One CR creates ONE grouped IMR (not individual requests per material)
+5. **Stock Deduction**: Stock only deducted when DN is ISSUED (not on creation)
+6. **Return Conditions**: Good returns go to current_stock, Damaged to backup_stock
+7. **Disposal Approval**: Defective materials require TD approval for disposal
+
+### Important Code Files
+
+**Backend:**
+- [buyer_controller.py:2276](/backend/controllers/buyer_controller.py#L2276) - `complete_purchase()` function (enforces routing)
+- [inventory_controller.py:5416](/backend/controllers/inventory_controller.py#L5416) - `check_material_availability()` function
+- [inventory_controller.py:2927](/backend/controllers/inventory_controller.py#L2927) - Delivery Note management
+- [change_request.py](/backend/models/change_request.py) - CR model with routing fields
+- [inventory.py](/backend/models/inventory.py) - All inventory-related models
+
+**Frontend:**
+- [buyerService.ts](/frontend/src/roles/buyer/services/buyerService.ts) - Buyer API integration
+- [M2StorePurchaseFlow.tsx](/frontend/src/roles/buyer/components/M2StorePurchaseFlow.tsx) - Availability check UI (planned)
+
+### Troubleshooting
+
+**Issue: IMR not created after purchase completion**
+- Check if CR has POChildren (they create their own grouped IMRs)
+- Verify no duplicate IMRs exist for this CR (prevents double-creation)
+- Check logs for "Created 1 grouped Internal Material Request for CR-{id}"
+
+**Issue: Materials not showing in store inventory**
+- Verify material added to `inventory_materials` table
+- Check `is_deleted = False` and `current_stock > 0`
+- Use material_code for unique identification
+
+**Issue: Delivery Note stock deduction not working**
+- DN must be in ISSUED status to deduct stock
+- Check inventory_transaction_id is created and linked
+- Verify sufficient current_stock available
+
+**Issue: Returns not updating stock**
+- RDN must be in RECEIVED status to add stock back
+- Good condition → current_stock, Damaged → backup_stock
+- Check return processing logs for condition-based routing
 
 ---
 

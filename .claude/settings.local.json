@@ -169,7 +169,17 @@
       "Bash(npm install:*)",
       "Bash(npm uninstall:*)",
       "Bash(export DATABASE_URL:*)",
-      "Bash(PGPASSWORD=\"Rameshdev$08\" psql:*)"
+      "Bash(PGPASSWORD=\"Rameshdev$08\" psql:*)",
+      "Bash(DATABASE_URL=\"postgresql://postgres.qinpqjwvrhgsqlwlrcyy:YIGOtpBLq5lfxQrb@aws-0-ap-south-1.pooler.supabase.com:6543/postgres\" python3 test_se_projects.py)",
+      "Bash(DATABASE_URL=\"postgresql://postgres.qinpqjwvrhgsqlwlrcyy:YIGOtpBLq5lfxQrb@aws-0-ap-south-1.pooler.supabase.com:6543/postgres\" python test_se_projects.py)",
+      "Bash(PGPASSWORD=\"YIGOtpBLq5lfxQrb\" psql:*)",
+      "Bash(python check_se_pmassign.py:*)",
+      "Bash(python check_project_statuses.py:*)",
+      "Bash(PGPASSWORD=\"Meterkol$2025\" psql:*)",
+      "Bash(killall node:*)",
+      "Bash(fuser:*)",
+      "Bash(python migrations/allow_null_project_id_in_delivery_notes.py:*)",
+      "Bash(DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" python:*)"
     ],
     "deny": [],
     "ask": []

@@ -507,3 +507,35 @@ def download_rdn_pdf_route(return_note_id):
 def request_material_disposal_route(material_id):
     """Request disposal for damaged/wasted material from catalog"""
     return request_material_disposal(material_id)
+
+
+# ==================== MATERIAL AVAILABILITY CHECK ROUTE ====================
+
+@inventory_routes.route('/inventory/check-availability', methods=['POST'])
+@jwt_required
+def check_material_availability_route():
+    """Check M2 Store inventory availability for materials before purchase completion"""
+    return check_material_availability()
+
+
+# ==================== BUYER TRANSFER RECEPTION ROUTES (PM) ====================
+
+@inventory_routes.route('/inventory/buyer-transfers/pending', methods=['GET'])
+@jwt_required
+def get_pending_buyer_transfers_route():
+    """Get pending buyer transfers to M2 Store for PM to receive"""
+    return get_pending_buyer_transfers()
+
+
+@inventory_routes.route('/inventory/buyer-transfers/<int:delivery_note_id>/receive', methods=['POST'])
+@jwt_required
+def receive_buyer_transfer_route(delivery_note_id):
+    """PM confirms receipt of buyer transfer and adds to inventory"""
+    return receive_buyer_transfer(delivery_note_id)
+
+
+@inventory_routes.route('/inventory/buyer-transfers/received', methods=['GET'])
+@jwt_required
+def get_received_buyer_transfers_route():
+    """Get history of received buyer transfers"""
+    return get_received_buyer_transfers()

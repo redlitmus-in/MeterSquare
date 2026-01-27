@@ -13,6 +13,7 @@ import {
   BuildingOfficeIcon,
   CubeIcon,
   ArrowUturnLeftIcon,
+  ArrowDownTrayIcon,
 } from '@heroicons/react/24/outline';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { showError, showSuccess, showInfo } from '@/utils/toastHelper';
@@ -525,6 +526,28 @@ const MaterialReceipts: React.FC = () => {
       showSuccess('PDF downloaded successfully!');
     } catch (err) {
       showError('Failed to download PDF');
+    }
+  };
+
+  const handleDownloadDNPDF = async (dnId: number, dnNumber: string) => {
+    try {
+      const response = await apiClient.get(`/delivery_note/${dnId}/download`, {
+        responseType: 'blob',
+      });
+
+      // Create blob link to download
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${dnNumber.replace(/\//g, '-')}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      showSuccess('DN PDF downloaded successfully!');
+    } catch (err) {
+      showError('Failed to download DN PDF');
     }
   };
 
@@ -1159,12 +1182,12 @@ const MaterialReceipts: React.FC = () => {
                             const isExpanded = expandedNotes.has(note.delivery_note_id);
                             return (
                               <div key={note.delivery_note_id}>
-                                <button
-                                  onClick={() => toggleExpand(note.delivery_note_id)}
-                                  className="w-full px-5 py-4 hover:bg-gray-50 transition-colors text-left"
-                                >
+                                <div className="w-full px-5 py-4 hover:bg-gray-50 transition-colors">
                                   <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
+                                    <button
+                                      onClick={() => toggleExpand(note.delivery_note_id)}
+                                      className="flex items-center gap-3 flex-1 text-left"
+                                    >
                                       <div className="p-2 bg-green-100 rounded-lg">
                                         <DocumentTextIcon className="w-5 h-5 text-green-600" />
                                       </div>
@@ -1174,19 +1197,32 @@ const MaterialReceipts: React.FC = () => {
                                           Delivered on {new Date(note.delivery_date).toLocaleDateString()}
                                         </p>
                                       </div>
-                                    </div>
+                                    </button>
                                     <div className="flex items-center gap-3">
                                       <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
                                         Received
                                       </span>
-                                      {isExpanded ? (
-                                        <ChevronUpIcon className="w-5 h-5 text-gray-400" />
-                                      ) : (
-                                        <ChevronDownIcon className="w-5 h-5 text-gray-400" />
-                                      )}
+                                      <button
+                                        onClick={() => handleDownloadDNPDF(note.delivery_note_id, note.delivery_note_number)}
+                                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                                        title="Download PDF"
+                                      >
+                                        <ArrowDownTrayIcon className="w-4 h-4" />
+                                        PDF
+                                      </button>
+                                      <button
+                                        onClick={() => toggleExpand(note.delivery_note_id)}
+                                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                      >
+                                        {isExpanded ? (
+                                          <ChevronUpIcon className="w-5 h-5 text-gray-400" />
+                                        ) : (
+                                          <ChevronDownIcon className="w-5 h-5 text-gray-400" />
+                                        )}
+                                      </button>
                                     </div>
                                   </div>
-                                </button>
+                                </div>
 
                                 <AnimatePresence>
                                   {isExpanded && (
@@ -1353,6 +1389,14 @@ const MaterialReceipts: React.FC = () => {
                                   Confirm Receipt
                                 </button>
                               )}
+                              <button
+                                onClick={() => handleDownloadDNPDF(note.delivery_note_id, note.delivery_note_number)}
+                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                                title="Download PDF"
+                              >
+                                <ArrowDownTrayIcon className="w-4 h-4" />
+                                Download PDF
+                              </button>
                               <button
                                 onClick={() => toggleExpand(note.delivery_note_id)}
                                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"

@@ -574,7 +574,23 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         href: buildPath('/store'),
         icon: BuildingOfficeIcon,
         iconSolid: BuildingOfficeSolid,
-        color: 'text-blue-600'
+        color: 'text-blue-600',
+        children: [
+          {
+            name: 'Store Items',
+            href: buildPath('/store'),
+            icon: CubeIcon,
+            iconSolid: CubeSolid,
+            color: 'text-blue-500'
+          },
+          {
+            name: 'Material Transfer',
+            href: buildPath('/material-transfer'),
+            icon: ShoppingCartIcon,
+            iconSolid: ShoppingSolid,
+            color: 'text-orange-500'
+          }
+        ]
       }
     ];
 

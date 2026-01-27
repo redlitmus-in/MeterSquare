@@ -2,6 +2,7 @@ from flask import Blueprint, g, jsonify
 from controllers.buyer_controller import *
 from controllers.auth_controller import jwt_required
 from controllers.upload_image_controller import *
+from controllers.boq_controller import get_custom_units
 from utils.response_cache import cached_response, cache_dashboard_data
 
 # Create blueprint with URL prefix
@@ -642,5 +643,70 @@ def get_project_site_engineers_route(project_id):
     if access_check:
         return access_check
     return get_project_site_engineers(project_id)
+
+
+# Buyer Material Transfer - Get Available CRs
+@buyer_routes.route('/crs-for-transfer', methods=['GET'])
+@jwt_required
+def get_crs_for_material_transfer_route():
+    """Get CRs that are ready for material transfer (purchase completed) (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_crs_for_material_transfer()
+
+
+# Buyer Material Transfer - Create DN
+@buyer_routes.route('/material-transfer', methods=['POST'])
+@jwt_required
+def create_buyer_material_transfer_route():
+    """Create delivery note for buyer-initiated material transfer to site or store (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return create_buyer_material_transfer()
+
+
+# Buyer Transfer History
+@buyer_routes.route('/transfer-history', methods=['GET'])
+@jwt_required
+def get_buyer_transfer_history_route():
+    """Get all delivery notes created by buyer for material transfers (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_buyer_transfer_history()
+
+
+# Get Site Engineers for Material Transfer
+@buyer_routes.route('/site-engineers', methods=['GET'])
+@jwt_required
+def get_site_engineers_route():
+    """Get all site engineers for buyer to select delivery recipient (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_site_engineers_for_transfer()
+
+
+# Get Projects for Site Engineer
+@buyer_routes.route('/site-engineers/<int:site_engineer_id>/projects', methods=['GET'])
+@jwt_required
+def get_se_projects_route(site_engineer_id):
+    """Get all projects for a specific site engineer (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_projects_for_site_engineer(site_engineer_id)
+
+# Get Custom Units (for Material Transfer)
+@buyer_routes.route('/custom-units', methods=['GET'])
+@jwt_required
+def get_buyer_custom_units_route():
+    """Get all custom units for material transfers (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_custom_units()
 
 

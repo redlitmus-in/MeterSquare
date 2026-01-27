@@ -1716,6 +1716,30 @@ class BuyerService {
     }
   }
 
+  // Check material availability in M2 Store before purchase completion
+  async checkMaterialAvailability(materials: MaterialAvailabilityRequest[]): Promise<MaterialAvailabilityResponse> {
+    try {
+      const response = await apiClient.post<MaterialAvailabilityResponse>(
+        '/inventory/check-availability',
+        { materials }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to check availability');
+    } catch (error: any) {
+      console.error('Error checking material availability:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response?.data?.error || 'Invalid request');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to check material availability');
+    }
+  }
+
 }
 
 // Response type for POChild price update
@@ -1790,6 +1814,38 @@ export interface CompleteFromStoreResponse {
   message: string;
   cr_id?: number;
   requests_created?: number;
+  error?: string;
+}
+
+// Material availability check types
+export interface MaterialAvailabilityRequest {
+  material_name: string;
+  brand?: string;
+  size?: string;
+  quantity: number;
+}
+
+export interface MaterialAvailabilityResult {
+  material_name: string;
+  brand: string;
+  size: string;
+  requested_quantity: number;
+  available_quantity: number;
+  is_available: boolean;
+  shortfall: number;
+  status: 'in_stock' | 'insufficient_stock' | 'not_in_inventory' | 'invalid_quantity';
+  inventory_material_id: number | null;
+  material_code: string | null;
+  error?: string;
+}
+
+export interface MaterialAvailabilityResponse {
+  success: boolean;
+  overall_available: boolean;
+  total_materials: number;
+  available_count: number;
+  unavailable_count: number;
+  materials: MaterialAvailabilityResult[];
   error?: string;
 }
 

@@ -487,6 +487,7 @@ def get_my_requisitions():
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 15, type=int), 100)
         status = request.args.get('status')
+        assignment_status = request.args.get('assignment_status')  # New parameter for filtering by assignment_status
 
         query = LabourRequisition.query.filter(
             LabourRequisition.requested_by_user_id == user_id,
@@ -500,6 +501,10 @@ def get_my_requisitions():
                 query = query.filter(LabourRequisition.status.in_(status_list))
             else:
                 query = query.filter(LabourRequisition.status == status)
+
+        if assignment_status:
+            # Filter by assignment_status (e.g., 'assigned' or 'unassigned')
+            query = query.filter(LabourRequisition.assignment_status == assignment_status)
 
         query = query.order_by(LabourRequisition.created_at.desc())
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -837,6 +842,10 @@ def send_to_production(requisition_id):
         requisition.approved_by_name = current_user.get('full_name', 'Unknown')
         requisition.approval_date = datetime.utcnow()
         requisition.last_modified_by = current_user.get('full_name', 'System')
+
+        # CRITICAL: Always set assignment_status to 'unassigned' when PM approves
+        # This ensures the requisition appears in Production Manager's "Pending Assignment" queue
+        requisition.assignment_status = 'unassigned'
 
         db.session.commit()
 
@@ -1180,36 +1189,10 @@ def approve_requisition(requisition_id):
         requisition.approval_date = datetime.utcnow()
         requisition.last_modified_by = current_user.get('full_name', 'System')
 
-        # Auto-assign preferred workers for reassignment requisitions
-        # This allows reassigned requisitions to skip Production Manager assignment step
-        if requisition.preferred_worker_ids and len(requisition.preferred_worker_ids) > 0:
-            # Auto-assign the preferred workers
-            requisition.assigned_worker_ids = requisition.preferred_worker_ids
-            requisition.assignment_status = 'assigned'
-            requisition.assigned_by_user_id = current_user.get('user_id')
-            requisition.assigned_by_name = current_user.get('full_name', 'System')
-            requisition.assignment_date = datetime.utcnow()
-
-            # Create labour arrival records for auto-assigned workers
-            for worker_id in requisition.preferred_worker_ids:
-                # Check if arrival record already exists
-                existing_arrival = LabourArrival.query.filter_by(
-                    requisition_id=requisition.requisition_id,
-                    worker_id=worker_id,
-                    arrival_date=requisition.required_date,
-                    is_deleted=False
-                ).first()
-
-                if not existing_arrival:
-                    arrival = LabourArrival(
-                        requisition_id=requisition.requisition_id,
-                        worker_id=worker_id,
-                        project_id=requisition.project_id,
-                        arrival_date=requisition.required_date,
-                        arrival_status='assigned',
-                        created_by=current_user.get('full_name', 'System')
-                    )
-                    db.session.add(arrival)
+        # CRITICAL: Always set assignment_status to 'unassigned' when PM approves
+        # This ensures the requisition appears in Production Manager's "Pending Assignment" queue
+        # regardless of what status it had before (fixes old 'pending' status from legacy code)
+        requisition.assignment_status = 'unassigned'
 
         db.session.commit()
 
@@ -1219,13 +1202,8 @@ def approve_requisition(requisition_id):
 
         return jsonify({
             "success": True,
-            "message": "Requisition approved successfully" + (
-                f" and {len(requisition.preferred_worker_ids)} worker(s) auto-assigned"
-                if requisition.preferred_worker_ids and len(requisition.preferred_worker_ids) > 0
-                else ""
-            ),
-            "requisition": requisition.to_dict(),
-            "auto_assigned": bool(requisition.preferred_worker_ids and len(requisition.preferred_worker_ids) > 0)
+            "message": "Requisition approved successfully and sent to Production Manager for worker assignment",
+            "requisition": requisition.to_dict()
         }), 200
 
     except Exception as e:
@@ -1858,7 +1836,7 @@ def retain_workers_for_next_day(requisition_id):
             requested_by_name=user_name,
             requester_role=user_role,
             status='send_to_pm',  # Send to PM for approval (not auto-approved)
-            assignment_status='pending',  # Not yet assigned
+            assignment_status='unassigned',  # Not yet assigned (use 'unassigned' not 'pending')
             preferred_worker_ids=available_workers,  # Store as preferred workers
             preferred_workers_notes=preferred_notes,
             created_by=user_name

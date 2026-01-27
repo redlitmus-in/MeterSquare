@@ -107,7 +107,7 @@ class DNPDFGenerator:
 
         Args:
             dn_data: dict - Delivery note details
-            project_data: dict - Project details
+            project_data: dict | None - Project details (None for store-destined DNs)
             items_data: list[dict] - List of items
             company_name: str - Company name for header
 
@@ -116,8 +116,8 @@ class DNPDFGenerator:
         """
         if not isinstance(dn_data, dict):
             raise ValueError("dn_data must be a dictionary")
-        if not isinstance(project_data, dict):
-            raise ValueError("project_data must be a dictionary")
+        if project_data is not None and not isinstance(project_data, dict):
+            raise ValueError("project_data must be a dictionary or None")
         if not isinstance(items_data, list):
             raise ValueError("items_data must be a list")
         if not items_data:
@@ -180,7 +180,11 @@ class DNPDFGenerator:
         # 2-column layout matching the template exactly
 
         # Format values
-        project_location = f"{self._escape_html(project_data.get('project_name', 'N/A'))}, {self._escape_html(project_data.get('location', ''))}"
+        if project_data:
+            project_location = f"{self._escape_html(project_data.get('project_name', 'N/A'))}, {self._escape_html(project_data.get('location', ''))}"
+        else:
+            # For store-destined DNs without project
+            project_location = "M2 Store / Warehouse"
         delivery_date = self._format_date(dn_data.get('delivery_date'))
         attention_to = self._escape_html(dn_data.get('attention_to', '-'))
         delivery_from = self._escape_html(dn_data.get('delivery_from', DefaultValues.DEFAULT_STORE_NAME))

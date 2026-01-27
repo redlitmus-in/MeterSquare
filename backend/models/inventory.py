@@ -258,7 +258,7 @@ class MaterialDeliveryNote(db.Model):
 
     delivery_note_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     delivery_note_number = db.Column(db.String(50), unique=True, nullable=False)  # MDN-2025-001
-    project_id = db.Column(db.Integer, nullable=False)
+    project_id = db.Column(db.Integer, nullable=True)  # Nullable for store transfers (no project)
     delivery_date = db.Column(db.DateTime, nullable=False)
     attention_to = db.Column(db.String(255), nullable=True)  # Site engineer/supervisor name
     delivery_from = db.Column(db.String(255), default='M2 Store')  # Store location

@@ -596,9 +596,38 @@ const PurchaseOrders: React.FC = () => {
   const handlePOChildComplete = async (poChildId: number, notes: string = '', recipient: string = '') => {
     try {
       setCompletingPurchaseId(poChildId);
+
+      // Optional: Check M2 Store availability before completing purchase
+      // This is non-blocking - we'll show a warning but still allow completion
+      try {
+        const poChild = approvedPOChildren?.find((p: any) => p.id === poChildId);
+        if (poChild && poChild.materials_data) {
+          // Format materials for availability check
+          const materials = poChild.materials_data.map((m: any) => ({
+            material_name: m.material_name || m.sub_item_name || '',
+            brand: m.brand || '',
+            size: m.size || '',
+            quantity: m.quantity || 0
+          }));
+
+          // Check availability (non-critical, doesn't block completion)
+          const availability = await buyerService.checkMaterialAvailability(materials);
+
+          if (!availability.overall_available && availability.unavailable_count > 0) {
+            console.warn(`⚠️ M2 Store Availability: ${availability.unavailable_count} material(s) have insufficient stock`);
+            // You can show a toast/alert here if needed
+            // showWarning(`Note: ${availability.unavailable_count} material(s) have low stock in M2 Store. Production Manager will handle procurement.`);
+          }
+        }
+      } catch (availError) {
+        // Availability check failed (non-critical) - continue with purchase
+        console.warn('Material availability check failed (non-critical):', availError);
+      }
+
+      // Complete purchase (routes to M2 Store automatically)
       await buyerService.completePOChildPurchase(poChildId, notes, recipient);
 
-      showSuccess('Purchase marked as complete and sent to Production Manager!');
+      showSuccess('Purchase completed and routed to M2 Store! Production Manager will dispatch to site.');
 
       // Remove cache completely and refetch fresh data (same as handleMarkAsComplete)
       removeQueries(['purchases']);

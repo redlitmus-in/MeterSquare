@@ -128,7 +128,7 @@ def is_site_engineer_role(role: str) -> bool:
     """Check if role is Site Engineer"""
     if not role:
         return False
-    return role.lower().strip() in [UserRole.SITE_ENGINEER.value, 'se', 'site_engineer', 'site_supervisor']
+    return role.lower().strip() in [UserRole.SITE_ENGINEER.value, 'se', 'site_engineer', 'site_supervisor', 'siteengineer', 'sitesupervisor']
 
 
 # ==================== BOQ STATUSES ====================

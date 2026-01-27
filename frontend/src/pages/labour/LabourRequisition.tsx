@@ -532,28 +532,29 @@ const LabourRequisition: React.FC = () => {
     setLoading(true);
     // Map tab to API status filter
     let statusFilter: string | undefined;
+    // Map activeTab to status and assignment_status filters
+    let assignmentStatusFilter: string | undefined = undefined;
+
     if (activeTab === 'assigned') {
       // For assigned tab, fetch approved requisitions with assignment_status = 'assigned'
       statusFilter = 'approved';
+      assignmentStatusFilter = 'assigned';
     } else if (activeTab === 'pending') {
       // For pending tab, fetch all requisitions that haven't been approved/rejected yet
       // This includes both 'pending' (not yet sent) and 'send_to_pm' (sent to PM)
       statusFilter = 'pending,send_to_pm';
+    } else if (activeTab === 'approved') {
+      // For approved tab, fetch approved requisitions that haven't been assigned yet
+      statusFilter = 'approved';
+      assignmentStatusFilter = 'unassigned';
     } else {
       statusFilter = activeTab;
     }
 
-    const result = await labourService.getMyRequisitions(statusFilter, currentPage, perPage);
+    const result = await labourService.getMyRequisitions(statusFilter, currentPage, perPage, assignmentStatusFilter);
     if (result.success) {
-      let data = result.data;
-      // Additional filtering for assigned tab
-      if (activeTab === 'assigned') {
-        data = data.filter((req: RequisitionType) => req.assignment_status === 'assigned');
-      } else if (activeTab === 'approved') {
-        // For approved tab, exclude requisitions that have been assigned workers
-        data = data.filter((req: RequisitionType) => req.assignment_status !== 'assigned');
-      }
-      setRequisitions(data);
+      // No need for client-side filtering anymore - backend handles it
+      setRequisitions(result.data);
       setPagination(result.pagination);
     } else {
       showError(result.message || 'Failed to fetch requisitions');

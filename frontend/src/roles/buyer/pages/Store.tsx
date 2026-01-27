@@ -8,6 +8,7 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { useAutoSync } from '@/hooks/useAutoSync';
 import { storeService, StoreItem } from '../services/storeService';
+import { buyerService } from '../services/buyerService';
 import { apiClient } from '@/api/config';
 import { API_BASE_URL } from '@/api/config';
 import { STALE_TIMES } from '@/lib/constants';
@@ -60,6 +61,7 @@ const Store: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+
 
   // Fetch store items from backend
   const { data: storeItems, isLoading } = useAutoSync<StoreItem[]>({
@@ -125,6 +127,7 @@ const Store: React.FC = () => {
       setIsLoadingProjects(false);
     }
   };
+
 
   // Load requests when tab changes to requests
   useEffect(() => {
@@ -565,6 +568,7 @@ const Store: React.FC = () => {
           )}
         </div>
       )}
+
 
       {/* Request Modal */}
       {isRequestModalOpen && selectedItem && (
