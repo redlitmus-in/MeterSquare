@@ -10,7 +10,9 @@ import {
   TrashIcon,
   EyeIcon,
   PhoneIcon,
-  EnvelopeIcon
+  EnvelopeIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon
 } from '@heroicons/react/24/outline';
 import { buyerVendorService, Vendor } from '@/roles/buyer/services/buyerVendorService';
 import AddVendorModal from '@/components/buyer/AddVendorModal';
@@ -19,6 +21,7 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
 import { getRoleSlug } from '@/utils/roleRouting';
+import { PAGINATION } from '@/lib/constants';
 
 const VendorManagement: React.FC = () => {
   const navigate = useNavigate();
@@ -44,6 +47,7 @@ const VendorManagement: React.FC = () => {
     total_inactive: 0,
     total_vendors: 0
   });
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     loadVendors();
@@ -110,6 +114,19 @@ const VendorManagement: React.FC = () => {
       return true;
     });
   }, [allVendors, searchTerm, categoryFilter, statusFilter]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, categoryFilter, statusFilter]);
+
+  // Pagination calculations
+  const totalRecords = vendors.length;
+  const totalPages = Math.ceil(totalRecords / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedVendors = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return vendors.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [vendors, currentPage]);
 
   const handleAddVendor = () => {
     setEditingVendor(null);
@@ -282,7 +299,7 @@ const VendorManagement: React.FC = () => {
         </motion.div>
       ) : vendors.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {vendors.map((vendor, index) => (
+          {paginatedVendors.map((vendor, index) => (
             <motion.div
               key={vendor.vendor_id}
               initial={{ opacity: 0, y: 20 }}
@@ -358,6 +375,60 @@ const VendorManagement: React.FC = () => {
           ))}
         </div>
       ) : null}
+
+      {/* Pagination */}
+      {totalRecords > 0 && (
+        <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white px-4 py-3 border border-gray-200 rounded-lg">
+          <p className="text-sm text-gray-600">
+            Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} to {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)} of {totalRecords} vendors
+          </p>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeftIcon className="w-4 h-4" />
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                if (
+                  page === 1 ||
+                  page === totalPages ||
+                  (page >= currentPage - 1 && page <= currentPage + 1)
+                ) {
+                  return (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        currentPage === page
+                          ? 'bg-[#243d8a] text-white'
+                          : 'border border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  );
+                } else if (
+                  page === currentPage - 2 ||
+                  page === currentPage + 2
+                ) {
+                  return <span key={page} className="px-1">...</span>;
+                }
+                return null;
+              })}
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRightIcon className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Mobile Add Button */}
       <button

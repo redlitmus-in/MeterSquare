@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { PAGINATION } from '@/lib/constants';
 import {
   TruckIcon,
   CheckCircleIcon,
@@ -105,6 +106,12 @@ interface DeliveryNote {
   driver_contact?: string;
   issued_at?: string;
   issued_by?: string;
+}
+
+interface GroupedProjectNotes {
+  project_name: string;
+  project_code: string;
+  notes: DeliveryNote[];
 }
 
 const MATERIAL_CONDITIONS = ['Good', 'Damaged', 'Defective'] as const;
@@ -230,6 +237,17 @@ const MaterialReceipts: React.FC = () => {
   const [returnDeliveryNotes, setReturnDeliveryNotes] = useState<any[]>([]);
   const [loadingRDNs, setLoadingRDNs] = useState(false);
   const [expandedRDNs, setExpandedRDNs] = useState<Set<number>>(new Set());
+
+  // Pagination state for each tab
+  const [pendingPage, setPendingPage] = useState(1);
+  const [materialsPage, setMaterialsPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
+  // Pagination for sub-tabs
+  const [rdnPage, setRdnPage] = useState(1);  // Return Delivery Notes sub-tab
+  const [materialReturnsPage, setMaterialReturnsPage] = useState(1);  // Material Returns sub-tab
+  // Collapsible state for Received Deliveries projects
+  const [expandedReceivedProjects, setExpandedReceivedProjects] = useState<Set<string>>(new Set());
+  const [hasInitializedReceivedExpansion, setHasInitializedReceivedExpansion] = useState(false);
 
   const fetchDeliveryNotes = useCallback(async () => {
     try {
@@ -362,6 +380,16 @@ const MaterialReceipts: React.FC = () => {
       newExpanded.add(projectId);
     }
     setExpandedReturnProjects(newExpanded);
+  };
+
+  const toggleReceivedProjectExpand = (projectKey: string) => {
+    const newExpanded = new Set(expandedReceivedProjects);
+    if (newExpanded.has(projectKey)) {
+      newExpanded.delete(projectKey);
+    } else {
+      newExpanded.add(projectKey);
+    }
+    setExpandedReceivedProjects(newExpanded);
   };
 
   const openReturnModal = (material: ReturnableMaterial, projectId: number) => {
@@ -531,7 +559,7 @@ const MaterialReceipts: React.FC = () => {
 
   const handleDownloadDNPDF = async (dnId: number, dnNumber: string) => {
     try {
-      const response = await apiClient.get(`/delivery_note/${dnId}/download`, {
+      const response = await apiClient.get(`/inventory/delivery_note/${dnId}/download`, {
         responseType: 'blob',
       });
 
@@ -566,6 +594,83 @@ const MaterialReceipts: React.FC = () => {
     acc[key].notes.push(note);
     return acc;
   }, {} as Record<string, { project_name: string; project_code: string; notes: DeliveryNote[] }>);
+
+  // Pagination for Pending tab (grouped by project)
+  const groupedNotesArray = useMemo(() => Object.entries(groupedNotes), [groupedNotes]);
+  const pendingTotalPages = Math.ceil(groupedNotesArray.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedPendingGroups = useMemo(() => {
+    const startIdx = (pendingPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return groupedNotesArray.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [groupedNotesArray, pendingPage]);
+
+  // Pagination for Materials tab (returnableProjects)
+  const materialsTotalPages = Math.ceil(returnableProjects.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedReturnableProjects = useMemo(() => {
+    const startIdx = (materialsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return returnableProjects.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [returnableProjects, materialsPage]);
+
+  // Pagination for History tab - group received notes by project first
+  const groupedReceivedNotes = useMemo(() => {
+    return receivedNotes.reduce((acc: Record<string, { project_name: string; project_code: string; notes: DeliveryNote[] }>, note) => {
+      const key = `${note.project_id}-${note.project_name}`;
+      if (!acc[key]) {
+        acc[key] = { project_name: note.project_name, project_code: note.project_code, notes: [] };
+      }
+      acc[key].notes.push(note);
+      return acc;
+    }, {});
+  }, [receivedNotes]);
+  const groupedReceivedArray = useMemo(() => Object.entries(groupedReceivedNotes), [groupedReceivedNotes]);
+  const historyTotalPages = Math.ceil(groupedReceivedArray.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedHistoryGroups = useMemo(() => {
+    const startIdx = (historyPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return groupedReceivedArray.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [groupedReceivedArray, historyPage]);
+
+  // Reset pagination when data changes
+  useEffect(() => {
+    setPendingPage(1);
+  }, [pendingNotes.length]);
+
+  useEffect(() => {
+    setMaterialsPage(1);
+  }, [returnableProjects.length]);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [receivedNotes.length]);
+
+  // Expand all received projects by default only on initial data load
+  useEffect(() => {
+    if (groupedReceivedArray.length > 0 && !hasInitializedReceivedExpansion) {
+      setExpandedReceivedProjects(new Set(groupedReceivedArray.map(([key]) => key)));
+      setHasInitializedReceivedExpansion(true);
+    }
+  }, [groupedReceivedArray, hasInitializedReceivedExpansion]);
+
+  // Reset sub-tab pagination when data changes
+  useEffect(() => {
+    setRdnPage(1);
+  }, [returnDeliveryNotes.length]);
+
+  useEffect(() => {
+    setMaterialReturnsPage(1);
+  }, [materialReturns.length]);
+
+  // Pagination for Return Delivery Notes (RDN) sub-tab
+  const rdnTotalPages = Math.ceil(returnDeliveryNotes.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRDNs = useMemo(() => {
+    const startIdx = (rdnPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return returnDeliveryNotes.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [returnDeliveryNotes, rdnPage]);
+
+  // Pagination for Material Returns sub-tab (History)
+  const materialReturnsTotalPages = Math.ceil(materialReturns.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedMaterialReturns = useMemo(() => {
+    const startIdx = (materialReturnsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return materialReturns.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [materialReturns, materialReturnsPage]);
 
   if (loading) {
     return (
@@ -687,7 +792,7 @@ const MaterialReceipts: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold text-gray-900">Materials Available for Return</h3>
                   </div>
-                  {returnableProjects.map((project) => {
+                  {paginatedReturnableProjects.map((project) => {
                     const isExpanded = expandedReturnProjects.has(project.project_id);
                     // Filter selected materials count for THIS project only
                     const projectSelectedCount = selectedMaterialsCart.filter(
@@ -864,7 +969,7 @@ const MaterialReceipts: React.FC = () => {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {returnDeliveryNotes.map((rdn) => {
+                    {paginatedRDNs.map((rdn) => {
                       const statusBadge = getRDNStatusBadge(rdn.status);
                       const isExpanded = expandedRDNs.has(rdn.return_note_id);
 
@@ -1011,8 +1116,118 @@ const MaterialReceipts: React.FC = () => {
                         </div>
                       );
                     })}
+
+                    {/* Pagination for Return Delivery Notes */}
+                    {returnDeliveryNotes.length > 0 && (
+                      <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm mt-4">
+                        <div className="text-sm text-gray-700">
+                          Showing {(rdnPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(rdnPage * PAGINATION.DEFAULT_PAGE_SIZE, returnDeliveryNotes.length)} of {returnDeliveryNotes.length} return delivery notes
+                          {rdnTotalPages > 1 && (
+                            <span className="text-gray-500 ml-2">(Page {rdnPage} of {rdnTotalPages})</span>
+                          )}
+                        </div>
+                        {rdnTotalPages > 1 && (
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setRdnPage(p => Math.max(1, p - 1))}
+                              disabled={rdnPage === 1}
+                              className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Previous
+                            </button>
+                            {Array.from({ length: Math.min(rdnTotalPages, 5) }, (_, i) => {
+                              let pageNum: number;
+                              if (rdnTotalPages <= 5) {
+                                pageNum = i + 1;
+                              } else if (rdnPage <= 3) {
+                                pageNum = i + 1;
+                              } else if (rdnPage >= rdnTotalPages - 2) {
+                                pageNum = rdnTotalPages - 4 + i;
+                              } else {
+                                pageNum = rdnPage - 2 + i;
+                              }
+                              return (
+                                <button
+                                  key={pageNum}
+                                  onClick={() => setRdnPage(pageNum)}
+                                  className={`px-3 py-1 rounded ${
+                                    rdnPage === pageNum
+                                      ? 'bg-blue-600 text-white'
+                                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                  }`}
+                                >
+                                  {pageNum}
+                                </button>
+                              );
+                            })}
+                            <button
+                              onClick={() => setRdnPage(p => Math.min(rdnTotalPages, p + 1))}
+                              disabled={rdnPage === rdnTotalPages}
+                              className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Next
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
+              )}
+
+              {/* Pagination for Returnable Materials */}
+              {returnSubTab === 'returnable' && returnableProjects.length > 0 && (
+                <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm mt-4">
+                  <div className="text-sm text-gray-700">
+                    Showing {(materialsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(materialsPage * PAGINATION.DEFAULT_PAGE_SIZE, returnableProjects.length)} of {returnableProjects.length} projects
+                    {materialsTotalPages > 1 && (
+                      <span className="text-gray-500 ml-2">(Page {materialsPage} of {materialsTotalPages})</span>
+                    )}
+                  </div>
+                  {materialsTotalPages > 1 && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setMaterialsPage(p => Math.max(1, p - 1))}
+                        disabled={materialsPage === 1}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      {Array.from({ length: Math.min(materialsTotalPages, 5) }, (_, i) => {
+                        let pageNum: number;
+                        if (materialsTotalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (materialsPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (materialsPage >= materialsTotalPages - 2) {
+                          pageNum = materialsTotalPages - 4 + i;
+                        } else {
+                          pageNum = materialsPage - 2 + i;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setMaterialsPage(pageNum)}
+                            className={`px-3 py-1 rounded ${
+                              materialsPage === pageNum
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      <button
+                        onClick={() => setMaterialsPage(p => Math.min(materialsTotalPages, p + 1))}
+                        disabled={materialsPage === materialsTotalPages}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )
@@ -1066,7 +1281,7 @@ const MaterialReceipts: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {materialReturns.map((ret) => {
+                        {paginatedMaterialReturns.map((ret) => {
                           const disposalBadge = getDisposalStatusBadge(ret.disposal_status);
                           return (
                             <tr key={ret.return_id} className="hover:bg-gray-50">
@@ -1114,6 +1329,61 @@ const MaterialReceipts: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Pagination for Material Returns */}
+                  {materialReturns.length > 0 && (
+                    <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm mt-4">
+                      <div className="text-sm text-gray-700">
+                        Showing {(materialReturnsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(materialReturnsPage * PAGINATION.DEFAULT_PAGE_SIZE, materialReturns.length)} of {materialReturns.length} returns
+                        {materialReturnsTotalPages > 1 && (
+                          <span className="text-gray-500 ml-2">(Page {materialReturnsPage} of {materialReturnsTotalPages})</span>
+                        )}
+                      </div>
+                      {materialReturnsTotalPages > 1 && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setMaterialReturnsPage(p => Math.max(1, p - 1))}
+                            disabled={materialReturnsPage === 1}
+                            className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Previous
+                          </button>
+                          {Array.from({ length: Math.min(materialReturnsTotalPages, 5) }, (_, i) => {
+                            let pageNum: number;
+                            if (materialReturnsTotalPages <= 5) {
+                              pageNum = i + 1;
+                            } else if (materialReturnsPage <= 3) {
+                              pageNum = i + 1;
+                            } else if (materialReturnsPage >= materialReturnsTotalPages - 2) {
+                              pageNum = materialReturnsTotalPages - 4 + i;
+                            } else {
+                              pageNum = materialReturnsPage - 2 + i;
+                            }
+                            return (
+                              <button
+                                key={pageNum}
+                                onClick={() => setMaterialReturnsPage(pageNum)}
+                                className={`px-3 py-1 rounded ${
+                                  materialReturnsPage === pageNum
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
+                              >
+                                {pageNum}
+                              </button>
+                            );
+                          })}
+                          <button
+                            onClick={() => setMaterialReturnsPage(p => Math.min(materialReturnsTotalPages, p + 1))}
+                            disabled={materialReturnsPage === materialReturnsTotalPages}
+                            className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 ) : (
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -1147,140 +1417,209 @@ const MaterialReceipts: React.FC = () => {
                   </motion.div>
                 ) : (
                   <div className="space-y-4">
-                    {Object.entries(receivedNotes.reduce((acc: any, note: DeliveryNote) => {
-                      const key = `${note.project_id}-${note.project_name}`;
-                      if (!acc[key]) {
-                        acc[key] = {
-                          project_id: note.project_id,
-                          project_name: note.project_name,
-                          notes: []
-                        };
-                      }
-                      acc[key].notes.push(note);
-                      return acc;
-                    }, {})).map(([key, group]: [string, any]) => (
-                      <motion.div
-                        key={key}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
-                      >
-                        {/* Project Header */}
-                        <div className="px-5 py-3 bg-gray-50 border-b">
-                          <div className="flex items-center gap-2">
-                            <BuildingOfficeIcon className="w-5 h-5 text-indigo-600" />
-                            <h3 className="font-semibold text-gray-900">{group.project_name}</h3>
-                            <span className="ml-auto px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-medium">
-                              {group.notes.length} delivery note(s)
-                            </span>
-                          </div>
-                        </div>
+                    {paginatedHistoryGroups.map(([key, group]: [string, GroupedProjectNotes]) => {
+                      const isProjectExpanded = expandedReceivedProjects.has(key);
+                      return (
+                        <motion.div
+                          key={key}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
+                        >
+                          {/* Project Header - Clickable to collapse */}
+                          <button
+                            onClick={() => toggleReceivedProjectExpand(key)}
+                            className="w-full px-5 py-3 bg-gray-50 border-b hover:bg-gray-100 transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              <BuildingOfficeIcon className="w-5 h-5 text-indigo-600" />
+                              <h3 className="font-semibold text-gray-900">{group.project_name}</h3>
+                              <span className="ml-auto px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-medium">
+                                {group.notes.length} delivery note(s)
+                              </span>
+                              <div className="p-1">
+                                {isProjectExpanded ? (
+                                  <ChevronUpIcon className="w-5 h-5 text-gray-400" />
+                                ) : (
+                                  <ChevronDownIcon className="w-5 h-5 text-gray-400" />
+                                )}
+                              </div>
+                            </div>
+                          </button>
 
-                        {/* Delivery Notes List */}
-                        <div className="divide-y divide-gray-100">
-                          {group.notes.map((note: DeliveryNote) => {
-                            const isExpanded = expandedNotes.has(note.delivery_note_id);
-                            return (
-                              <div key={note.delivery_note_id}>
-                                <div className="w-full px-5 py-4 hover:bg-gray-50 transition-colors">
-                                  <div className="flex items-center justify-between">
-                                    <button
-                                      onClick={() => toggleExpand(note.delivery_note_id)}
-                                      className="flex items-center gap-3 flex-1 text-left"
-                                    >
-                                      <div className="p-2 bg-green-100 rounded-lg">
-                                        <DocumentTextIcon className="w-5 h-5 text-green-600" />
-                                      </div>
-                                      <div>
-                                        <p className="font-semibold text-gray-900">{note.delivery_note_number}</p>
-                                        <p className="text-sm text-gray-500">
-                                          Delivered on {new Date(note.delivery_date).toLocaleDateString()}
-                                        </p>
-                                      </div>
-                                    </button>
-                                    <div className="flex items-center gap-3">
-                                      <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
-                                        Received
-                                      </span>
-                                      <button
-                                        onClick={() => handleDownloadDNPDF(note.delivery_note_id, note.delivery_note_number)}
-                                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                                        title="Download PDF"
-                                      >
-                                        <ArrowDownTrayIcon className="w-4 h-4" />
-                                        PDF
-                                      </button>
-                                      <button
-                                        onClick={() => toggleExpand(note.delivery_note_id)}
-                                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                                      >
-                                        {isExpanded ? (
-                                          <ChevronUpIcon className="w-5 h-5 text-gray-400" />
-                                        ) : (
-                                          <ChevronDownIcon className="w-5 h-5 text-gray-400" />
-                                        )}
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <AnimatePresence>
-                                  {isExpanded && (
-                                    <motion.div
-                                      initial={{ height: 0, opacity: 0 }}
-                                      animate={{ height: 'auto', opacity: 1 }}
-                                      exit={{ height: 0, opacity: 0 }}
-                                      className="overflow-hidden bg-gray-50 border-t"
-                                    >
-                                      <div className="px-5 py-4">
-                                        <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-                                          <div>
-                                            <p className="text-gray-500 text-xs mb-1">Received By</p>
-                                            <p className="font-medium text-gray-900">{note.received_by || '-'}</p>
-                                          </div>
-                                          <div>
-                                            <p className="text-gray-500 text-xs mb-1">Received At</p>
-                                            <p className="font-medium text-gray-900">
-                                              {note.received_at ? new Date(note.received_at).toLocaleString() : '-'}
-                                            </p>
+                          {/* Delivery Notes List - Collapsible */}
+                          <AnimatePresence mode="wait">
+                            {isProjectExpanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="divide-y divide-gray-100">
+                                  {group.notes.map((note: DeliveryNote) => {
+                                    const isExpanded = expandedNotes.has(note.delivery_note_id);
+                                    return (
+                                      <div key={note.delivery_note_id}>
+                                        <div className="w-full px-5 py-4 hover:bg-gray-50 transition-colors">
+                                          <div className="flex items-center justify-between">
+                                            <button
+                                              onClick={() => toggleExpand(note.delivery_note_id)}
+                                              className="flex items-center gap-3 flex-1 text-left"
+                                            >
+                                              <div className="p-2 bg-green-100 rounded-lg">
+                                                <DocumentTextIcon className="w-5 h-5 text-green-600" />
+                                              </div>
+                                              <div>
+                                                <p className="font-semibold text-gray-900">{note.delivery_note_number}</p>
+                                                <p className="text-sm text-gray-500">
+                                                  Delivered on {new Date(note.delivery_date).toLocaleDateString()}
+                                                </p>
+                                              </div>
+                                            </button>
+                                            <div className="flex items-center gap-3">
+                                              <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                                                Received
+                                              </span>
+                                              <button
+                                                onClick={() => handleDownloadDNPDF(note.delivery_note_id, note.delivery_note_number)}
+                                                className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                                                title="Download PDF"
+                                              >
+                                                <ArrowDownTrayIcon className="w-4 h-4" />
+                                                PDF
+                                              </button>
+                                              <button
+                                                onClick={() => toggleExpand(note.delivery_note_id)}
+                                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                              >
+                                                {isExpanded ? (
+                                                  <ChevronUpIcon className="w-5 h-5 text-gray-400" />
+                                                ) : (
+                                                  <ChevronDownIcon className="w-5 h-5 text-gray-400" />
+                                                )}
+                                              </button>
+                                            </div>
                                           </div>
                                         </div>
 
-                                        {note.receiver_notes && (
-                                          <div className="mb-4">
-                                            <p className="text-gray-500 text-xs mb-1">Notes</p>
-                                            <p className="text-gray-700 text-sm">{note.receiver_notes}</p>
-                                          </div>
-                                        )}
+                                        <AnimatePresence>
+                                          {isExpanded && (
+                                            <motion.div
+                                              initial={{ height: 0, opacity: 0 }}
+                                              animate={{ height: 'auto', opacity: 1 }}
+                                              exit={{ height: 0, opacity: 0 }}
+                                              className="overflow-hidden bg-gray-50 border-t"
+                                            >
+                                              <div className="px-5 py-4">
+                                                <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+                                                  <div>
+                                                    <p className="text-gray-500 text-xs mb-1">Received By</p>
+                                                    <p className="font-medium text-gray-900">{note.received_by || '-'}</p>
+                                                  </div>
+                                                  <div>
+                                                    <p className="text-gray-500 text-xs mb-1">Received At</p>
+                                                    <p className="font-medium text-gray-900">
+                                                      {note.received_at ? new Date(note.received_at).toLocaleString() : '-'}
+                                                    </p>
+                                                  </div>
+                                                </div>
 
-                                        <table className="w-full text-sm">
-                                          <thead>
-                                            <tr className="text-left text-gray-500 border-b">
-                                              <th className="pb-2 font-medium">Material</th>
-                                              <th className="pb-2 font-medium text-right">Quantity</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-gray-200">
-                                            {note.items.map((item) => (
-                                              <tr key={item.item_id}>
-                                                <td className="py-2 text-gray-900">{item.material_name}</td>
-                                                <td className="py-2 text-right text-gray-600">
-                                                  {item.quantity} {item.unit}
-                                                </td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
+                                                {note.receiver_notes && (
+                                                  <div className="mb-4">
+                                                    <p className="text-gray-500 text-xs mb-1">Notes</p>
+                                                    <p className="text-gray-700 text-sm">{note.receiver_notes}</p>
+                                                  </div>
+                                                )}
+
+                                                <table className="w-full text-sm">
+                                                  <thead>
+                                                    <tr className="text-left text-gray-500 border-b">
+                                                      <th className="pb-2 font-medium">Material</th>
+                                                      <th className="pb-2 font-medium text-right">Quantity</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody className="divide-y divide-gray-200">
+                                                    {note.items.map((item) => (
+                                                      <tr key={item.item_id}>
+                                                        <td className="py-2 text-gray-900">{item.material_name}</td>
+                                                        <td className="py-2 text-right text-gray-600">
+                                                          {item.quantity} {item.unit}
+                                                        </td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            </motion.div>
+                                          )}
+                                        </AnimatePresence>
                                       </div>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
-                              </div>
-                            );
-                          })}
+                                    );
+                                  })}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </motion.div>
+                      );
+                    })}
+
+                    {/* Pagination for History Received Deliveries */}
+                    {groupedReceivedArray.length > 0 && (
+                      <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm mt-4">
+                        <div className="text-sm text-gray-700">
+                          Showing {(historyPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(historyPage * PAGINATION.DEFAULT_PAGE_SIZE, groupedReceivedArray.length)} of {groupedReceivedArray.length} projects ({receivedNotes.length} total deliveries)
+                          {historyTotalPages > 1 && (
+                            <span className="text-gray-500 ml-2">(Page {historyPage} of {historyTotalPages})</span>
+                          )}
                         </div>
-                      </motion.div>
-                    ))}
+                        {historyTotalPages > 1 && (
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
+                              disabled={historyPage === 1}
+                              className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Previous
+                            </button>
+                            {Array.from({ length: Math.min(historyTotalPages, 5) }, (_, i) => {
+                              let pageNum: number;
+                              if (historyTotalPages <= 5) {
+                                pageNum = i + 1;
+                              } else if (historyPage <= 3) {
+                                pageNum = i + 1;
+                              } else if (historyPage >= historyTotalPages - 2) {
+                                pageNum = historyTotalPages - 4 + i;
+                              } else {
+                                pageNum = historyPage - 2 + i;
+                              }
+                              return (
+                                <button
+                                  key={pageNum}
+                                  onClick={() => setHistoryPage(pageNum)}
+                                  className={`px-3 py-1 rounded ${
+                                    historyPage === pageNum
+                                      ? 'bg-blue-600 text-white'
+                                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                  }`}
+                                >
+                                  {pageNum}
+                                </button>
+                              );
+                            })}
+                            <button
+                              onClick={() => setHistoryPage(p => Math.min(historyTotalPages, p + 1))}
+                              disabled={historyPage === historyTotalPages}
+                              className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Next
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               )}
@@ -1308,7 +1647,7 @@ const MaterialReceipts: React.FC = () => {
           </motion.div>
         ) : (
           <div className="space-y-4">
-            {Object.entries(groupedNotes).map(([key, group]) => (
+            {paginatedPendingGroups.map(([key, group]) => (
               <motion.div
                 key={key}
                 initial={{ opacity: 0, y: 20 }}
@@ -1507,6 +1846,61 @@ const MaterialReceipts: React.FC = () => {
                 </div>
               </motion.div>
             ))}
+
+            {/* Pagination for Pending Tab */}
+            {groupedNotesArray.length > 0 && (
+              <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm mt-4">
+                <div className="text-sm text-gray-700">
+                  Showing {(pendingPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(pendingPage * PAGINATION.DEFAULT_PAGE_SIZE, groupedNotesArray.length)} of {groupedNotesArray.length} projects ({displayNotes.length} total deliveries)
+                  {pendingTotalPages > 1 && (
+                    <span className="text-gray-500 ml-2">(Page {pendingPage} of {pendingTotalPages})</span>
+                  )}
+                </div>
+                {pendingTotalPages > 1 && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setPendingPage(p => Math.max(1, p - 1))}
+                      disabled={pendingPage === 1}
+                      className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    {Array.from({ length: Math.min(pendingTotalPages, 5) }, (_, i) => {
+                      let pageNum: number;
+                      if (pendingTotalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (pendingPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (pendingPage >= pendingTotalPages - 2) {
+                        pageNum = pendingTotalPages - 4 + i;
+                      } else {
+                        pageNum = pendingPage - 2 + i;
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setPendingPage(pageNum)}
+                          className={`px-3 py-1 rounded ${
+                            pendingPage === pageNum
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                    <button
+                      onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))}
+                      disabled={pendingPage === pendingTotalPages}
+                      className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

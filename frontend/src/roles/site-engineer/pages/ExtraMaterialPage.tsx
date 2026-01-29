@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { PAGINATION } from '@/lib/constants';
 import {
   PlusIcon,
   CubeIcon,
@@ -54,6 +55,79 @@ interface ExtraMaterialRequest {
   purchase_completion_date?: string;
 }
 
+// Pagination Component for reuse across tabs
+interface PaginationControlsProps {
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  onPageChange: (page: number) => void;
+  itemLabel?: string;
+}
+
+const PaginationControls: React.FC<PaginationControlsProps> = ({
+  currentPage,
+  totalPages,
+  totalItems,
+  onPageChange,
+  itemLabel = 'items'
+}) => {
+  if (totalItems === 0) return null;
+
+  return (
+    <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm mt-4">
+      <div className="text-sm text-gray-700">
+        Showing {(currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalItems)} of {totalItems} {itemLabel}
+        {totalPages > 1 && (
+          <span className="text-gray-500 ml-2">(Page {currentPage} of {totalPages})</span>
+        )}
+      </div>
+      {totalPages > 1 && (
+        <div className="flex gap-2">
+          <button
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            disabled={currentPage === 1}
+            className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Previous
+          </button>
+          {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+            let pageNum: number;
+            if (totalPages <= 5) {
+              pageNum = i + 1;
+            } else if (currentPage <= 3) {
+              pageNum = i + 1;
+            } else if (currentPage >= totalPages - 2) {
+              pageNum = totalPages - 4 + i;
+            } else {
+              pageNum = currentPage - 2 + i;
+            }
+            return (
+              <button
+                key={pageNum}
+                onClick={() => onPageChange(pageNum)}
+                className={`px-3 py-1 rounded ${
+                  currentPage === pageNum
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                {pageNum}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ExtraMaterialPage: React.FC = () => {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'pending' | 'request' | 'approved' | 'rejected' | 'complete'>('pending');
@@ -65,6 +139,13 @@ const ExtraMaterialPage: React.FC = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteRequestId, setDeleteRequestId] = useState<number | null>(null);
   const [sendingRequestId, setSendingRequestId] = useState<number | null>(null); // Prevents double-clicks
+
+  // Pagination state for each tab
+  const [pendingPage, setPendingPage] = useState(1);
+  const [requestPage, setRequestPage] = useState(1);
+  const [approvedPage, setApprovedPage] = useState(1);
+  const [rejectedPage, setRejectedPage] = useState(1);
+  const [completePage, setCompletePage] = useState(1);
 
   // Real-time auto-sync for extra materials
   const { data: materialsData, isLoading: loading, refetch } = useExtraMaterialsAutoSync(
@@ -265,6 +346,60 @@ const ExtraMaterialPage: React.FC = () => {
   const approvedMaterials = useMemo(() => materialsData?.approved || [], [materialsData]);
   const rejectedMaterials = useMemo(() => materialsData?.rejected || [], [materialsData]);
   const completedMaterials = useMemo(() => materialsData?.completed || [], [materialsData]);
+
+  // Pagination calculations
+  const pendingTotalPages = Math.ceil(pendingMaterials.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const requestTotalPages = Math.ceil(underReviewMaterials.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const approvedTotalPages = Math.ceil(approvedMaterials.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const rejectedTotalPages = Math.ceil(rejectedMaterials.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const completeTotalPages = Math.ceil(completedMaterials.length / PAGINATION.DEFAULT_PAGE_SIZE);
+
+  // Paginated data
+  const paginatedPending = useMemo(() => {
+    const startIdx = (pendingPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return pendingMaterials.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [pendingMaterials, pendingPage]);
+
+  const paginatedRequest = useMemo(() => {
+    const startIdx = (requestPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return underReviewMaterials.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [underReviewMaterials, requestPage]);
+
+  const paginatedApproved = useMemo(() => {
+    const startIdx = (approvedPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return approvedMaterials.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [approvedMaterials, approvedPage]);
+
+  const paginatedRejected = useMemo(() => {
+    const startIdx = (rejectedPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return rejectedMaterials.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [rejectedMaterials, rejectedPage]);
+
+  const paginatedComplete = useMemo(() => {
+    const startIdx = (completePage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return completedMaterials.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [completedMaterials, completePage]);
+
+  // Reset pagination when data changes
+  useEffect(() => {
+    setPendingPage(1);
+  }, [pendingMaterials.length]);
+
+  useEffect(() => {
+    setRequestPage(1);
+  }, [underReviewMaterials.length]);
+
+  useEffect(() => {
+    setApprovedPage(1);
+  }, [approvedMaterials.length]);
+
+  useEffect(() => {
+    setRejectedPage(1);
+  }, [rejectedMaterials.length]);
+
+  useEffect(() => {
+    setCompletePage(1);
+  }, [completedMaterials.length]);
 
   // REMOVED: Unnecessary refetch on tab change - data is already cached and fresh
   // The auto-sync hook handles refetching when needed
@@ -739,8 +874,9 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-xs sm:text-base text-gray-500">Click "MATERIAL PURCHASE" to create your first request</p>
               </div>
             ) : viewMode === 'card' ? (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {pendingMaterials.map((request: ExtraMaterialRequest) => (
+                {paginatedPending.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -804,7 +940,15 @@ const ExtraMaterialPage: React.FC = () => {
                   </motion.div>
                 ))}
               </div>
+              <PaginationControls
+                currentPage={pendingPage}
+                totalPages={pendingTotalPages}
+                totalItems={pendingMaterials.length}
+                onPageChange={setPendingPage}
+              />
+              </>
             ) : (
+              <>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -834,7 +978,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {pendingMaterials.map((request: ExtraMaterialRequest) => (
+                      {paginatedPending.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -891,6 +1035,13 @@ const ExtraMaterialPage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <PaginationControls
+                currentPage={pendingPage}
+                totalPages={pendingTotalPages}
+                totalItems={pendingMaterials.length}
+                onPageChange={setPendingPage}
+              />
+              </>
             )}
           </motion.div>
         ) : activeTab === 'request' ? (
@@ -912,8 +1063,9 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-xs sm:text-base text-gray-500">Requests sent to PM will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {underReviewMaterials.map((request: ExtraMaterialRequest) => (
+                {paginatedRequest.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -956,7 +1108,15 @@ const ExtraMaterialPage: React.FC = () => {
                   </motion.div>
                 ))}
               </div>
+              <PaginationControls
+                currentPage={requestPage}
+                totalPages={requestTotalPages}
+                totalItems={underReviewMaterials.length}
+                onPageChange={setRequestPage}
+              />
+              </>
             ) : (
+              <>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -992,7 +1152,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {underReviewMaterials.map((request: ExtraMaterialRequest) => (
+                      {paginatedRequest.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1038,6 +1198,13 @@ const ExtraMaterialPage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <PaginationControls
+                currentPage={requestPage}
+                totalPages={requestTotalPages}
+                totalItems={underReviewMaterials.length}
+                onPageChange={setRequestPage}
+              />
+              </>
             )}
           </motion.div>
         ) : activeTab === 'approved' ? (
@@ -1060,8 +1227,9 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-xs sm:text-base text-gray-500">Approved extra material requests will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {approvedMaterials.map((request: ExtraMaterialRequest) => (
+                {paginatedApproved.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -1104,7 +1272,15 @@ const ExtraMaterialPage: React.FC = () => {
                   </motion.div>
                 ))}
               </div>
+              <PaginationControls
+                currentPage={approvedPage}
+                totalPages={approvedTotalPages}
+                totalItems={approvedMaterials.length}
+                onPageChange={setApprovedPage}
+              />
+              </>
             ) : (
+              <>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -1137,7 +1313,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {approvedMaterials.map((request: ExtraMaterialRequest) => (
+                      {paginatedApproved.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1180,6 +1356,13 @@ const ExtraMaterialPage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <PaginationControls
+                currentPage={approvedPage}
+                totalPages={approvedTotalPages}
+                totalItems={approvedMaterials.length}
+                onPageChange={setApprovedPage}
+              />
+              </>
             )}
           </motion.div>
         ) : activeTab === 'rejected' ? (
@@ -1201,8 +1384,9 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-xs sm:text-base text-gray-500">Rejected extra material requests will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {rejectedMaterials.map((request: ExtraMaterialRequest) => (
+                {paginatedRejected.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -1267,7 +1451,15 @@ const ExtraMaterialPage: React.FC = () => {
                   </motion.div>
                 ))}
               </div>
+              <PaginationControls
+                currentPage={rejectedPage}
+                totalPages={rejectedTotalPages}
+                totalItems={rejectedMaterials.length}
+                onPageChange={setRejectedPage}
+              />
+              </>
             ) : (
+              <>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -1303,7 +1495,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {rejectedMaterials.map((request: ExtraMaterialRequest) => (
+                      {paginatedRejected.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1360,6 +1552,13 @@ const ExtraMaterialPage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <PaginationControls
+                currentPage={rejectedPage}
+                totalPages={rejectedTotalPages}
+                totalItems={rejectedMaterials.length}
+                onPageChange={setRejectedPage}
+              />
+              </>
             )}
           </motion.div>
         ) : activeTab === 'complete' ? (
@@ -1381,8 +1580,9 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-xs sm:text-base text-gray-500">Purchases completed by buyer will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {completedMaterials.map((request: ExtraMaterialRequest) => (
+                {paginatedComplete.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -1449,7 +1649,15 @@ const ExtraMaterialPage: React.FC = () => {
                   </motion.div>
                 ))}
               </div>
+              <PaginationControls
+                currentPage={completePage}
+                totalPages={completeTotalPages}
+                totalItems={completedMaterials.length}
+                onPageChange={setCompletePage}
+              />
+              </>
             ) : (
+              <>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -1485,7 +1693,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {completedMaterials.map((request: ExtraMaterialRequest) => (
+                      {paginatedComplete.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1533,6 +1741,13 @@ const ExtraMaterialPage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <PaginationControls
+                currentPage={completePage}
+                totalPages={completeTotalPages}
+                totalItems={completedMaterials.length}
+                onPageChange={setCompletePage}
+              />
+              </>
             )}
           </motion.div>
          ) : null}

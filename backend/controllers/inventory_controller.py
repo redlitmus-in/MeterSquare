@@ -189,16 +189,31 @@ def get_site_supervisors(project):
     3. PMAssignSS.assigned_to_se_id (single SE assignment)
 
     Returns array of site supervisor objects with user details
+
+    IMPORTANT: Only returns users with Site Engineer role to prevent
+    incorrect assignments (e.g., Estimators being listed as Site Engineers)
     """
     from models.pm_assign_ss import PMAssignSS
 
     supervisors = []
     seen_ids = set()
 
+    # Helper function to validate user is actually a Site Engineer
+    def is_site_engineer(user):
+        """Check if user has Site Engineer role"""
+        if not user or not user.role_id:
+            return False
+        role = Role.query.get(user.role_id)
+        if not role:
+            return False
+        # Check for Site Engineer role (case-insensitive)
+        role_name_lower = role.role.lower().replace('_', '').replace(' ', '')
+        return role_name_lower in ['siteengineer', 'sitesupervisor', 'se']
+
     # First, check if project has direct site_supervisor_id
     if project and project.site_supervisor_id:
         site_user = User.query.get(project.site_supervisor_id)
-        if site_user:
+        if site_user and is_site_engineer(site_user):
             supervisors.append({
                 'user_id': site_user.user_id,
                 'full_name': site_user.full_name,
@@ -219,7 +234,7 @@ def get_site_supervisors(project):
                 for ss_id in assignment.ss_ids:
                     if ss_id not in seen_ids:
                         ss_user = User.query.get(ss_id)
-                        if ss_user:
+                        if ss_user and is_site_engineer(ss_user):
                             supervisors.append({
                                 'user_id': ss_user.user_id,
                                 'full_name': ss_user.full_name,
@@ -230,7 +245,7 @@ def get_site_supervisors(project):
             # Also check assigned_to_se_id (single SE assignment)
             if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in seen_ids:
                 se_user = User.query.get(assignment.assigned_to_se_id)
-                if se_user:
+                if se_user and is_site_engineer(se_user):
                     supervisors.append({
                         'user_id': se_user.user_id,
                         'full_name': se_user.full_name,
@@ -5161,16 +5176,19 @@ def download_dn_pdf(delivery_note_id):
     import re
     from flask import send_file
     from config.constants import is_admin_role, is_project_manager_role, is_buyer_role, is_site_engineer_role, DefaultValues, ErrorMessages
+    from config.logging import get_logger
+    log = get_logger()
 
     try:
         current_user_email = g.user.get('email')
         current_user_id = g.user.get('user_id')
         user_role = g.user.get('role')
 
-        dn = MaterialDeliveryNote.query.get(delivery_note_id)
+        dn = MaterialDeliveryNote.query.filter_by(delivery_note_id=delivery_note_id).first()
 
         if not dn:
-            return jsonify({'error': ErrorMessages.NOT_FOUND}), 404
+            log.error(f"Delivery note with ID {delivery_note_id} not found")
+            return jsonify({'error': f'Delivery note with ID {delivery_note_id} not found'}), 404
 
         # Get project details (may be None for store-destined DNs)
         project = None
@@ -5354,9 +5372,9 @@ def download_dn_pdf(delivery_note_id):
         )
 
     except Exception as e:
-        print(f"Error downloading DN PDF: {e}")
-        import traceback
-        traceback.print_exc()
+        from config.logging import get_logger
+        log = get_logger()
+        log.error(f"Error downloading DN PDF: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -5479,12 +5497,6 @@ def download_rdn_pdf(return_note_id):
             })
 
         # Generate PDF
-        # Debug: Log transport fee value
-        print(f"DEBUG - RDN PDF Generation:")
-        print(f"  RDN Number: {rdn_data.get('return_note_number')}")
-        print(f"  Transport Fee: {rdn_data.get('transport_fee')} (type: {type(rdn_data.get('transport_fee'))})")
-        print(f"  Vehicle: {rdn_data.get('vehicle_number')}")
-
         pdf_generator = RDNPDFGenerator()
         pdf_buffer = pdf_generator.generate_pdf(rdn_data, project_data, items_data, company_name)
 
@@ -5690,8 +5702,6 @@ def check_material_availability():
                 "materials": []
             }), 400
 
-        log.info(f"Availability check requested for {len(materials_list)} materials")
-
         results = []
         overall_available = True
 
@@ -5787,8 +5797,6 @@ def check_material_availability():
                     "material_code": None
                 })
 
-        log.info(f"Availability check completed: {len(results)} materials processed, {sum(1 for m in results if m.get('is_available'))} available")
-
         return jsonify({
             "success": True,
             "overall_available": overall_available,
@@ -5865,7 +5873,6 @@ def get_pending_buyer_transfers():
                 "total_quantity": sum(item.quantity for item in dn.items)
             })
 
-        log.info(f"Retrieved {len(transfers_data)} pending buyer transfers for PM")
         return jsonify({
             "success": True,
             "transfers": transfers_data,
@@ -5881,104 +5888,122 @@ def get_pending_buyer_transfers():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-def receive_buyer_transfer(delivery_note_id):
-    """PM confirms receipt of buyer transfer and adds materials to inventory"""
+def get_buyer_transfers_history():
+    """Get all received buyer transfers history for PM to view"""
     try:
         from config.logging import get_logger
         log = get_logger()
+        from models.inventory import MaterialDeliveryNote
 
-        # Check PM/Admin access
+        # Get all received buyer transfers (status = DELIVERED)
+        # Filter by delivery_from containing 'Buyer...Store' pattern (buyer to M2 Store)
+        received_dns = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.delivery_from.like('%Buyer%Store%'),
+            MaterialDeliveryNote.status == 'DELIVERED'
+        ).order_by(MaterialDeliveryNote.received_at.desc()).limit(100).all()
+
+        transfers_data = []
+        for dn in received_dns:
+            materials_data = []
+            for item in dn.items:
+                materials_data.append({
+                    'material_name': item.inventory_material.material_name if item.inventory_material else 'Unknown',
+                    'quantity': float(item.quantity),
+                    'unit': item.inventory_material.unit if item.inventory_material else 'unit',
+                    'category': item.inventory_material.category if item.inventory_material else 'General'
+                })
+
+            # Creator name is already stored in created_by field as the buyer's full name
+            created_by_name = dn.created_by if dn.created_by else 'Unknown Buyer'
+
+            transfers_data.append({
+                'delivery_note_id': dn.delivery_note_id,
+                'delivery_note_number': dn.delivery_note_number,
+                'status': dn.status,
+                'created_by': created_by_name,
+                'delivery_date': dn.delivery_date.isoformat() if dn.delivery_date else None,
+                'received_at': dn.received_at.isoformat() if dn.received_at else None,
+                'total_items': len(dn.items),
+                'materials': materials_data,
+                'vehicle_number': dn.vehicle_number,
+                'driver_name': dn.driver_name,
+                'driver_contact': dn.driver_contact,
+                'transport_fee': float(dn.transport_fee) if dn.transport_fee else 0,
+                'notes': dn.notes
+            })
+
+        return jsonify({
+            "success": True,
+            "transfers": transfers_data
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching buyer transfers history: {e}")
+        log.error(traceback.format_exc())
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def receive_buyer_transfer(delivery_note_id):
+    """
+    PM confirms receipt of buyer transfer and adds materials to inventory
+
+    This endpoint uses the BuyerTransferService for clean separation of concerns.
+    """
+    try:
+        from config.logging import get_logger
+        from services.buyer_transfer_service import BuyerTransferService
+
+        log = get_logger()
+
+        # Authorization check
         current_user = g.user
         user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
         pm_name = current_user.get('full_name', 'Production Manager')
         allowed_roles = ['productionmanager', 'admin']
 
         if not any(role in user_role for role in allowed_roles):
-            return jsonify({"success": False, "error": "Access denied. Production Manager or Admin role required."}), 403
+            return jsonify({
+                "success": False,
+                "error": "Access denied. Production Manager or Admin role required."
+            }), 403
 
+        # Extract request data
         data = request.get_json() or {}
         receiver_notes = data.get('notes', '')
 
-        # Get the delivery note
-        dn = MaterialDeliveryNote.query.filter_by(delivery_note_id=delivery_note_id).first()
-        if not dn:
-            return jsonify({"success": False, "error": "Delivery note not found"}), 404
+        # Use service to handle business logic
+        service = BuyerTransferService()
+        result = service.receive_transfer(
+            delivery_note_id=delivery_note_id,
+            receiver_name=pm_name,
+            receiver_notes=receiver_notes
+        )
 
-        # Verify it's a buyer transfer to store
-        if 'Buyer' not in dn.delivery_from or 'Store' not in dn.delivery_from:
-            return jsonify({"success": False, "error": "This is not a buyer transfer to store"}), 400
+        # Handle result
+        if not result.success:
+            log.warning(f"Failed to receive buyer transfer {delivery_note_id}: {result.error_message}")
+            status_code = 404 if "not found" in result.error_message.lower() else 400
+            return jsonify({
+                "success": False,
+                "error": result.error_message
+            }), status_code
 
-        # Check status
-        if dn.status == 'DELIVERED':
-            return jsonify({"success": False, "error": "This transfer has already been received"}), 400
+        # Log success
+        log.info(
+            f"PM {pm_name} received buyer transfer {result.delivery_note_number} "
+            f"with {len(result.items_processed)} items. Batch: {result.batch_reference}"
+        )
 
-        # Generate batch reference
-        batch_ref = f"BTR-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
-
-        # Process each item - add to inventory
-        items_processed = []
-        for item in dn.items:
-            inv_material = InventoryMaterial.query.filter_by(
-                inventory_material_id=item.inventory_material_id
-            ).first()
-
-            if inv_material:
-                # Update stock
-                old_stock = inv_material.current_stock or 0
-                inv_material.current_stock = old_stock + item.quantity
-                inv_material.last_modified_by = pm_name
-                inv_material.last_modified_at = datetime.utcnow()
-
-                # Create inventory transaction (RECEIVING)
-                transaction = InventoryTransaction(
-                    inventory_material_id=inv_material.inventory_material_id,
-                    transaction_type='PURCHASE',  # Receiving from buyer transfer
-                    quantity=item.quantity,
-                    unit_price=item.unit_price or 0,
-                    total_amount=(item.unit_price or 0) * item.quantity,
-                    reference_number=dn.delivery_note_number,
-                    notes=f"Received from buyer transfer: {dn.delivery_note_number}",
-                    delivery_batch_ref=batch_ref,
-                    driver_name=dn.driver_name,
-                    vehicle_number=dn.vehicle_number,
-                    transport_fee=dn.transport_fee if len(dn.items) == 1 else (dn.transport_fee or 0) / len(dn.items),
-                    performed_by=pm_name,
-                    performed_at=datetime.utcnow()
-                )
-                db.session.add(transaction)
-                db.session.flush()
-
-                # Link transaction to item
-                item.inventory_transaction_id = transaction.transaction_id
-
-                items_processed.append({
-                    "material_name": inv_material.material_name,
-                    "quantity_added": item.quantity,
-                    "new_stock": inv_material.current_stock
-                })
-
-                log.info(f"Added {item.quantity} {inv_material.unit} of {inv_material.material_name} to stock. New stock: {inv_material.current_stock}")
-
-        # Update DN status
-        dn.status = 'DELIVERED'
-        dn.received_by = pm_name
-        dn.received_at = datetime.utcnow()
-        dn.receiver_notes = receiver_notes
-        dn.last_modified_by = pm_name
-        dn.last_modified_at = datetime.utcnow()
-
-        db.session.commit()
-
-        log.info(f"PM {pm_name} received buyer transfer {dn.delivery_note_number} with {len(items_processed)} items")
-
+        # Return success response
         return jsonify({
             "success": True,
-            "message": f"Transfer {dn.delivery_note_number} received successfully",
-            "delivery_note_id": dn.delivery_note_id,
-            "delivery_note_number": dn.delivery_note_number,
-            "items_processed": items_processed,
-            "received_by": pm_name,
-            "received_at": dn.received_at.isoformat()
+            "message": f"Transfer {result.delivery_note_number} received successfully",
+            "delivery_note_id": result.delivery_note_id,
+            "delivery_note_number": result.delivery_note_number,
+            "items_processed": result.items_processed,
+            "received_by": result.received_by,
+            "received_at": result.received_at,
+            "batch_reference": result.batch_reference
         }), 200
 
     except Exception as e:
@@ -5986,9 +6011,12 @@ def receive_buyer_transfer(delivery_note_id):
         import traceback
         from config.logging import get_logger
         log = get_logger()
-        log.error(f"Error receiving buyer transfer: {e}")
+        log.error(f"Error receiving buyer transfer {delivery_note_id}: {e}")
         log.error(traceback.format_exc())
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({
+            "success": False,
+            "error": "An unexpected error occurred while receiving the transfer"
+        }), 500
 
 
 def get_received_buyer_transfers():

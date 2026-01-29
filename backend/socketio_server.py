@@ -7,11 +7,19 @@ from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 from flask import request
 import jwt
 import os
+import logging
 from datetime import datetime
 from functools import wraps
 from config.logging import get_logger
 
 log = get_logger()
+
+# Suppress verbose Socket.IO and EngineIO logs
+# Set to WARNING to only show important messages, not every ping/pong/room join
+logging.getLogger('socketio').setLevel(logging.WARNING)
+logging.getLogger('socketio.server').setLevel(logging.WARNING)
+logging.getLogger('engineio').setLevel(logging.WARNING)
+logging.getLogger('engineio.server').setLevel(logging.WARNING)
 
 # Initialize Socket.IO with explicit CORS origins for development
 # Must match the origins allowed by Flask CORS
@@ -29,8 +37,8 @@ SOCKET_CORS_ORIGINS = [
 socketio = SocketIO(
     cors_allowed_origins=SOCKET_CORS_ORIGINS,
     async_mode='threading',
-    logger=True,
-    engineio_logger=True,  # Enable engine.io logging to debug connection issues
+    logger=False,  # Disable Socket.IO internal logging (reduces noise)
+    engineio_logger=False,  # Disable EngineIO logging (removes ping/pong spam)
     ping_timeout=60,
     ping_interval=25
 )

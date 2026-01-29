@@ -85,6 +85,11 @@ const MaterialsCatalogPage: React.FC = () => {
     fetchData();
   }, []);
 
+  // Reset page when search/category filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, categoryFilter]);
+
   const fetchData = async () => {
     setLoading(true);
     try {

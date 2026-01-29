@@ -2,6 +2,35 @@ from config.db import db
 from datetime import datetime
 
 
+class VendorCategory(db.Model):
+    """Vendor category model for dynamic category management"""
+    __tablename__ = 'vendor_categories'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    description = db.Column(db.Text, nullable=True)
+    is_default = db.Column(db.Boolean, default=False)  # True for predefined categories
+    is_active = db.Column(db.Boolean, default=True)
+    is_deleted = db.Column(db.Boolean, default=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        """Convert category object to dictionary"""
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'is_default': self.is_default,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+    def __repr__(self):
+        return f'<VendorCategory {self.id}: {self.name}>'
+
+
 class Vendor(db.Model):
     """Vendor model for managing vendor/supplier information"""
     __tablename__ = 'vendors'

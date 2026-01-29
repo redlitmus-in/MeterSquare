@@ -4,7 +4,7 @@
  * No login required - uses email to identify ticket owner
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bug,
@@ -46,7 +46,9 @@ import {
   notifyAdminResponse,
   initializeTicketStates,
   hasTicketStatusChanged,
-  notifyNewComment
+  notifyNewComment,
+  getUnreadCommentCount,
+  markCommentsAsRead
 } from '@/utils/supportNotificationHelper';
 import NotificationPanel from '@/components/support/NotificationPanel';
 
@@ -120,6 +122,8 @@ const PublicSupportPage: React.FC = () => {
   // Comment state
   const [commentText, setCommentText] = useState<Record<number, string>>({});
   const [isSendingComment, setIsSendingComment] = useState<Record<number, boolean>>({});
+  // Counter to trigger re-sort when comments are marked as read
+  const [commentReadCounter, setCommentReadCounter] = useState(0);
 
 
   // Form state - Initialize with user data if authenticated
@@ -539,10 +543,42 @@ const PublicSupportPage: React.FC = () => {
     return true;
   });
 
+  // Sort tickets:
+  // 1. Tickets with new comments appear first (in order they received comments)
+  // 2. Active tickets (not closed/resolved/pending_deployment) come next
+  // 3. Closed/resolved/pending_deployment tickets go to bottom
+  // Note: commentReadCounter triggers re-sort when comments are marked as read
+  const sortedTickets = useMemo(() => {
+    const endedStatuses = ['closed', 'resolved', 'pending_deployment'];
+
+    return [...filteredTickets].sort((a, b) => {
+      const aUnread = getUnreadCommentCount(a.ticket_id, a.comments?.length || 0);
+      const bUnread = getUnreadCommentCount(b.ticket_id, b.comments?.length || 0);
+      const aIsEnded = endedStatuses.includes(a.status);
+      const bIsEnded = endedStatuses.includes(b.status);
+
+      // Priority 1: Tickets with unread comments come first
+      if (aUnread > 0 && bUnread === 0) return -1;
+      if (bUnread > 0 && aUnread === 0) return 1;
+
+      // Priority 2: If both have unread comments, sort by most recent activity
+      if (aUnread > 0 && bUnread > 0) {
+        return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime();
+      }
+
+      // Priority 3: Active tickets before ended tickets (when no unread comments)
+      if (!aIsEnded && bIsEnded) return -1;
+      if (aIsEnded && !bIsEnded) return 1;
+
+      // Priority 4: Within same category, sort by created_at (newest first)
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  }, [filteredTickets, commentReadCounter]);
+
   // Pagination
-  const totalPages = Math.ceil(filteredTickets.length / ticketsPerPage);
+  const totalPages = Math.ceil(sortedTickets.length / ticketsPerPage);
   const startIndex = (currentPage - 1) * ticketsPerPage;
-  const paginatedTickets = filteredTickets.slice(startIndex, startIndex + ticketsPerPage);
+  const paginatedTickets = sortedTickets.slice(startIndex, startIndex + ticketsPerPage);
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -1032,7 +1068,15 @@ const PublicSupportPage: React.FC = () => {
                   {/* Ticket Header */}
                   <div
                     className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                    onClick={() => setExpandedTicketId(isExpanded ? null : ticket.ticket_id)}
+                    onClick={() => {
+                      if (!isExpanded) {
+                        // Mark comments as read when expanding ticket
+                        markCommentsAsRead(ticket.ticket_id, ticket.comments?.length || 0);
+                        // Trigger re-sort to move ticket down after reading
+                        setCommentReadCounter(c => c + 1);
+                      }
+                      setExpandedTicketId(isExpanded ? null : ticket.ticket_id);
+                    }}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
@@ -1051,6 +1095,18 @@ const PublicSupportPage: React.FC = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
+                        {/* New Comment Badge */}
+                        {(() => {
+                          const unreadCount = getUnreadCommentCount(ticket.ticket_id, ticket.comments?.length || 0);
+                          return unreadCount > 0 ? (
+                            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-purple-100 animate-pulse">
+                              <MessageCircle className="w-4 h-4 text-purple-600" />
+                              <span className="text-xs font-bold text-purple-600">
+                                {unreadCount} new
+                              </span>
+                            </div>
+                          ) : null;
+                        })()}
                         <div className={`flex items-center gap-1 px-3 py-1 rounded-full ${statusCfg.bgColor}`}>
                           <StatusIcon className={`w-4 h-4 ${statusCfg.color}`} />
                           <span className={`text-sm font-medium ${statusCfg.color}`}>

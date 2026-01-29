@@ -7,7 +7,7 @@ from flask_caching import Cache
 from dotenv import load_dotenv
 from config.routes import initialize_routes
 from config.db import initialize_db as initialize_sqlalchemy, db
-from config.logging import get_logger
+from config.logging import get_logger, configure_quiet_logging
 from socketio_server import init_socketio
 from controllers.notification_controller import notification_bp
 import os
@@ -17,6 +17,9 @@ import os
 basedir = os.path.abspath(os.path.dirname(__file__))
 # Load .env from the backend directory
 load_dotenv(os.path.join(basedir, '.env'))
+
+# Suppress verbose logging from third-party libraries early
+configure_quiet_logging()
 
 def create_app():
     app = Flask(__name__)

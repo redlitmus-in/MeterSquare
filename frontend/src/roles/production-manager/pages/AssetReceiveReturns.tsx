@@ -3,12 +3,13 @@
  * PM processes returned assets - verify condition and decide fate
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, CheckCircle, Package, RefreshCw, AlertTriangle,
-  Wrench, Trash2, Check, X, Eye
+  Wrench, Trash2, Check, X, Eye, ChevronLeft, ChevronRight
 } from 'lucide-react';
+import { PAGINATION } from '@/lib/inventoryConstants';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import {
   getReturnNotes,
@@ -67,6 +68,27 @@ const AssetReceiveReturns: React.FC = () => {
   const [selectedReturn, setSelectedReturn] = useState<AssetReturnDeliveryNote | null>(null);
   const [processingItems, setProcessingItems] = useState<ProcessingItem[]>([]);
   const [showProcessModal, setShowProcessModal] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Pagination calculations
+  const currentItems = activeTab === 'pending' ? pendingReturns : processedReturns;
+  const totalPages = Math.ceil(currentItems.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedItems = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return currentItems.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [currentItems, currentPage]);
+
+  // Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Clamp page when total pages decreases
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   useEffect(() => {
     fetchData();
@@ -267,7 +289,7 @@ const AssetReceiveReturns: React.FC = () => {
             </div>
           ) : (
             <div className="divide-y">
-              {pendingReturns.map(rn => (
+              {paginatedItems.map(rn => (
                 <div key={rn.ardn_id} className="p-4 hover:bg-gray-50">
                   <div className="flex items-center justify-between">
                     <div>
@@ -351,7 +373,7 @@ const AssetReceiveReturns: React.FC = () => {
             </div>
           ) : (
             <div className="divide-y">
-              {processedReturns.map(rn => (
+              {paginatedItems.map(rn => (
                 <div key={rn.ardn_id} className="p-4 hover:bg-gray-50">
                   <div className="flex items-center justify-between">
                     <div>
@@ -397,6 +419,38 @@ const AssetReceiveReturns: React.FC = () => {
               ))}
             </div>
           )
+        )}
+
+        {/* Pagination */}
+        {currentItems.length > 0 && (
+          <div className="px-4 py-3 bg-gray-50 border-t flex items-center justify-between text-sm">
+            <span className="text-gray-600">
+              Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, currentItems.length)} of {currentItems.length} returns
+            </span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </button>
+                <span className="text-sm text-gray-600">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

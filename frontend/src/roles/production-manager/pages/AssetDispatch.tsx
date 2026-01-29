@@ -10,8 +10,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Plus, Truck, Send, Package, RefreshCw, FileText,
   Trash2, Check, X, Eye, ChevronDown, ChevronUp, Download, Printer,
-  Clock, CheckCircle, XCircle, Search, AlertTriangle
+  Clock, CheckCircle, XCircle, Search, AlertTriangle, ChevronLeft, ChevronRight
 } from 'lucide-react';
+import { PAGINATION } from '@/lib/inventoryConstants';
 import { apiClient, API_BASE_URL } from '@/api/config';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import {
@@ -38,8 +39,8 @@ import {
 } from '@/roles/site-engineer/services/assetRequisitionService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 
-type SubTabType = 'requisitions' | 'delivery-notes';
-type RequisitionTabType = 'pending' | 'ready_dispatch' | 'rejected';
+// Unified tab type - all tabs in single row
+type MainTabType = 'pending' | 'ready_dispatch' | 'rejected' | 'draft' | 'issued' | 'delivered';
 
 interface SiteEngineer {
   user_id: number;
@@ -82,14 +83,15 @@ const AssetDispatch: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // ==================== SUB-TAB STATE ====================
-  const [activeSubTab, setActiveSubTab] = useState<SubTabType>('requisitions');
+  // ==================== MAIN TAB STATE ====================
+  const [activeMainTab, setActiveMainTab] = useState<MainTabType>('pending');
 
   // Handle URL parameters
   useEffect(() => {
-    const subtab = searchParams.get('subtab');
-    if (subtab === 'requisitions') setActiveSubTab('requisitions');
-    else if (subtab === 'delivery-notes') setActiveSubTab('delivery-notes');
+    const tab = searchParams.get('tab');
+    if (tab && ['pending', 'ready_dispatch', 'rejected', 'draft', 'issued', 'delivered'].includes(tab)) {
+      setActiveMainTab(tab as MainTabType);
+    }
   }, [searchParams]);
 
   // ==================== DELIVERY NOTES STATE ====================
@@ -98,7 +100,6 @@ const AssetDispatch: React.FC = () => {
   const [availableItems, setAvailableItems] = useState<AssetItem[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [expandedDN, setExpandedDN] = useState<number | null>(null);
-  const [dnStatusFilter, setDnStatusFilter] = useState<string>('DRAFT');
 
   // Separate DN data by status (lazy loading)
   const [draftDNs, setDraftDNs] = useState<AssetDeliveryNote[]>([]);
@@ -149,8 +150,11 @@ const AssetDispatch: React.FC = () => {
   const [readyDispatchLoaded, setReadyDispatchLoaded] = useState(false);
   const [rejectedLoaded, setRejectedLoaded] = useState(false);
 
-  const [activeReqTab, setActiveReqTab] = useState<RequisitionTabType>('pending');
   const [reqSearchTerm, setReqSearchTerm] = useState('');
+
+  // Pagination state for requisitions and DNs
+  const [reqCurrentPage, setReqCurrentPage] = useState(1);
+  const [dnCurrentPage, setDnCurrentPage] = useState(1);
 
   // Requisition Modal state
   const [selectedRequisition, setSelectedRequisition] = useState<AssetRequisition | null>(null);
@@ -293,51 +297,29 @@ const AssetDispatch: React.FC = () => {
     }
   }, []);
 
-  // Initial load based on sub-tab
+  // Lazy load tabs based on activeMainTab
   useEffect(() => {
-    if (activeSubTab === 'requisitions') {
-      if (!pendingLoaded && !loadingPending) {
-        fetchPending();
-      }
-    } else {
-      // For delivery-notes, load DRAFT by default
-      if (!draftLoaded && !loadingDraft) {
-        fetchDraftDNs();
-      }
-    }
-  }, [activeSubTab, pendingLoaded, loadingPending, draftLoaded, loadingDraft, fetchPending, fetchDraftDNs]);
-
-  // Lazy load requisition tabs
-  useEffect(() => {
-    if (activeSubTab !== 'requisitions') return;
-
-    if (activeReqTab === 'pending' && !pendingLoaded && !loadingPending) {
+    // Requisition tabs
+    if (activeMainTab === 'pending' && !pendingLoaded && !loadingPending) {
       fetchPending();
-    } else if (activeReqTab === 'ready_dispatch' && !readyDispatchLoaded && !loadingReadyDispatch) {
+    } else if (activeMainTab === 'ready_dispatch' && !readyDispatchLoaded && !loadingReadyDispatch) {
       fetchReadyDispatch();
-    } else if (activeReqTab === 'rejected' && !rejectedLoaded && !loadingRejected) {
+    } else if (activeMainTab === 'rejected' && !rejectedLoaded && !loadingRejected) {
       fetchRejected();
     }
-  }, [
-    activeSubTab, activeReqTab,
-    pendingLoaded, readyDispatchLoaded, rejectedLoaded,
-    loadingPending, loadingReadyDispatch, loadingRejected,
-    fetchPending, fetchReadyDispatch, fetchRejected
-  ]);
-
-  // Lazy load DN tabs
-  useEffect(() => {
-    if (activeSubTab !== 'delivery-notes') return;
-
-    if (dnStatusFilter === 'DRAFT' && !draftLoaded && !loadingDraft) {
+    // DN tabs
+    else if (activeMainTab === 'draft' && !draftLoaded && !loadingDraft) {
       fetchDraftDNs();
-    } else if (dnStatusFilter === 'ISSUED' && !issuedLoaded && !loadingIssued) {
+    } else if (activeMainTab === 'issued' && !issuedLoaded && !loadingIssued) {
       fetchIssuedDNs();
-    } else if (dnStatusFilter === 'DELIVERED' && !deliveredLoaded && !loadingDelivered) {
+    } else if (activeMainTab === 'delivered' && !deliveredLoaded && !loadingDelivered) {
       fetchDeliveredDNs();
     }
   }, [
-    activeSubTab, dnStatusFilter,
+    activeMainTab,
+    pendingLoaded, readyDispatchLoaded, rejectedLoaded,
+    loadingPending, loadingReadyDispatch, loadingRejected,
+    fetchPending, fetchReadyDispatch, fetchRejected,
     draftLoaded, issuedLoaded, deliveredLoaded,
     loadingDraft, loadingIssued, loadingDelivered,
     fetchDraftDNs, fetchIssuedDNs, fetchDeliveredDNs
@@ -353,22 +335,22 @@ const AssetDispatch: React.FC = () => {
   // ==================== REQUISITION HELPERS ====================
 
   const currentRequisitions = useMemo(() => {
-    switch (activeReqTab) {
+    switch (activeMainTab) {
       case 'pending': return pendingRequisitions;
       case 'ready_dispatch': return readyDispatchRequisitions;
       case 'rejected': return rejectedRequisitions;
-      default: return pendingRequisitions;
+      default: return [];
     }
-  }, [activeReqTab, pendingRequisitions, readyDispatchRequisitions, rejectedRequisitions]);
+  }, [activeMainTab, pendingRequisitions, readyDispatchRequisitions, rejectedRequisitions]);
 
   const isReqLoading = useMemo(() => {
-    switch (activeReqTab) {
+    switch (activeMainTab) {
       case 'pending': return loadingPending;
       case 'ready_dispatch': return loadingReadyDispatch;
       case 'rejected': return loadingRejected;
       default: return false;
     }
-  }, [activeReqTab, loadingPending, loadingReadyDispatch, loadingRejected]);
+  }, [activeMainTab, loadingPending, loadingReadyDispatch, loadingRejected]);
 
   const filteredRequisitions = useMemo(() => {
     if (!reqSearchTerm) return currentRequisitions;
@@ -390,44 +372,91 @@ const AssetDispatch: React.FC = () => {
     });
   }, [currentRequisitions, reqSearchTerm]);
 
+  // Pagination calculations for requisitions
+  const reqTotalPages = Math.ceil(filteredRequisitions.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequisitions = useMemo(() => {
+    const startIndex = (reqCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredRequisitions.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequisitions, reqCurrentPage]);
+
+  // Reset requisition page when tab or search changes
+  useEffect(() => {
+    setReqCurrentPage(1);
+  }, [activeMainTab, reqSearchTerm]);
+
+  // Clamp requisition page when total pages decreases
+  useEffect(() => {
+    if (reqCurrentPage > reqTotalPages && reqTotalPages > 0) {
+      setReqCurrentPage(reqTotalPages);
+    }
+  }, [reqCurrentPage, reqTotalPages]);
+
   const reqStatusCounts = useMemo(() => ({
     pending: pendingRequisitions.length,
     ready_dispatch: readyDispatchRequisitions.length,
     rejected: rejectedRequisitions.length,
   }), [pendingRequisitions, readyDispatchRequisitions, rejectedRequisitions]);
 
-  const refreshCurrentReqTab = useCallback(() => {
-    if (activeReqTab === 'pending') {
+  const refreshCurrentTab = useCallback(() => {
+    if (activeMainTab === 'pending') {
       setPendingLoaded(false);
       fetchPending();
-    } else if (activeReqTab === 'ready_dispatch') {
+    } else if (activeMainTab === 'ready_dispatch') {
       setReadyDispatchLoaded(false);
       fetchReadyDispatch();
-    } else if (activeReqTab === 'rejected') {
+    } else if (activeMainTab === 'rejected') {
       setRejectedLoaded(false);
       fetchRejected();
+    } else if (activeMainTab === 'draft') {
+      setDraftLoaded(false);
+      fetchDraftDNs();
+    } else if (activeMainTab === 'issued') {
+      setIssuedLoaded(false);
+      fetchIssuedDNs();
+    } else if (activeMainTab === 'delivered') {
+      setDeliveredLoaded(false);
+      fetchDeliveredDNs();
     }
-  }, [activeReqTab, fetchPending, fetchReadyDispatch, fetchRejected]);
+  }, [activeMainTab, fetchPending, fetchReadyDispatch, fetchRejected, fetchDraftDNs, fetchIssuedDNs, fetchDeliveredDNs]);
 
   // ==================== DN HELPERS ====================
 
   const currentDNs = useMemo(() => {
-    switch (dnStatusFilter) {
-      case 'DRAFT': return draftDNs;
-      case 'ISSUED': return issuedDNs;
-      case 'DELIVERED': return deliveredDNs;
-      default: return draftDNs;
+    switch (activeMainTab) {
+      case 'draft': return draftDNs;
+      case 'issued': return issuedDNs;
+      case 'delivered': return deliveredDNs;
+      default: return [];
     }
-  }, [dnStatusFilter, draftDNs, issuedDNs, deliveredDNs]);
+  }, [activeMainTab, draftDNs, issuedDNs, deliveredDNs]);
+
+  // Pagination calculations for DNs
+  const dnTotalPages = Math.ceil(currentDNs.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedDNs = useMemo(() => {
+    const startIndex = (dnCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return currentDNs.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [currentDNs, dnCurrentPage]);
+
+  // Reset DN page when tab changes
+  useEffect(() => {
+    setDnCurrentPage(1);
+  }, [activeMainTab]);
+
+  // Clamp DN page when total pages decreases
+  useEffect(() => {
+    if (dnCurrentPage > dnTotalPages && dnTotalPages > 0) {
+      setDnCurrentPage(dnTotalPages);
+    }
+  }, [dnCurrentPage, dnTotalPages]);
 
   const isDNLoading = useMemo(() => {
-    switch (dnStatusFilter) {
-      case 'DRAFT': return loadingDraft;
-      case 'ISSUED': return loadingIssued;
-      case 'DELIVERED': return loadingDelivered;
+    switch (activeMainTab) {
+      case 'draft': return loadingDraft;
+      case 'issued': return loadingIssued;
+      case 'delivered': return loadingDelivered;
       default: return false;
     }
-  }, [dnStatusFilter, loadingDraft, loadingIssued, loadingDelivered]);
+  }, [activeMainTab, loadingDraft, loadingIssued, loadingDelivered]);
 
   const dnStatusCounts = useMemo(() => ({
     DRAFT: draftDNs.length,
@@ -439,20 +468,6 @@ const AssetDispatch: React.FC = () => {
     return draftDNs.length + issuedDNs.length + deliveredDNs.length;
   }, [draftDNs, issuedDNs, deliveredDNs]);
 
-  const refreshCurrentDNTab = useCallback(() => {
-    if (dnStatusFilter === 'DRAFT') {
-      setDraftLoaded(false);
-      fetchDraftDNs();
-    } else if (dnStatusFilter === 'ISSUED') {
-      setIssuedLoaded(false);
-      fetchIssuedDNs();
-    } else if (dnStatusFilter === 'DELIVERED') {
-      setDeliveredLoaded(false);
-      fetchDeliveredDNs();
-    }
-    // Also refresh form data for available assets
-    setFormDataLoaded(false);
-  }, [dnStatusFilter, fetchDraftDNs, fetchIssuedDNs, fetchDeliveredDNs]);
 
   const openActionModal = (requisition: AssetRequisition, action: 'approve' | 'reject') => {
     setSelectedRequisition(requisition);
@@ -605,10 +620,6 @@ const AssetDispatch: React.FC = () => {
       showError('Please add at least one item to dispatch');
       return;
     }
-    if (!deliveryNoteFile) {
-      showError('Please upload a delivery note file');
-      return;
-    }
     for (const item of dispatchItems) {
       if (item.quantity > item.available) {
         showError(`Quantity exceeds available stock for ${item.category_name}`);
@@ -683,9 +694,9 @@ const AssetDispatch: React.FC = () => {
       setIssuedLoaded(false);
       setFormDataLoaded(false);
       // Re-fetch current tab
-      if (dnStatusFilter === 'DRAFT') {
+      if (activeMainTab === 'draft') {
         fetchDraftDNs();
-      } else if (dnStatusFilter === 'ISSUED') {
+      } else if (activeMainTab === 'issued') {
         fetchIssuedDNs();
       }
     } catch (error: unknown) {
@@ -715,9 +726,8 @@ const AssetDispatch: React.FC = () => {
   // Handle dispatch by opening DN form with requisition data
   const handleDispatchWithDN = async (requisition: AssetRequisition) => {
     try {
-      // Switch to delivery-notes tab first for visual feedback
-      setActiveSubTab('delivery-notes');
-      setDnStatusFilter('DRAFT');
+      // Switch to draft tab for visual feedback
+      setActiveMainTab('draft');
 
       // Get form data - either from existing state or fetch fresh
       let projectsList = projects;
@@ -871,11 +881,14 @@ const AssetDispatch: React.FC = () => {
     }
   };
 
-  // Requisition Tab configuration
-  const reqTabs: { key: RequisitionTabType; label: string; icon: React.ReactNode; color: string }[] = [
-    { key: 'pending', label: 'Pending Approval', icon: <Clock className="h-4 w-4" />, color: 'yellow' },
-    { key: 'ready_dispatch', label: 'Ready to Dispatch', icon: <Truck className="h-4 w-4" />, color: 'blue' },
-    { key: 'rejected', label: 'Rejected', icon: <XCircle className="h-4 w-4" />, color: 'red' }
+  // Main Tab configuration - all tabs in single row
+  const mainTabs: { key: MainTabType; label: string; icon: React.ReactNode; activeColor: string; badgeColor: string; count: number }[] = [
+    { key: 'pending', label: 'Pending', icon: <Clock className="h-4 w-4" />, activeColor: 'bg-yellow-500 text-white', badgeColor: 'bg-yellow-100 text-yellow-700', count: reqStatusCounts.pending },
+    { key: 'ready_dispatch', label: 'Ready', icon: <Truck className="h-4 w-4" />, activeColor: 'bg-blue-600 text-white', badgeColor: 'bg-blue-100 text-blue-700', count: reqStatusCounts.ready_dispatch },
+    { key: 'rejected', label: 'Rejected', icon: <XCircle className="h-4 w-4" />, activeColor: 'bg-red-500 text-white', badgeColor: 'bg-red-100 text-red-700', count: reqStatusCounts.rejected },
+    { key: 'draft', label: 'Draft ADN', icon: <FileText className="h-4 w-4" />, activeColor: 'bg-gray-700 text-white', badgeColor: 'bg-gray-200 text-gray-700', count: dnStatusCounts.DRAFT },
+    { key: 'issued', label: 'Issued ADN', icon: <Send className="h-4 w-4" />, activeColor: 'bg-blue-600 text-white', badgeColor: 'bg-blue-100 text-blue-700', count: dnStatusCounts.ISSUED },
+    { key: 'delivered', label: 'Delivered ADN', icon: <CheckCircle className="h-4 w-4" />, activeColor: 'bg-green-600 text-white', badgeColor: 'bg-green-100 text-green-700', count: dnStatusCounts.DELIVERED },
   ];
 
   // ==================== RENDER ====================
@@ -897,7 +910,7 @@ const AssetDispatch: React.FC = () => {
           </div>
         </div>
         <button
-          onClick={() => activeSubTab === 'requisitions' ? refreshCurrentReqTab() : refreshCurrentDNTab()}
+          onClick={() => refreshCurrentTab()}
           className="p-2 hover:bg-gray-100 rounded-lg"
           disabled={isReqLoading || isDNLoading}
         >
@@ -905,65 +918,32 @@ const AssetDispatch: React.FC = () => {
         </button>
       </div>
 
-      {/* Sub-tabs (like Stock Out) */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setActiveSubTab('requisitions')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-            activeSubTab === 'requisitions'
-              ? 'bg-orange-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          <Package className="w-4 h-4" />
-          Requisitions
-          <span className={`px-2 py-0.5 rounded-full text-xs ${
-            activeSubTab === 'requisitions' ? 'bg-orange-500' : 'bg-yellow-100 text-yellow-700'
-          }`}>
-            {reqStatusCounts.pending}
-          </span>
-        </button>
-        <button
-          onClick={() => setActiveSubTab('delivery-notes')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-            activeSubTab === 'delivery-notes'
-              ? 'bg-orange-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          Delivery Notes (ADN)
-          <span className={`px-2 py-0.5 rounded-full text-xs ${
-            activeSubTab === 'delivery-notes' ? 'bg-orange-500' : 'bg-blue-100 text-blue-700'
-          }`}>
-            {dnStatusCounts.DRAFT}
-          </span>
-        </button>
+      {/* Main Tabs - Single Row */}
+      <div className="flex gap-2 flex-wrap">
+        {mainTabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveMainTab(tab.key)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeMainTab === tab.key
+                ? tab.activeColor
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+            <span className={`px-2 py-0.5 rounded-full text-xs ${
+              activeMainTab === tab.key ? 'bg-white/20' : tab.badgeColor
+            }`}>
+              {tab.count}
+            </span>
+          </button>
+        ))}
       </div>
 
-      {/* ==================== REQUISITIONS SUB-TAB ==================== */}
-      {activeSubTab === 'requisitions' && (
+      {/* ==================== REQUISITIONS TABS ==================== */}
+      {['pending', 'ready_dispatch', 'rejected'].includes(activeMainTab) && (
         <>
-          {/* Requisition Status Tabs */}
-          <div className="flex gap-2 flex-wrap">
-            {reqTabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveReqTab(tab.key)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  activeReqTab === tab.key
-                    ? tab.color === 'yellow' ? 'bg-yellow-100 text-yellow-700'
-                    : tab.color === 'blue' ? 'bg-blue-100 text-blue-700'
-                    : tab.color === 'green' ? 'bg-green-100 text-green-700'
-                    : 'bg-red-100 text-red-700'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {tab.icon}
-                {tab.label} ({reqStatusCounts[tab.key]})
-              </button>
-            ))}
-          </div>
 
           {/* Search */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
@@ -992,14 +972,14 @@ const AssetDispatch: React.FC = () => {
               <Package className="h-12 w-12 text-gray-300 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No requisitions found</h3>
               <p className="text-sm text-gray-500">
-                {activeReqTab === 'pending' ? 'No requisitions waiting for your approval'
-                  : activeReqTab === 'ready_dispatch' ? 'No approved requisitions ready for dispatch'
+                {activeMainTab === 'pending' ? 'No requisitions waiting for your approval'
+                  : activeMainTab === 'ready_dispatch' ? 'No approved requisitions ready for dispatch'
                   : 'No rejected requisitions'}
               </p>
             </div>
           ) : !isReqLoading && (
             <div className="space-y-4">
-              {filteredRequisitions.map(requisition => (
+              {paginatedRequisitions.map(requisition => (
                 <div
                   key={requisition.requisition_id}
                   className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow"
@@ -1092,55 +1072,46 @@ const AssetDispatch: React.FC = () => {
                   </div>
                 </div>
               ))}
+
+              {/* Pagination for Requisitions */}
+              {filteredRequisitions.length > 0 && (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 flex items-center justify-between">
+                  <span className="text-sm text-gray-600">
+                    Showing {((reqCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(reqCurrentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredRequisitions.length)} of {filteredRequisitions.length} requisitions
+                  </span>
+                  {reqTotalPages > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setReqCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={reqCurrentPage === 1}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600">
+                        Page {reqCurrentPage} of {reqTotalPages}
+                      </span>
+                      <button
+                        onClick={() => setReqCurrentPage(prev => Math.min(prev + 1, reqTotalPages))}
+                        disabled={reqCurrentPage === reqTotalPages}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </>
       )}
 
-      {/* ==================== DELIVERY NOTES SUB-TAB ==================== */}
-      {activeSubTab === 'delivery-notes' && (
+      {/* ==================== DELIVERY NOTES TABS ==================== */}
+      {['draft', 'issued', 'delivered'].includes(activeMainTab) && (
         <>
-          {/* DN Status Filter & Create Button */}
-          <div className="flex justify-between items-center">
-            <div className="flex gap-2">
-              {(['DRAFT', 'ISSUED', 'DELIVERED'] as const).map(status => (
-                <button
-                  key={status}
-                  onClick={() => setDnStatusFilter(status)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                    dnStatusFilter === status
-                      ? status === 'DRAFT' ? 'bg-gray-700 text-white'
-                        : status === 'ISSUED' ? 'bg-blue-600 text-white'
-                        : 'bg-green-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  {status === 'DRAFT' ? <FileText className="h-4 w-4" /> :
-                   status === 'ISSUED' ? <Truck className="h-4 w-4" /> :
-                   <CheckCircle className="h-4 w-4" />}
-                  {status}
-                  <span className={`px-2 py-0.5 rounded-full text-xs ${
-                    dnStatusFilter === status
-                      ? 'bg-white/20'
-                      : status === 'DRAFT' ? 'bg-gray-200 text-gray-700'
-                        : status === 'ISSUED' ? 'bg-blue-100 text-blue-700'
-                        : 'bg-green-100 text-green-700'
-                  }`}>
-                    {dnStatusCounts[status]}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowForm(true)}
-              disabled={loadingFormData}
-              className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
-            >
-              <Plus className="w-4 h-4" />
-              Create ADN
-            </button>
-          </div>
-
           {/* Create DN Form */}
           {showForm && (
             <div className="bg-white rounded-xl shadow-sm border p-6">
@@ -1288,65 +1259,6 @@ const AssetDispatch: React.FC = () => {
                     </p>
                   </div>
 
-                  {/* Delivery Note from Vendor - File Upload */}
-                  <div className="mt-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Delivery Note from Vendor <span className="text-red-500">*</span>
-                    </label>
-                    <div className="border border-gray-300 rounded-lg overflow-hidden">
-                      <label className="flex items-center justify-center w-full px-4 py-3 bg-white border-dashed border-2 border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
-                        <div className="flex flex-col items-center w-full">
-                          {deliveryNoteFile ? (
-                            <div className="flex items-center gap-2 w-full justify-center">
-                              <FileText className="w-5 h-5 text-green-600" />
-                              <span className="text-sm text-gray-700 font-medium">{deliveryNoteFile.name}</span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setDeliveryNoteFile(null);
-                                }}
-                                className="ml-2 text-red-600 hover:text-red-800"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ) : (
-                            <>
-                              <div className="flex items-center gap-2 text-gray-600 mb-1">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                </svg>
-                                <span className="text-sm font-medium">Browse...</span>
-                              </div>
-                              <span className="text-xs text-gray-500">No file selected.</span>
-                            </>
-                          )}
-                        </div>
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              // Check file size (max 10MB)
-                              if (file.size > 10 * 1024 * 1024) {
-                                showError('File size must be less than 10MB');
-                                e.target.value = '';
-                                return;
-                              }
-                              setDeliveryNoteFile(file);
-                            }
-                          }}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)
-                    </p>
-                  </div>
                 </div>
 
                 {/* Asset Selection - Only show if NOT creating from requisition */}
@@ -1589,10 +1501,10 @@ const AssetDispatch: React.FC = () => {
               <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
                 <h2 className="font-semibold flex items-center gap-2 text-gray-800">
                   <Truck className="w-5 h-5 text-orange-500" />
-                  {dnStatusFilter} Delivery Notes
+                  {activeMainTab === 'draft' ? 'Draft' : activeMainTab === 'issued' ? 'Issued' : 'Delivered'} Asset Delivery Notes
                 </h2>
                 <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm font-medium">
-                  {currentDNs.length} Notes
+                  {currentDNs.length} {currentDNs.length === 1 ? 'Note' : 'Notes'}
                 </span>
               </div>
               <div className="overflow-x-auto">
@@ -1611,15 +1523,15 @@ const AssetDispatch: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {currentDNs.length === 0 ? (
+                    {paginatedDNs.length === 0 ? (
                       <tr>
                         <td colSpan={9} className="px-6 py-12 text-center">
                           <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                          <p className="text-gray-500">No {dnStatusFilter.toLowerCase()} delivery notes found</p>
+                          <p className="text-gray-500">No {activeMainTab === 'draft' ? 'draft' : activeMainTab === 'issued' ? 'issued' : 'delivered'} asset delivery notes found</p>
                         </td>
                       </tr>
                     ) : (
-                      currentDNs.map(dn => (
+                      paginatedDNs.map(dn => (
                           <React.Fragment key={dn.adn_id}>
                             <tr className="hover:bg-gray-50">
                               <td className="px-4 py-4">
@@ -1764,6 +1676,38 @@ const AssetDispatch: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+
+              {/* Pagination for DNs */}
+              {currentDNs.length > 0 && (
+                <div className="px-4 py-3 bg-gray-50 border-t flex items-center justify-between text-sm">
+                  <span className="text-gray-600">
+                    Showing {((dnCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(dnCurrentPage * PAGINATION.DEFAULT_PAGE_SIZE, currentDNs.length)} of {currentDNs.length} delivery notes
+                  </span>
+                  {dnTotalPages > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setDnCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={dnCurrentPage === 1}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600">
+                        Page {dnCurrentPage} of {dnTotalPages}
+                      </span>
+                      <button
+                        onClick={() => setDnCurrentPage(prev => Math.min(prev + 1, dnTotalPages))}
+                        disabled={dnCurrentPage === dnTotalPages}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </>

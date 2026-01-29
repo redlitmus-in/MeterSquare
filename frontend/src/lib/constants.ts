@@ -444,3 +444,22 @@ export type StaleTimeKey = keyof typeof STALE_TIMES;
 export type QueryKeyFactory = typeof queryKeys;
 export type ChangeRequestStatus = typeof CHANGE_REQUEST_STATUSES[keyof typeof CHANGE_REQUEST_STATUSES];
 export type MaterialConsumingStatus = typeof MATERIAL_CONSUMING_STATUSES[number];
+
+// =============================================================================
+// PAGINATION CONFIGURATION
+// =============================================================================
+
+/**
+ * Pagination constants - Single source of truth
+ * Must match backend/utils/pagination.py values
+ */
+export const PAGINATION = {
+  /** Default number of items per page */
+  DEFAULT_PAGE_SIZE: 10,
+  /** Maximum allowed items per page */
+  MAX_PAGE_SIZE: 100,
+  /** Minimum allowed items per page */
+  MIN_PAGE_SIZE: 1,
+  /** Available page size options for dropdowns */
+  PAGE_SIZE_OPTIONS: [10, 25, 50, 100],
+} as const;

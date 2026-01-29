@@ -223,8 +223,8 @@ class ChangeRequestService {
    * Get all change requests (role-filtered by backend)
    * GET /api/change-requests
    */
-  // ✅ PERFORMANCE: Added pagination parameters
-  async getChangeRequests(page?: number, pageSize: number = 50): Promise<{
+  // ✅ PERFORMANCE: Added pagination parameters and status filter
+  async getChangeRequests(page?: number, pageSize: number = 50, status?: string): Promise<{
     success: boolean;
     data: ChangeRequestItem[];
     message?: string;
@@ -237,12 +237,22 @@ class ChangeRequestService {
       has_next: boolean;
       has_prev: boolean;
     };
+    status_counts?: {
+      pending: number;
+      approved: number;
+      completed: number;
+      rejected: number;
+      total: number;
+    };
   }> {
     try {
       const params: any = {};
       if (page !== undefined) {
         params.page = page;
         params.page_size = pageSize;
+      }
+      if (status) {
+        params.status = status;
       }
 
       const response = await apiClient.get('/change-requests', { params });
@@ -252,7 +262,8 @@ class ChangeRequestService {
           success: true,
           data: response.data.data || [],
           count: response.data.count || 0,
-          pagination: response.data.pagination
+          pagination: response.data.pagination,
+          status_counts: response.data.status_counts
         };
       }
 

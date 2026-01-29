@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ArrowDownCircle, Package, Plus, Search, FileText, CheckCircle, DollarSign, ChevronDown, X, Download, ExternalLink, Truck, Bell } from 'lucide-react';
+import { ArrowDownCircle, Package, Plus, Search, FileText, CheckCircle, DollarSign, ChevronDown, ChevronLeft, ChevronRight, X, Download, ExternalLink, Truck, Bell } from 'lucide-react';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { inventoryService, InventoryMaterial, CustomUnit } from '../services/inventoryService';
 import { apiClient } from '@/api/config';
+import { PAGINATION } from '@/lib/constants';
 
 // Buyer Transfer Interface
 interface BuyerTransfer {
@@ -145,6 +146,7 @@ const StockInPage: React.FC = () => {
   // UI states
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [expandedMaterials, setExpandedMaterials] = useState<Set<number>>(new Set());
@@ -240,8 +242,10 @@ const StockInPage: React.FC = () => {
   // Buyer Transfers state
   const [showBuyerTransfersModal, setShowBuyerTransfersModal] = useState(false);
   const [buyerTransfers, setBuyerTransfers] = useState<BuyerTransfer[]>([]);
+  const [buyerTransfersHistory, setBuyerTransfersHistory] = useState<BuyerTransfer[]>([]);
   const [loadingBuyerTransfers, setLoadingBuyerTransfers] = useState(false);
   const [receivingTransferId, setReceivingTransferId] = useState<number | null>(null);
+  const [buyerTransfersTab, setBuyerTransfersTab] = useState<'pending' | 'history'>('pending');
 
   useEffect(() => {
     fetchData();
@@ -330,17 +334,29 @@ const StockInPage: React.FC = () => {
   const fetchBuyerTransfers = async () => {
     setLoadingBuyerTransfers(true);
     try {
-      const response = await apiClient.get('/inventory/buyer-transfers/pending', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        }
-      });
-      if (response.data.success) {
-        setBuyerTransfers(response.data.transfers || []);
+      const [pendingResponse, historyResponse] = await Promise.all([
+        apiClient.get('/inventory/buyer-transfers/pending', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          }
+        }),
+        apiClient.get('/inventory/buyer-transfers/history', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          }
+        })
+      ]);
+
+      if (pendingResponse.data.success) {
+        setBuyerTransfers(pendingResponse.data.transfers || []);
+      }
+      if (historyResponse.data.success) {
+        setBuyerTransfersHistory(historyResponse.data.transfers || []);
       }
     } catch (error) {
       console.error('Error fetching buyer transfers:', error);
       setBuyerTransfers([]);
+      setBuyerTransfersHistory([]);
     } finally {
       setLoadingBuyerTransfers(false);
     }
@@ -379,6 +395,13 @@ const StockInPage: React.FC = () => {
         responseType: 'blob'
       });
 
+      // Check if response is actually JSON error (not PDF)
+      if (response.data.type === 'application/json') {
+        const text = await response.data.text();
+        const errorData = JSON.parse(text);
+        throw new Error(errorData.error || 'Failed to download PDF');
+      }
+
       // Create download link
       const blob = new Blob([response.data], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
@@ -391,7 +414,8 @@ const StockInPage: React.FC = () => {
       window.URL.revokeObjectURL(url);
     } catch (error: any) {
       console.error('Error downloading PDF:', error);
-      alert(error.response?.data?.error || 'Failed to download PDF');
+      const errorMessage = error.message || error.response?.data?.error || 'Failed to download PDF';
+      alert(errorMessage);
     }
   };
 
@@ -495,6 +519,25 @@ const StockInPage: React.FC = () => {
       return bLatest - aLatest;
     });
   }, [filteredTransactions]);
+
+  // Pagination for grouped transactions
+  const totalPages = Math.ceil(groupedTransactions.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedGroups = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return groupedTransactions.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [groupedTransactions, currentPage]);
+
+  // Reset page when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  // Clamp page when total pages changes
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
 
   const toggleMaterialExpansion = (materialId: number) => {
     setExpandedMaterials(prev => {
@@ -934,7 +977,7 @@ const StockInPage: React.FC = () => {
           </div>
         ) : (
           <div className="divide-y divide-gray-200">
-            {groupedTransactions.map((group) => {
+            {paginatedGroups.map((group) => {
               const isExpanded = expandedMaterials.has(group.material.id);
               const transactionCount = group.transactions.length;
 
@@ -1085,6 +1128,40 @@ const StockInPage: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {groupedTransactions.length > 0 && (
+          <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+              <div className="text-sm text-gray-600">
+                Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, groupedTransactions.length)} of {groupedTransactions.length} materials
+              </div>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Previous
+                  </button>
+                  <span className="text-sm text-gray-600 px-2">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -1936,19 +2013,44 @@ const StockInPage: React.FC = () => {
               </button>
             </div>
 
+            {/* Tabs */}
+            <div className="flex border-b border-gray-200 px-6 bg-gray-50">
+              <button
+                onClick={() => setBuyerTransfersTab('pending')}
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  buyerTransfersTab === 'pending'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Pending ({buyerTransfers.length})
+              </button>
+              <button
+                onClick={() => setBuyerTransfersTab('history')}
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  buyerTransfersTab === 'history'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                History ({buyerTransfersHistory.length})
+              </button>
+            </div>
+
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto max-h-[60vh]">
               {loadingBuyerTransfers ? (
                 <div className="flex items-center justify-center py-12">
                   <ModernLoadingSpinners size="md" />
                 </div>
-              ) : buyerTransfers.length === 0 ? (
-                <div className="text-center py-12">
-                  <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500">No pending buyer transfers</p>
-                  <p className="text-sm text-gray-400 mt-1">All transfers have been received</p>
-                </div>
-              ) : (
+              ) : buyerTransfersTab === 'pending' ? (
+                buyerTransfers.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-gray-500">No pending buyer transfers</p>
+                    <p className="text-sm text-gray-400 mt-1">All transfers have been received</p>
+                  </div>
+                ) : (
                 <div className="space-y-4">
                   {buyerTransfers.map((transfer) => (
                     <div
@@ -2021,13 +2123,89 @@ const StockInPage: React.FC = () => {
                     </div>
                   ))}
                 </div>
+                )
+              ) : (
+                /* History Tab */
+                buyerTransfersHistory.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-gray-500">No transfer history</p>
+                    <p className="text-sm text-gray-400 mt-1">Received transfers will appear here</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {buyerTransfersHistory.map((transfer) => (
+                      <div
+                        key={transfer.delivery_note_id}
+                        className="border border-green-200 rounded-lg p-4 bg-green-50"
+                      >
+                        {/* Transfer Header */}
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <span className="font-semibold text-green-700">{transfer.delivery_note_number}</span>
+                              <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">
+                                RECEIVED
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-600 mt-1">From: {transfer.created_by}</p>
+                            {transfer.received_at && (
+                              <p className="text-xs text-gray-500">
+                                Received: {new Date(transfer.received_at).toLocaleString()}
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleDownloadBuyerTransferPDF(transfer.delivery_note_id, transfer.delivery_note_number)}
+                            className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-white border border-green-300 text-green-700 hover:bg-green-50 transition-colors text-sm"
+                          >
+                            <Download className="w-4 h-4" />
+                            <span>PDF</span>
+                          </button>
+                        </div>
+
+                        {/* Materials List */}
+                        <div className="bg-white rounded-lg p-3 mt-3 border border-green-200">
+                          <p className="text-xs font-medium text-gray-600 mb-2">Materials ({transfer.total_items})</p>
+                          <div className="space-y-2 max-h-32 overflow-y-auto">
+                            {transfer.materials?.map((material: any, idx: number) => (
+                              <div key={idx} className="flex justify-between text-sm">
+                                <span className="text-gray-700">{material.material_name}</span>
+                                <span className="text-gray-600">{material.quantity} {material.unit}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Transport Info */}
+                        {transfer.vehicle_number && (
+                          <div className="mt-3 pt-3 border-t border-green-200 grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-gray-500">Vehicle:</span>
+                              <span className="ml-1 text-gray-700">{transfer.vehicle_number}</span>
+                            </div>
+                            {transfer.driver_name && (
+                              <div>
+                                <span className="text-gray-500">Driver:</span>
+                                <span className="ml-1 text-gray-700">{transfer.driver_name}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )
               )}
             </div>
 
             {/* Modal Footer */}
             <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
               <p className="text-sm text-gray-500">
-                {buyerTransfers.length} pending transfer{buyerTransfers.length !== 1 ? 's' : ''}
+                {buyerTransfersTab === 'pending'
+                  ? `${buyerTransfers.length} pending transfer${buyerTransfers.length !== 1 ? 's' : ''}`
+                  : `${buyerTransfersHistory.length} received transfer${buyerTransfersHistory.length !== 1 ? 's' : ''}`
+                }
               </p>
               <button
                 onClick={() => setShowBuyerTransfersModal(false)}

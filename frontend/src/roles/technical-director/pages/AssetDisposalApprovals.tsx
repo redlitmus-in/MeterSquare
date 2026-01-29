@@ -14,7 +14,9 @@ import {
   XCircle,
   Clock,
   Image as ImageIcon,
-  Wrench
+  Wrench,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import {
   getAssetDisposalRequests,
@@ -25,6 +27,7 @@ import {
 } from '@/roles/production-manager/services/assetDnService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { PAGINATION } from '@/lib/constants';
 
 interface AssetDisposal {
   disposal_id: number;
@@ -67,6 +70,7 @@ const AssetDisposalApprovals: React.FC = () => {
   const [reviewNotes, setReviewNotes] = useState('');
   const [rejectAction, setRejectAction] = useState<'return_to_stock' | 'send_to_repair' | null>(null);
   const [saving, setSaving] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     fetchDisposalRequests();
@@ -128,6 +132,19 @@ const AssetDisposalApprovals: React.FC = () => {
 
     return filtered;
   }, [searchTerm, statusFilter, disposalRequests]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, searchTerm]);
+
+  // Pagination calculations
+  const totalRecords = filteredRequests.length;
+  const totalPages = Math.ceil(totalRecords / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequests = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredRequests.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequests, currentPage]);
 
   const handleViewDetails = async (disposal: AssetDisposal) => {
     try {
@@ -442,8 +459,8 @@ const AssetDisposalApprovals: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
-                {filteredRequests.length > 0 ? (
-                  filteredRequests.map((request) => (
+                {paginatedRequests.length > 0 ? (
+                  paginatedRequests.map((request) => (
                     <tr key={request.disposal_id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
                         <div>
@@ -523,10 +540,57 @@ const AssetDisposalApprovals: React.FC = () => {
           </div>
         </div>
 
-        {/* Results count */}
-        {filteredRequests.length > 0 && (
-          <div className="mt-6 text-sm text-gray-600 text-center">
-            Showing {filteredRequests.length} of {disposalRequests.length} asset disposal requests
+        {/* Pagination */}
+        {totalRecords > 0 && (
+          <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-sm text-gray-600">
+              Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} to {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)} of {totalRecords} asset disposal requests
+            </p>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                  if (
+                    page === 1 ||
+                    page === totalPages ||
+                    (page >= currentPage - 1 && page <= currentPage + 1)
+                  ) {
+                    return (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          currentPage === page
+                            ? 'bg-red-600 text-white'
+                            : 'border border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    );
+                  } else if (
+                    page === currentPage - 2 ||
+                    page === currentPage + 2
+                  ) {
+                    return <span key={page} className="px-1">...</span>;
+                  }
+                  return null;
+                })}
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -214,9 +214,9 @@ ALLOWED_LPO_EXTENSIONS = ['.pdf', '.docx', '.doc']
 ALLOWED_BOQ_EXTENSIONS = ['.xlsx', '.xls']
 ALLOWED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif']
 
-# Pagination
-DEFAULT_PAGE_SIZE = 20
-MAX_PAGE_SIZE = 100
+# Pagination - Import from utils/pagination.py for the single source of truth
+# These are re-exported here for backward compatibility
+from utils.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 # Price Precision
 PRICE_DECIMAL_PLACES = 2

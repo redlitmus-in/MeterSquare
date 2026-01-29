@@ -7,7 +7,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Wrench, RefreshCw, CheckCircle, Package,
-  AlertTriangle, Trash2, Eye, X, Search, Clock, History, Upload, Image
+  AlertTriangle, Trash2, Eye, X, Search, Clock, History, Upload, Image,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import {
@@ -19,6 +20,7 @@ import {
   DisposalReason
 } from '../services/assetDnService';
 import { showSuccess, showError } from '@/utils/toastHelper';
+import { PAGINATION } from '@/lib/inventoryConstants';
 
 type TabType = 'pending' | 'history';
 
@@ -47,6 +49,9 @@ const AssetRepairManagement: React.FC = () => {
   const [disposeJustification, setDisposeJustification] = useState('');
   const [disposalImage, setDisposalImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     fetchData();
@@ -82,6 +87,25 @@ const AssetRepairManagement: React.FC = () => {
       item.project_name?.toLowerCase().includes(term)
     );
   }, [currentItems, searchTerm]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredItems.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedItems = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredItems.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredItems, currentPage]);
+
+  // Reset page when tab or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchTerm]);
+
+  // Clamp page when total pages decreases
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const handleViewDetails = (item: AssetRepairItem) => {
     setSelectedItem(item);
@@ -304,7 +328,7 @@ const AssetRepairManagement: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredItems.map(item => (
+                {paginatedItems.map(item => (
                   <tr key={item.return_item_id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div>
@@ -364,6 +388,38 @@ const AssetRepairManagement: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {filteredItems.length > 0 && (
+          <div className="px-4 py-3 bg-gray-50 border-t flex items-center justify-between text-sm">
+            <span className="text-gray-600">
+              Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredItems.length)} of {filteredItems.length} items
+            </span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </button>
+                <span className="text-sm text-gray-600">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

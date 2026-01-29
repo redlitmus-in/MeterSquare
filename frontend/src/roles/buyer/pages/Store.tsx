@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Search, Package, X, SendHorizontal, ClipboardList, RefreshCw } from 'lucide-react';
+import { Search, Package, X, SendHorizontal, ClipboardList, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
@@ -11,7 +11,7 @@ import { storeService, StoreItem } from '../services/storeService';
 import { buyerService } from '../services/buyerService';
 import { apiClient } from '@/api/config';
 import { API_BASE_URL } from '@/api/config';
-import { STALE_TIMES } from '@/lib/constants';
+import { STALE_TIMES, PAGINATION } from '@/lib/constants';
 
 // Use centralized API URL from config
 const API_URL = API_BASE_URL;
@@ -61,6 +61,10 @@ const Store: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+
+  // Pagination states
+  const [storeCurrentPage, setStoreCurrentPage] = useState(1);
+  const [requestsCurrentPage, setRequestsCurrentPage] = useState(1);
 
 
   // Fetch store items from backend
@@ -136,6 +140,16 @@ const Store: React.FC = () => {
     }
   }, [activeTab]);
 
+  // Reset store page when search/category changes
+  useEffect(() => {
+    setStoreCurrentPage(1);
+  }, [searchTerm, selectedCategory]);
+
+  // Reset requests page when filter changes
+  useEffect(() => {
+    setRequestsCurrentPage(1);
+  }, [requestFilter]);
+
   // Get unique categories
   const categories = useMemo(() => {
     if (!storeItems) return ['all'];
@@ -161,6 +175,47 @@ const Store: React.FC = () => {
       return matchesSearch && matchesCategory;
     });
   }, [storeItems, searchTerm, selectedCategory]);
+
+  // Pagination for Store Items
+  const storeTotalPages = Math.ceil(filteredItems.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedStoreItems = useMemo(() => {
+    const startIndex = (storeCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredItems.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredItems, storeCurrentPage]);
+
+  // Filtered requests based on filter
+  const filteredRequests = useMemo(() => {
+    if (!Array.isArray(myRequests)) return [];
+    return myRequests.filter(r => {
+      const status = r.status?.toUpperCase() || '';
+      if (requestFilter === 'completed') {
+        return ['FULFILLED', 'DELIVERED'].includes(status);
+      } else {
+        return !['FULFILLED', 'DELIVERED', 'REJECTED'].includes(status);
+      }
+    });
+  }, [myRequests, requestFilter]);
+
+  // Pagination for Requests
+  const requestsTotalPages = Math.ceil(filteredRequests.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequests = useMemo(() => {
+    const startIndex = (requestsCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredRequests.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequests, requestsCurrentPage]);
+
+  // Clamp store page when total pages changes (e.g., real-time data update)
+  useEffect(() => {
+    if (storeCurrentPage > storeTotalPages && storeTotalPages > 0) {
+      setStoreCurrentPage(storeTotalPages);
+    }
+  }, [storeTotalPages, storeCurrentPage]);
+
+  // Clamp requests page when total pages changes
+  useEffect(() => {
+    if (requestsCurrentPage > requestsTotalPages && requestsTotalPages > 0) {
+      setRequestsCurrentPage(requestsTotalPages);
+    }
+  }, [requestsTotalPages, requestsCurrentPage]);
 
   // Open request modal
   const openRequestModal = (item: StoreItem) => {
@@ -350,7 +405,7 @@ const Store: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {filteredItems.map((item, index) => (
+                    {paginatedStoreItems.map((item, index) => (
                       <tr
                         key={item.id}
                         className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}
@@ -405,9 +460,40 @@ const Store: React.FC = () => {
             </div>
           )}
 
+          {/* Pagination for Store Items */}
           {!isLoading && filteredItems.length > 0 && (
-            <div className="mt-4 text-sm text-gray-600">
-              Showing {filteredItems.length} of {storeItems?.length || 0} materials
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-4">
+              <div className="text-sm text-gray-600">
+                Showing {((storeCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(storeCurrentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredItems.length)} of {filteredItems.length} materials
+                {storeItems && filteredItems.length !== storeItems.length && (
+                  <span className="text-gray-400"> (filtered from {storeItems.length})</span>
+                )}
+              </div>
+              {storeTotalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setStoreCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={storeCurrentPage === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Previous
+                  </Button>
+                  <span className="text-sm text-gray-600 px-2">
+                    Page {storeCurrentPage} of {storeTotalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setStoreCurrentPage(prev => Math.min(prev + 1, storeTotalPages))}
+                    disabled={storeCurrentPage === storeTotalPages}
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </>
@@ -474,16 +560,7 @@ const Store: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {Array.isArray(myRequests) && myRequests
-                    .filter(r => {
-                      const status = r.status?.toUpperCase() || '';
-                      if (requestFilter === 'completed') {
-                        return ['FULFILLED', 'DELIVERED'].includes(status);
-                      } else {
-                        return !['FULFILLED', 'DELIVERED', 'REJECTED'].includes(status);
-                      }
-                    })
-                    .map((request, index) => (
+                  {paginatedRequests.map((request, index) => (
                     <tr
                       key={request.request_id}
                       className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}
@@ -525,14 +602,7 @@ const Store: React.FC = () => {
                 </tbody>
               </table>
 
-              {(!Array.isArray(myRequests) || myRequests.filter(r => {
-                const status = r.status?.toUpperCase() || '';
-                if (requestFilter === 'completed') {
-                  return ['FULFILLED', 'DELIVERED'].includes(status);
-                } else {
-                  return !['FULFILLED', 'DELIVERED', 'REJECTED'].includes(status);
-                }
-              }).length === 0) && (
+              {filteredRequests.length === 0 && (
                 <div className="text-center py-12">
                   <ClipboardList className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -556,6 +626,43 @@ const Store: React.FC = () => {
             </div>
           )}
 
+          {/* Pagination for My Requests */}
+          {!isLoadingRequests && filteredRequests.length > 0 && (
+            <div className="p-4 border-t">
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div className="text-sm text-gray-600">
+                  Showing {((requestsCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(requestsCurrentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredRequests.length)} of {filteredRequests.length} {requestFilter} requests
+                </div>
+                {requestsTotalPages > 1 && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRequestsCurrentPage(prev => Math.max(prev - 1, 1))}
+                      disabled={requestsCurrentPage === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    <span className="text-sm text-gray-600 px-2">
+                      Page {requestsCurrentPage} of {requestsTotalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRequestsCurrentPage(prev => Math.min(prev + 1, requestsTotalPages))}
+                      disabled={requestsCurrentPage === requestsTotalPages}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Summary Stats */}
           {!isLoadingRequests && Array.isArray(myRequests) && myRequests.length > 0 && (
             <div className="p-4 border-t text-sm text-gray-600">
               Total {myRequests.length} request(s) •

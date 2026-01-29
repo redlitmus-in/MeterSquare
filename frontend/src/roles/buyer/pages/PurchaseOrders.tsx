@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -40,11 +40,24 @@ import MaterialVendorSelectionModal from '../components/MaterialVendorSelectionM
 import VendorEmailModal from '../components/VendorEmailModal';
 import EditPricesModal from '../components/EditPricesModal';
 import { removeQueries } from '@/lib/queryClient';
-import { STALE_TIMES, REALTIME_TABLES } from '@/lib/constants';
+import { STALE_TIMES, REALTIME_TABLES, PAGINATION } from '@/lib/constants';
 
 // Helper function to check if an item is a POChild (has parent_cr_id) vs a Purchase (has cr_id)
-const isPOChild = (item: Purchase | POChild): item is POChild => {
+const isPOChild = (item: Purchase | POChild | TDRejectedPOChild): item is POChild | TDRejectedPOChild => {
   return 'parent_cr_id' in item;
+};
+
+// Helper function to check if an item is a TDRejectedPOChild (has po_child_id instead of id)
+const isTDRejectedPOChild = (item: any): item is TDRejectedPOChild => {
+  return 'po_child_id' in item && !('id' in item);
+};
+
+// Helper to get the unique ID for a POChild or TDRejectedPOChild
+const getPOChildId = (item: POChild | TDRejectedPOChild): number => {
+  if ('po_child_id' in item) {
+    return (item as TDRejectedPOChild).po_child_id;
+  }
+  return (item as POChild).id;
 };
 
 const PurchaseOrders: React.FC = () => {
@@ -83,7 +96,7 @@ const PurchaseOrders: React.FC = () => {
   const [pendingPage, setPendingPage] = useState(1);
   const [completedPage, setCompletedPage] = useState(1);
   const [rejectedPage, setRejectedPage] = useState(1);
-  const perPage = 20; // Items per page
+  const perPage = PAGINATION.DEFAULT_PAGE_SIZE; // Items per page
 
   // ✅ OPTIMIZED: Fetch pending purchases - Real-time updates via Supabase (NO POLLING)
   // BEFORE: Polling every 2 seconds = 30 requests/minute per user
@@ -263,46 +276,88 @@ const PurchaseOrders: React.FC = () => {
 
   // Determine which purchases to show based on active tab and sub-tab
   const currentPurchases = useMemo(() => {
+    let items: Array<Purchase | POChild> = [];
+
     if (activeTab === 'ongoing') {
-      if (ongoingSubTab === 'pending_purchase') return pendingPurchaseItems;
-      if (ongoingSubTab === 'store_approved') return storeApprovedItems;
-      return vendorApprovedItems;
+      if (ongoingSubTab === 'pending_purchase') items = pendingPurchaseItems;
+      else if (ongoingSubTab === 'store_approved') items = storeApprovedItems;
+      else items = vendorApprovedItems;
     } else if (activeTab === 'pending_approval') {
       // Sub-tabs for pending approval
-      // For vendor_approval subtab, return BOTH parent CRs pending approval AND POChild records
       if (pendingApprovalSubTab === 'vendor_approval') {
-        return [...vendorPendingApproval, ...pendingPOChildren];
+        // Get parent CR IDs that have POChildren pending
+        const parentIdsWithPOChildren = new Set(
+          pendingPOChildren.map(child => child.parent_cr_id).filter(Boolean)
+        );
+
+        // Only include parent CRs that DON'T have POChildren (single vendor, not split)
+        // Parents with POChildren should only show their children, not the parent card
+        const parentsWithoutChildren = vendorPendingApproval.filter(
+          p => !parentIdsWithPOChildren.has(p.cr_id)
+        );
+
+        // Combine: Parents without children + All POChildren
+        items = [...parentsWithoutChildren, ...pendingPOChildren];
+      } else {
+        items = storeRequestsPending;
       }
-      return storeRequestsPending;
     } else if (activeTab === 'rejected') {
-      return rejectedPurchases;
+      // Merge rejectedPurchases and tdRejectedPOChildren for unified display
+      items = [...rejectedPurchases, ...tdRejectedPOChildren];
+    } else if (activeTab === 'completed') {
+      // Merge completedPurchases and completedPOChildren for unified display
+      items = [...completedPurchases, ...completedPOChildren];
     } else {
-      return completedPurchases;
+      items = completedPurchases;
     }
-  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, storeRequestsPending, vendorPendingApproval, pendingPOChildren, completedPurchases, rejectedPurchases]);
+
+    // Deduplicate items based on unique identifier
+    const seen = new Set<string>();
+    return items.filter(item => {
+      const key = isPOChild(item)
+        ? `poChild-${getPOChildId(item)}`
+        : `purchase-${item.cr_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, storeRequestsPending, vendorPendingApproval, pendingPOChildren, completedPurchases, completedPOChildren, rejectedPurchases, tdRejectedPOChildren]);
 
   const filteredPurchases = useMemo(() => {
     return currentPurchases
-      .filter(purchase => {
+      .filter(item => {
+        if (!searchTerm) return true;
+
         const searchLower = searchTerm.toLowerCase().trim();
-        // ✅ Search by ID (CR-123, PO-123, 123), project code (MSQ26), project name, client, or item
-        const crIdString = `cr-${purchase.cr_id}`;
-        const poIdString = `po-${purchase.cr_id}`;
-        const matchesSearch = !searchTerm ||
-          purchase.project_name.toLowerCase().includes(searchLower) ||
-          purchase.client.toLowerCase().includes(searchLower) ||
-          purchase.item_name.toLowerCase().includes(searchLower) ||
-          purchase.project_code?.toLowerCase().includes(searchLower) ||
+
+        // Handle POChild items differently
+        if (isPOChild(item)) {
+          const poIdString = `po-${getPOChildId(item)}`;
+          const formattedId = (item.formatted_id || '').toLowerCase();
+          return (item.project_name || item.item_name || '').toLowerCase().includes(searchLower) ||
+            (item.vendor_name || '').toLowerCase().includes(searchLower) ||
+            (item.client || '').toLowerCase().includes(searchLower) ||
+            item.project_code?.toLowerCase().includes(searchLower) ||
+            poIdString.includes(searchLower) ||
+            formattedId.includes(searchLower) ||
+            getPOChildId(item)?.toString().includes(searchTerm.trim());
+        }
+
+        // Handle Purchase items
+        const crIdString = `cr-${item.cr_id}`;
+        const poIdString = `po-${item.cr_id}`;
+        return item.project_name?.toLowerCase().includes(searchLower) ||
+          item.client?.toLowerCase().includes(searchLower) ||
+          item.item_name?.toLowerCase().includes(searchLower) ||
+          item.project_code?.toLowerCase().includes(searchLower) ||
           crIdString.includes(searchLower) ||
           poIdString.includes(searchLower) ||
-          purchase.cr_id?.toString().includes(searchTerm.trim());
-
-        return matchesSearch;
+          item.cr_id?.toString().includes(searchTerm.trim());
       })
       .sort((a, b) => {
         // Sort by created_at in descending order (newest first)
-        const dateA = new Date(a.created_at).getTime();
-        const dateB = new Date(b.created_at).getTime();
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
         return dateB - dateA;
       });
   }, [currentPurchases, searchTerm]);
@@ -316,7 +371,7 @@ const PurchaseOrders: React.FC = () => {
     // Filter approved PO children by search term (includes ID and project code search)
     const searchLower = searchTerm.toLowerCase().trim();
     const filteredPOChildren = approvedPOChildren.filter(poChild => {
-      const poIdString = `po-${poChild.id}`;
+      const poIdString = `po-${getPOChildId(poChild)}`;
       const formattedId = (poChild.formatted_id || '').toLowerCase();
       return !searchTerm ||
         (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
@@ -324,7 +379,7 @@ const PurchaseOrders: React.FC = () => {
         poChild.project_code?.toLowerCase().includes(searchLower) ||
         poIdString.includes(searchLower) ||
         formattedId.includes(searchLower) ||
-        poChild.id?.toString().includes(searchTerm.trim());
+        getPOChildId(poChild)?.toString().includes(searchTerm.trim());
     });
 
     // Combine filtered purchases and filtered PO children
@@ -378,23 +433,46 @@ const PurchaseOrders: React.FC = () => {
 
   // Paginate the items for display (client-side pagination)
   const paginatedItems = useMemo(() => {
-    const itemsPerPage = 20;
+    const itemsPerPage = PAGINATION.DEFAULT_PAGE_SIZE;
 
     // Determine which items to use based on active tab and subtab
     let items: Array<Purchase | POChild>;
     if (activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved') {
       items = mergedVendorApprovedItems;
-    } else if (activeTab === 'pending_approval' && pendingApprovalSubTab === 'vendor_approval') {
-      // For pending_approval vendor_approval, combine parent CRs and POChildren
-      items = [...vendorPendingApproval, ...pendingPOChildren];
     } else {
+      // For all other tabs (including pending_approval vendor_approval), use filteredPurchases
+      // which already contains the correct merged data from currentPurchases
       items = filteredPurchases;
     }
 
     const startIndex = (currentTabPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
+
     return items.slice(startIndex, endIndex);
-  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, mergedVendorApprovedItems, filteredPurchases, vendorPendingApproval, pendingPOChildren, currentTabPage]);
+  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, mergedVendorApprovedItems, filteredPurchases, currentTabPage]);
+
+  // Calculate the actual vendor pending count based on filteredPurchases when on that tab
+  const vendorPendingActualCount = useMemo(() => {
+    // This should match exactly what currentPurchases returns for vendor_approval subtab
+    const parentIdsWithPOChildren = new Set(
+      pendingPOChildren.map(child => child.parent_cr_id).filter(Boolean)
+    );
+    const parentsWithoutChildren = vendorPendingApproval.filter(
+      p => !parentIdsWithPOChildren.has(p.cr_id)
+    );
+
+    // Combine and deduplicate (same logic as currentPurchases)
+    const items = [...parentsWithoutChildren, ...pendingPOChildren];
+    const seen = new Set<string>();
+    return items.filter(item => {
+      const key = isPOChild(item)
+        ? `poChild-${getPOChildId(item)}`
+        : `purchase-${(item as Purchase).cr_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).length;
+  }, [vendorPendingApproval, pendingPOChildren]);
 
   const stats = useMemo(() => {
     return {
@@ -402,13 +480,25 @@ const PurchaseOrders: React.FC = () => {
       pendingPurchase: pendingPurchaseItems.length,
       storeApproved: storeApprovedItems.length,
       vendorApproved: vendorApprovedItems.length + approvedPOChildren.length,
-      pendingApproval: pendingApprovalPurchases.length + pendingPOChildren.length,
+      pendingApproval: storeRequestsPending.length + vendorPendingActualCount,
       storeRequestsPending: storeRequestsPending.length,
-      vendorPendingApproval: vendorPendingApproval.length + pendingPOChildren.length,
+      vendorPendingApproval: vendorPendingActualCount,
       completed: completedPurchases.length + completedPOChildren.length,
       rejected: rejectedPurchases.length + tdRejectedPOChildren.length
     };
-  }, [pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, approvedPOChildren, pendingApprovalPurchases, pendingPOChildren, completedPurchases, completedPOChildren, rejectedPurchases, tdRejectedPOChildren, storeRequestsPending, vendorPendingApproval]);
+  }, [pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, approvedPOChildren, vendorPendingActualCount, completedPurchases, completedPOChildren, rejectedPurchases, tdRejectedPOChildren, storeRequestsPending]);
+
+  // Reset page to 1 when tab or subtab changes
+  useEffect(() => {
+    setPendingPage(1);
+  }, [activeTab, ongoingSubTab, pendingApprovalSubTab]);
+
+  // Reset page to 1 when search term changes
+  useEffect(() => {
+    setPendingPage(1);
+    setCompletedPage(1);
+    setRejectedPage(1);
+  }, [searchTerm]);
 
   const handleViewDetails = (purchase: Purchase) => {
     setSelectedPurchase(purchase);
@@ -555,7 +645,7 @@ const PurchaseOrders: React.FC = () => {
       any_store_request_rejected: false,
       vendor_selection_pending_td_approval: false,
       item_name: poChild.item_name || '',
-      po_child_id: poChild.id,
+      po_child_id: getPOChildId(poChild),
       child_notes: (poChild as any).child_notes || '',
     } as any;
     setSelectedPurchase(purchaseLike);
@@ -1006,7 +1096,9 @@ const PurchaseOrders: React.FC = () => {
         {/* Content */}
         <div className="space-y-4">
           {/* Check for empty state - use merged arrays for special tabs */}
-          {(activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved' ? mergedVendorApprovedItems.length === 0 : filteredPurchases.length === 0) && !(activeTab === 'completed' && completedPOChildren.length > 0) && !(activeTab === 'rejected' && tdRejectedPOChildren.length > 0) ? (
+          {(activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved'
+            ? mergedVendorApprovedItems.length === 0
+            : filteredPurchases.length === 0) ? (
             <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-12 text-center">
               <ShoppingCart className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 text-lg">
@@ -1040,7 +1132,7 @@ const PurchaseOrders: React.FC = () => {
 
                   return (
                     <motion.div
-                      key={`po-child-${poChild.id}`}
+                      key={`po-child-${getPOChildId(poChild)}`}
                       initial={false}
                       animate={{ opacity: 1, y: 0 }}
                       className={`bg-white rounded-xl border shadow-sm hover:shadow-md transition-all flex flex-col ${borderColor}`}
@@ -1183,6 +1275,66 @@ const PurchaseOrders: React.FC = () => {
 
                         {/* Action Buttons */}
                         <div className="flex flex-col gap-1.5 mt-auto">
+                          {/* Select New Vendor for Rejected POChildren */}
+                          {isRejected && (
+                            <>
+                              <Button
+                                onClick={() => {
+                                  const purchaseLike: Purchase = {
+                                    cr_id: poChild.parent_cr_id,
+                                    formatted_cr_id: poChild.formatted_id,
+                                    project_id: poChild.project_id || 0,
+                                    project_name: poChild.project_name || 'Unknown Project',
+                                    project_code: poChild.project_code,
+                                    client: poChild.client || '',
+                                    location: poChild.location || '',
+                                    boq_id: poChild.boq_id || 0,
+                                    boq_name: poChild.boq_name || '',
+                                    item_name: poChild.item_name || '',
+                                    sub_item_name: '',
+                                    request_type: '',
+                                    reason: '',
+                                    materials: poChild.materials || [],
+                                    materials_count: poChild.materials_count || poChild.materials?.length || 0,
+                                    total_cost: poChild.materials_total_cost || 0,
+                                    approved_by: 0,
+                                    approved_at: null,
+                                    created_at: poChild.created_at || '',
+                                    status: 'pending',
+                                    po_child_id: getPOChildId(poChild),
+                                    child_notes: (poChild as any).child_notes || '',
+                                  } as any;
+                                  setSelectedPurchase(purchaseLike);
+                                  setIsVendorSelectionModalOpen(true);
+                                }}
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs"
+                                size="sm"
+                              >
+                                <Store className="w-3.5 h-3.5 mr-1.5" />
+                                Select New Vendor
+                              </Button>
+
+                              <Button
+                                onClick={() => {
+                                  const purchaseLike: Purchase = {
+                                    ...poChild,
+                                    cr_id: poChild.parent_cr_id,
+                                    vendor_id: poChild.vendor_id || 0,
+                                    status: 'rejected',
+                                  } as any;
+                                  setSelectedPurchase(purchaseLike);
+                                  setIsDetailsModalOpen(true);
+                                }}
+                                variant="outline"
+                                className="w-full text-xs"
+                                size="sm"
+                              >
+                                <Eye className="w-3.5 h-3.5 mr-1.5" />
+                                View Details
+                              </Button>
+                            </>
+                          )}
+
                           {/* Show buttons ONLY when TD approved */}
                           {isApproved && (
                             <>
@@ -1220,16 +1372,16 @@ const PurchaseOrders: React.FC = () => {
                                         }
                                       } else {
                                         // No project_id, complete directly with proper cache invalidation
-                                        await handlePOChildComplete(poChild.id);
+                                        await handlePOChildComplete(getPOChildId(poChild));
                                       }
                                     }}
-                                    disabled={completingPurchaseId === poChild.id}
+                                    disabled={completingPurchaseId === getPOChildId(poChild)}
                                     variant="default"
                                     size="sm"
                                     className="w-full h-7 text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1"
                                     title="Materials will go to M2 Store first, then Production Manager will dispatch to site"
                                   >
-                                    {completingPurchaseId === poChild.id ? (
+                                    {completingPurchaseId === getPOChildId(poChild) ? (
                                       <>
                                         <ModernLoadingSpinners size="xxs" />
                                         Sending to Store...
@@ -1270,7 +1422,7 @@ const PurchaseOrders: React.FC = () => {
                                         any_store_request_rejected: false,
                                         vendor_selection_pending_td_approval: false,
                                         item_name: poChild.item_name || '',
-                                        po_child_id: poChild.id,
+                                        po_child_id: getPOChildId(poChild),
                                         child_notes: (poChild as any).child_notes || '',
                                       } as any;
                                       setSelectedPurchase(purchaseLike);
@@ -1344,7 +1496,7 @@ const PurchaseOrders: React.FC = () => {
                                 any_store_request_rejected: false,
                                 vendor_selection_pending_td_approval: false,
                                 item_name: poChild.item_name || '',
-                                po_child_id: poChild.id,
+                                po_child_id: getPOChildId(poChild),
                                 child_notes: (poChild as any).child_notes || '',
                               } as any;
                               handleViewDetails(purchaseLike);
@@ -1838,7 +1990,7 @@ const PurchaseOrders: React.FC = () => {
                       <div className="flex flex-wrap gap-1">
                         {purchase.po_children.map((poChild) => (
                           <div
-                            key={poChild.id}
+                            key={`po-child-${getPOChildId(poChild)}`}
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${
                               poChild.vendor_selection_status === 'approved'
                                 ? 'bg-green-50 border-green-200 text-green-800'
@@ -1879,7 +2031,7 @@ const PurchaseOrders: React.FC = () => {
                 )
                 .map((poChild) => (
                 <motion.div
-                  key={`po-child-${poChild.id}`}
+                  key={`po-child-${getPOChildId(poChild)}`}
                   initial={false}
                   animate={{ opacity: 1, y: 0 }}
                   className="bg-white rounded-xl border shadow-sm hover:shadow-md transition-all flex flex-col border-green-300"
@@ -2023,7 +2175,7 @@ const PurchaseOrders: React.FC = () => {
                                 vendor_email: poChild.vendor_email,
                                 supplier_notes: poChild.supplier_notes,
                                 vendor_selection_status: poChild.vendor_selection_status,
-                                po_child_id: poChild.id,  // Pass POChild ID for email API
+                                po_child_id: getPOChildId(poChild),  // Pass POChild ID for email API
                                 child_notes: (poChild as any).child_notes || '',
                               } as any;
                               setSelectedPurchase(purchaseLike);
@@ -2099,15 +2251,15 @@ const PurchaseOrders: React.FC = () => {
                                 }
                               } else {
                                 // No project_id, complete directly with proper cache invalidation
-                                await handlePOChildComplete(poChild.id);
+                                await handlePOChildComplete(getPOChildId(poChild));
                               }
                             }}
-                            disabled={completingPurchaseId === poChild.id}
+                            disabled={completingPurchaseId === getPOChildId(poChild)}
                             className="w-full bg-green-600 hover:bg-green-700 text-white text-xs"
                             size="sm"
                             title="Materials will go to M2 Store first, then Production Manager will dispatch to site"
                           >
-                            {completingPurchaseId === poChild.id ? (
+                            {completingPurchaseId === getPOChildId(poChild) ? (
                               <>
                                 <ModernLoadingSpinners size="xxs" className="mr-1.5" />
                                 Sending to Store...
@@ -2163,513 +2315,7 @@ const PurchaseOrders: React.FC = () => {
                   </div>
                 </motion.div>
               ))}
-
-              {/* Pending POChildren Cards (when on Pending Approval tab) */}
-              {activeTab === 'pending_approval' && pendingPOChildren
-                .filter(poChild => {
-                  const searchLower = searchTerm.toLowerCase().trim();
-                  const poIdString = `po-${poChild.id}`;
-                  const formattedId = (poChild.formatted_id || '').toLowerCase();
-                  return !searchTerm ||
-                    (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
-                    (poChild.vendor_name || '').toLowerCase().includes(searchLower) ||
-                    poChild.project_code?.toLowerCase().includes(searchLower) ||
-                    poIdString.includes(searchLower) ||
-                    formattedId.includes(searchLower) ||
-                    poChild.id?.toString().includes(searchTerm.trim());
-                })
-                .map((poChild) => (
-                <motion.div
-                  key={`pending-po-child-${poChild.id}`}
-                  initial={false}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-white rounded-xl border shadow-sm hover:shadow-md transition-all flex flex-col border-amber-300"
-                >
-                  {/* Card Header */}
-                  <div className="px-4 py-3 border-b bg-gradient-to-r from-amber-50 to-amber-100 border-amber-200">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <h3 className="text-base font-bold text-gray-900 line-clamp-1">{poChild.project_name || 'Unknown Project'}</h3>
-                      <Badge className="bg-amber-100 text-amber-800 text-xs whitespace-nowrap">
-                        {poChild.formatted_id}
-                      </Badge>
-                    </div>
-                    <div className="space-y-1 text-xs text-gray-600">
-                      {poChild.project_code && (
-                        <div className="flex items-center gap-1.5">
-                          <FileText className="w-3 h-3 flex-shrink-0 text-blue-600" />
-                          <span className="truncate font-semibold text-blue-900">Project Code: {poChild.project_code}</span>
-                        </div>
-                      )}
-                      {poChild.client && (
-                        <div className="flex items-center gap-1.5">
-                          <Building2 className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.client}</span>
-                        </div>
-                      )}
-                      {poChild.location && (
-                        <div className="flex items-center gap-1.5">
-                          <MapPin className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.location}</span>
-                        </div>
-                      )}
-                      {poChild.boq_name && (
-                        <div className="flex items-center gap-1.5">
-                          <FileText className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.boq_name}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Card Body */}
-                  <div className="px-4 py-3 flex-1 flex flex-col">
-                    {/* Vendor Info */}
-                    {poChild.vendor_name && (
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-                        <div className="text-xs text-amber-600 mb-1">Selected Vendor</div>
-                        <div className="flex items-center gap-2">
-                          <Store className="w-4 h-4 text-amber-700" />
-                          <span className="text-sm font-semibold text-amber-900">{poChild.vendor_name}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Item */}
-                    {poChild.item_name && (
-                      <div className="mb-3">
-                        <div className="text-xs text-gray-500 mb-1">Item</div>
-                        <div className="font-medium text-sm">{poChild.item_name}</div>
-                      </div>
-                    )}
-
-                    {/* Details Row */}
-                    <div className="grid grid-cols-2 gap-3 mb-3">
-                      <div>
-                        <div className="text-xs text-gray-500 mb-1">Created</div>
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                          <Calendar className="w-3 h-3" />
-                          {poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-500 mb-1">Materials</div>
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                          <Package className="w-3 h-3" />
-                          {poChild.materials_count || poChild.materials_data?.length || 0} items
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Total Cost */}
-                    <div className="mb-3">
-                      <div className="text-xs text-gray-500 mb-1">Total Cost</div>
-                      <div className="text-lg font-bold text-amber-700">
-                        {formatCurrency(poChild.materials_total_cost || 0)}
-                      </div>
-                    </div>
-
-                    {/* Pending TD Approval Status */}
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-amber-600" />
-                        <div>
-                          <div className="text-xs font-semibold text-amber-900">Pending TD Approval</div>
-                          <div className="text-xs text-amber-700">
-                            Waiting for Technical Director to approve vendor selection
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* View Details Button */}
-                    <div className="flex flex-col gap-1.5 mt-auto">
-                      <Button
-                        onClick={() => {
-                          const purchaseLike: Purchase = {
-                            cr_id: poChild.parent_cr_id,
-                            formatted_cr_id: poChild.formatted_id,
-                            project_id: poChild.project_id || 0,
-                            project_name: poChild.project_name || 'Unknown Project',
-                            project_code: poChild.project_code,
-                            client: poChild.client || '',
-                            location: poChild.location || '',
-                            boq_id: poChild.boq_id || 0,
-                            boq_name: poChild.boq_name || '',
-                            item_name: poChild.item_name || '',
-                            sub_item_name: '',
-                            request_type: '',
-                            reason: '',
-                            materials: poChild.materials || [],
-                            materials_count: poChild.materials_count || poChild.materials_data?.length || 0,
-                            total_cost: poChild.materials_total_cost || 0,
-                            approved_by: 0,
-                            approved_at: null,
-                            created_at: poChild.created_at || '',
-                            status: 'pending',
-                            vendor_id: poChild.vendor_id,
-                            vendor_name: poChild.vendor_name,
-                            child_notes: (poChild as any).child_notes || '',
-                          } as any;
-                          setSelectedPurchase(purchaseLike);
-                          setIsDetailsModalOpen(true);
-                        }}
-                        variant="outline"
-                        className="w-full text-xs"
-                        size="sm"
-                      >
-                        <Eye className="w-3.5 h-3.5 mr-1.5" />
-                        View Details
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-
-              {/* Completed PO Children Cards (when on Completed tab) */}
-              {activeTab === 'completed' && completedPOChildren
-                .filter(poChild => {
-                  const searchLower = searchTerm.toLowerCase().trim();
-                  const poIdString = `po-${poChild.id}`;
-                  const formattedId = (poChild.formatted_id || '').toLowerCase();
-                  return !searchTerm ||
-                    (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
-                    (poChild.vendor_name || '').toLowerCase().includes(searchLower) ||
-                    poChild.project_code?.toLowerCase().includes(searchLower) ||
-                    poIdString.includes(searchLower) ||
-                    formattedId.includes(searchLower) ||
-                    poChild.id?.toString().includes(searchTerm.trim());
-                })
-                .map((poChild) => (
-                <motion.div
-                  key={`completed-po-child-${poChild.id}`}
-                  initial={false}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-white rounded-xl border shadow-sm hover:shadow-md transition-all flex flex-col border-green-300"
-                >
-                  {/* Card Header */}
-                  <div className="px-4 py-3 border-b bg-gradient-to-r from-green-50 to-green-100 border-green-200">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <h3 className="text-base font-bold text-gray-900 line-clamp-1">{poChild.project_name || 'Unknown Project'}</h3>
-                      <Badge className="bg-green-100 text-green-800 text-xs whitespace-nowrap">
-                        {poChild.formatted_id}
-                      </Badge>
-                    </div>
-                    <div className="space-y-1 text-xs text-gray-600">
-                      {poChild.project_code && (
-                        <div className="flex items-center gap-1.5">
-                          <FileText className="w-3 h-3 flex-shrink-0 text-blue-600" />
-                          <span className="truncate font-semibold text-blue-900">Project Code: {poChild.project_code}</span>
-                        </div>
-                      )}
-                      {poChild.client && (
-                        <div className="flex items-center gap-1.5">
-                          <Building2 className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.client}</span>
-                        </div>
-                      )}
-                      {poChild.location && (
-                        <div className="flex items-center gap-1.5">
-                          <MapPin className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.location}</span>
-                        </div>
-                      )}
-                      {poChild.boq_name && (
-                        <div className="flex items-center gap-1.5">
-                          <FileText className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.boq_name}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Card Body */}
-                  <div className="px-4 py-3 flex-1 flex flex-col">
-                    {/* Vendor Info */}
-                    {poChild.vendor_name && (
-                      <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-3">
-                        <div className="text-xs text-green-600 mb-1">Vendor</div>
-                        <div className="flex items-center gap-2">
-                          <Store className="w-4 h-4 text-green-700" />
-                          <span className="text-sm font-semibold text-green-900">{poChild.vendor_name}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Item */}
-                    {poChild.item_name && (
-                      <div className="mb-3">
-                        <div className="text-xs text-gray-500 mb-1">Item</div>
-                        <div className="font-medium text-sm">{poChild.item_name}</div>
-                      </div>
-                    )}
-
-                    {/* Details Row */}
-                    <div className="grid grid-cols-2 gap-3 mb-3">
-                      <div>
-                        <div className="text-xs text-gray-500 mb-1">Created</div>
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                          <Calendar className="w-3 h-3" />
-                          {poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-500 mb-1">Materials</div>
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                          <Package className="w-3 h-3" />
-                          {poChild.materials_count || poChild.materials_data?.length || 0} items
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Total Cost */}
-                    <div className="mb-3">
-                      <div className="text-xs text-gray-500 mb-1">Total Cost</div>
-                      <div className="text-lg font-bold text-green-700">
-                        {formatCurrency(poChild.materials_total_cost || 0)}
-                      </div>
-                    </div>
-
-                    {/* Completed Status */}
-                    <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-3">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 text-green-600" />
-                        <div>
-                          <div className="text-xs font-semibold text-green-900">Purchase Completed</div>
-                          {poChild.purchase_completed_by_name && (
-                            <div className="text-xs text-green-700">
-                              By {poChild.purchase_completed_by_name}
-                              {poChild.purchase_completion_date && (
-                                <> on {new Date(poChild.purchase_completion_date).toLocaleDateString()}</>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* View Details Button */}
-                    <div className="flex flex-col gap-1.5 mt-auto">
-                      <Button
-                        onClick={() => {
-                          const purchaseLike: Purchase = {
-                            cr_id: poChild.parent_cr_id,
-                            formatted_cr_id: poChild.formatted_id,
-                            project_id: poChild.project_id || 0,
-                            project_name: poChild.project_name || 'Unknown Project',
-                            project_code: poChild.project_code,
-                            client: poChild.client || '',
-                            location: poChild.location || '',
-                            boq_id: poChild.boq_id || 0,
-                            boq_name: poChild.boq_name || '',
-                            item_name: poChild.item_name || '',
-                            sub_item_name: '',
-                            request_type: '',
-                            reason: '',
-                            materials: poChild.materials || [],
-                            materials_count: poChild.materials_count || poChild.materials_data?.length || 0,
-                            total_cost: poChild.materials_total_cost || 0,
-                            approved_by: 0,
-                            approved_at: null,
-                            created_at: poChild.created_at || '',
-                            status: 'completed',
-                            vendor_id: poChild.vendor_id,
-                            vendor_name: poChild.vendor_name,
-                            child_notes: (poChild as any).child_notes || '',
-                          } as any;
-                          setSelectedPurchase(purchaseLike);
-                          setIsDetailsModalOpen(true);
-                        }}
-                        variant="outline"
-                        className="w-full text-xs"
-                        size="sm"
-                      >
-                        <Eye className="w-3.5 h-3.5 mr-1.5" />
-                        View Details
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-
-              {/* TD Rejected PO Children Cards (when on Rejected tab) - Buyer can re-select vendor */}
-              {activeTab === 'rejected' && tdRejectedPOChildren
-                .filter(poChild => {
-                  const searchLower = searchTerm.toLowerCase().trim();
-                  const poIdString = `po-${poChild.po_child_id}`;
-                  const formattedId = (poChild.formatted_id || '').toLowerCase();
-                  return !searchTerm ||
-                    (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchLower) ||
-                    poChild.project_code?.toLowerCase().includes(searchLower) ||
-                    poIdString.includes(searchLower) ||
-                    formattedId.includes(searchLower) ||
-                    poChild.po_child_id?.toString().includes(searchTerm.trim());
-                })
-                .map((poChild) => (
-                <motion.div
-                  key={`td-rejected-po-child-${poChild.po_child_id}`}
-                  initial={false}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-white rounded-xl border shadow-sm hover:shadow-md transition-all flex flex-col border-red-300"
-                >
-                  {/* Card Header */}
-                  <div className="px-4 py-3 border-b bg-gradient-to-r from-red-50 to-red-100 border-red-200">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <h3 className="text-base font-bold text-gray-900 line-clamp-1">{poChild.project_name || 'Unknown Project'}</h3>
-                      <Badge className="bg-red-100 text-red-800 text-xs whitespace-nowrap">
-                        {poChild.formatted_id}
-                      </Badge>
-                    </div>
-                    <div className="space-y-1 text-xs text-gray-600">
-                      {poChild.client && (
-                        <div className="flex items-center gap-1.5">
-                          <Building2 className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.client}</span>
-                        </div>
-                      )}
-                      {poChild.location && (
-                        <div className="flex items-center gap-1.5">
-                          <MapPin className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.location}</span>
-                        </div>
-                      )}
-                      {poChild.boq_name && (
-                        <div className="flex items-center gap-1.5">
-                          <FileText className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.boq_name}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Rejection Reason Banner */}
-                  <div className="px-4 py-2 bg-red-50 border-b border-red-200">
-                    <div className="flex items-start gap-2">
-                      <XCircleIcon className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-semibold text-red-800">TD Rejected - Select New Vendor</div>
-                        <div className="text-xs text-red-700 mt-0.5 line-clamp-2">
-                          {poChild.rejection_reason}
-                        </div>
-                        {poChild.rejected_by_name && (
-                          <div className="text-[10px] text-red-600 mt-1">Rejected by: {poChild.rejected_by_name}</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card Body */}
-                  <div className="px-4 py-3 flex-1 flex flex-col">
-                    {/* Item */}
-                    {poChild.item_name && (
-                      <div className="mb-3">
-                        <div className="text-xs text-gray-500 mb-1">Item</div>
-                        <div className="font-medium text-sm">{poChild.item_name}</div>
-                      </div>
-                    )}
-
-                    {/* Details Row */}
-                    <div className="grid grid-cols-2 gap-3 mb-3">
-                      <div>
-                        <div className="text-xs text-gray-500 mb-1">Created</div>
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                          <Calendar className="w-3 h-3" />
-                          {poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-500 mb-1">Materials</div>
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                          <Package className="w-3 h-3" />
-                          {poChild.materials_count || 0} items
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Total Cost */}
-                    <div className="mb-3">
-                      <div className="text-xs text-gray-500 mb-1">Total Cost</div>
-                      <div className="text-lg font-bold text-red-700">
-                        {formatCurrency(poChild.total_cost || 0)}
-                      </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex flex-col gap-1.5 mt-auto">
-                      {/* Select New Vendor Button */}
-                      <Button
-                        onClick={() => {
-                          // Convert to Purchase format for vendor selection modal
-                          const purchaseLike: Purchase = {
-                            cr_id: poChild.parent_cr_id,
-                            formatted_cr_id: poChild.formatted_id,
-                            project_id: poChild.project_id,
-                            project_name: poChild.project_name,
-                            client: poChild.client,
-                            location: poChild.location,
-                            boq_id: poChild.boq_id,
-                            boq_name: poChild.boq_name,
-                            item_name: poChild.item_name,
-                            sub_item_name: '',
-                            request_type: '',
-                            reason: '',
-                            materials: poChild.materials || [],
-                            materials_count: poChild.materials_count || 0,
-                            total_cost: poChild.total_cost || 0,
-                            approved_by: 0,
-                            approved_at: null,
-                            created_at: poChild.created_at || '',
-                            status: 'pending',
-                            po_child_id: poChild.po_child_id,  // Pass POChild ID for re-selection
-                            child_notes: (poChild as any).child_notes || '',
-                          } as any;
-                          setSelectedPurchase(purchaseLike);
-                          setIsVendorSelectionModalOpen(true);
-                        }}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs"
-                        size="sm"
-                      >
-                        <Store className="w-3.5 h-3.5 mr-1.5" />
-                        Select New Vendor
-                      </Button>
-
-                      <Button
-                        onClick={() => {
-                          const purchaseLike: Purchase = {
-                            cr_id: poChild.parent_cr_id,
-                            formatted_cr_id: poChild.formatted_id,
-                            project_id: poChild.project_id,
-                            project_name: poChild.project_name,
-                            client: poChild.client,
-                            location: poChild.location,
-                            boq_id: poChild.boq_id,
-                            boq_name: poChild.boq_name,
-                            item_name: poChild.item_name,
-                            sub_item_name: '',
-                            request_type: '',
-                            reason: '',
-                            materials: poChild.materials || [],
-                            materials_count: poChild.materials_count || 0,
-                            total_cost: poChild.total_cost || 0,
-                            approved_by: 0,
-                            approved_at: null,
-                            created_at: poChild.created_at || '',
-                            status: 'rejected',
-                            child_notes: (poChild as any).child_notes || '',
-                          } as any;
-                          setSelectedPurchase(purchaseLike);
-                          setIsDetailsModalOpen(true);
-                        }}
-                        variant="outline"
-                        className="w-full text-xs"
-                        size="sm"
-                      >
-                        <Eye className="w-3.5 h-3.5 mr-1.5" />
-                        View Details
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
+              {/* NOTE: Pending POChildren are now rendered via paginatedItems above, no separate block needed */}
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -2697,7 +2343,7 @@ const PurchaseOrders: React.FC = () => {
                         const poChild = item;
                         return (
                           <motion.tr
-                            key={`po-child-${poChild.id}`}
+                            key={`po-child-${getPOChildId(poChild)}`}
                             initial={false}
                             animate={{ opacity: 1 }}
                             className="hover:bg-gray-50 transition-colors bg-green-50/30"
@@ -2760,7 +2406,7 @@ const PurchaseOrders: React.FC = () => {
                                       any_store_request_rejected: false,
                                       vendor_selection_pending_td_approval: false,
                                       item_name: poChild.item_name || '',
-                                      po_child_id: poChild.id,
+                                      po_child_id: getPOChildId(poChild),
                                       child_notes: (poChild as any).child_notes || '',
                                     } as any;
                                     handleViewDetails(purchaseLike);
@@ -2796,15 +2442,15 @@ const PurchaseOrders: React.FC = () => {
                                       }
                                     } else {
                                       // No project_id, complete directly with proper cache invalidation
-                                      await handlePOChildComplete(poChild.id);
+                                      await handlePOChildComplete(getPOChildId(poChild));
                                     }
                                   }}
-                                  disabled={completingPurchaseId === poChild.id}
+                                  disabled={completingPurchaseId === getPOChildId(poChild)}
                                   variant="default"
                                   size="sm"
                                   className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700"
                                 >
-                                  {completingPurchaseId === poChild.id ? (
+                                  {completingPurchaseId === getPOChildId(poChild) ? (
                                     <>
                                       <ModernLoadingSpinners size="xxs" />
                                       Completing...
@@ -3039,14 +2685,12 @@ const PurchaseOrders: React.FC = () => {
             let totalFiltered: number;
             if (activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved') {
               totalFiltered = mergedVendorApprovedItems.length;
-            } else if (activeTab === 'pending_approval' && pendingApprovalSubTab === 'vendor_approval') {
-              totalFiltered = vendorPendingApproval.length + pendingPOChildren.length;
             } else {
               totalFiltered = filteredPurchases.length;
             }
 
             // Client-side pagination for filtered results
-            const clientPerPage = 20;
+            const clientPerPage = PAGINATION.DEFAULT_PAGE_SIZE;
             const clientPages = Math.ceil(totalFiltered / clientPerPage);
 
             // Get page state based on active tab (for consistency)
@@ -3257,11 +2901,20 @@ const PurchaseOrders: React.FC = () => {
             removeQueries(['buyer-approved-po-children']);
             removeQueries(['buyer-pending-po-children']);
             removeQueries(['dashboard']);
-            // Small delay to ensure backend has processed the change
-            await new Promise(resolve => setTimeout(resolve, 500));
-            await refetchPending();
-            await refetchCompleted();
-            await refetchApprovedPOChildren();
+
+            // Longer delay to ensure backend has processed the change and database is updated
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Force refetch all tabs to ensure UI is updated
+            await Promise.all([
+              refetchPending(),
+              refetchCompleted(),
+              refetchApprovedPOChildren()
+            ]);
+
+            // Reset to first page and switch to completed tab to show the newly completed purchase
+            setCompletedPage(1);
+            setActiveTab('completed');
           }}
         />
       )}

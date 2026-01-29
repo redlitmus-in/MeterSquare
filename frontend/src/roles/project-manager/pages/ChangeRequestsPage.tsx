@@ -37,6 +37,7 @@ import {
   MapPin
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
+import { PAGINATION } from '@/lib/constants';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
@@ -188,7 +189,7 @@ const ChangeRequestsPage: React.FC = () => {
     has_next: boolean;
     has_prev: boolean;
   } | null>(null);
-  const perPage = 20;
+  const perPage = PAGINATION.DEFAULT_PAGE_SIZE;
 
   // State for data loading
   const [changeRequestsData, setChangeRequestsData] = useState<ChangeRequestItem[]>([]);
@@ -247,6 +248,16 @@ const ChangeRequestsPage: React.FC = () => {
     if (changeRequestUpdateTimestamp === 0) return;
     loadChangeRequests(false);
   }, [changeRequestUpdateTimestamp]);
+
+  // Reset page when main tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Reset page when sub-tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [pendingSubTab]);
 
   const refetch = () => loadChangeRequests(false);
 
@@ -665,6 +676,44 @@ const ChangeRequestsPage: React.FC = () => {
     completed_extra: changeRequests.filter(r => r.status === 'purchase_completed' || r.status === 'routed_to_store').length
   };
 
+  // Sub-tab specific filtered data for "My Requests" (pending) tab
+  const draftsRequests = useMemo(() =>
+    filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status)),
+    [filteredRequests]
+  );
+
+  const sentToEstimatorRequests = useMemo(() =>
+    filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator'),
+    [filteredRequests]
+  );
+
+  const sentToBuyerRequests = useMemo(() =>
+    filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer'),
+    [filteredRequests]
+  );
+
+  // Get the correct data based on active tab and sub-tab
+  const currentTabData = useMemo(() => {
+    if (isExtraMaterial && activeTab === 'pending') {
+      // For "My Requests" tab with sub-tabs
+      switch (pendingSubTab) {
+        case 'drafts': return draftsRequests;
+        case 'sent_to_estimator': return sentToEstimatorRequests;
+        case 'sent_to_buyer': return sentToBuyerRequests;
+        default: return draftsRequests;
+      }
+    }
+    // For other tabs, use the full filtered requests
+    return filteredRequests;
+  }, [isExtraMaterial, activeTab, pendingSubTab, filteredRequests, draftsRequests, sentToEstimatorRequests, sentToBuyerRequests]);
+
+  // Paginated data for current tab/sub-tab
+  const paginatedRequests = useMemo(() => {
+    const startIndex = (currentPage - 1) * perPage;
+    const endIndex = startIndex + perPage;
+    return currentTabData.slice(startIndex, endIndex);
+  }, [currentTabData, currentPage, perPage]);
+
   if (initialLoad) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -933,10 +982,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No change requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -1098,10 +1147,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No approved requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -1191,10 +1240,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No completed requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -1285,10 +1334,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No rejected requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -1377,10 +1426,10 @@ const ChangeRequestsPage: React.FC = () => {
                       <p className="text-gray-500 text-lg">No requests found</p>
                     </div>
                   ) : viewMode === 'table' ? (
-                    <RequestsTable requests={filteredRequests} />
+                    <RequestsTable requests={paginatedRequests} />
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                      {filteredRequests.map((request, index) => (
+                      {paginatedRequests.map((request, index) => (
                         <motion.div
                           key={request.cr_id}
                           initial={{ opacity: 0, y: 20 }}
@@ -1507,7 +1556,7 @@ const ChangeRequestsPage: React.FC = () => {
                         <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
                           pendingSubTab === 'drafts' ? 'bg-[#243d8a]/20' : 'bg-gray-100'
                         }`}>
-                          ({filteredRequests.filter(r => r.status === 'pending').length})
+                          ({draftsRequests.length})
                         </span>
                       </div>
                     </button>
@@ -1525,7 +1574,7 @@ const ChangeRequestsPage: React.FC = () => {
                         <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
                           pendingSubTab === 'sent_to_estimator' ? 'bg-[#243d8a]/20' : 'bg-gray-100'
                         }`}>
-                          ({filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator').length})
+                          ({sentToEstimatorRequests.length})
                         </span>
                       </div>
                     </button>
@@ -1543,7 +1592,7 @@ const ChangeRequestsPage: React.FC = () => {
                         <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
                           pendingSubTab === 'sent_to_buyer' ? 'bg-[#243d8a]/20' : 'bg-gray-100'
                         }`}>
-                          ({filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer').length})
+                          ({sentToBuyerRequests.length})
                         </span>
                       </div>
                     </button>
@@ -1552,16 +1601,16 @@ const ChangeRequestsPage: React.FC = () => {
                   {/* Drafts Sub-tab Content */}
                   {pendingSubTab === 'drafts' && (
                     <>
-                      {filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status)).length === 0 ? (
+                      {draftsRequests.length === 0 ? (
                         <div className="text-center py-12">
                           <Pencil className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                           <p className="text-gray-500 text-lg">No draft requests found</p>
                         </div>
                       ) : viewMode === 'table' ? (
-                        <RequestsTable requests={filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status))} />
+                        <RequestsTable requests={paginatedRequests} />
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                          {filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status)).map((request, index) => (
+                          {paginatedRequests.map((request, index) => (
                             <motion.div
                               key={request.cr_id}
                               initial={{ opacity: 0, y: 20 }}
@@ -1668,16 +1717,16 @@ const ChangeRequestsPage: React.FC = () => {
                   {/* Sent to Estimator Sub-tab Content */}
                   {pendingSubTab === 'sent_to_estimator' && (
                     <>
-                      {filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator').length === 0 ? (
+                      {sentToEstimatorRequests.length === 0 ? (
                         <div className="text-center py-12">
                           <Clock className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                           <p className="text-gray-500 text-lg">No requests sent to estimator</p>
                         </div>
                       ) : viewMode === 'table' ? (
-                        <RequestsTable requests={filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator')} />
+                        <RequestsTable requests={paginatedRequests} />
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                          {filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator').map((request, index) => (
+                          {paginatedRequests.map((request, index) => (
                             <motion.div
                               key={request.cr_id}
                               initial={{ opacity: 0, y: 20 }}
@@ -1764,16 +1813,16 @@ const ChangeRequestsPage: React.FC = () => {
                   {/* Sent to Buyer Sub-tab Content */}
                   {pendingSubTab === 'sent_to_buyer' && (
                     <>
-                      {filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer').length === 0 ? (
+                      {sentToBuyerRequests.length === 0 ? (
                         <div className="text-center py-12">
                           <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                           <p className="text-gray-500 text-lg">No requests sent to buyer</p>
                         </div>
                       ) : viewMode === 'table' ? (
-                        <RequestsTable requests={filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer')} />
+                        <RequestsTable requests={paginatedRequests} />
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                          {filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer').map((request, index) => (
+                          {paginatedRequests.map((request, index) => (
                             <motion.div
                               key={request.cr_id}
                               initial={{ opacity: 0, y: 20 }}
@@ -1863,10 +1912,10 @@ const ChangeRequestsPage: React.FC = () => {
                       <p className="text-gray-500 text-lg">No accepted requests found</p>
                     </div>
                   ) : viewMode === 'table' ? (
-                    <RequestsTable requests={filteredRequests} />
+                    <RequestsTable requests={paginatedRequests} />
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                      {filteredRequests.map((request, index) => (
+                      {paginatedRequests.map((request, index) => (
                         <motion.div
                           key={request.cr_id}
                           initial={{ opacity: 0, y: 20 }}
@@ -1949,10 +1998,10 @@ const ChangeRequestsPage: React.FC = () => {
                       <p className="text-gray-500 text-lg">No completed requests found</p>
                     </div>
                   ) : viewMode === 'table' ? (
-                    <RequestsTable requests={filteredRequests} />
+                    <RequestsTable requests={paginatedRequests} />
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                      {filteredRequests.map((request, index) => (
+                      {paginatedRequests.map((request, index) => (
                         <motion.div
                           key={request.cr_id}
                           initial={{ opacity: 0, y: 20 }}
@@ -2035,10 +2084,10 @@ const ChangeRequestsPage: React.FC = () => {
                       <p className="text-gray-500 text-lg">No rejected requests found</p>
                     </div>
                   ) : viewMode === 'table' ? (
-                    <RequestsTable requests={filteredRequests} />
+                    <RequestsTable requests={paginatedRequests} />
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                      {filteredRequests.map((request, index) => (
+                      {paginatedRequests.map((request, index) => (
                         <motion.div
                           key={request.cr_id}
                           initial={{ opacity: 0, y: 20 }}
@@ -2123,46 +2172,74 @@ const ChangeRequestsPage: React.FC = () => {
             )}
           </Tabs>
 
-          {/* ✅ PERFORMANCE: Pagination Controls */}
-          {pagination && (
-            <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
-              <div className="text-sm text-gray-600 font-medium">
-                Showing {pagination.total_count > 0 ? Math.min((currentPage - 1) * perPage + 1, pagination.total_count) : 0} to {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
+          {/* ✅ PERFORMANCE: Pagination Controls - Based on current tab/sub-tab data */}
+          {(() => {
+            const totalFilteredCount = currentTabData.length;
+            const totalFilteredPages = Math.ceil(totalFilteredCount / perPage);
+            const startItem = totalFilteredCount > 0 ? (currentPage - 1) * perPage + 1 : 0;
+            const endItem = Math.min(currentPage * perPage, totalFilteredCount);
+
+            if (totalFilteredCount === 0) return null;
+
+            return (
+              <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                <div className="text-sm text-gray-700">
+                  Showing {startItem} to {endItem} of {totalFilteredCount} results
+                  {totalFilteredPages > 1 && (
+                    <span className="text-gray-500 ml-2">(Page {currentPage} of {totalFilteredPages})</span>
+                  )}
+                </div>
+                {totalFilteredPages > 1 && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Previous
+                    </button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalFilteredPages }, (_, i) => i + 1).map(page => {
+                        const showPage =
+                          page === 1 ||
+                          page === totalFilteredPages ||
+                          (page >= currentPage - 1 && page <= currentPage + 1);
+
+                        if (!showPage) {
+                          if (page === currentPage - 2 || page === currentPage + 2) {
+                            return <span key={page} className="px-2 text-gray-500">...</span>;
+                          }
+                          return null;
+                        }
+
+                        return (
+                          <button
+                            key={page}
+                            onClick={() => setCurrentPage(page)}
+                            className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                              currentPage === page
+                                ? 'text-white font-medium'
+                                : 'border border-gray-300 hover:bg-gray-50'
+                            }`}
+                            style={currentPage === page ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
+                          >
+                            {page}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(totalFilteredPages, prev + 1))}
+                      disabled={currentPage === totalFilteredPages}
+                      className="px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={!pagination.has_prev}
-                  className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  style={{ color: 'rgb(36, 61, 138)' }}
-                >
-                  Previous
-                </button>
-                {Array.from({ length: pagination.total_pages || 1 }, (_, i) => i + 1).map(page => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                      currentPage === page
-                        ? 'border-[rgb(36,61,138)] bg-blue-50'
-                        : 'border-gray-300 hover:bg-gray-50'
-                    }`}
-                    style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
-                  >
-                    {page}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
-                  disabled={!pagination.has_next}
-                  className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  style={{ color: 'rgb(36, 61, 138)' }}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </div>
 

@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { labourService, DailyAttendance, LabourRequisition } from '@/services/labourService';
 import { apiClient } from '@/api/config';
+import { PAGINATION } from '@/lib/constants';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import {
   ClockIcon,
@@ -40,6 +41,9 @@ const AttendanceLogs: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [processing, setProcessing] = useState<number | null>(null);
   const [summary, setSummary] = useState<any>(null);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Labour role selection for clock-in
   const [labourRoles, setLabourRoles] = useState<LabourRole[]>([]);
@@ -217,6 +221,19 @@ const AttendanceLogs: React.FC = () => {
     return `${hours.toFixed(1)} hrs`;
   };
 
+  // Pagination calculations
+  const totalRecords = attendance.length;
+  const totalPages = Math.ceil(totalRecords / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedAttendance = attendance.slice(
+    (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE,
+    currentPage * PAGINATION.DEFAULT_PAGE_SIZE
+  );
+
+  // Reset page when attendance data changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [attendance.length, selectedProject?.project_id, selectedDate]);
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -356,7 +373,7 @@ const AttendanceLogs: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {attendance.map((record) => (
+              {paginatedAttendance.map((record) => (
                 <motion.tr
                   key={record.attendance_id}
                   initial={{ opacity: 0 }}
@@ -429,6 +446,67 @@ const AttendanceLogs: React.FC = () => {
               ))}
             </tbody>
           </table>
+
+          {/* Pagination */}
+          {totalRecords > 0 && (
+            <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200">
+              <div className="text-sm text-gray-700">
+                Showing {(currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to{' '}
+                {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)} of{' '}
+                {totalRecords} records
+                {totalPages > 1 && (
+                  <span className="text-gray-500 ml-2">(Page {currentPage} of {totalPages})</span>
+                )}
+              </div>
+              {totalPages > 1 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                      const showPage =
+                        page === 1 ||
+                        page === totalPages ||
+                        (page >= currentPage - 1 && page <= currentPage + 1);
+
+                      if (!showPage) {
+                        if (page === currentPage - 2 || page === currentPage + 2) {
+                          return <span key={page} className="px-2 text-gray-500">...</span>;
+                        }
+                        return null;
+                      }
+
+                      return (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                            currentPage === page
+                              ? 'bg-blue-600 text-white font-medium'
+                              : 'border border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

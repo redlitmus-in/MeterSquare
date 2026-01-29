@@ -412,9 +412,13 @@ def jwt_required(f):
     """Decorator to require valid JWT token for protected routes"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # Skip JWT validation for CORS preflight requests
+        if request.method == 'OPTIONS':
+            return '', 200
+
         from models.role import Role  # Import Role model here
         token = None
-        
+
         # Check for token in Authorization header
         auth_header = request.headers.get('Authorization')
         if auth_header:

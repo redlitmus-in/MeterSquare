@@ -181,7 +181,22 @@ class DNPDFGenerator:
 
         # Format values
         if project_data:
-            project_location = f"{self._escape_html(project_data.get('project_name', 'N/A'))}, {self._escape_html(project_data.get('location', ''))}"
+            # Build project location with all available details
+            project_name = self._escape_html(project_data.get('project_name', 'N/A'))
+            project_code = self._escape_html(project_data.get('project_code', ''))
+            area = self._escape_html(project_data.get('area', ''))
+            location = self._escape_html(project_data.get('location', ''))
+
+            # Combine details into a comprehensive location string
+            location_parts = [project_name]
+            if project_code:
+                location_parts.append(f"({project_code})")
+            if area:
+                location_parts.append(f"Area: {area}")
+            if location:
+                location_parts.append(location)
+
+            project_location = ", ".join(filter(None, location_parts))
         else:
             # For store-destined DNs without project
             project_location = "M2 Store / Warehouse"

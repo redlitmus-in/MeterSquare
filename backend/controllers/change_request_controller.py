@@ -947,12 +947,14 @@ def get_all_change_requests():
     Optional query params for pagination (backward compatible):
     - page: Page number (1-indexed), default None (returns all)
     - page_size: Items per page, default 20, max 100
+    - status: Filter by status (e.g., 'purchase_completed', 'pending', etc.)
     """
     try:
         # PERFORMANCE: Optional pagination support (backward compatible)
         page = request.args.get('page', type=int)
         page_size = request.args.get('page_size', default=20, type=int)
         page_size = min(page_size, 100)  # Cap at 100 items per page
+        status_filter = request.args.get('status', type=str)  # Optional status filter
 
         current_user = getattr(g, 'user', None)
         if not current_user:
@@ -1435,6 +1437,11 @@ def get_all_change_requests():
             # Other roles see nothing
             return jsonify({"success": True, "data": []}), 200
 
+        # Apply status filter if provided
+        if status_filter:
+            query = query.filter(ChangeRequest.status == status_filter)
+            log.info(f"📋 Filtering by status: {status_filter}")
+
         # Execute query with optional pagination
         ordered_query = query.order_by(ChangeRequest.created_at.desc())
 
@@ -1603,11 +1610,31 @@ def get_all_change_requests():
 
             result.append(cr_dict)
 
+        # PERFORMANCE: Calculate status counts for tab badges (efficient single query)
+        # This uses the same base query (with role filters) to count by status
+        status_counts_query = query.with_entities(
+            ChangeRequest.status,
+            func.count(ChangeRequest.cr_id)
+        ).group_by(ChangeRequest.status).all()
+
+        status_counts = {status: count for status, count in status_counts_query}
+
+        # Aggregate counts for frontend tabs
+        pending_statuses = ['under_review', 'approved_by_pm', 'pending']
+        status_counts_summary = {
+            "pending": sum(status_counts.get(s, 0) for s in pending_statuses),
+            "approved": status_counts.get('assigned_to_buyer', 0),
+            "completed": status_counts.get('purchase_completed', 0),
+            "rejected": status_counts.get('rejected', 0),
+            "total": sum(status_counts.values())
+        }
+
         # PERFORMANCE: Return pagination metadata when paginated
         response = {
             "success": True,
             "data": result,
-            "count": len(result)
+            "count": len(result),
+            "status_counts": status_counts_summary
         }
 
         if page is not None:

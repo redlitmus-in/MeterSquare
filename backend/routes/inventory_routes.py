@@ -486,7 +486,7 @@ def get_pm_return_delivery_notes_route():
     return get_return_delivery_notes_for_pm()
 
 
-@inventory_routes.route('/delivery_note/<int:delivery_note_id>/download', methods=['GET'])
+@inventory_routes.route('/inventory/delivery_note/<int:delivery_note_id>/download', methods=['GET', 'OPTIONS'])
 @jwt_required
 def download_dn_pdf_route(delivery_note_id):
     """Download Material Delivery Note as PDF"""
@@ -525,6 +525,13 @@ def check_material_availability_route():
 def get_pending_buyer_transfers_route():
     """Get pending buyer transfers to M2 Store for PM to receive"""
     return get_pending_buyer_transfers()
+
+
+@inventory_routes.route('/inventory/buyer-transfers/history', methods=['GET'])
+@jwt_required
+def get_buyer_transfers_history_route():
+    """Get received buyer transfers history for PM to view"""
+    return get_buyer_transfers_history()
 
 
 @inventory_routes.route('/inventory/buyer-transfers/<int:delivery_note_id>/receive', methods=['POST'])

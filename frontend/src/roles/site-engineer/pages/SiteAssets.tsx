@@ -24,6 +24,7 @@ import {
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { showError, showSuccess } from '@/utils/toastHelper';
 import { apiClient, API_BASE_URL } from '@/api/config';
+import { PAGINATION } from '@/lib/constants';
 import {
   AssetRequisition,
   CreateRequisitionPayload,
@@ -301,6 +302,12 @@ const SiteAssets: React.FC = () => {
   const [loadingReturns, setLoadingReturns] = useState(false);
   const [requisitionsLoaded, setRequisitionsLoaded] = useState(false);
   const [returnsLoaded, setReturnsLoaded] = useState(false);
+
+  // Pagination state for each tab
+  const [assetsPage, setAssetsPage] = useState(1);
+  const [requisitionsPage, setRequisitionsPage] = useState(1);
+  const [returnsPage, setReturnsPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
 
   const fetchAssets = useCallback(async () => {
     try {
@@ -896,6 +903,80 @@ const SiteAssets: React.FC = () => {
     );
   }, [received]);
 
+  // Combined assets for pagination (pending + received ADNs)
+  const allAssetsADNs = useMemo(() => {
+    return [...groupedPendingADNs, ...groupedReceivedADNs];
+  }, [groupedPendingADNs, groupedReceivedADNs]);
+
+  // Paginated assets
+  const assetsTotalPages = Math.ceil(allAssetsADNs.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedPendingADNs = useMemo(() => {
+    const startIdx = (assetsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    const endIdx = startIdx + PAGINATION.DEFAULT_PAGE_SIZE;
+    // Filter pending from sliced window
+    const pendingIds = new Set(groupedPendingADNs.map(a => a.adn_id));
+    return allAssetsADNs.slice(startIdx, endIdx).filter(a => pendingIds.has(a.adn_id));
+  }, [allAssetsADNs, groupedPendingADNs, assetsPage]);
+
+  const paginatedReceivedADNs = useMemo(() => {
+    const startIdx = (assetsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    const endIdx = startIdx + PAGINATION.DEFAULT_PAGE_SIZE;
+    // Filter received from sliced window
+    const receivedIds = new Set(groupedReceivedADNs.map(a => a.adn_id));
+    return allAssetsADNs.slice(startIdx, endIdx).filter(a => receivedIds.has(a.adn_id));
+  }, [allAssetsADNs, groupedReceivedADNs, assetsPage]);
+
+  // Paginated requisitions
+  const requisitionsTotalPages = Math.ceil(filteredRequisitions.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequisitions = useMemo(() => {
+    const startIdx = (requisitionsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredRequisitions.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequisitions, requisitionsPage]);
+
+  // Paginated return notes
+  const returnsTotalPages = Math.ceil(myReturnNotes.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedReturnNotes = useMemo(() => {
+    const startIdx = (returnsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return myReturnNotes.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [myReturnNotes, returnsPage]);
+
+  // Group history by project first, then paginate the groups
+  const groupedHistory = useMemo(() => {
+    const groups: Record<string, { project_name: string; movements: typeof history }> = {};
+    history.forEach(h => {
+      const key = `${h.project_id}-${h.project_name}`;
+      if (!groups[key]) {
+        groups[key] = { project_name: h.project_name, movements: [] };
+      }
+      groups[key].movements.push(h);
+    });
+    return Object.entries(groups);
+  }, [history]);
+
+  // Paginated history (by project groups, not individual movements)
+  const historyTotalPages = Math.ceil(groupedHistory.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedHistoryGroups = useMemo(() => {
+    const startIdx = (historyPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return groupedHistory.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [groupedHistory, historyPage]);
+
+  // Reset pagination when tab changes or data changes
+  useEffect(() => {
+    setAssetsPage(1);
+  }, [groupedPendingADNs.length, groupedReceivedADNs.length]);
+
+  useEffect(() => {
+    setRequisitionsPage(1);
+  }, [reqSubTab, filteredRequisitions.length]);
+
+  useEffect(() => {
+    setReturnsPage(1);
+  }, [myReturnNotes.length]);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [groupedHistory.length]);
+
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
@@ -1369,7 +1450,7 @@ const SiteAssets: React.FC = () => {
         {activeTab === 'assets' && (
           <>
             {/* Pending Receipt Section - Grouped by ADN */}
-        {groupedPendingADNs.length > 0 && (
+        {paginatedPendingADNs.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1386,7 +1467,7 @@ const SiteAssets: React.FC = () => {
             </div>
 
             <div className="divide-y divide-gray-200">
-              {groupedPendingADNs.map((adn) => {
+              {paginatedPendingADNs.map((adn) => {
                 const isExpanded = expandedADNs.has(adn.adn_id);
                 const allChecked = isAllCheckedInADN(adn);
                 const someChecked = isSomeCheckedInADN(adn);
@@ -1564,7 +1645,7 @@ const SiteAssets: React.FC = () => {
         )}
 
         {/* Received Section - Grouped by ADN */}
-        {groupedReceivedADNs.length > 0 && (
+        {paginatedReceivedADNs.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1579,7 +1660,7 @@ const SiteAssets: React.FC = () => {
             </div>
 
             <div className="divide-y divide-gray-200">
-              {groupedReceivedADNs.map((adn) => {
+              {paginatedReceivedADNs.map((adn) => {
                 const isExpanded = expandedADNs.has(adn.adn_id);
                 const allReturnChecked = isAllReturnCheckedInADN(adn);
                 const someReturnChecked = isSomeReturnCheckedInADN(adn);
@@ -1790,6 +1871,61 @@ const SiteAssets: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Pagination for Assets Tab - Always show count */}
+        {allAssetsADNs.length > 0 && (
+          <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm">
+            <div className="text-sm text-gray-700">
+              Showing {(assetsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(assetsPage * PAGINATION.DEFAULT_PAGE_SIZE, allAssetsADNs.length)} of {allAssetsADNs.length} delivery notes
+              {assetsTotalPages > 1 && (
+                <span className="text-gray-500 ml-2">(Page {assetsPage} of {assetsTotalPages})</span>
+              )}
+            </div>
+            {assetsTotalPages > 1 && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setAssetsPage(p => Math.max(1, p - 1))}
+                  disabled={assetsPage === 1}
+                  className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                {Array.from({ length: Math.min(assetsTotalPages, 5) }, (_, i) => {
+                  let pageNum: number;
+                  if (assetsTotalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (assetsPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (assetsPage >= assetsTotalPages - 2) {
+                    pageNum = assetsTotalPages - 4 + i;
+                  } else {
+                    pageNum = assetsPage - 2 + i;
+                  }
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setAssetsPage(pageNum)}
+                      className={`px-3 py-1 rounded ${
+                        assetsPage === pageNum
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => setAssetsPage(p => Math.min(assetsTotalPages, p + 1))}
+                  disabled={assetsPage === assetsTotalPages}
+                  className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </div>
+        )}
           </>
         )}
 
@@ -1828,7 +1964,7 @@ const SiteAssets: React.FC = () => {
             </div>
 
             <div className="divide-y divide-gray-200">
-              {myReturnNotes.map(ardn => {
+              {paginatedReturnNotes.map(ardn => {
                 const isExpanded = expandedARDNs.has(ardn.ardn_id);
                 const isProcessing = processingARDN === ardn.ardn_id;
 
@@ -1993,6 +2129,61 @@ const SiteAssets: React.FC = () => {
           </motion.div>
         )}
 
+            {/* Pagination for Returns Tab - Always show count */}
+            {!loadingReturns && myReturnNotes.length > 0 && (
+              <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm">
+                <div className="text-sm text-gray-700">
+                  Showing {(returnsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(returnsPage * PAGINATION.DEFAULT_PAGE_SIZE, myReturnNotes.length)} of {myReturnNotes.length} return notes
+                  {returnsTotalPages > 1 && (
+                    <span className="text-gray-500 ml-2">(Page {returnsPage} of {returnsTotalPages})</span>
+                  )}
+                </div>
+                {returnsTotalPages > 1 && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setReturnsPage(p => Math.max(1, p - 1))}
+                      disabled={returnsPage === 1}
+                      className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    {Array.from({ length: Math.min(returnsTotalPages, 5) }, (_, i) => {
+                      let pageNum: number;
+                      if (returnsTotalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (returnsPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (returnsPage >= returnsTotalPages - 2) {
+                        pageNum = returnsTotalPages - 4 + i;
+                      } else {
+                        pageNum = returnsPage - 2 + i;
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setReturnsPage(pageNum)}
+                          className={`px-3 py-1 rounded ${
+                            returnsPage === pageNum
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                    <button
+                      onClick={() => setReturnsPage(p => Math.min(returnsTotalPages, p + 1))}
+                      disabled={returnsPage === returnsTotalPages}
+                      className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Empty State for Returns */}
             {!loadingReturns && myReturnNotes.length === 0 && (
               <motion.div
@@ -2084,7 +2275,7 @@ const SiteAssets: React.FC = () => {
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">
-                  {filteredRequisitions.map(req => {
+                  {paginatedRequisitions.map(req => {
                     // Get items - use items array if available, else fallback to single item
                     const reqItems = req.items && req.items.length > 0 ? req.items : (
                       req.category_id ? [{
@@ -2184,6 +2375,61 @@ const SiteAssets: React.FC = () => {
                   })}
                 </div>
               )}
+
+              {/* Pagination for Requisitions Tab - Always show count */}
+              {filteredRequisitions.length > 0 && (
+                <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200 bg-gray-50">
+                  <div className="text-sm text-gray-700">
+                    Showing {(requisitionsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(requisitionsPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredRequisitions.length)} of {filteredRequisitions.length} requisitions
+                    {requisitionsTotalPages > 1 && (
+                      <span className="text-gray-500 ml-2">(Page {requisitionsPage} of {requisitionsTotalPages})</span>
+                    )}
+                  </div>
+                  {requisitionsTotalPages > 1 && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setRequisitionsPage(p => Math.max(1, p - 1))}
+                        disabled={requisitionsPage === 1}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      {Array.from({ length: Math.min(requisitionsTotalPages, 5) }, (_, i) => {
+                        let pageNum: number;
+                        if (requisitionsTotalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (requisitionsPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (requisitionsPage >= requisitionsTotalPages - 2) {
+                          pageNum = requisitionsTotalPages - 4 + i;
+                        } else {
+                          pageNum = requisitionsPage - 2 + i;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setRequisitionsPage(pageNum)}
+                            className={`px-3 py-1 rounded ${
+                              requisitionsPage === pageNum
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      <button
+                        onClick={() => setRequisitionsPage(p => Math.min(requisitionsTotalPages, p + 1))}
+                        disabled={requisitionsPage === requisitionsTotalPages}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </motion.div>
             )}
           </>
@@ -2229,16 +2475,9 @@ const SiteAssets: React.FC = () => {
                     <p className="text-sm">No movement history found for your projects</p>
                   </div>
                 ) : (
-                  <div className="h-[calc(100vh-350px)] min-h-[600px] overflow-y-auto">
-                    {/* Group by project */}
-                    {Object.entries(
-                      history.reduce((acc, h) => {
-                        const key = `${h.project_id}-${h.project_name}`;
-                        if (!acc[key]) acc[key] = { project_name: h.project_name, movements: [] };
-                        acc[key].movements.push(h);
-                        return acc;
-                      }, {} as Record<string, { project_name: string; movements: AssetHistory[] }>)
-                    ).map(([key, group]) => {
+                  <div className="overflow-y-auto">
+                    {/* Paginated project groups */}
+                    {paginatedHistoryGroups.map(([key, group]) => {
                       const isProjectExpanded = expandedProjects.has(key);
                       return (
                         <div key={key} className="border-b border-gray-200 last:border-b-0">
@@ -2338,6 +2577,61 @@ const SiteAssets: React.FC = () => {
                     })}
                   </div>
                 )}
+
+              {/* Pagination for History Tab - Always show count (by project groups) */}
+              {groupedHistory.length > 0 && (
+                <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200 bg-gray-50">
+                  <div className="text-sm text-gray-700">
+                    Showing {(historyPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(historyPage * PAGINATION.DEFAULT_PAGE_SIZE, groupedHistory.length)} of {groupedHistory.length} projects ({history.length} total movements)
+                    {historyTotalPages > 1 && (
+                      <span className="text-gray-500 ml-2">(Page {historyPage} of {historyTotalPages})</span>
+                    )}
+                  </div>
+                  {historyTotalPages > 1 && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
+                        disabled={historyPage === 1}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      {Array.from({ length: Math.min(historyTotalPages, 5) }, (_, i) => {
+                        let pageNum: number;
+                        if (historyTotalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (historyPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (historyPage >= historyTotalPages - 2) {
+                          pageNum = historyTotalPages - 4 + i;
+                        } else {
+                          pageNum = historyPage - 2 + i;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setHistoryPage(pageNum)}
+                            className={`px-3 py-1 rounded ${
+                              historyPage === pageNum
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      <button
+                        onClick={() => setHistoryPage(p => Math.min(historyTotalPages, p + 1))}
+                        disabled={historyPage === historyTotalPages}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </motion.div>
           </>
         )}

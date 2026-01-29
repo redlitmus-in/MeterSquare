@@ -669,7 +669,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             color: 'text-blue-600'
           },
           {
-            name: 'Dispatch (DN)',
+            name: 'Stock Out',
             href: buildPath('/returnable-assets/dispatch'),
             icon: ArrowUpTrayIcon,
             iconSolid: ArrowUpTrayIcon,

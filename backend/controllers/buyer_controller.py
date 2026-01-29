@@ -10164,6 +10164,12 @@ def create_buyer_material_transfer():
             quantity = mat_data.get('quantity', 0)
             unit = mat_data.get('unit', 'pcs').strip()
 
+            # Optional material attributes for new materials
+            category = mat_data.get('category', '').strip()
+            brand = mat_data.get('brand', '').strip()
+            size = mat_data.get('size', '').strip()
+            material_unit_price = mat_data.get('material_unit_price', 0)
+
             # Validate quantity is a valid number
             try:
                 quantity = float(quantity)
@@ -10235,14 +10241,19 @@ def create_buyer_material_transfer():
                         # Material doesn't exist - create new inventory entry for M2 Store
                         log.info(f"✗ Material '{material_name}' not found in inventory - creating new entry")
 
+                        # Use provided category or default to 'General'
+                        material_category = category if category else 'General'
+
                         inv_material = InventoryMaterial(
                             material_name=material_name,
                             unit=unit,
                             current_stock=0,  # PM will update stock when receiving
                             min_stock_level=0,
                             material_code=f"MAT-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",
-                            category='Buyer Transfer - New Material',
-                            unit_price=0.0,
+                            category=material_category,
+                            brand=brand if brand else None,
+                            size=size if size else None,
+                            unit_price=material_unit_price if material_unit_price else 0.0,
                             is_active=True,
                             created_by=buyer_name,
                             created_at=datetime.utcnow(),
@@ -10257,14 +10268,19 @@ def create_buyer_material_transfer():
                     # Site transfer - create custom material entry (not added to M2 Store inventory)
                     log.info(f"Creating custom material entry for site transfer: {material_name}")
 
+                    # Use provided category or default to 'Custom Materials'
+                    material_category = category if category else 'Custom Materials'
+
                     inv_material = InventoryMaterial(
                         material_name=material_name,
                         unit=unit,
                         current_stock=0,
                         min_stock_level=0,
                         material_code=f"CUSTOM-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
-                        category='Custom - Direct to Site',
-                        unit_price=0.0,
+                        category=material_category,
+                        brand=brand if brand else None,
+                        size=size if size else None,
+                        unit_price=material_unit_price if material_unit_price else 0.0,
                         is_active=True,
                         created_by=buyer_name,
                         created_at=datetime.utcnow(),

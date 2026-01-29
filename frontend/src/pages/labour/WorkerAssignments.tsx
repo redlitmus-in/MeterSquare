@@ -19,8 +19,11 @@ import {
   UserIcon,
   WrenchScrewdriverIcon,
   UsersIcon,
-  PlusIcon
+  PlusIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon
 } from '@heroicons/react/24/outline';
+import { PAGINATION } from '@/lib/inventoryConstants';
 
 // Tab configuration
 type TabType = 'pending' | 'assigned';
@@ -90,6 +93,9 @@ const WorkerAssignments: React.FC = () => {
   // Confirmation Modal State
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+
   const fetchRequisitions = async () => {
     setLoading(true);
     try {
@@ -109,6 +115,25 @@ const WorkerAssignments: React.FC = () => {
   useEffect(() => {
     fetchRequisitions();
   }, [activeTab]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(requisitions.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequisitions = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return requisitions.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [requisitions, currentPage]);
+
+  // Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Clamp page when total pages decreases
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const openAssignModal = async (requisition: LabourRequisition) => {
     setSelectedRequisition(requisition);
@@ -475,7 +500,7 @@ const WorkerAssignments: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-2">
-          {requisitions.map((req) => (
+          {paginatedRequisitions.map((req) => (
             <motion.div
               key={req.requisition_id}
               initial={{ opacity: 0, y: 10 }}
@@ -546,6 +571,38 @@ const WorkerAssignments: React.FC = () => {
               </div>
             </motion.div>
           ))}
+
+          {/* Pagination */}
+          {requisitions.length > 0 && (
+            <div className="mt-4 px-4 py-3 bg-white rounded-lg border border-gray-200 flex items-center justify-between text-sm">
+              <span className="text-gray-600">
+                Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, requisitions.length)} of {requisitions.length} requisitions
+              </span>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeftIcon className="w-4 h-4" />
+                    Previous
+                  </button>
+                  <span className="text-sm text-gray-600">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                    <ChevronRightIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

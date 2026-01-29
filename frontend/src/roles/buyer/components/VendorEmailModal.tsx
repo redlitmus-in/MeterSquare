@@ -59,6 +59,8 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     { email: 'admin@metersquare.com', name: 'Admin', checked: true },
     { email: 'amjath@metersquare.com', name: 'Amjath', checked: true },
     { email: 'sujith@metersquare.com', name: 'Suijth', checked: true },
+    { email: 'accounts@metersquare.com', name: 'Accounts', checked: true },
+    { email: 'mail@metersquare.com', name: 'Mail', checked: true },
   ];
   const [ccEmails, setCcEmails] = useState(defaultCcEmails);
   const [customCcEmails, setCustomCcEmails] = useState<Array<{ email: string; name: string }>>([]);

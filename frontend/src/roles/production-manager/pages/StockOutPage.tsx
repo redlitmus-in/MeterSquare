@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Package, CheckCircle, X, Save, FileText,
-  ArrowUpCircle, RefreshCw, Download, Printer, DollarSign, ChevronDown
+  ArrowUpCircle, RefreshCw, Download, Printer, DollarSign, ChevronDown, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import {
   inventoryService,
@@ -16,23 +16,25 @@ import {
 import { showSuccess, showError, showWarning } from '@/utils/toastHelper';
 import { API_BASE_URL } from '@/api/config';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import { INVENTORY_DEFAULTS } from '@/lib/inventoryConstants';
+import { INVENTORY_DEFAULTS, PAGINATION } from '@/lib/inventoryConstants';
 import { normalizeStatus } from '../utils/inventoryHelpers';
 import ConfirmationModal from '../components/ConfirmationModal';
 
-type StockOutSubTab = 'requests' | 'delivery-notes';
+// Unified tab type - all tabs in single row
+type MainTabType = 'pending' | 'approved' | 'completed' | 'rejected' | 'draft_dn' | 'issued_dn' | 'delivered_dn';
 
 const StockOutPage: React.FC = () => {
   const [searchParams] = useSearchParams();
 
-  // Tab state
-  const [activeSubTab, setActiveSubTab] = useState<StockOutSubTab>('requests');
+  // Main tab state
+  const [activeMainTab, setActiveMainTab] = useState<MainTabType>('pending');
 
   // Handle URL parameters
   useEffect(() => {
-    const subtab = searchParams.get('subtab');
-    if (subtab === 'requests') setActiveSubTab('requests');
-    else if (subtab === 'delivery-notes') setActiveSubTab('delivery-notes');
+    const tab = searchParams.get('tab');
+    if (tab && ['pending', 'approved', 'completed', 'rejected', 'draft_dn', 'issued_dn', 'delivered_dn'].includes(tab)) {
+      setActiveMainTab(tab as MainTabType);
+    }
   }, [searchParams]);
 
   // Data states - Lazy loading pattern for Material Requests
@@ -64,8 +66,7 @@ const StockOutPage: React.FC = () => {
   // UI states
   const [loadingInitialData, setLoadingInitialData] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('PENDING');
-  const [dnStatusFilter, setDnStatusFilter] = useState<string>('DRAFT');
+  const [currentPage, setCurrentPage] = useState(1);
   const [showDeliveryNoteModal, setShowDeliveryNoteModal] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -122,45 +123,14 @@ const StockOutPage: React.FC = () => {
     driver_name: '',
     driver_contact: '',
     notes: '',
-    transport_fee: 0,
-    delivery_batch_ref: ''
+    transport_fee: 0
   });
-
-  // File upload state
-  const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null);
-
-  // Last transport details for "Copy from Last Entry" feature
-  const [lastTransportDetails, setLastTransportDetails] = useState<{
-    driver_name: string;
-    driver_contact: string;
-    vehicle_number: string;
-    transport_fee: number;
-    delivery_batch_ref: string;
-    delivery_note_url: string;
-  } | null>(null);
-
-  // Delivery batch selection
-  const [showBatchListModal, setShowBatchListModal] = useState(false);
-  const [recentBatches, setRecentBatches] = useState<Array<{
-    delivery_batch_ref: string;
-    driver_name: string;
-    driver_contact: string;
-    vehicle_number: string;
-    transport_fee: number;
-    delivery_note_url: string;
-    created_at: string;
-    material_count: number;
-  }>>([]);
-
-  // Reference info from selected batch (for display only, not saved)
-  const [selectedBatchReference, setSelectedBatchReference] = useState<{
-    original_fee: number;
-  } | null>(null);
 
   // Items to add to the delivery note
   const [dnItems, setDnItems] = useState<Array<{
     inventory_material_id: number;
     quantity: number;
+    unit?: string;
     notes: string;
     internal_request_id?: number;
     use_backup?: boolean;
@@ -267,104 +237,35 @@ const StockOutPage: React.FC = () => {
     try {
       const deliveryNotesResult = await inventoryService.getAllDeliveryNotes();
       setDeliveryNotes(deliveryNotesResult.delivery_notes || []);
-      extractRecentBatchesFromDNs(deliveryNotesResult.delivery_notes || []);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to fetch delivery notes';
       showError(errorMessage);
     }
   }, []);
 
-  // Extract recent delivery batches from delivery notes (for batch reference system)
-  const extractRecentBatchesFromDNs = (notes: MaterialDeliveryNote[]) => {
-    const batchMap = new Map<string, {
-      delivery_batch_ref: string;
-      driver_name: string;
-      driver_contact: string;
-      vehicle_number: string;
-      transport_fee: number;
-      delivery_note_url: string;
-      created_at: string;
-      material_count: number;
-    }>();
-
-    // Group delivery notes by delivery_batch_ref (if they have transport details)
-    notes.forEach(dn => {
-      // Create batch reference from common transport details if no explicit batch ref
-      const batchKey = dn.delivery_batch_ref ||
-        (dn.driver_name && dn.vehicle_number ? `${dn.driver_name}-${dn.vehicle_number}` : null);
-
-      if (batchKey && (dn.driver_name || dn.vehicle_number)) {
-        if (!batchMap.has(batchKey)) {
-          batchMap.set(batchKey, {
-            delivery_batch_ref: dn.delivery_batch_ref || batchKey,
-            driver_name: dn.driver_name || '',
-            driver_contact: dn.driver_contact || '',
-            vehicle_number: dn.vehicle_number || '',
-            transport_fee: dn.transport_fee || 0,
-            delivery_note_url: dn.delivery_note_url || '',
-            created_at: dn.created_at || '',
-            material_count: 1
-          });
-        } else {
-          const existing = batchMap.get(batchKey)!;
-          existing.material_count += 1;
-          // Keep the MAXIMUM transport fee (the one that was actually paid)
-          if (dn.transport_fee && dn.transport_fee > existing.transport_fee) {
-            existing.transport_fee = dn.transport_fee;
-          }
-          // Keep delivery note URL if not already set
-          if (!existing.delivery_note_url && dn.delivery_note_url) {
-            existing.delivery_note_url = dn.delivery_note_url;
-          }
-        }
-      }
-    });
-
-    // Convert to array and sort by date (most recent first)
-    const batches = Array.from(batchMap.values()).sort((a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-
-    setRecentBatches(batches.slice(0, 10)); // Keep only 10 most recent batches
-
-    // Set the most recent batch as last transport details for quick access
-    if (batches.length > 0) {
-      setLastTransportDetails({
-        driver_name: batches[0].driver_name,
-        driver_contact: batches[0].driver_contact,
-        vehicle_number: batches[0].vehicle_number,
-        transport_fee: batches[0].transport_fee,
-        delivery_batch_ref: batches[0].delivery_batch_ref,
-        delivery_note_url: batches[0].delivery_note_url
-      });
-    }
-  };
-
   // Load initial data on mount
   useEffect(() => {
     fetchInitialData();
   }, [fetchInitialData]);
 
-  // Lazy load based on active sub-tab
+  // Lazy load based on active main tab
   useEffect(() => {
-    if (activeSubTab === 'requests') {
-      // For requests tab, load based on statusFilter
-      if (statusFilter === 'PENDING' && !pendingLoaded && !loadingPending) {
-        fetchPendingRequests();
-      } else if (statusFilter === 'APPROVED' && !approvedLoaded && !loadingApproved) {
-        fetchApprovedRequests();
-      } else if (statusFilter === 'COMPLETED' && !completedLoaded && !loadingCompleted) {
-        fetchCompletedRequests();
-      } else if (statusFilter === 'REJECTED' && !rejectedLoaded && !loadingRejected) {
-        fetchRejectedRequests();
-      }
-    } else if (activeSubTab === 'delivery-notes') {
-      // Load delivery notes when switching to delivery-notes tab
+    // Material request tabs
+    if (activeMainTab === 'pending' && !pendingLoaded && !loadingPending) {
+      fetchPendingRequests();
+    } else if (activeMainTab === 'approved' && !approvedLoaded && !loadingApproved) {
+      fetchApprovedRequests();
+    } else if (activeMainTab === 'completed' && !completedLoaded && !loadingCompleted) {
+      fetchCompletedRequests();
+    } else if (activeMainTab === 'rejected' && !rejectedLoaded && !loadingRejected) {
+      fetchRejectedRequests();
+    }
+    // Delivery note tabs
+    else if (['draft_dn', 'issued_dn', 'delivered_dn'].includes(activeMainTab)) {
       fetchDeliveryNotes();
     }
   }, [
-    activeSubTab,
-    statusFilter,
+    activeMainTab,
     pendingLoaded,
     approvedLoaded,
     completedLoaded,
@@ -545,9 +446,9 @@ const StockOutPage: React.FC = () => {
       vehicle_number: '',
       driver_name: '',
       driver_contact: '',
+      transport_fee: 0,
       notes: `Material request #${request.request_number || request.request_id}${destinationNote}`
     });
-    setDeliveryNoteFile(null);
 
     // For vendor delivery requests, store material info since it's not in inventory
     // Match inventory by sub-item (brand) name, not item name
@@ -563,6 +464,7 @@ const StockOutPage: React.FC = () => {
         return {
           inventory_material_id: matchedInventory?.inventory_material_id || 0,
           quantity: mat.quantity || 0,
+          unit: mat.unit || matchedInventory?.unit || 'unit',
           notes: '',
           internal_request_id: request.request_id,
           material_name: isVendorDelivery ? mat.material_name : undefined,
@@ -581,6 +483,7 @@ const StockOutPage: React.FC = () => {
       setDnItems([{
         inventory_material_id: matchedInventory?.inventory_material_id || request.inventory_material_id || 0,
         quantity: request.quantity || 0,
+        unit: request.unit || matchedInventory?.unit || 'unit',
         notes: '',
         internal_request_id: request.request_id,
         material_name: isVendorDelivery ? request.material_name : undefined,
@@ -590,7 +493,7 @@ const StockOutPage: React.FC = () => {
     }
 
     setShowDeliveryNoteModal(true);
-    setActiveSubTab('delivery-notes');
+    setActiveMainTab('draft_dn');
   };
 
   const handleDeliveryNoteProjectSelect = (projectId: number) => {
@@ -624,71 +527,9 @@ const StockOutPage: React.FC = () => {
       return;
     }
 
-    // Check if file is required (not required if reusing from last delivery batch)
-    const isReusingBatch = dnFormData.delivery_batch_ref && lastTransportDetails?.delivery_note_url;
-    if (!deliveryNoteFile && !isReusingBatch) {
-      showWarning('Please upload a delivery note file');
-      return;
-    }
-
     setSaving(true);
     try {
-      // Auto-generate delivery batch reference if transport details provided and no existing batch ref
-      let finalBatchRef = dnFormData.delivery_batch_ref;
-
-      // Check if user made changes that require a new batch ref (different delivery)
-      const hasTransportFeeChange = selectedBatchReference &&
-        dnFormData.transport_fee !== 0 &&
-        dnFormData.transport_fee !== selectedBatchReference.original_fee;
-
-      const hasNewDeliveryNote = deliveryNoteFile !== null && selectedBatchReference?.delivery_note_url;
-
-      // If user changed transport fee or uploaded new delivery note, this is a different delivery - create new batch
-      if (finalBatchRef && (hasTransportFeeChange || hasNewDeliveryNote)) {
-        finalBatchRef = ''; // Clear batch ref to force generation of new one
-      }
-
-      if (!finalBatchRef && (dnFormData.driver_name || dnFormData.vehicle_number)) {
-        // First material in a new delivery - generate new batch ref like MSQ-OUT-01
-        // Count existing delivery notes to get next sequence number
-        const existingBatchRefs = deliveryNotes
-          .map(dn => dn.delivery_batch_ref)
-          .filter(ref => ref && ref.startsWith('MSQ-OUT-'));
-
-        const sequenceNumbers = existingBatchRefs.map(ref => {
-          const match = ref.match(/MSQ-OUT-(\d+)/);
-          return match ? parseInt(match[1]) : 0;
-        });
-
-        const nextSequence = sequenceNumbers.length > 0
-          ? Math.max(...sequenceNumbers) + 1
-          : 1;
-
-        finalBatchRef = `MSQ-OUT-${String(nextSequence).padStart(2, '0')}`;
-      }
-
-      const formDataWithTransport = {
-        ...dnFormData,
-        delivery_batch_ref: finalBatchRef,
-        // If reusing batch and no new file, pass the existing delivery_note_url
-        delivery_note_url: (!deliveryNoteFile && isReusingBatch && lastTransportDetails?.delivery_note_url)
-          ? lastTransportDetails.delivery_note_url
-          : undefined
-      };
-
-      const newNote = await inventoryService.createDeliveryNote(formDataWithTransport, deliveryNoteFile);
-
-      // Save transport details for quick reuse (including batch ref)
-      if (dnFormData.driver_name || dnFormData.vehicle_number || dnFormData.transport_fee) {
-        setLastTransportDetails({
-          driver_name: dnFormData.driver_name || '',
-          driver_contact: dnFormData.driver_contact || '',
-          vehicle_number: dnFormData.vehicle_number || '',
-          transport_fee: dnFormData.transport_fee || 0,
-          delivery_batch_ref: finalBatchRef || '',
-          delivery_note_url: newNote.delivery_note_url || ''
-        });
-      }
+      const newNote = await inventoryService.createDeliveryNote(dnFormData, null);
 
       // Use bulk endpoint to add all items in a single request (eliminates N+1 API calls)
       // Include vendor delivery info for items that need inventory creation
@@ -713,7 +554,7 @@ const StockOutPage: React.FC = () => {
       resetDeliveryNoteForm();
 
       // Refresh the appropriate request list and delivery notes
-      if (statusFilter === 'APPROVED' && approvedLoaded) {
+      if (activeMainTab === 'approved' && approvedLoaded) {
         fetchApprovedRequests();
       }
       fetchDeliveryNotes();
@@ -738,13 +579,10 @@ const StockOutPage: React.FC = () => {
       driver_name: '',
       driver_contact: '',
       notes: '',
-      transport_fee: 0,
-      delivery_batch_ref: ''
+      transport_fee: 0
     });
     setDnItems([]);
     setSelectedRequestForDN(null);
-    setDeliveryNoteFile(null);
-    setSelectedBatchReference(null);
   };
 
   const handleDnItemChange = (index: number, field: string, value: unknown) => {
@@ -889,14 +727,14 @@ const StockOutPage: React.FC = () => {
     }
   };
 
-  // Get current requests based on status filter
+  // Get current requests based on active tab
   const currentRequests = useMemo(() => {
-    if (statusFilter === 'PENDING') return pendingRequests;
-    if (statusFilter === 'APPROVED') return approvedRequests;
-    if (statusFilter === 'COMPLETED') return completedRequests;
-    if (statusFilter === 'REJECTED') return rejectedRequests;
+    if (activeMainTab === 'pending') return pendingRequests;
+    if (activeMainTab === 'approved') return approvedRequests;
+    if (activeMainTab === 'completed') return completedRequests;
+    if (activeMainTab === 'rejected') return rejectedRequests;
     return [];
-  }, [statusFilter, pendingRequests, approvedRequests, completedRequests, rejectedRequests]);
+  }, [activeMainTab, pendingRequests, approvedRequests, completedRequests, rejectedRequests]);
 
   // Memoized filtered data with search
   const filteredRequests = useMemo(() => {
@@ -911,14 +749,52 @@ const StockOutPage: React.FC = () => {
     });
   }, [currentRequests, searchTerm]);
 
+  // Pagination for requests
+  const requestsTotalPages = Math.ceil(filteredRequests.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequests = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredRequests.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequests, currentPage]);
+
+  // Filtered delivery notes based on active tab
+  const filteredDeliveryNotes = useMemo(() => {
+    return deliveryNotes.filter(dn => {
+      const status = normalizeStatus(dn.status);
+      if (activeMainTab === 'draft_dn') return status === 'DRAFT';
+      if (activeMainTab === 'issued_dn') return ['ISSUED', 'IN_TRANSIT', 'DISPATCHED'].includes(status);
+      if (activeMainTab === 'delivered_dn') return status === 'DELIVERED';
+      return false;
+    });
+  }, [deliveryNotes, activeMainTab]);
+
+  // Pagination for delivery notes
+  const dnTotalPages = Math.ceil(filteredDeliveryNotes.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedDeliveryNotes = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredDeliveryNotes.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredDeliveryNotes, currentPage]);
+
+  // Reset page when tab or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeMainTab, searchTerm]);
+
+  // Clamp page when total pages changes
+  useEffect(() => {
+    const totalPages = ['draft_dn', 'issued_dn', 'delivered_dn'].includes(activeMainTab) ? dnTotalPages : requestsTotalPages;
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [requestsTotalPages, dnTotalPages, currentPage, activeMainTab]);
+
   // Get loading state for current tab
   const isCurrentTabLoading = useMemo(() => {
-    if (statusFilter === 'PENDING') return loadingPending;
-    if (statusFilter === 'APPROVED') return loadingApproved;
-    if (statusFilter === 'COMPLETED') return loadingCompleted;
-    if (statusFilter === 'REJECTED') return loadingRejected;
+    if (activeMainTab === 'pending') return loadingPending;
+    if (activeMainTab === 'approved') return loadingApproved;
+    if (activeMainTab === 'completed') return loadingCompleted;
+    if (activeMainTab === 'rejected') return loadingRejected;
     return false;
-  }, [statusFilter, loadingPending, loadingApproved, loadingCompleted, loadingRejected]);
+  }, [activeMainTab, loadingPending, loadingApproved, loadingCompleted, loadingRejected]);
 
   const stockOutStats = useMemo(() => {
     const pending = pendingLoaded ? pendingRequests.length : 0;
@@ -969,103 +845,147 @@ const StockOutPage: React.FC = () => {
         <p className="text-gray-600 mt-1">Issue materials to project sites</p>
       </div>
 
-      {/* Info Banner */}
-      <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-4">
-        <div className="flex items-start gap-3">
-          <ArrowUpCircle className="w-5 h-5 text-cyan-600 mt-0.5 flex-shrink-0" />
-          <div>
-            <h3 className="font-semibold text-cyan-900">Stock Out - Decrease Inventory</h3>
-            <p className="text-sm text-cyan-700 mt-1">
-              Issue materials <strong>going out</strong> to project sites. This <strong>decreases stock quantities</strong>.
-            </p>
-            <div className="flex flex-wrap gap-4 mt-2 text-xs text-cyan-600">
-              <span className="flex items-center gap-1">
-                <Package className="w-3 h-3" />
-                <strong>Requests:</strong> Material requests from Procurement team
-              </span>
-              <span className="flex items-center gap-1">
-                <FileText className="w-3 h-3" />
-                <strong>Delivery Notes:</strong> Official dispatch documents for site delivery
-              </span>
-            </div>
-          </div>
+      {/* Main Tabs - Single Row with horizontal scroll */}
+      <div className="overflow-x-auto pb-2">
+        <div className="flex gap-2 min-w-max">
+          {/* Material Request Tabs */}
+          <button
+            onClick={() => setActiveMainTab('pending')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'pending'
+                ? 'bg-yellow-500 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <Package className="w-4 h-4" />
+            Pending
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'pending' ? 'bg-white/20' : 'bg-yellow-100 text-yellow-700'
+            }`}>
+              {pendingRequests.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('approved')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'approved'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <CheckCircle className="w-4 h-4" />
+            Approved
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'approved' ? 'bg-white/20' : 'bg-blue-100 text-blue-700'
+            }`}>
+              {approvedRequests.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('draft_dn')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'draft_dn'
+                ? 'bg-gray-700 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            Draft DN
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'draft_dn' ? 'bg-white/20' : 'bg-gray-200 text-gray-700'
+            }`}>
+              {deliveryNotes.filter(dn => normalizeStatus(dn.status) === 'DRAFT').length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('issued_dn')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'issued_dn'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            Issued DN
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'issued_dn' ? 'bg-white/20' : 'bg-blue-100 text-blue-700'
+            }`}>
+              {deliveryNotes.filter(dn => ['ISSUED', 'IN_TRANSIT', 'DISPATCHED'].includes(normalizeStatus(dn.status))).length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('completed')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'completed'
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <CheckCircle className="w-4 h-4" />
+            Completed
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'completed' ? 'bg-white/20' : 'bg-green-100 text-green-700'
+            }`}>
+              {completedRequests.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('rejected')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'rejected'
+                ? 'bg-red-500 text-white'
+                : 'bg-red-50 text-red-700 hover:bg-red-100'
+            }`}
+          >
+            <X className="w-4 h-4" />
+            Rejected
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'rejected' ? 'bg-white/20' : 'bg-red-100 text-red-700'
+            }`}>
+              {rejectedRequests.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('delivered_dn')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'delivered_dn'
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <CheckCircle className="w-4 h-4" />
+            Delivered DN
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'delivered_dn' ? 'bg-white/20' : 'bg-green-100 text-green-700'
+            }`}>
+              {deliveryNotes.filter(dn => normalizeStatus(dn.status) === 'DELIVERED').length}
+            </span>
+          </button>
         </div>
       </div>
 
-      {/* Sub-tabs */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setActiveSubTab('requests')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            activeSubTab === 'requests'
-              ? 'bg-cyan-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-          aria-label="Material Requests tab"
-        >
-          <Package className="w-4 h-4 inline mr-2" />
-          Material Requests
-          <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-yellow-100 text-yellow-700">
-            {stockOutStats.pending}
-          </span>
-        </button>
-        <button
-          onClick={() => setActiveSubTab('delivery-notes')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            activeSubTab === 'delivery-notes'
-              ? 'bg-cyan-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-          aria-label="Delivery Notes tab"
-        >
-          <FileText className="w-4 h-4 inline mr-2" />
-          Delivery Notes
-          <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
-            {deliveryNotes.length}
-          </span>
-        </button>
-      </div>
-
-      {/* REQUESTS SUB-TAB */}
-      {activeSubTab === 'requests' && (
+      {/* MATERIAL REQUESTS TABS */}
+      {['pending', 'approved', 'completed', 'rejected'].includes(activeMainTab) && (
         <>
-          {/* Filters */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-            <div className="flex gap-2 flex-wrap">
-              {['PENDING', 'APPROVED', 'COMPLETED', 'REJECTED'].map(status => (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    statusFilter === status
-                      ? status === 'REJECTED'
-                        ? 'bg-red-600 text-white'
-                        : 'bg-cyan-600 text-white'
-                      : status === 'REJECTED'
-                        ? 'bg-red-50 text-red-700 hover:bg-red-100'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                  aria-label={`Filter by ${status}`}
-                >
-                  {status}
-                </button>
-              ))}
-            </div>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Search materials..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 w-64"
-                aria-label="Search material requests"
-              />
-            </div>
-          </div>
-
           {/* Requests Table */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            {/* Table Header with Search */}
+            <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
+              <h2 className="text-lg font-semibold text-gray-800">
+                {activeMainTab.charAt(0).toUpperCase() + activeMainTab.slice(1)} Material Requests
+              </h2>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="Search materials..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 w-64"
+                  aria-label="Search material requests"
+                />
+              </div>
+            </div>
             {isCurrentTabLoading ? (
               <div className="flex items-center justify-center py-12">
                 <ModernLoadingSpinners size="md" />
@@ -1086,14 +1006,14 @@ const StockOutPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {filteredRequests.length === 0 ? (
+                  {paginatedRequests.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                         No material requests found
                       </td>
                     </tr>
                   ) : (
-                  filteredRequests.map((req) => (
+                  paginatedRequests.map((req) => (
                     <tr key={req.request_id} className="hover:bg-gray-50">
                       <td className="px-4 py-4 text-sm font-medium text-gray-900">
                         #{req.request_number || req.request_id}
@@ -1326,43 +1246,63 @@ const StockOutPage: React.FC = () => {
               </tbody>
             </table>
             )}
+
+            {/* Pagination for Requests */}
+            {filteredRequests.length > 0 && (
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div className="text-sm text-gray-600">
+                    Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredRequests.length)} of {filteredRequests.length} requests
+                  </div>
+                  {requestsTotalPages > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600 px-2">
+                        Page {currentPage} of {requestsTotalPages}
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, requestsTotalPages))}
+                        disabled={currentPage === requestsTotalPages}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
 
-      {/* DELIVERY NOTES SUB-TAB */}
-      {activeSubTab === 'delivery-notes' && (
+      {/* DELIVERY NOTES TABS */}
+      {['draft_dn', 'issued_dn', 'delivered_dn'].includes(activeMainTab) && (
         <>
-          {/* Filters for Delivery Notes */}
-          <div className="flex justify-between items-center">
-            <div className="flex gap-2">
-              {['DRAFT', 'ISSUED', 'DELIVERED'].map(status => (
-                <button
-                  key={status}
-                  onClick={() => setDnStatusFilter(status)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    dnStatusFilter === status
-                      ? 'bg-cyan-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                  aria-label={`Filter by ${status}`}
-                >
-                  {status.replace('_', ' ')}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowDeliveryNoteModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition-colors"
-              aria-label="Create new delivery note"
-            >
-              <Plus className="w-5 h-5" />
-              New Delivery Note
-            </button>
-          </div>
-
           {/* Delivery Notes Table */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            {/* Table Header with Create Button */}
+            <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
+              <h2 className="text-lg font-semibold text-gray-800">
+                {activeMainTab === 'draft_dn' ? 'Draft' : activeMainTab === 'issued_dn' ? 'Issued' : 'Delivered'} Delivery Notes
+              </h2>
+              {/* <button
+                onClick={() => setShowDeliveryNoteModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition-colors"
+                aria-label="Create new delivery note"
+              >
+                <Plus className="w-5 h-5" />
+                New Delivery Note
+              </button> */}
+            </div>
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -1376,28 +1316,14 @@ const StockOutPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {deliveryNotes
-                  .filter(dn => {
-                    if (dnStatusFilter === 'DRAFT') return dn.status === 'DRAFT';
-                    if (dnStatusFilter === 'ISSUED') return dn.status === 'ISSUED' || dn.status === 'IN_TRANSIT';
-                    if (dnStatusFilter === 'DELIVERED') return dn.status === 'DELIVERED';
-                    return true;
-                  })
-                  .length === 0 ? (
+                {paginatedDeliveryNotes.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                      No delivery notes found
+                      No {activeMainTab === 'draft_dn' ? 'draft' : activeMainTab === 'issued_dn' ? 'issued' : 'delivered'} delivery notes found
                     </td>
                   </tr>
                 ) : (
-                  deliveryNotes
-                    .filter(dn => {
-                      if (dnStatusFilter === 'DRAFT') return dn.status === 'DRAFT';
-                      if (dnStatusFilter === 'ISSUED') return dn.status === 'ISSUED' || dn.status === 'IN_TRANSIT';
-                      if (dnStatusFilter === 'DELIVERED') return dn.status === 'DELIVERED';
-                      return true;
-                    })
-                    .map((dn) => (
+                  paginatedDeliveryNotes.map((dn) => (
                       <tr key={dn.delivery_note_id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">
                           {dn.delivery_note_number}
@@ -1516,6 +1442,40 @@ const StockOutPage: React.FC = () => {
                 )}
               </tbody>
             </table>
+
+            {/* Pagination for Delivery Notes */}
+            {filteredDeliveryNotes.length > 0 && (
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div className="text-sm text-gray-600">
+                    Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredDeliveryNotes.length)} of {filteredDeliveryNotes.length} delivery notes
+                  </div>
+                  {dnTotalPages > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600 px-2">
+                        Page {currentPage} of {dnTotalPages}
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, dnTotalPages))}
+                        disabled={currentPage === dnTotalPages}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1681,203 +1641,46 @@ const StockOutPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Transport Fee */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Transport Fee (AED)
-                </label>
-
-                {/* Show reference info if batch was selected */}
-                {selectedBatchReference && selectedBatchReference.original_fee > 0 && (
-                  <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    <p className="text-amber-800 font-medium text-sm">
-                      Reference: Original transport fee for this batch was: <span className="font-bold">AED {selectedBatchReference.original_fee.toFixed(2)}</span>
-                    </p>
-                    <p className="text-amber-700 text-xs mt-2">
-                      You can edit the fee below if there was an additional charge for this specific material.
-                    </p>
-                  </div>
-                )}
-
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={dnFormData.transport_fee ?? ''}
-                    onChange={(e) => setDnFormData({ ...dnFormData, transport_fee: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                    placeholder="Enter transport fee for this delivery"
-                  />
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Enter the transport fee paid for delivering these materials from vendor to store
-                </p>
-              </div>
-
-              {/* Delivery Note from Vendor - File Upload */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Delivery Note from Vendor {!lastTransportDetails?.delivery_note_url && <span className="text-red-500">*</span>}
-                </label>
-
-                {/* Show delivery note available from batch */}
-                {lastTransportDetails?.delivery_note_url && dnFormData.delivery_batch_ref && (
-                  <div className="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
-                    <div className="flex items-start">
-                      <CheckCircle className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-green-800 font-medium text-sm">
-                          ✓ Delivery Note Available from Batch
-                        </p>
-                        <a
-                          href={lastTransportDetails.delivery_note_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline text-sm mt-1 inline-flex items-center"
-                        >
-                          <FileText className="w-4 h-4 mr-1" />
-                          View Batch Delivery Note
-                        </a>
-                        <p className="text-green-700 text-xs mt-2">
-                          This material will use the delivery note from the selected batch. You can upload a different file below if this specific material has a separate delivery note.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="border border-gray-300 rounded-lg overflow-hidden">
-                  <label className="flex items-center justify-center w-full px-4 py-3 bg-white border-dashed border-2 border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
-                    <div className="flex flex-col items-center">
-                      {deliveryNoteFile ? (
-                        <div className="flex items-center gap-2">
-                          <FileText className="w-5 h-5 text-green-600" />
-                          <span className="text-sm text-gray-700 font-medium">{deliveryNoteFile.name}</span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              setDeliveryNoteFile(null);
-                            }}
-                            className="ml-2 text-red-600 hover:text-red-800"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-2 text-gray-600 mb-1">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                            </svg>
-                            <span className="text-sm font-medium">Browse...</span>
-                          </div>
-                          <span className="text-xs text-gray-500">No file selected.</span>
-                        </>
-                      )}
-                    </div>
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          // Check file size (max 10MB)
-                          if (file.size > 10 * 1024 * 1024) {
-                            showError('File size must be less than 10MB');
-                            e.target.value = '';
-                            return;
-                          }
-                          setDeliveryNoteFile(file);
-                        }
-                      }}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  {lastTransportDetails?.delivery_note_url && dnFormData.delivery_batch_ref
-                    ? '(Optional) Upload a new file only if this material has a different delivery note'
-                    : 'Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)'}
-                </p>
-              </div>
-
               {/* Transport & Delivery Details */}
               <div className="border-t pt-6 mt-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold text-gray-900 flex items-center">
-                    <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
-                    </svg>
-                    Transport & Delivery Details
-                  </h3>
-                  {recentBatches.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setShowBatchListModal(true)}
-                      className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm flex items-center space-x-1"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                      </svg>
-                      <span>Recent Deliveries</span>
-                    </button>
-                  )}
-                </div>
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center mb-4">
+                  <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
+                  </svg>
+                  Transport & Delivery Details
+                </h3>
 
-                {recentBatches.length > 0 && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm text-blue-800">
-                        <strong>Last Delivery:</strong> {recentBatches[0].driver_name} • {recentBatches[0].vehicle_number}
-                        {recentBatches[0].delivery_batch_ref && (
-                          <span className="ml-2 px-2 py-0.5 bg-blue-100 rounded text-xs font-mono">
-                            {recentBatches[0].delivery_batch_ref}
-                          </span>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const mostRecentBatch = recentBatches[0];
-                          if (mostRecentBatch) {
-                            setSelectedBatchReference({
-                              original_fee: mostRecentBatch.transport_fee || 0
-                            });
-
-                            setDnFormData(prev => ({
-                              ...prev,
-                              driver_name: mostRecentBatch.driver_name,
-                              driver_contact: mostRecentBatch.driver_contact,
-                              vehicle_number: mostRecentBatch.vehicle_number,
-                              transport_fee: 0,  // Set to 0 for subsequent materials (only first material should have the fee)
-                              delivery_batch_ref: mostRecentBatch.delivery_batch_ref
-                            }));
-
-                            // If there's a delivery note URL, indicate it's reused (no need to upload new file)
-                            if (mostRecentBatch.delivery_note_url) {
-                              // Note: File upload will be optional since we'll reuse the URL
-                              setDeliveryNoteFile(null);
-                            }
-                          }
-                        }}
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex items-center space-x-1"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                        <span>Last Delivery</span>
-                      </button>
-                    </div>
-                    <p className="text-xs text-blue-600 mt-2">
-                      Materials from the same delivery trip will share the batch reference and transport details. Only the first material should have the transport fee.
-                    </p>
-                  </div>
-                )}
-
+                {/* 2x2 Grid Layout */}
                 <div className="grid grid-cols-2 gap-4">
-                  {/* Driver Name */}
+                  {/* Row 1, Col 1: Transport Fee */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Transport Fee (AED)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={dnFormData.transport_fee || ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Only accept valid numbers (including decimals)
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          setDnFormData({ ...dnFormData, transport_fee: Number(value) || 0 });
+                        }
+                      }}
+                      onKeyPress={(e) => {
+                        // Prevent non-numeric characters except decimal point
+                        if (!/[0-9.]/.test(e.key)) {
+                          e.preventDefault();
+                        }
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                      placeholder="0"
+                    />
+                  </div>
+
+                  {/* Row 1, Col 2: Driver Name */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Driver Name *
@@ -1885,14 +1688,20 @@ const StockOutPage: React.FC = () => {
                     <input
                       type="text"
                       value={dnFormData.driver_name}
-                      onChange={(e) => setDnFormData({ ...dnFormData, driver_name: e.target.value })}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Only allow letters, spaces, and common name characters
+                        if (/^[a-zA-Z\s.''-]*$/.test(value)) {
+                          setDnFormData({ ...dnFormData, driver_name: value });
+                        }
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
                       placeholder="Enter driver name"
                       required
                     />
                   </div>
 
-                  {/* Vehicle Number */}
+                  {/* Row 2, Col 1: Vehicle Number */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Vehicle Number *
@@ -1900,26 +1709,38 @@ const StockOutPage: React.FC = () => {
                     <input
                       type="text"
                       value={dnFormData.vehicle_number}
-                      onChange={(e) => setDnFormData({ ...dnFormData, vehicle_number: e.target.value })}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Allow alphanumeric characters, hyphens, and spaces for vehicle numbers
+                        if (/^[a-zA-Z0-9\s-]*$/.test(value)) {
+                          setDnFormData({ ...dnFormData, vehicle_number: value.toUpperCase() });
+                        }
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
                       placeholder="Enter vehicle number"
                       required
                     />
                   </div>
-                </div>
 
-                {/* Driver Contact */}
-                <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Driver Contact
-                  </label>
-                  <input
-                    type="text"
-                    value={dnFormData.driver_contact}
-                    onChange={(e) => setDnFormData({ ...dnFormData, driver_contact: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
-                    placeholder="Enter driver contact number"
-                  />
+                  {/* Row 2, Col 2: Driver Contact */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Driver Contact
+                    </label>
+                    <input
+                      type="tel"
+                      value={dnFormData.driver_contact}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Only allow numbers, +, -, spaces, and parentheses
+                        if (/^[0-9+\s()-]*$/.test(value)) {
+                          setDnFormData({ ...dnFormData, driver_contact: value });
+                        }
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                      placeholder="Enter driver contact number"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1930,8 +1751,8 @@ const StockOutPage: React.FC = () => {
 
                 <div className="space-y-2">
                   {dnItems.map((item, index) => (
-                    <div key={index} className={`grid grid-cols-12 gap-2 items-center p-2 rounded ${item.is_vendor_delivery ? 'bg-orange-50 border border-orange-200' : 'bg-gray-50'}`}>
-                      <div className="col-span-7">
+                    <div key={index} className={`flex items-center gap-2 p-2 rounded ${item.is_vendor_delivery ? 'bg-orange-50 border border-orange-200' : 'bg-gray-50'}`}>
+                      <div className="flex-1 min-w-0">
                         {/* Show material name directly for vendor deliveries, dropdown for store materials */}
                         {item.is_vendor_delivery ? (
                           <div className="px-2 py-1 text-sm">
@@ -1948,14 +1769,22 @@ const StockOutPage: React.FC = () => {
                           </div>
                         )}
                       </div>
-                      <div className="col-span-2">
-                        <div className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center bg-white">
-                          {item.quantity}
-                        </div>
-                      </div>
-                      <div className="col-span-3">
-                        {/* Show unit */}
-                        <div className="text-sm text-gray-700 px-2 py-1">
+                      <div className="flex items-center gap-1 shrink-0">
+                        {item.is_vendor_delivery ? (
+                          <div className="w-20 px-2 py-1 text-sm text-center bg-gray-100 border border-gray-300 rounded text-gray-700">
+                            {item.quantity}
+                          </div>
+                        ) : (
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.quantity}
+                            onChange={(e) => handleDnItemChange(index, 'quantity', Number(e.target.value))}
+                            className="w-20 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500"
+                          />
+                        )}
+                        <div className="text-sm text-gray-700 px-1 py-1 whitespace-nowrap">
                           {item.unit || 'unit'}
                         </div>
                       </div>
@@ -1986,12 +1815,11 @@ const StockOutPage: React.FC = () => {
                 <button
                   onClick={handleCreateDeliveryNote}
                   className="px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  disabled={saving || !dnFormData.attention_to || !dnFormData.vehicle_number || !dnFormData.driver_name || (!deliveryNoteFile && !(dnFormData.delivery_batch_ref && lastTransportDetails?.delivery_note_url))}
+                  disabled={saving || !dnFormData.attention_to || !dnFormData.vehicle_number || !dnFormData.driver_name}
                   title={
                     !dnFormData.attention_to ? 'Please select a Site Engineer first' :
                     !dnFormData.vehicle_number ? 'Please enter Vehicle Number' :
-                    !dnFormData.driver_name ? 'Please enter Driver Name' :
-                    (!deliveryNoteFile && !(dnFormData.delivery_batch_ref && lastTransportDetails?.delivery_note_url)) ? 'Please upload a delivery note file' : ''
+                    !dnFormData.driver_name ? 'Please enter Driver Name' : ''
                   }
                 >
                   {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -2172,129 +2000,6 @@ const StockOutPage: React.FC = () => {
               <button
                 onClick={() => setMaterialsViewModal({ show: false, materials: [], requestNumber: null })}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Recent Delivery Batches Modal */}
-      {showBatchListModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-hidden">
-            {/* Modal Header */}
-            <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-6 py-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold flex items-center">
-                <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                </svg>
-                Recent Delivery Batches
-              </h2>
-              <button
-                type="button"
-                onClick={() => setShowBatchListModal(false)}
-                className="text-white hover:bg-purple-800 rounded-lg p-1"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto max-h-[calc(80vh-180px)]">
-              <p className="text-sm text-gray-600 mb-4">
-                Select a recent delivery to copy transport and driver details to the form. Click on any batch to auto-fill the form.
-              </p>
-
-              <div className="space-y-3">
-                {recentBatches.map((batch, index) => (
-                  <div
-                    key={batch.delivery_batch_ref}
-                    onClick={() => {
-                      // Store reference info for display
-                      setSelectedBatchReference({
-                        original_fee: batch.transport_fee || 0
-                      });
-
-                      // Populate form with batch details - set transport_fee to 0 (only first material should have the fee)
-                      setDnFormData(prev => ({
-                        ...prev,
-                        driver_name: batch.driver_name,
-                        driver_contact: batch.driver_contact,
-                        vehicle_number: batch.vehicle_number,
-                        transport_fee: 0, // Set to 0 for subsequent materials (only first material should have the fee)
-                        delivery_batch_ref: batch.delivery_batch_ref
-                      }));
-
-                      // If there's a delivery note URL, clear file input (will reuse URL)
-                      if (batch.delivery_note_url) {
-                        setDeliveryNoteFile(null);
-                      }
-
-                      setShowBatchListModal(false);
-                    }}
-                    className="border border-gray-200 rounded-lg p-4 hover:bg-purple-50 hover:border-purple-300 cursor-pointer transition-all"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-2">
-                          <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-sm font-mono font-semibold">
-                            {batch.delivery_batch_ref}
-                          </span>
-                          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
-                            {batch.material_count} material{batch.material_count > 1 ? 's' : ''}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div>
-                            <span className="text-gray-600">Driver:</span>
-                            <span className="ml-2 font-medium text-gray-900">{batch.driver_name || 'N/A'}</span>
-                          </div>
-                          <div>
-                            <span className="text-gray-600">Contact:</span>
-                            <span className="ml-2 font-medium text-gray-900">{batch.driver_contact || 'N/A'}</span>
-                          </div>
-                          <div>
-                            <span className="text-gray-600">Vehicle:</span>
-                            <span className="ml-2 font-medium text-gray-900">{batch.vehicle_number || 'N/A'}</span>
-                          </div>
-                          <div>
-                            <span className="text-gray-600">Transport Fee:</span>
-                            <span className="ml-2 font-medium text-gray-900">AED {batch.transport_fee?.toFixed(2) || '0.00'}</span>
-                          </div>
-                          <div className="col-span-2">
-                            <span className="text-gray-600">Date:</span>
-                            <span className="ml-2 font-medium text-gray-900">
-                              {new Date(batch.created_at).toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                year: 'numeric'
-                              })}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <ChevronDown className="w-5 h-5 text-purple-600 transform -rotate-90" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {recentBatches.length === 0 && (
-                <div className="text-center py-8 text-gray-500">
-                  <Package className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-                  <p>No recent delivery batches found</p>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="bg-gray-50 px-6 py-4 flex justify-end border-t">
-              <button
-                type="button"
-                onClick={() => setShowBatchListModal(false)}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
               >
                 Close
               </button>

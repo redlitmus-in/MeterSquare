@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
-import { DocumentChartBarIcon, ArrowLeftIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import { DocumentChartBarIcon, ArrowLeftIcon, ArrowDownTrayIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { showError, showInfo, showSuccess } from '@/utils/toastHelper';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { apiClient } from '@/api/config';
 import { saveAs } from 'file-saver';
+import { PAGINATION } from '@/lib/constants';
 
 // Interface matching backend response structure
 interface ComparisonMaterial {
@@ -112,6 +113,7 @@ export default function PurchaseComparison() {
   const [comparisonData, setComparisonData] = useState<PurchaseComparisonData | null>(null);
   const [loadingComparison, setLoadingComparison] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Real-time auto-sync for BOQ list - use dedicated purchase comparison projects endpoint
   const { data: boqData, isLoading: loading, refetch } = useProjectsAutoSync(
@@ -168,6 +170,19 @@ export default function PurchaseComparison() {
       });
     }
   }, [boqList, activeTab]);
+
+  // Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Pagination calculations
+  const totalRecords = filteredBOQList.length;
+  const totalPages = Math.ceil(totalRecords / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedBOQList = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredBOQList.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredBOQList, currentPage]);
 
   // Fetch purchase comparison data when project is selected
   const fetchComparisonData = async (projectId: number) => {
@@ -1116,35 +1131,91 @@ export default function PurchaseComparison() {
                     <p className="text-gray-500">No live projects available</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredBOQList.map((boq: any) => (
-                      <motion.div
-                        key={boq.boq_id || boq.project_id}
-                        whileHover={{ scale: 1.02 }}
-                        className="bg-white border border-gray-200 rounded-xl p-5 cursor-pointer hover:shadow-lg transition-all"
-                        onClick={() => handleProjectSelect(boq)}
-                      >
-                        <div className="flex justify-between items-start mb-3">
-                          <DocumentChartBarIcon className="w-8 h-8 text-green-500" />
-                          <Badge className={getStatusColor(boq)}>{getStatusLabel(boq)}</Badge>
-                        </div>
-                        <h3 className="font-semibold text-gray-800 mb-2 line-clamp-2">
-                          {boq.project_name || boq.project?.name || 'Unnamed Project'}
-                        </h3>
-                        <p className="text-sm text-gray-500 mb-3 line-clamp-1">
-                          {boq.boq_description || `BOQ for ${boq.project_name || 'project'}`}
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {paginatedBOQList.map((boq: any) => (
+                        <motion.div
+                          key={boq.boq_id || boq.project_id}
+                          whileHover={{ scale: 1.02 }}
+                          className="bg-white border border-gray-200 rounded-xl p-5 cursor-pointer hover:shadow-lg transition-all"
+                          onClick={() => handleProjectSelect(boq)}
+                        >
+                          <div className="flex justify-between items-start mb-3">
+                            <DocumentChartBarIcon className="w-8 h-8 text-green-500" />
+                            <Badge className={getStatusColor(boq)}>{getStatusLabel(boq)}</Badge>
+                          </div>
+                          <h3 className="font-semibold text-gray-800 mb-2 line-clamp-2">
+                            {boq.project_name || boq.project?.name || 'Unnamed Project'}
+                          </h3>
+                          <p className="text-sm text-gray-500 mb-3 line-clamp-1">
+                            {boq.boq_description || `BOQ for ${boq.project_name || 'project'}`}
+                          </p>
+                          <div className="flex justify-between text-xs text-gray-500">
+                            <span>BOQ ID: #{boq.boq_id}</span>
+                            <span>{boq.created_at ? new Date(boq.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}</span>
+                          </div>
+                          <button className="w-full mt-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2">
+                            <DocumentChartBarIcon className="w-4 h-4" />
+                            View Comparison
+                          </button>
+                        </motion.div>
+                      ))}
+                    </div>
+
+                    {/* Pagination */}
+                    {totalRecords > 0 && (
+                      <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gray-50 px-4 py-3 border border-gray-200 rounded-lg">
+                        <p className="text-sm text-gray-600">
+                          Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} to {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)} of {totalRecords} projects
                         </p>
-                        <div className="flex justify-between text-xs text-gray-500">
-                          <span>BOQ ID: #{boq.boq_id}</span>
-                          <span>{boq.created_at ? new Date(boq.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}</span>
-                        </div>
-                        <button className="w-full mt-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2">
-                          <DocumentChartBarIcon className="w-4 h-4" />
-                          View Comparison
-                        </button>
-                      </motion.div>
-                    ))}
-                  </div>
+                        {totalPages > 1 && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={currentPage === 1}
+                              className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <ChevronLeftIcon className="w-4 h-4" />
+                            </button>
+                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                              if (
+                                page === 1 ||
+                                page === totalPages ||
+                                (page >= currentPage - 1 && page <= currentPage + 1)
+                              ) {
+                                return (
+                                  <button
+                                    key={page}
+                                    onClick={() => setCurrentPage(page)}
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                                      currentPage === page
+                                        ? 'bg-green-600 text-white'
+                                        : 'border border-gray-300 hover:bg-gray-100'
+                                    }`}
+                                  >
+                                    {page}
+                                  </button>
+                                );
+                              } else if (
+                                page === currentPage - 2 ||
+                                page === currentPage + 2
+                              ) {
+                                return <span key={page} className="px-1">...</span>;
+                              }
+                              return null;
+                            })}
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                              disabled={currentPage === totalPages}
+                              className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <ChevronRightIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </TabsContent>
 
@@ -1155,35 +1226,91 @@ export default function PurchaseComparison() {
                     <p className="text-gray-500">No completed projects available</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredBOQList.map((boq: any) => (
-                      <motion.div
-                        key={boq.boq_id || boq.project_id}
-                        whileHover={{ scale: 1.02 }}
-                        className="bg-white border border-gray-200 rounded-xl p-5 cursor-pointer hover:shadow-lg transition-all"
-                        onClick={() => handleProjectSelect(boq)}
-                      >
-                        <div className="flex justify-between items-start mb-3">
-                          <DocumentChartBarIcon className="w-8 h-8 text-blue-500" />
-                          <Badge className={getStatusColor(boq)}>{getStatusLabel(boq)}</Badge>
-                        </div>
-                        <h3 className="font-semibold text-gray-800 mb-2 line-clamp-2">
-                          {boq.project_name || boq.project?.name || 'Unnamed Project'}
-                        </h3>
-                        <p className="text-sm text-gray-500 mb-3 line-clamp-1">
-                          {boq.boq_description || `BOQ for ${boq.project_name || 'project'}`}
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {paginatedBOQList.map((boq: any) => (
+                        <motion.div
+                          key={boq.boq_id || boq.project_id}
+                          whileHover={{ scale: 1.02 }}
+                          className="bg-white border border-gray-200 rounded-xl p-5 cursor-pointer hover:shadow-lg transition-all"
+                          onClick={() => handleProjectSelect(boq)}
+                        >
+                          <div className="flex justify-between items-start mb-3">
+                            <DocumentChartBarIcon className="w-8 h-8 text-blue-500" />
+                            <Badge className={getStatusColor(boq)}>{getStatusLabel(boq)}</Badge>
+                          </div>
+                          <h3 className="font-semibold text-gray-800 mb-2 line-clamp-2">
+                            {boq.project_name || boq.project?.name || 'Unnamed Project'}
+                          </h3>
+                          <p className="text-sm text-gray-500 mb-3 line-clamp-1">
+                            {boq.boq_description || `BOQ for ${boq.project_name || 'project'}`}
+                          </p>
+                          <div className="flex justify-between text-xs text-gray-500">
+                            <span>BOQ ID: #{boq.boq_id}</span>
+                            <span>{boq.created_at ? new Date(boq.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}</span>
+                          </div>
+                          <button className="w-full mt-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                            <DocumentChartBarIcon className="w-4 h-4" />
+                            View Comparison
+                          </button>
+                        </motion.div>
+                      ))}
+                    </div>
+
+                    {/* Pagination */}
+                    {totalRecords > 0 && (
+                      <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gray-50 px-4 py-3 border border-gray-200 rounded-lg">
+                        <p className="text-sm text-gray-600">
+                          Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} to {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)} of {totalRecords} projects
                         </p>
-                        <div className="flex justify-between text-xs text-gray-500">
-                          <span>BOQ ID: #{boq.boq_id}</span>
-                          <span>{boq.created_at ? new Date(boq.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}</span>
-                        </div>
-                        <button className="w-full mt-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                          <DocumentChartBarIcon className="w-4 h-4" />
-                          View Comparison
-                        </button>
-                      </motion.div>
-                    ))}
-                  </div>
+                        {totalPages > 1 && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={currentPage === 1}
+                              className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <ChevronLeftIcon className="w-4 h-4" />
+                            </button>
+                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                              if (
+                                page === 1 ||
+                                page === totalPages ||
+                                (page >= currentPage - 1 && page <= currentPage + 1)
+                              ) {
+                                return (
+                                  <button
+                                    key={page}
+                                    onClick={() => setCurrentPage(page)}
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                                      currentPage === page
+                                        ? 'bg-blue-600 text-white'
+                                        : 'border border-gray-300 hover:bg-gray-100'
+                                    }`}
+                                  >
+                                    {page}
+                                  </button>
+                                );
+                              } else if (
+                                page === currentPage - 2 ||
+                                page === currentPage + 2
+                              ) {
+                                return <span key={page} className="px-1">...</span>;
+                              }
+                              return null;
+                            })}
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                              disabled={currentPage === totalPages}
+                              className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <ChevronRightIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </TabsContent>
             </Tabs>

@@ -9,6 +9,7 @@ import { labourService, LabourRequisition, CreateRequisitionData } from '@/servi
 import { showSuccess, showError } from '@/utils/toastHelper';
 import { apiClient } from '@/api/config';
 import { TimePicker } from '@/components/TimePicker';
+import { PAGINATION } from '@/lib/constants';
 import {
   CheckCircleIcon,
   XCircleIcon,
@@ -78,7 +79,7 @@ const RequisitionApprovals: React.FC = () => {
   const [selectedRequisition, setSelectedRequisition] = useState<LabourRequisition | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pagination, setPagination] = useState<any>(null);
-  const perPage = 15;
+  const perPage = PAGINATION.DEFAULT_PAGE_SIZE;
   const [showAddModal, setShowAddModal] = useState(false);
 
   // Tab counts state
@@ -187,21 +188,22 @@ const RequisitionApprovals: React.FC = () => {
   const [selectedWorkers, setSelectedWorkers] = useState<any[]>([]);
   const [workerSearchQuery, setWorkerSearchQuery] = useState('');
 
-  // Fetch counts for all tabs
+  // Fetch counts for all tabs using pagination totals
   const fetchTabCounts = async () => {
     try {
+      // Fetch just first page with small limit to get pagination.total for each tab
       const results = await Promise.all([
-        labourService.getMyRequisitions('pending'), // PM's own pending drafts
-        labourService.getPendingRequisitions('pending'), // SE pending
-        labourService.getPendingRequisitions('approved'),
-        labourService.getPendingRequisitions('rejected')
+        labourService.getMyRequisitions('pending', 1, 1), // PM's own pending drafts
+        labourService.getPendingRequisitions('pending', undefined, 1, 1), // SE pending
+        labourService.getPendingRequisitions('approved', undefined, 1, 1),
+        labourService.getPendingRequisitions('rejected', undefined, 1, 1)
       ]);
 
       setTabCounts({
-        my_pending: results[0].success ? results[0].data.length : 0,
-        pending: results[1].success ? results[1].data.length : 0,
-        approved: results[2].success ? results[2].data.length : 0,
-        rejected: results[3].success ? results[3].data.length : 0
+        my_pending: results[0].success ? (results[0].pagination?.total || results[0].data.length) : 0,
+        pending: results[1].success ? (results[1].pagination?.total || results[1].data.length) : 0,
+        approved: results[2].success ? (results[2].pagination?.total || results[2].data.length) : 0,
+        rejected: results[3].success ? (results[3].pagination?.total || results[3].data.length) : 0
       });
     } catch (error) {
       console.error('Failed to fetch tab counts:', error);
@@ -223,6 +225,13 @@ const RequisitionApprovals: React.FC = () => {
       if (result.success) {
         setRequisitions(result.data);
         setPagination(result.pagination);
+        // Update the current tab's count from pagination total
+        if (result.pagination?.total !== undefined) {
+          setTabCounts(prev => ({
+            ...prev,
+            [activeTab]: result.pagination.total
+          }));
+        }
       } else {
         showError(result.message || 'Failed to fetch requisitions');
       }
@@ -825,62 +834,65 @@ const RequisitionApprovals: React.FC = () => {
       )}
 
       {/* Pagination */}
-      {pagination && pagination.pages > 1 && (
+      {pagination && pagination.total > 0 && (
         <div className="mt-6 flex items-center justify-between bg-white px-4 py-3 border border-gray-200 rounded-lg">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-700">
-              Showing <span className="font-medium">{(currentPage - 1) * perPage + 1}</span> to{' '}
-              <span className="font-medium">{Math.min(currentPage * perPage, pagination.total)}</span> of{' '}
-              <span className="font-medium">{pagination.total}</span> results
-            </span>
+          <div className="text-sm text-gray-700">
+            Showing {(currentPage - 1) * perPage + 1} to{' '}
+            {Math.min(currentPage * perPage, pagination.total)} of{' '}
+            {pagination.total} requisitions
+            {pagination.pages > 1 && (
+              <span className="text-gray-500 ml-2">(Page {currentPage} of {pagination.pages})</span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Previous
-            </button>
-            <div className="flex items-center gap-1">
-              {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => {
-                // Show first page, last page, current page, and pages around current
-                const showPage =
-                  page === 1 ||
-                  page === pagination.pages ||
-                  (page >= currentPage - 1 && page <= currentPage + 1);
+          {pagination.pages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Previous
+              </button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => {
+                  // Show first page, last page, current page, and pages around current
+                  const showPage =
+                    page === 1 ||
+                    page === pagination.pages ||
+                    (page >= currentPage - 1 && page <= currentPage + 1);
 
-                if (!showPage) {
-                  // Show ellipsis
-                  if (page === currentPage - 2 || page === currentPage + 2) {
-                    return <span key={page} className="px-2 text-gray-500">...</span>;
+                  if (!showPage) {
+                    // Show ellipsis
+                    if (page === currentPage - 2 || page === currentPage + 2) {
+                      return <span key={page} className="px-2 text-gray-500">...</span>;
+                    }
+                    return null;
                   }
-                  return null;
-                }
 
-                return (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                      currentPage === page
-                        ? 'bg-teal-600 text-white font-medium'
-                        : 'border border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    {page}
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                        currentPage === page
+                          ? 'bg-teal-600 text-white font-medium'
+                          : 'border border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                onClick={() => setCurrentPage(Math.min(pagination.pages, currentPage + 1))}
+                disabled={currentPage === pagination.pages}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
             </div>
-            <button
-              onClick={() => setCurrentPage(Math.min(pagination.pages, currentPage + 1))}
-              disabled={currentPage === pagination.pages}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Next
-            </button>
-          </div>
+          )}
         </div>
       )}
 

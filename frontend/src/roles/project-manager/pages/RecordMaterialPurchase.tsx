@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
-import { DocumentTextIcon, ShoppingCartIcon } from '@heroicons/react/24/outline';
+import { DocumentTextIcon, ShoppingCartIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { PAGINATION } from '@/lib/constants';
 import { boqTrackingService } from '../services/boqTrackingService';
 import PlannedVsActualView from '@/components/boq/PlannedVsActualView';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
@@ -15,6 +16,7 @@ export default function RecordMaterialPurchase() {
   const [searchParams] = useSearchParams();
   const [selectedBOQ, setSelectedBOQ] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState('live');
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Real-time auto-sync for BOQ list
   const { data: boqData, isLoading: loading, refetch } = useProjectsAutoSync(
@@ -66,6 +68,21 @@ export default function RecordMaterialPurchase() {
       });
     }
   }, [boqList, activeTab]);
+
+  // Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Pagination calculations
+  const totalRecords = filteredBOQList.length;
+  const totalPages = Math.ceil(totalRecords / PAGINATION.DEFAULT_PAGE_SIZE);
+
+  // Paginated BOQ list
+  const paginatedBOQList = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredBOQList.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredBOQList, currentPage]);
 
   // Auto-select BOQ from URL param (e.g., from notification click)
   useEffect(() => {
@@ -255,7 +272,7 @@ export default function RecordMaterialPurchase() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredBOQList.map((boq) => (
+                    {paginatedBOQList.map((boq) => (
                       <motion.div
                         key={boq.boq_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -337,6 +354,86 @@ export default function RecordMaterialPurchase() {
                     ))}
                   </div>
                 )}
+
+                {/* Pagination for Live Projects */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 mt-6 rounded-lg shadow-sm">
+                    <div className="flex flex-1 justify-between sm:hidden">
+                      <button
+                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                        disabled={currentPage === 1}
+                        className="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                        disabled={currentPage === totalPages}
+                        className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                    <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm text-gray-700">
+                          Showing <span className="font-medium">{(currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1}</span> to{' '}
+                          <span className="font-medium">{Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)}</span> of{' '}
+                          <span className="font-medium">{totalRecords}</span> results
+                        </p>
+                      </div>
+                      <div>
+                        <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                          <button
+                            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                            disabled={currentPage === 1}
+                            className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <span className="sr-only">Previous</span>
+                            <ChevronLeftIcon className="h-5 w-5" aria-hidden="true" />
+                          </button>
+                          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                            // Show first page, last page, current page, and pages around current
+                            const showPage = page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1;
+                            const showEllipsis = page === 2 && currentPage > 3 || page === totalPages - 1 && currentPage < totalPages - 2;
+
+                            if (showEllipsis && !showPage) {
+                              return (
+                                <span key={page} className="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-700 ring-1 ring-inset ring-gray-300">
+                                  ...
+                                </span>
+                              );
+                            }
+
+                            if (!showPage) return null;
+
+                            return (
+                              <button
+                                key={page}
+                                onClick={() => setCurrentPage(page)}
+                                className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${
+                                  page === currentPage
+                                    ? 'z-10 bg-blue-600 text-white focus:z-20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600'
+                                    : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
+                                }`}
+                              >
+                                {page}
+                              </button>
+                            );
+                          })}
+                          <button
+                            onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                            disabled={currentPage === totalPages}
+                            className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <span className="sr-only">Next</span>
+                            <ChevronRightIcon className="h-5 w-5" aria-hidden="true" />
+                          </button>
+                        </nav>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </TabsContent>
 
               {/* Completed Tab Content */}
@@ -349,7 +446,7 @@ export default function RecordMaterialPurchase() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredBOQList.map((boq) => (
+                    {paginatedBOQList.map((boq) => (
                       <motion.div
                         key={boq.boq_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -429,6 +526,86 @@ export default function RecordMaterialPurchase() {
                         </div>
                       </motion.div>
                     ))}
+                  </div>
+                )}
+
+                {/* Pagination for Completed Projects */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 mt-6 rounded-lg shadow-sm">
+                    <div className="flex flex-1 justify-between sm:hidden">
+                      <button
+                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                        disabled={currentPage === 1}
+                        className="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                        disabled={currentPage === totalPages}
+                        className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                    <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm text-gray-700">
+                          Showing <span className="font-medium">{(currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1}</span> to{' '}
+                          <span className="font-medium">{Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)}</span> of{' '}
+                          <span className="font-medium">{totalRecords}</span> results
+                        </p>
+                      </div>
+                      <div>
+                        <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                          <button
+                            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                            disabled={currentPage === 1}
+                            className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <span className="sr-only">Previous</span>
+                            <ChevronLeftIcon className="h-5 w-5" aria-hidden="true" />
+                          </button>
+                          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                            // Show first page, last page, current page, and pages around current
+                            const showPage = page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1;
+                            const showEllipsis = page === 2 && currentPage > 3 || page === totalPages - 1 && currentPage < totalPages - 2;
+
+                            if (showEllipsis && !showPage) {
+                              return (
+                                <span key={page} className="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-700 ring-1 ring-inset ring-gray-300">
+                                  ...
+                                </span>
+                              );
+                            }
+
+                            if (!showPage) return null;
+
+                            return (
+                              <button
+                                key={page}
+                                onClick={() => setCurrentPage(page)}
+                                className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${
+                                  page === currentPage
+                                    ? 'z-10 bg-green-600 text-white focus:z-20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600'
+                                    : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
+                                }`}
+                              >
+                                {page}
+                              </button>
+                            );
+                          })}
+                          <button
+                            onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                            disabled={currentPage === totalPages}
+                            className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <span className="sr-only">Next</span>
+                            <ChevronRightIcon className="h-5 w-5" aria-hidden="true" />
+                          </button>
+                        </nav>
+                      </div>
+                    </div>
                   </div>
                 )}
               </TabsContent>

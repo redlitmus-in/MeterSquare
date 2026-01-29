@@ -9,6 +9,7 @@ import { labourService, LabourRequisition as RequisitionType, CreateRequisitionD
 import { showSuccess, showError } from '@/utils/toastHelper';
 import { apiClient } from '@/api/config';
 import { TimePicker } from '@/components/TimePicker';
+import { PAGINATION } from '@/lib/constants';
 import {
   PlusIcon,
   ClipboardDocumentListIcon,
@@ -180,7 +181,7 @@ const LabourRequisition: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('pending');
   const [currentPage, setCurrentPage] = useState(1);
   const [pagination, setPagination] = useState<any>(null);
-  const perPage = 15;
+  const perPage = PAGINATION.DEFAULT_PAGE_SIZE;
 
   // Get current user role
   const [userRole, setUserRole] = useState<string>('');
@@ -1389,62 +1390,65 @@ const LabourRequisition: React.FC = () => {
       )}
 
       {/* Pagination */}
-      {pagination && pagination.pages > 1 && (
-        <div className="mt-6 flex items-center justify-between bg-white px-4 py-3 border border-gray-200 rounded-lg">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-700">
-              Showing <span className="font-medium">{(currentPage - 1) * perPage + 1}</span> to{' '}
-              <span className="font-medium">{Math.min(currentPage * perPage, pagination.total)}</span> of{' '}
-              <span className="font-medium">{pagination.total}</span> results
-            </span>
+      {pagination && pagination.total > 0 && (
+        <div className="mt-6 flex items-center justify-between bg-white px-4 py-3 border border-gray-200 rounded-lg shadow-sm">
+          <div className="text-sm text-gray-700">
+            Showing <span className="font-medium">{(currentPage - 1) * perPage + 1}</span> to{' '}
+            <span className="font-medium">{Math.min(currentPage * perPage, pagination.total)}</span> of{' '}
+            <span className="font-medium">{pagination.total}</span> requisitions
+            {pagination.pages > 1 && (
+              <span className="text-gray-500 ml-2">(Page {currentPage} of {pagination.pages})</span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Previous
-            </button>
-            <div className="flex items-center gap-1">
-              {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => {
-                // Show first page, last page, current page, and pages around current
-                const showPage =
-                  page === 1 ||
-                  page === pagination.pages ||
-                  (page >= currentPage - 1 && page <= currentPage + 1);
+          {pagination.pages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Previous
+              </button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => {
+                  // Show first page, last page, current page, and pages around current
+                  const showPage =
+                    page === 1 ||
+                    page === pagination.pages ||
+                    (page >= currentPage - 1 && page <= currentPage + 1);
 
-                if (!showPage) {
-                  // Show ellipsis
-                  if (page === currentPage - 2 || page === currentPage + 2) {
-                    return <span key={page} className="px-2 text-gray-500">...</span>;
+                  if (!showPage) {
+                    // Show ellipsis
+                    if (page === currentPage - 2 || page === currentPage + 2) {
+                      return <span key={page} className="px-2 text-gray-500">...</span>;
+                    }
+                    return null;
                   }
-                  return null;
-                }
 
-                return (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                      currentPage === page
-                        ? 'bg-purple-600 text-white font-medium'
-                        : 'border border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    {page}
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                        currentPage === page
+                          ? 'bg-purple-600 text-white font-medium'
+                          : 'border border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                onClick={() => setCurrentPage(Math.min(pagination.pages, currentPage + 1))}
+                disabled={currentPage === pagination.pages}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
             </div>
-            <button
-              onClick={() => setCurrentPage(Math.min(pagination.pages, currentPage + 1))}
-              disabled={currentPage === pagination.pages}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Next
-            </button>
-          </div>
+          )}
         </div>
       )}
 

@@ -347,10 +347,10 @@ class BuyerVendorService {
     }
   }
 
-  // Get vendor categories
+  // Get vendor categories from database
   async getVendorCategories(): Promise<string[]> {
     try {
-      const response = await apiClient.get<{ success: boolean; categories: string[] }>(
+      const response = await apiClient.get<{ success: boolean; categories: string[]; categories_detailed?: any[] }>(
         `/vendor/categories`
       );
 
@@ -361,6 +361,55 @@ class BuyerVendorService {
     } catch (error: any) {
       console.error('Error fetching categories:', error);
       return this.getDefaultCategories();
+    }
+  }
+
+  // Get vendor categories with detailed info (id, name, description, is_default)
+  async getVendorCategoriesDetailed(): Promise<{ id: number; name: string; description?: string; is_default: boolean }[]> {
+    try {
+      const response = await apiClient.get<{
+        success: boolean;
+        categories: string[];
+        categories_detailed?: { id: number; name: string; description?: string; is_default: boolean }[]
+      }>(`/vendor/categories`);
+
+      if (response.data.success && response.data.categories_detailed) {
+        return response.data.categories_detailed;
+      }
+      // Return default categories as detailed format
+      return this.getDefaultCategories().map((name, index) => ({
+        id: index + 1,
+        name,
+        is_default: true
+      }));
+    } catch (error: any) {
+      console.error('Error fetching detailed categories:', error);
+      return this.getDefaultCategories().map((name, index) => ({
+        id: index + 1,
+        name,
+        is_default: true
+      }));
+    }
+  }
+
+  // Create a new vendor category
+  async createVendorCategory(name: string, description?: string): Promise<{ success: boolean; category?: any; error?: string }> {
+    try {
+      const response = await apiClient.post<{ success: boolean; category: any; message?: string; error?: string }>(
+        `/vendor/categories`,
+        { name, description }
+      );
+
+      if (response.data.success) {
+        return { success: true, category: response.data.category };
+      }
+      return { success: false, error: response.data.error || 'Failed to create category' };
+    } catch (error: any) {
+      console.error('Error creating category:', error);
+      if (error.response?.status === 409) {
+        return { success: false, error: 'Category already exists' };
+      }
+      return { success: false, error: error.response?.data?.error || 'Failed to create category' };
     }
   }
 

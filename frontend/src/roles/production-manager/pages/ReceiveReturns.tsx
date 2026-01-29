@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   DocumentTextIcon,
   CheckCircleIcon,
@@ -9,6 +9,8 @@ import {
   TruckIcon,
   BuildingOfficeIcon,
   ClockIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from '@heroicons/react/24/outline';
 import { motion, AnimatePresence } from 'framer-motion';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -18,7 +20,8 @@ import {
   CONDITION_COLORS,
   RETURN_ACTIONS,
   RETURN_ACTION_LABELS,
-  RDN_STATUS_BADGES
+  RDN_STATUS_BADGES,
+  PAGINATION
 } from '@/lib/inventoryConstants';
 
 interface RDNItem {
@@ -81,6 +84,7 @@ const ReceiveReturns: React.FC = () => {
 
   const [expandedRDNs, setExpandedRDNs] = useState<Set<number>>(new Set());
   const [activeTab, setActiveTab] = useState<TabType>('pending');
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Improved Confirm Receipt Modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -379,6 +383,25 @@ const ReceiveReturns: React.FC = () => {
   // Get current RDNs based on active tab
   const currentRDNs = activeTab === 'pending' ? pendingRDNs : receivedRDNs;
 
+  // Pagination
+  const totalPages = Math.ceil(currentRDNs.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRDNs = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return currentRDNs.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [currentRDNs, currentPage]);
+
+  // Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Clamp page when total pages changes
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
   // Get current loading state
   const isLoading = activeTab === 'pending' ? loadingPending : loadingReceived;
 
@@ -464,7 +487,7 @@ const ReceiveReturns: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-3">
-            {currentRDNs.map((rdn) => {
+            {paginatedRDNs.map((rdn) => {
               const statusBadge = RDN_STATUS_BADGES[rdn.status] || RDN_STATUS_BADGES.DRAFT;
               const isExpanded = expandedRDNs.has(rdn.return_note_id);
 
@@ -706,6 +729,40 @@ const ReceiveReturns: React.FC = () => {
                 </motion.div>
               );
             })}
+
+            {/* Pagination */}
+            {currentRDNs.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 px-6 py-4 mt-4">
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div className="text-sm text-gray-600">
+                    Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, currentRDNs.length)} of {currentRDNs.length} return notes
+                  </div>
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        <ChevronLeftIcon className="h-4 w-4" />
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600 px-2">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        Next
+                        <ChevronRightIcon className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -1,6 +1,6 @@
 from flask import request, jsonify, g
 from config.db import db
-from models.vendor import Vendor, VendorProduct
+from models.vendor import Vendor, VendorProduct, VendorCategory
 from models.user import User
 from config.logging import get_logger
 from datetime import datetime
@@ -30,6 +30,9 @@ def create_vendor():
                 "error": f"Vendor with email '{data['email']}' already exists"
             }), 409
 
+        # Handle category - get existing or create new one
+        category_value = get_or_create_category(data.get('category'))
+
         # Create new vendor
         new_vendor = Vendor(
             company_name=data['company_name'],
@@ -43,7 +46,7 @@ def create_vendor():
             country=data.get('country', 'UAE'),
             pin_code=data.get('pin_code'),
             gst_number=data.get('gst_number'),
-            category=data.get('category'),
+            category=category_value,
             status=data.get('status', 'active'),
             created_by=current_user['user_id'],
             last_modified_by=current_user['user_id']
@@ -343,7 +346,7 @@ def update_vendor(vendor_id):
         if 'gst_number' in data:
             vendor.gst_number = data['gst_number']
         if 'category' in data:
-            vendor.category = data['category']
+            vendor.category = get_or_create_category(data['category'])
         if 'status' in data:
             vendor.status = data['status']
 
@@ -536,29 +539,161 @@ def delete_vendor_product(vendor_id, product_id):
 
 
 def get_vendor_categories():
-    """Get list of vendor categories"""
+    """Get list of vendor categories from database"""
     try:
-        categories = [
-            'Construction Materials',
-            'Electrical Equipment',
-            'Plumbing Supplies',
-            'HVAC Equipment',
-            'Safety Equipment',
-            'Tools & Machinery',
-            'Furniture',
-            'IT Equipment',
-            'Office Supplies',
-            'Transportation',
-            'Consulting Services',
-            'Maintenance Services',
-            'Other'
-        ]
+        # Fetch active categories from database
+        db_categories = VendorCategory.query.filter_by(
+            is_active=True,
+            is_deleted=False
+        ).order_by(VendorCategory.name).all()
+
+        if db_categories:
+            # Return categories from database
+            categories = [cat.name for cat in db_categories]
+            categories_detailed = [cat.to_dict() for cat in db_categories]
+        else:
+            # Fallback to default list if table is empty
+            categories = [
+                'Construction Materials',
+                'Electrical Equipment',
+                'Plumbing Supplies',
+                'HVAC Equipment',
+                'Safety Equipment',
+                'Tools & Machinery',
+                'Furniture',
+                'IT Equipment',
+                'Office Supplies',
+                'Transportation',
+                'Consulting Services',
+                'Maintenance Services',
+                'Other'
+            ]
+            categories_detailed = [{'name': cat, 'is_default': True} for cat in categories]
 
         return jsonify({
             "success": True,
-            "categories": categories
+            "categories": categories,
+            "categories_detailed": categories_detailed
         }), 200
 
     except Exception as e:
         log.error(f"Error fetching categories: {str(e)}")
-        return jsonify({"success": False, "error": f"Failed to fetch categories: {str(e)}"}), 500
+        # Fallback to hardcoded list on error
+        fallback_categories = [
+            'Construction Materials', 'Electrical Equipment', 'Plumbing Supplies',
+            'HVAC Equipment', 'Safety Equipment', 'Tools & Machinery', 'Furniture',
+            'IT Equipment', 'Office Supplies', 'Transportation', 'Consulting Services',
+            'Maintenance Services', 'Other'
+        ]
+        return jsonify({
+            "success": True,
+            "categories": fallback_categories,
+            "fallback": True
+        }), 200
+
+
+def create_vendor_category():
+    """Create a new vendor category"""
+    try:
+        current_user = g.user
+        data = request.get_json()
+
+        category_name = data.get('name', '').strip()
+        if not category_name:
+            return jsonify({"success": False, "error": "Category name is required"}), 400
+
+        # Validate category name length (max 100 characters to match DB column)
+        if len(category_name) > 100:
+            return jsonify({"success": False, "error": "Category name must be 100 characters or less"}), 400
+
+        # Check if category already exists (case-insensitive)
+        existing = VendorCategory.query.filter(
+            func.lower(VendorCategory.name) == func.lower(category_name),
+            VendorCategory.is_deleted == False
+        ).first()
+
+        if existing:
+            if existing.is_active:
+                return jsonify({
+                    "success": False,
+                    "error": f"Category '{existing.name}' already exists"
+                }), 409
+            else:
+                # Reactivate if it was deactivated
+                existing.is_active = True
+                existing.last_modified_at = datetime.utcnow()
+                db.session.commit()
+                log.info(f"Vendor category reactivated: {existing.name}")
+                return jsonify({
+                    "success": True,
+                    "message": f"Category '{existing.name}' reactivated",
+                    "category": existing.to_dict()
+                }), 200
+
+        # Create new category
+        new_category = VendorCategory(
+            name=category_name,
+            description=data.get('description', ''),
+            is_default=False,
+            is_active=True,
+            created_by=current_user['user_id'] if current_user else None
+        )
+
+        db.session.add(new_category)
+        db.session.commit()
+
+        log.info(f"New vendor category created: {category_name}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Category '{category_name}' created successfully",
+            "category": new_category.to_dict()
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error creating category: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to create category. Please try again."}), 500
+
+
+def get_or_create_category(category_name):
+    """
+    Get existing category or create new one - used internally when creating vendors.
+
+    NOTE: This function uses flush() but does NOT commit. The calling function
+    must call db.session.commit() to persist changes.
+    """
+    if not category_name or not category_name.strip():
+        return None
+
+    category_name = category_name.strip()
+
+    # Validate length (max 100 chars to match DB column)
+    if len(category_name) > 100:
+        category_name = category_name[:100]
+
+    # Check if category exists (case-insensitive)
+    existing = VendorCategory.query.filter(
+        func.lower(VendorCategory.name) == func.lower(category_name),
+        VendorCategory.is_deleted == False
+    ).first()
+
+    if existing:
+        if not existing.is_active:
+            existing.is_active = True
+            existing.last_modified_at = datetime.utcnow()
+            db.session.flush()
+            log.info(f"Reactivated vendor category: {existing.name}")
+        return existing.name  # Return the actual name from DB to maintain casing
+
+    # Create new category
+    new_category = VendorCategory(
+        name=category_name,
+        is_default=False,
+        is_active=True
+    )
+    db.session.add(new_category)
+    db.session.flush()
+
+    log.info(f"Auto-created new vendor category: {category_name}")
+    return new_category.name

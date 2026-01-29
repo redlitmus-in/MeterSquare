@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { labourService, DailyAttendance } from '@/services/labourService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import { apiClient } from '@/api/config';
+import { PAGINATION } from '@/lib/constants';
 import {
   LockClosedIcon,
   ClockIcon,
@@ -48,6 +49,9 @@ const AttendanceLock: React.FC = () => {
   const [projects, setProjects] = useState<Array<{ project_id: number; project_code: string; project_name: string }>>([]);
   const [selectedAttendanceIds, setSelectedAttendanceIds] = useState<number[]>([]);
   const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
 
   const fetchAttendance = async () => {
     setLoading(true);
@@ -201,6 +205,22 @@ const AttendanceLock: React.FC = () => {
         return acc;
       }, {} as Record<string, DailyAttendance[]>);
   }, [attendance]);
+
+  // Convert to array for pagination
+  const dateGroupsArray = Object.entries(groupedByDate);
+  const totalDateGroups = dateGroupsArray.length;
+  const totalPages = Math.ceil(totalDateGroups / PAGINATION.DEFAULT_PAGE_SIZE);
+
+  // Paginated date groups
+  const paginatedDateGroups = dateGroupsArray.slice(
+    (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE,
+    currentPage * PAGINATION.DEFAULT_PAGE_SIZE
+  );
+
+  // Reset page when data changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [attendance.length, projectId, selectedDate, activeTab]);
 
   // Select/deselect all in a date group
   const toggleDateGroupSelection = (dateRecords: DailyAttendance[]) => {
@@ -393,7 +413,7 @@ const AttendanceLock: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {Object.entries(groupedByDate).map(([date, dateRecords]) => {
+          {paginatedDateGroups.map(([date, dateRecords]) => {
             const isCollapsed = collapsedDates.has(date);
             const allSelected = dateRecords.every(r => selectedAttendanceIds.includes(r.attendance_id));
             const someSelected = dateRecords.some(r => selectedAttendanceIds.includes(r.attendance_id)) && !allSelected;
@@ -548,6 +568,67 @@ const AttendanceLock: React.FC = () => {
               </div>
             );
           })}
+
+          {/* Pagination */}
+          {totalDateGroups > 0 && (
+            <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm mt-4">
+              <div className="text-sm text-gray-700">
+                Showing {(currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to{' '}
+                {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalDateGroups)} of{' '}
+                {totalDateGroups} date groups
+                {totalPages > 1 && (
+                  <span className="text-gray-500 ml-2">(Page {currentPage} of {totalPages})</span>
+                )}
+              </div>
+              {totalPages > 1 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                      const showPage =
+                        page === 1 ||
+                        page === totalPages ||
+                        (page >= currentPage - 1 && page <= currentPage + 1);
+
+                      if (!showPage) {
+                        if (page === currentPage - 2 || page === currentPage + 2) {
+                          return <span key={page} className="px-2 text-gray-500">...</span>;
+                        }
+                        return null;
+                      }
+
+                      return (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                            currentPage === page
+                              ? 'bg-teal-600 text-white font-medium'
+                              : 'border border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
