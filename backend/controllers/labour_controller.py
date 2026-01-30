@@ -439,6 +439,7 @@ def create_requisition():
                     requester_role=requester_role,  # Track if PM or SE created this
                     status=initial_status,
                     created_by=current_user.get('full_name', 'System')
+                    # Note: transport_fee will be set by Production Manager during worker assignment
                 )
 
                 db.session.add(requisition)
@@ -1001,14 +1002,6 @@ def get_pending_requisitions():
         user_id = current_user.get('user_id')
         user_role = normalize_role(current_user.get('role', ''))
 
-        # Log the current user details for debugging
-        print(f"\n=== get_pending_requisitions called ===")
-        print(f"Current User: {current_user.get('full_name')} (ID: {user_id})")
-        print(f"Role: {current_user.get('role')} -> Normalized: {user_role}")
-        log.info(f"=== get_pending_requisitions called ===")
-        log.info(f"Current User: {current_user.get('full_name')} (ID: {user_id})")
-        log.info(f"Role: {current_user.get('role')} -> Normalized: {user_role}")
-
         # Validate user_id
         if not user_id:
             return jsonify({"error": "User ID not found in session"}), 401
@@ -1024,7 +1017,6 @@ def get_pending_requisitions():
 
         # If admin is viewing as another role, use that role for filtering
         if is_admin_viewing_as_role:
-            log.info(f"Admin {user_id} viewing as role: {view_as_role} - will show ALL data for that role")
             user_role = view_as_role
 
         # Query labour requisitions
@@ -1055,8 +1047,6 @@ def get_pending_requisitions():
                 # For PENDING tab: filter by project_id (PM's assigned projects)
                 # For APPROVED/REJECTED tabs: filter by approved_by_user_id
                 if status == 'pending':
-                    log.info(f"PM user_id {user_id} - filtering PENDING by project_id")
-
                     # Get all projects and find which ones this PM is assigned to
                     from models.project import Project
                     all_projects = Project.query.filter(
@@ -1069,12 +1059,9 @@ def get_pending_requisitions():
                         if proj.user_id and isinstance(proj.user_id, list) and user_id in proj.user_id:
                             assigned_project_ids.append(proj.project_id)
 
-                    log.info(f"PM {user_id} assigned to projects: {assigned_project_ids}")
-
                     if assigned_project_ids:
                         query = query.filter(LabourRequisition.project_id.in_(assigned_project_ids))
                     else:
-                        log.warning(f"No assigned projects found for PM user_id: {user_id}")
                         return jsonify({
                             "success": True,
                             "requisitions": [],
@@ -1087,7 +1074,6 @@ def get_pending_requisitions():
                         }), 200
                 else:
                     # For approved/rejected tabs: filter by approved_by_user_id
-                    log.info(f"PM user_id {user_id} - filtering {status.upper()} by approved_by_user_id")
                     query = query.filter(LabourRequisition.approved_by_user_id == user_id)
 
             elif user_role in ['mep', 'mepsupervisor', 'mep_supervisor']:
@@ -1095,7 +1081,6 @@ def get_pending_requisitions():
                 # For PENDING tab: filter by MEP's assigned projects
                 # For APPROVED/REJECTED tabs: filter by approved_by_user_id
                 if status == 'pending':
-                    log.info(f"MEP user_id {user_id} - filtering PENDING by mep_supervisor_id")
 
                     from models.project import Project
                     all_projects = Project.query.filter(
@@ -1108,12 +1093,9 @@ def get_pending_requisitions():
                         if proj.mep_supervisor_id and isinstance(proj.mep_supervisor_id, list) and user_id in proj.mep_supervisor_id:
                             assigned_project_ids.append(proj.project_id)
 
-                    log.info(f"MEP {user_id} assigned to projects: {assigned_project_ids}")
-
                     if assigned_project_ids:
                         query = query.filter(LabourRequisition.project_id.in_(assigned_project_ids))
                     else:
-                        log.warning(f"No assigned projects found for MEP user_id: {user_id}")
                         return jsonify({
                             "success": True,
                             "requisitions": [],
@@ -1126,7 +1108,6 @@ def get_pending_requisitions():
                         }), 200
                 else:
                     # For approved/rejected tabs: filter by approved_by_user_id
-                    log.info(f"MEP user_id {user_id} - filtering {status.upper()} by approved_by_user_id")
                     query = query.filter(LabourRequisition.approved_by_user_id == user_id)
 
             else:
@@ -1135,7 +1116,6 @@ def get_pending_requisitions():
                 if assigned_project_ids:
                     query = query.filter(LabourRequisition.project_id.in_(assigned_project_ids))
                 else:
-                    log.warning(f"No assigned projects found for user_id: {user_id}, role: {user_role}")
                     return jsonify({
                         "success": True,
                         "requisitions": [],
@@ -1149,8 +1129,6 @@ def get_pending_requisitions():
 
         query = query.order_by(LabourRequisition.required_date.desc())
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
-
-        log.info(f"Returning {len(paginated.items)} requisitions (Total: {paginated.total})")
 
         return jsonify({
             "success": True,
@@ -1196,7 +1174,6 @@ def approve_requisition(requisition_id):
             elif requisition.status == 'rejected':
                 error_msg = "This requisition has already been rejected"
 
-            log.warning(f"Attempt to approve requisition {requisition_id} with invalid status: {requisition.status}")
             return jsonify({"error": error_msg}), 400
 
         requisition.status = 'approved'
@@ -1211,11 +1188,6 @@ def approve_requisition(requisition_id):
         requisition.assignment_status = 'unassigned'
 
         db.session.commit()
-
-        log.info(f"Requisition approved: {requisition.requisition_code} by {current_user.get('full_name')}")
-
-        # TODO: Send notification to Production Manager and SE
-
         return jsonify({
             "success": True,
             "message": "Requisition approved successfully and sent to Production Manager for worker assignment",
@@ -1261,7 +1233,6 @@ def reject_requisition(requisition_id):
             elif requisition.status == 'rejected':
                 error_msg = "This requisition has already been rejected"
 
-            log.warning(f"Attempt to reject requisition {requisition_id} with invalid status: {requisition.status}")
             return jsonify({"error": error_msg}), 400
 
         requisition.status = 'rejected'
@@ -1272,11 +1243,6 @@ def reject_requisition(requisition_id):
         requisition.last_modified_by = current_user.get('full_name', 'System')
 
         db.session.commit()
-
-        log.info(f"Requisition rejected: {requisition.requisition_code} by {current_user.get('full_name')}")
-
-        # TODO: Send notification to SE
-
         return jsonify({
             "success": True,
             "message": "Requisition rejected",
@@ -1580,16 +1546,25 @@ def assign_workers_to_requisition(requisition_id):
             )
             db.session.add(assignment)
 
-            # Create arrival record
-            arrival = LabourArrival(
+            # Create arrival record only if it doesn't already exist
+            existing_arrival = LabourArrival.query.filter_by(
                 requisition_id=requisition.requisition_id,
                 worker_id=worker.worker_id,
-                project_id=requisition.project_id,
-                arrival_date=requisition.required_date,
-                arrival_status='assigned',
-                created_by=current_user.get('full_name', 'System')
-            )
-            db.session.add(arrival)
+                arrival_date=requisition.required_date
+            ).first()
+
+            if not existing_arrival:
+                arrival = LabourArrival(
+                    requisition_id=requisition.requisition_id,
+                    worker_id=worker.worker_id,
+                    project_id=requisition.project_id,
+                    arrival_date=requisition.required_date,
+                    arrival_status='assigned',
+                    created_by=current_user.get('full_name', 'System')
+                )
+                db.session.add(arrival)
+            else:
+                log.info(f"Arrival record already exists for worker {worker.worker_id} on {requisition.required_date}, skipping creation")
 
         # Update requisition
         requisition.assignment_status = 'assigned'
@@ -1600,9 +1575,25 @@ def assign_workers_to_requisition(requisition_id):
         requisition.assignment_date = datetime.utcnow()
         requisition.last_modified_by = current_user.get('full_name', 'System')
 
-        db.session.commit()
+        # Update transport fee (PM sets transport cost during worker assignment)
+        transport_fee = data.get('transport_fee', 0)
+        if transport_fee is not None:
+            requisition.transport_fee = float(transport_fee)
 
-        log.info(f"Workers assigned to requisition: {requisition.requisition_code} by {current_user.get('full_name')}")
+        # Update transport logistics details (driver and vehicle information)
+        driver_name = data.get('driver_name')
+        if driver_name:
+            requisition.driver_name = driver_name
+
+        vehicle_number = data.get('vehicle_number')
+        if vehicle_number:
+            requisition.vehicle_number = vehicle_number
+
+        driver_contact = data.get('driver_contact')
+        if driver_contact:
+            requisition.driver_contact = driver_contact
+
+        db.session.commit()
 
         # Send WhatsApp notification to workers
         whatsapp_results = []
@@ -1650,7 +1641,6 @@ _MeterSquare Interiors LLC_"""
                     result = whatsapp_service.send_message(worker.phone, message)
                     if result.get('success'):
                         notification_sent_count += 1
-                        log.info(f"WhatsApp sent to worker {worker.worker_code}")
                     else:
                         log.warning(f"WhatsApp failed for worker {worker.worker_code}: {result.get('message')}")
                     whatsapp_results.append({
@@ -1668,7 +1658,6 @@ _MeterSquare Interiors LLC_"""
                         'success': False
                     })
             else:
-                log.warning(f"No phone number for worker {worker.worker_code}")
                 whatsapp_results.append({
                     'worker_id': worker.worker_id,
                     'worker_code': worker.worker_code,
@@ -1938,8 +1927,6 @@ def confirm_arrival():
 
         db.session.commit()
 
-        log.info(f"Arrival confirmed: {arrival_id} by {current_user.get('full_name')}")
-
         return jsonify({
             "success": True,
             "message": "Arrival confirmed",
@@ -1976,9 +1963,6 @@ def mark_no_show():
         arrival.confirmed_by_user_id = current_user.get('user_id')
 
         db.session.commit()
-
-        log.info(f"Worker marked as no-show: {arrival_id} by {current_user.get('full_name')}")
-
         return jsonify({
             "success": True,
             "message": "Worker marked as no-show",
@@ -2088,12 +2072,8 @@ def mark_departure():
                 # Calculate hours and cost
                 attendance.calculate_hours_and_cost()
                 db.session.add(attendance)
-                log.info(f"Auto-created attendance record for worker {arrival.worker_id}")
 
         db.session.commit()
-
-        log.info(f"Worker departure marked: {arrival_id} at {arrival.departure_time} by {current_user.get('full_name')}")
-
         return jsonify({
             "success": True,
             "message": f"Worker clocked out at {arrival.departure_time}",
@@ -2183,9 +2163,6 @@ def clock_in_worker():
         attendance.last_modified_by = current_user.get('full_name', 'System')
 
         db.session.commit()
-
-        log.info(f"Worker clocked in: {worker_id} by {current_user.get('full_name')}")
-
         return jsonify({
             "success": True,
             "message": "Worker clocked in successfully",
@@ -2253,9 +2230,6 @@ def clock_out_worker():
         attendance.last_modified_by = current_user.get('full_name', 'System')
 
         db.session.commit()
-
-        log.info(f"Worker clocked out: {worker_id} by {current_user.get('full_name')}")
-
         return jsonify({
             "success": True,
             "message": "Worker clocked out successfully",
@@ -2382,14 +2356,12 @@ def get_attendance_to_lock():
 
         # Validate view_as_role if provided
         if view_as_role and view_as_role not in VALID_VIEW_AS_ROLES:
-            log.warning(f"Invalid view_as_role '{view_as_role}' provided by user {user_id}")
             return jsonify({'success': False, 'error': f'Invalid view_as_role: {view_as_role}'}), 400
 
         # If admin is viewing as another role, use that role for filtering
         is_admin_viewing_as_role = False
         original_role = user_role
         if user_role in SUPER_ADMIN_ROLES and view_as_role:
-            log.info(f"Admin {user_id} viewing attendance as role: {view_as_role}")
             is_admin_viewing_as_role = True
             user_role = view_as_role
 
@@ -2401,12 +2373,10 @@ def get_attendance_to_lock():
 
         # Admin viewing as role gets ALL projects (no user-specific filtering)
         if is_admin_viewing_as_role or original_role in SUPER_ADMIN_ROLES:
-            log.info(f"Admin viewing as {view_as_role or 'admin'} - getting ALL projects for attendance")
             all_projects = Project.query.filter(
                 Project.is_deleted == False
             ).all()
             pm_project_ids = [proj.project_id for proj in all_projects]
-            log.info(f"Admin has access to {len(pm_project_ids)} projects for attendance")
         # Role-based project filtering for regular users
         elif user_role in ['mep', 'mepsupervisor', 'mep_supervisor']:
             # MEP: Get projects where mep_supervisor_id contains this user
@@ -2418,8 +2388,6 @@ def get_attendance_to_lock():
             for proj in all_projects:
                 if proj.mep_supervisor_id and isinstance(proj.mep_supervisor_id, list) and user_id in proj.mep_supervisor_id:
                     pm_project_ids.append(proj.project_id)
-
-            log.info(f"MEP {user_id} assigned to projects for attendance: {pm_project_ids}")
         else:
             # PM: Get projects where user_id contains this user
             all_projects = Project.query.filter(
@@ -2430,9 +2398,6 @@ def get_attendance_to_lock():
             for proj in all_projects:
                 if proj.user_id and isinstance(proj.user_id, list) and user_id in proj.user_id:
                     pm_project_ids.append(proj.project_id)
-
-            log.info(f"PM {user_id} assigned to projects for attendance: {pm_project_ids}")
-
         # If no projects assigned, return empty list
         if not pm_project_ids:
             return jsonify({
@@ -2498,7 +2463,6 @@ def get_attendance_to_lock():
                         )
                         attendance.calculate_hours_and_cost()
                         db.session.add(attendance)
-                        log.info(f"Auto-created attendance for departed worker {arrival.worker_id}")
 
             db.session.commit()
 
@@ -2520,7 +2484,6 @@ def get_attendance_to_lock():
         if not is_admin_viewing_as_role and original_role not in SUPER_ADMIN_ROLES:
             # Regular PM only sees requisitions they approved
             query = query.filter(LabourRequisition.approved_by_user_id == user_id)
-            log.info(f"PM {user_id} filtering by approved requisitions only")
         else:
             log.info(f"Admin viewing all attendance records (no approver filter)")
 
@@ -2615,8 +2578,6 @@ def lock_attendance(attendance_id):
 
         db.session.commit()
 
-        log.info(f"Attendance locked: {attendance_id} by {current_user.get('full_name')}")
-
         return jsonify({
             "success": True,
             "message": "Attendance locked for payroll",
@@ -2678,8 +2639,6 @@ def lock_day_attendance():
             locked_count += 1
 
         db.session.commit()
-
-        log.info(f"Day locked: {date_str} ({locked_count} records) by {current_user.get('full_name')}")
 
         return jsonify({
             "success": True,
@@ -2770,6 +2729,7 @@ def get_payroll_summary():
             LabourRequisition.skill_required,
             LabourRequisition.site_name,
             LabourRequisition.workers_count,
+            LabourRequisition.transport_fee,
             DailyAttendance.worker_id,
             Worker.worker_code,
             Worker.full_name,
@@ -2803,6 +2763,7 @@ def get_payroll_summary():
             LabourRequisition.skill_required,
             LabourRequisition.site_name,
             LabourRequisition.workers_count,
+            LabourRequisition.transport_fee,
             DailyAttendance.worker_id,
             Worker.worker_code,
             Worker.full_name,
@@ -2812,6 +2773,7 @@ def get_payroll_summary():
         # Group by project -> requisition -> workers (nested structure)
         projects_dict = {}
         flat_summary = []  # Keep flat list for backwards compatibility
+        requisition_transport_added = set()  # Track which requisitions already have transport fee added
 
         for r in results:
             # Build flat summary (backwards compatible)
@@ -2857,6 +2819,7 @@ def get_payroll_summary():
                     'skill_required': r.skill_required if r.requisition_id else 'General',
                     'site_name': r.site_name if r.requisition_id else None,
                     'workers_count': r.workers_count if r.requisition_id else None,
+                    'transport_fee': float(r.transport_fee or 0) if r.requisition_id else 0,
                     'total_hours': 0,
                     'total_regular_hours': 0,
                     'total_overtime_hours': 0,
@@ -2864,6 +2827,13 @@ def get_payroll_summary():
                     'total_days': 0,
                     'workers': []
                 }
+
+                # Add transport fee once per requisition (not per worker)
+                if r.requisition_id and r.requisition_id not in requisition_transport_added:
+                    transport_fee_value = float(r.transport_fee or 0)
+                    proj['requisitions'][req_key]['total_cost'] += transport_fee_value
+                    proj['total_cost'] += transport_fee_value
+                    requisition_transport_added.add(r.requisition_id)
 
             req = proj['requisitions'][req_key]
             req['workers'].append({
@@ -3270,6 +3240,4 @@ def download_assignment_pdf(requisition_id):
 
     except Exception as e:
         log.error(f"Error generating assignment PDF: {str(e)}")
-        import traceback
-        log.error(traceback.format_exc())
         return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500

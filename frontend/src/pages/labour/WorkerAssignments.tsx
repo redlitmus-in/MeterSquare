@@ -93,6 +93,12 @@ const WorkerAssignments: React.FC = () => {
   // Confirmation Modal State
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
+  // Transport Fee State
+  const [transportFee, setTransportFee] = useState<number>(0);
+  const [driverName, setDriverName] = useState<string>('');
+  const [vehicleNumber, setVehicleNumber] = useState<string>('');
+  const [driverContact, setDriverContact] = useState<string>('');
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -139,6 +145,10 @@ const WorkerAssignments: React.FC = () => {
     setSelectedRequisition(requisition);
     setSelectedWorkerIds([]);
     setSelectedFilter(null); // Reset filter when opening modal
+    setTransportFee(0); // Reset transport fee
+    setDriverName(''); // Reset driver name
+    setVehicleNumber(''); // Reset vehicle number
+    setDriverContact(''); // Reset driver contact
     setShowAssignModal(true);
     setLoadingWorkers(true);
     setShowAddWorkerForm(false);
@@ -412,7 +422,11 @@ const WorkerAssignments: React.FC = () => {
     try {
       const result = await labourService.assignWorkersToRequisition(
         selectedRequisition.requisition_id,
-        selectedWorkerIds
+        selectedWorkerIds,
+        transportFee,
+        driverName,
+        vehicleNumber,
+        driverContact
       );
       if (result.success) {
         showSuccess(result.message || 'Workers assigned successfully');
@@ -420,6 +434,10 @@ const WorkerAssignments: React.FC = () => {
         setShowAssignModal(false);
         setSelectedRequisition(null);
         setSelectedWorkerIds([]);
+        setTransportFee(0); // Reset transport fee
+        setDriverName(''); // Reset driver name
+        setVehicleNumber(''); // Reset vehicle number
+        setDriverContact(''); // Reset driver contact
         fetchRequisitions();
       } else {
         showError(result.message || 'Failed to assign workers');
@@ -1429,10 +1447,10 @@ const WorkerAssignments: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-xl shadow-xl w-full max-w-md"
+            className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col"
           >
             {/* Header */}
-            <div className="p-4 border-b border-gray-200 flex items-center gap-3">
+            <div className="p-4 border-b border-gray-200 flex items-center gap-3 flex-shrink-0">
               <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
                 <WhatsAppIcon className="w-6 h-6 text-green-600" />
               </div>
@@ -1442,8 +1460,8 @@ const WorkerAssignments: React.FC = () => {
               </div>
             </div>
 
-            {/* Content */}
-            <div className="p-4">
+            {/* Content - Scrollable */}
+            <div className="p-4 overflow-y-auto flex-1">
               {/* Alert Box */}
               <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
                 <div className="flex items-start gap-2">
@@ -1469,6 +1487,78 @@ const WorkerAssignments: React.FC = () => {
                   <span className="text-gray-500">Workers to Assign:</span>
                   <span className="font-medium text-gray-900">{selectedWorkerIds.length}</span>
                 </div>
+              </div>
+
+              {/* Transport Details Section */}
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center gap-2 mb-3">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                  </svg>
+                  <h3 className="text-sm font-semibold text-blue-900">Transport Details</h3>
+                </div>
+
+                <div className="space-y-3">
+                  {/* Driver Name */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Driver Name
+                    </label>
+                    <input
+                      type="text"
+                      value={driverName}
+                      onChange={(e) => setDriverName(e.target.value)}
+                      placeholder="Enter driver name"
+                      className="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                  </div>
+
+                  {/* Driver Contact */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Driver Contact
+                    </label>
+                    <input
+                      type="text"
+                      value={driverContact}
+                      onChange={(e) => setDriverContact(e.target.value)}
+                      placeholder="+971XXXXXXXXX"
+                      className="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                  </div>
+
+                  {/* Vehicle Number */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Vehicle Number
+                    </label>
+                    <input
+                      type="text"
+                      value={vehicleNumber}
+                      onChange={(e) => setVehicleNumber(e.target.value)}
+                      placeholder="DXB-T-12345"
+                      className="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                  </div>
+
+                  {/* Transport Fee */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Transport Fee (AED)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={transportFee}
+                      onChange={(e) => setTransportFee(parseFloat(e.target.value) || 0)}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <p className="mt-2 text-xs text-blue-700">Enter transport details for bringing workers to site</p>
               </div>
 
               {/* Workers List */}
@@ -1497,8 +1587,8 @@ const WorkerAssignments: React.FC = () => {
               </div>
             </div>
 
-            {/* Footer */}
-            <div className="p-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+            {/* Footer - Fixed at bottom */}
+            <div className="p-4 border-t border-gray-200 bg-gray-50 rounded-b-xl flex-shrink-0">
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowConfirmModal(false)}

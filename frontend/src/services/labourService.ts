@@ -107,6 +107,11 @@ export interface LabourRequisition {
   assigned_by_name?: string;
   assignment_date?: string;
   whatsapp_notified: boolean;
+  transport_fee?: number;
+  transport_master_requisition_id?: number;
+  driver_name?: string;
+  vehicle_number?: string;
+  driver_contact?: string;
   is_deleted: boolean;
   created_at: string;
   created_by: string;
@@ -128,6 +133,7 @@ export interface CreateRequisitionData {
   boq_id?: number;
   item_id?: string;
   labour_id?: string;
+  transport_fee?: number;
 }
 
 export interface LabourArrival {
@@ -243,6 +249,7 @@ export interface PayrollRequisitionGroup {
   skill_required: string;
   site_name: string | null;
   workers_count: number | null;
+  transport_fee: number;
   total_hours: number;
   total_regular_hours: number;
   total_overtime_hours: number;
@@ -720,10 +727,21 @@ class LabourService {
   /**
    * Assign workers to requisition
    */
-  async assignWorkersToRequisition(requisitionId: number, workerIds: number[]): Promise<{ success: boolean; message?: string }> {
+  async assignWorkersToRequisition(
+    requisitionId: number,
+    workerIds: number[],
+    transportFee?: number,
+    driverName?: string,
+    vehicleNumber?: string,
+    driverContact?: string
+  ): Promise<{ success: boolean; message?: string }> {
     try {
       const response = await apiClient.post(`/labour/requisitions/${requisitionId}/assign`, {
-        worker_ids: workerIds
+        worker_ids: workerIds,
+        transport_fee: transportFee || 0,
+        driver_name: driverName || '',
+        vehicle_number: vehicleNumber || '',
+        driver_contact: driverContact || ''
       });
       return {
         success: true,

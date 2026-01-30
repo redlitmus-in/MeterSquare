@@ -571,6 +571,34 @@ const PayrollProcessing: React.FC = () => {
                                 );
                               })}
                             </tbody>
+                            <tfoot className="bg-gradient-to-r from-purple-50 to-blue-50">
+                              <tr>
+                                <td colSpan={7} className="px-5 py-3 text-right text-sm font-medium text-gray-700">
+                                  Labour Cost:
+                                </td>
+                                <td className="px-5 py-3 text-right text-sm font-semibold text-gray-900">
+                                  AED {(requisition.total_cost - requisition.transport_fee).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                              {requisition.transport_fee > 0 && (
+                                <tr>
+                                  <td colSpan={7} className="px-5 py-2 text-right text-sm font-medium text-gray-700">
+                                    Transport Fee:
+                                  </td>
+                                  <td className="px-5 py-2 text-right text-sm font-semibold text-blue-600">
+                                    AED {requisition.transport_fee.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              )}
+                              <tr className="border-t-2 border-purple-300">
+                                <td colSpan={7} className="px-5 py-3 text-right text-sm font-bold text-gray-900">
+                                  Requisition Total:
+                                </td>
+                                <td className="px-5 py-3 text-right text-sm font-bold text-purple-700">
+                                  AED {requisition.total_cost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            </tfoot>
                           </table>
                                 </motion.div>
                               )}

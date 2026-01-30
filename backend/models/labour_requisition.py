@@ -63,6 +63,13 @@ class LabourRequisition(db.Model):
     assignment_date = db.Column(db.DateTime, nullable=True)
     whatsapp_notified = db.Column(db.Boolean, default=False)
 
+    # Transport fee (for master requisition or standalone transport)
+    transport_fee = db.Column(db.Float, default=0.0)
+    # Transport logistics details (driver and vehicle information)
+    driver_name = db.Column(db.Text(255), nullable=True)
+    vehicle_number = db.Column(db.Text(100), nullable=True)
+    driver_contact = db.Column(db.Text(50), nullable=True)
+
     # Standard tracking fields
     is_deleted = db.Column(db.Boolean, default=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -143,6 +150,11 @@ class LabourRequisition(db.Model):
             'assigned_by_name': self.assigned_by_name,
             'assignment_date': self.assignment_date.isoformat() if self.assignment_date else None,
             'whatsapp_notified': self.whatsapp_notified,
+            'transport_fee': self.transport_fee,
+            'driver_name': self.driver_name,
+            'vehicle_number': self.vehicle_number,
+            'driver_contact': self.driver_contact,
+            # Standard fields
             'is_deleted': self.is_deleted,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by,
