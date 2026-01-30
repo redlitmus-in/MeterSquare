@@ -6,5 +6,6 @@ from models.boq import BOQ
 from models.change_request import ChangeRequest
 from models.system_settings import SystemSettings
 from models.po_child import POChild
+from models.login_history import LoginHistory
 
-__all__ = ['db', 'User', 'Role', 'Project', 'BOQ', 'ChangeRequest', 'SystemSettings', 'POChild']
+__all__ = ['db', 'User', 'Role', 'Project', 'BOQ', 'ChangeRequest', 'SystemSettings', 'POChild', 'LoginHistory']

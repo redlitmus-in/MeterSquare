@@ -188,6 +188,30 @@ export const adminApi = {
   async approveBOQ(boqId: number, data: { approved: boolean; comments?: string }): Promise<{ message: string; boq_id: number; status: string }> {
     const response = await apiClient.post(`/admin/boqs/${boqId}/approve`, data);
     return response.data;
+  },
+
+  // ============================================
+  // LOGIN HISTORY
+  // ============================================
+
+  // Get login history for a specific user
+  async getUserLoginHistory(userId: number, params?: {
+    page?: number;
+    per_page?: number;
+    days?: number;
+  }): Promise<LoginHistoryResponse> {
+    const response = await apiClient.get(`/admin/users/${userId}/login-history`, { params });
+    return response.data;
+  },
+
+  // Get all users' login history (recent overview)
+  async getAllLoginHistory(params?: {
+    page?: number;
+    per_page?: number;
+    days?: number;
+  }): Promise<LoginHistoryResponse> {
+    const response = await apiClient.get(`/admin/login-history`, { params });
+    return response.data;
   }
 };
 
@@ -336,6 +360,48 @@ export interface BOQItem {
   updated_at: string;
   version: number;
   approval_status?: string;
+}
+
+// ============================================
+// LOGIN HISTORY
+// ============================================
+
+export interface LoginHistoryRecord {
+  id: number;
+  user_id: number;
+  login_at: string;
+  logout_at?: string;
+  ip_address?: string;
+  user_agent?: string;
+  device_type?: string;
+  browser?: string;
+  os?: string;
+  login_method: 'email_otp' | 'sms_otp';
+  status: 'active' | 'logged_out' | 'expired';
+  created_at: string;
+  user_name?: string;
+  user_email?: string;
+}
+
+export interface LoginHistoryResponse {
+  success: boolean;
+  user?: {
+    user_id: number;
+    email: string;
+    full_name: string;
+  };
+  login_history: LoginHistoryRecord[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  };
+  filter?: {
+    days: number;
+  };
 }
 
 export default adminApi;

@@ -525,6 +525,10 @@ def verify_sms_otp_login():
         user.last_login = current_time
         db.session.commit()
 
+        # Record login history for SMS OTP login
+        from utils.authentication import record_login_history
+        record_login_history(user.user_id, login_method='sms_otp')
+
         # Remove OTP from storage
         del otp_storage[storage_key]
 

@@ -76,8 +76,9 @@ def get_all_users():
         if department:
             query = query.filter(User.department.ilike(f"%{department}%"))
 
-        # Order by most recent first
-        query = query.order_by(desc(User.created_at))
+        # Order by most recent login first (users who logged in recently appear at top)
+        # NULLS LAST ensures users who never logged in appear at the bottom
+        query = query.order_by(User.last_login.desc().nulls_last(), desc(User.created_at))
 
         # Paginate
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -1001,3 +1002,151 @@ def approve_boq_admin(boq_id):
         db.session.rollback()
         log.error(f"Error approving BOQ: {str(e)}")
         return jsonify({"error": f"Failed to approve BOQ: {str(e)}"}), 500
+
+
+# ============================================
+# LOGIN HISTORY APIs
+# ============================================
+
+@jwt_required
+def get_user_login_history(user_id):
+    """
+    Get login history for a specific user
+    Query params:
+    - page: page number (default 1)
+    - per_page: items per page (default 20, max 100)
+    - days: filter to last N days (optional)
+    """
+    try:
+        current_user = g.get("user")
+
+        # Verify admin role
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        # Check user exists
+        user = User.query.filter_by(user_id=user_id, is_deleted=False).first()
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Get query parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 20, type=int), 100)
+        days = request.args.get('days', type=int)
+
+        # Import LoginHistory model
+        from models.login_history import LoginHistory
+
+        # Build query
+        query = LoginHistory.query.filter_by(user_id=user_id)
+
+        # Filter by days if specified
+        if days:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            query = query.filter(LoginHistory.login_at >= cutoff)
+
+        # Order by most recent first
+        query = query.order_by(LoginHistory.login_at.desc())
+
+        # Get total count
+        total = query.count()
+
+        # Apply pagination
+        offset = (page - 1) * per_page
+        login_records = query.offset(offset).limit(per_page).all()
+
+        # Calculate pagination info
+        total_pages = (total + per_page - 1) // per_page
+
+        return jsonify({
+            "success": True,
+            "user": {
+                "user_id": user.user_id,
+                "email": user.email,
+                "full_name": user.full_name
+            },
+            "login_history": [record.to_dict() for record in login_records],
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching login history: {str(e)}")
+        return jsonify({"error": f"Failed to fetch login history: {str(e)}"}), 500
+
+
+@jwt_required
+def get_all_login_history():
+    """
+    Get login history for all users (admin overview)
+    Query params:
+    - page: page number (default 1)
+    - per_page: items per page (default 50, max 100)
+    - days: filter to last N days (default 7)
+    """
+    try:
+        current_user = g.get("user")
+
+        # Verify admin role
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        # Get query parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 50, type=int), 100)
+        days = request.args.get('days', 7, type=int)
+
+        # Import LoginHistory model
+        from models.login_history import LoginHistory
+
+        # Build query with user join for names
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        query = db.session.query(LoginHistory, User).join(
+            User, LoginHistory.user_id == User.user_id
+        ).filter(
+            LoginHistory.login_at >= cutoff
+        ).order_by(LoginHistory.login_at.desc())
+
+        # Get total count
+        total = query.count()
+
+        # Apply pagination
+        offset = (page - 1) * per_page
+        results = query.offset(offset).limit(per_page).all()
+
+        # Calculate pagination info
+        total_pages = (total + per_page - 1) // per_page
+
+        # Format results
+        login_history = []
+        for login_record, user in results:
+            record_dict = login_record.to_dict()
+            record_dict['user_name'] = user.full_name
+            record_dict['user_email'] = user.email
+            login_history.append(record_dict)
+
+        return jsonify({
+            "success": True,
+            "login_history": login_history,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            },
+            "filter": {
+                "days": days
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching all login history: {str(e)}")
+        return jsonify({"error": f"Failed to fetch login history: {str(e)}"}), 500

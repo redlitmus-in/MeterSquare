@@ -10,7 +10,9 @@ from controllers.admin_controller import (
     get_all_boqs_admin,
     approve_boq_admin,
     get_all_project_managers,
-    get_all_site_engineers
+    get_all_site_engineers,
+    get_user_login_history,
+    get_all_login_history
 )
 
 admin_routes = Blueprint("admin_routes", __name__, url_prefix='/api/admin')
@@ -152,3 +154,19 @@ def get_site_engineers_route():
     return get_all_site_engineers()
 
 
+# ============================================
+# LOGIN HISTORY ROUTES
+# ============================================
+
+@admin_routes.route('/users/<int:user_id>/login-history', methods=['GET'])
+@jwt_required
+def get_user_login_history_route(user_id):
+    """Get login history for a specific user"""
+    return get_user_login_history(user_id)
+
+
+@admin_routes.route('/login-history', methods=['GET'])
+@jwt_required
+def get_all_login_history_route():
+    """Get login history for all users (recent overview)"""
+    return get_all_login_history()

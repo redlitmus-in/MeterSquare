@@ -11,6 +11,7 @@ from config.logging import get_logger, configure_quiet_logging
 from socketio_server import init_socketio
 from controllers.notification_controller import notification_bp
 import os
+import traceback
 
 # Load environment variables from .env file
 # Get the directory where this file is located (backend directory)
@@ -170,6 +171,53 @@ def create_app():
     # Create all tables
     # with app.app_context():
     #     db.create_all()
+
+    # ✅ CRITICAL: Global error handlers to prevent "write() before start_response" errors
+    # These catch any unhandled exceptions and ensure a proper HTTP response is returned
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        """Catch-all error handler for unhandled exceptions"""
+        import traceback
+        logger.error(f"Unhandled exception: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+        # Always return a proper JSON response
+        return jsonify({
+            "success": False,
+            "error": "Internal server error",
+            "message": str(e) if environment != "production" else "An unexpected error occurred"
+        }), 500
+
+    @app.errorhandler(404)
+    def handle_not_found(e):
+        """Handle 404 errors"""
+        return jsonify({
+            "success": False,
+            "error": "Not found",
+            "message": "The requested resource was not found"
+        }), 404
+
+    @app.errorhandler(500)
+    def handle_internal_error(e):
+        """Handle 500 errors"""
+        logger.error(f"Internal server error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "Internal server error",
+            "message": "An internal server error occurred"
+        }), 500
+
+    @app.errorhandler(AssertionError)
+    def handle_assertion_error(e):
+        """Handle assertion errors (including werkzeug WSGI issues)"""
+        import traceback
+        logger.error(f"Assertion error: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "success": False,
+            "error": "Request processing error",
+            "message": "The request could not be processed"
+        }), 500
 
     # WhatsApp Webhook endpoint for Echt.im
     @app.route('/api/whatsapp/webhook', methods=['GET', 'POST'])

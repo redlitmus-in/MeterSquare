@@ -38,6 +38,10 @@ const PayrollProcessing: React.FC = () => {
   const [expandedRequisitions, setExpandedRequisitions] = useState<Set<string>>(new Set()); // "projectId-requisitionId"
   const [expandedWorkers, setExpandedWorkers] = useState<Set<string>>(new Set()); // "projectId-workerId"
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
   // Date range - default to current month
   const today = new Date();
   const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -178,6 +182,49 @@ const PayrollProcessing: React.FC = () => {
     totalWorkers: summary.length,
     totalHours: summary.reduce((sum, s) => sum + s.total_hours, 0)
   }), [summary]);
+
+  // Pagination calculations
+  const totalProjects = groupedByProject.length;
+  const totalPages = Math.ceil(totalProjects / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedProjects = groupedByProject.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [startDate, endDate, projectId]);
+
+  // Generate page numbers for pagination
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    const maxVisiblePages = 5;
+
+    if (totalPages <= maxVisiblePages) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        for (let i = 1; i <= 4; i++) pages.push(i);
+        pages.push('...');
+        pages.push(totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        pages.push(1);
+        pages.push('...');
+        for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i);
+      } else {
+        pages.push(1);
+        pages.push('...');
+        pages.push(currentPage - 1);
+        pages.push(currentPage);
+        pages.push(currentPage + 1);
+        pages.push('...');
+        pages.push(totalPages);
+      }
+    }
+    return pages;
+  };
 
   // Export to PDF
   const handleExportPDF = async () => {
@@ -332,7 +379,7 @@ const PayrollProcessing: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-4">
-            {groupedByProject.map((project) => (
+            {paginatedProjects.map((project) => (
               <div key={project.project_id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
                 {/* Project Header - Collapsible */}
                 <button
@@ -544,7 +591,7 @@ const PayrollProcessing: React.FC = () => {
                   <BanknotesIcon className="w-8 h-8 text-green-600" />
                   <div>
                     <p className="font-semibold text-gray-900">Grand Total</p>
-                    <p className="text-sm text-gray-600">{totalWorkers} workers • {groupedByProject.length} projects</p>
+                    <p className="text-sm text-gray-600">{totalWorkers} workers • {totalProjects} projects</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-8">
@@ -559,6 +606,46 @@ const PayrollProcessing: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Pagination Controls */}
+            {groupedByProject.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <div className="flex items-center justify-between">
+                  {/* Left side: Showing info */}
+                  <span className="text-sm text-gray-600">
+                    Showing {startIndex + 1} - {Math.min(endIndex, totalProjects)} of {totalProjects} projects
+                  </span>
+
+                  {/* Right side: Page navigation - only show if more than 1 page */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-1">
+                      {/* Previous Button */}
+                      <button
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                      >
+                        Previous
+                      </button>
+
+                      {/* Page info */}
+                      <span className="text-sm text-gray-600 px-2">
+                        Page {currentPage} of {totalPages}
+                      </span>
+
+                      {/* Next Button */}
+                      <button
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )
       }

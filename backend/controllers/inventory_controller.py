@@ -3728,36 +3728,61 @@ def get_delivery_notes_for_se():
     1. Project.site_supervisor_id (direct assignment)
     2. PMAssignSS.ss_ids (array of SE IDs)
     3. PMAssignSS.assigned_to_se_id (single SE assignment)
+
+    Admin viewing as SE gets ALL delivery notes (no user-specific filtering)
     """
     try:
         current_user_id = g.user.get('user_id')
+        user_role = g.user.get('role', '').lower()
+        view_as_role = request.args.get('view_as_role', '').lower()
+
         from models.project import Project
         from models.pm_assign_ss import PMAssignSS
         from sqlalchemy import or_, any_
+        import logging
+        log = logging.getLogger(__name__)
+
+        # Valid roles for view_as_role parameter
+        VALID_VIEW_AS_ROLES = frozenset(['se', 'siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])
+        SUPER_ADMIN_ROLES = frozenset(['admin', 'superadmin', 'super_admin'])
+
+        # Validate view_as_role if provided
+        if view_as_role and view_as_role not in VALID_VIEW_AS_ROLES:
+            log.warning(f"Invalid view_as_role '{view_as_role}' provided by user {current_user_id}")
+            return jsonify({'error': f'Invalid view_as_role: {view_as_role}'}), 400
+
+        # Check if admin is viewing as SE
+        is_admin_viewing_as_role = user_role in SUPER_ADMIN_ROLES and view_as_role
 
         # Collect all project IDs from multiple sources
         project_ids = set()
 
-        # Source 1: Direct assignment via Project.site_supervisor_id
-        direct_projects = Project.query.filter(
-            Project.site_supervisor_id == current_user_id,
-            Project.is_deleted == False
-        ).all()
-        for p in direct_projects:
-            project_ids.add(p.project_id)
+        # Admin viewing as role gets ALL projects
+        if is_admin_viewing_as_role or user_role in SUPER_ADMIN_ROLES:
+            log.info(f"Admin {current_user_id} viewing as {view_as_role or 'admin'} - getting ALL projects for delivery notes")
+            all_projects = Project.query.filter(Project.is_deleted == False).all()
+            project_ids = set(p.project_id for p in all_projects)
+        else:
+            # Source 1: Direct assignment via Project.site_supervisor_id
+            direct_projects = Project.query.filter(
+                Project.site_supervisor_id == current_user_id,
+                Project.is_deleted == False
+            ).all()
+            for p in direct_projects:
+                project_ids.add(p.project_id)
 
-        # Source 2 & 3: Assignment via pm_assign_ss table
-        pm_assignments = PMAssignSS.query.filter(
-            PMAssignSS.is_deleted == False,
-            or_(
-                PMAssignSS.assigned_to_se_id == current_user_id,
-                PMAssignSS.ss_ids.any(current_user_id)
-            )
-        ).all()
+            # Source 2 & 3: Assignment via pm_assign_ss table
+            pm_assignments = PMAssignSS.query.filter(
+                PMAssignSS.is_deleted == False,
+                or_(
+                    PMAssignSS.assigned_to_se_id == current_user_id,
+                    PMAssignSS.ss_ids.any(current_user_id)
+                )
+            ).all()
 
-        for assignment in pm_assignments:
-            if assignment.project_id:
-                project_ids.add(assignment.project_id)
+            for assignment in pm_assignments:
+                if assignment.project_id:
+                    project_ids.add(assignment.project_id)
 
         project_ids = list(project_ids)
 
@@ -3820,35 +3845,60 @@ def get_returnable_materials_for_se():
     1. Project.site_supervisor_id (direct assignment)
     2. PMAssignSS.ss_ids (array of SE IDs)
     3. PMAssignSS.assigned_to_se_id (single SE assignment)
+
+    Admin viewing as SE gets ALL returnable materials (no user-specific filtering)
     """
     try:
         current_user_id = g.user.get('user_id')
+        user_role = g.user.get('role', '').lower()
+        view_as_role = request.args.get('view_as_role', '').lower()
+
         from models.pm_assign_ss import PMAssignSS
         from sqlalchemy import or_
+        import logging
+        log = logging.getLogger(__name__)
+
+        # Valid roles for view_as_role parameter
+        VALID_VIEW_AS_ROLES = frozenset(['se', 'siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])
+        SUPER_ADMIN_ROLES = frozenset(['admin', 'superadmin', 'super_admin'])
+
+        # Validate view_as_role if provided
+        if view_as_role and view_as_role not in VALID_VIEW_AS_ROLES:
+            log.warning(f"Invalid view_as_role '{view_as_role}' provided by user {current_user_id}")
+            return jsonify({'error': f'Invalid view_as_role: {view_as_role}'}), 400
+
+        # Check if admin is viewing as SE
+        is_admin_viewing_as_role = user_role in SUPER_ADMIN_ROLES and view_as_role
 
         # Collect all project IDs from multiple sources
         project_ids = set()
 
-        # Source 1: Direct assignment via Project.site_supervisor_id
-        direct_projects = Project.query.filter(
-            Project.site_supervisor_id == current_user_id,
-            Project.is_deleted == False
-        ).all()
-        for p in direct_projects:
-            project_ids.add(p.project_id)
+        # Admin viewing as role gets ALL projects
+        if is_admin_viewing_as_role or user_role in SUPER_ADMIN_ROLES:
+            log.info(f"Admin {current_user_id} viewing as {view_as_role or 'admin'} - getting ALL projects for returnable materials")
+            all_projects = Project.query.filter(Project.is_deleted == False).all()
+            project_ids = set(p.project_id for p in all_projects)
+        else:
+            # Source 1: Direct assignment via Project.site_supervisor_id
+            direct_projects = Project.query.filter(
+                Project.site_supervisor_id == current_user_id,
+                Project.is_deleted == False
+            ).all()
+            for p in direct_projects:
+                project_ids.add(p.project_id)
 
-        # Source 2 & 3: Assignment via pm_assign_ss table
-        pm_assignments = PMAssignSS.query.filter(
-            PMAssignSS.is_deleted == False,
-            or_(
-                PMAssignSS.assigned_to_se_id == current_user_id,
-                PMAssignSS.ss_ids.any(current_user_id)
-            )
-        ).all()
+            # Source 2 & 3: Assignment via pm_assign_ss table
+            pm_assignments = PMAssignSS.query.filter(
+                PMAssignSS.is_deleted == False,
+                or_(
+                    PMAssignSS.assigned_to_se_id == current_user_id,
+                    PMAssignSS.ss_ids.any(current_user_id)
+                )
+            ).all()
 
-        for assignment in pm_assignments:
-            if assignment.project_id:
-                project_ids.add(assignment.project_id)
+            for assignment in pm_assignments:
+                if assignment.project_id:
+                    project_ids.add(assignment.project_id)
 
         if not project_ids:
             return jsonify({
@@ -3925,36 +3975,61 @@ def get_material_returns_for_se():
     1. Project.site_supervisor_id (direct assignment)
     2. PMAssignSS.ss_ids (array of SE IDs)
     3. PMAssignSS.assigned_to_se_id (single SE assignment)
+
+    Admin viewing as SE gets ALL material returns (no user-specific filtering)
     """
     try:
         current_user_id = g.user.get('user_id')
+        user_role = g.user.get('role', '').lower()
+        view_as_role = request.args.get('view_as_role', '').lower()
+
         from models.project import Project
         from models.pm_assign_ss import PMAssignSS
         from sqlalchemy import or_
+        import logging
+        log = logging.getLogger(__name__)
+
+        # Valid roles for view_as_role parameter
+        VALID_VIEW_AS_ROLES = frozenset(['se', 'siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])
+        SUPER_ADMIN_ROLES = frozenset(['admin', 'superadmin', 'super_admin'])
+
+        # Validate view_as_role if provided
+        if view_as_role and view_as_role not in VALID_VIEW_AS_ROLES:
+            log.warning(f"Invalid view_as_role '{view_as_role}' provided by user {current_user_id}")
+            return jsonify({'error': f'Invalid view_as_role: {view_as_role}'}), 400
+
+        # Check if admin is viewing as SE
+        is_admin_viewing_as_role = user_role in SUPER_ADMIN_ROLES and view_as_role
 
         # Collect all project IDs from multiple sources
         project_ids = set()
 
-        # Source 1: Direct assignment via Project.site_supervisor_id
-        direct_projects = Project.query.filter(
-            Project.site_supervisor_id == current_user_id,
-            Project.is_deleted == False
-        ).all()
-        for p in direct_projects:
-            project_ids.add(p.project_id)
+        # Admin viewing as role gets ALL projects
+        if is_admin_viewing_as_role or user_role in SUPER_ADMIN_ROLES:
+            log.info(f"Admin {current_user_id} viewing as {view_as_role or 'admin'} - getting ALL projects for material returns")
+            all_projects = Project.query.filter(Project.is_deleted == False).all()
+            project_ids = set(p.project_id for p in all_projects)
+        else:
+            # Source 1: Direct assignment via Project.site_supervisor_id
+            direct_projects = Project.query.filter(
+                Project.site_supervisor_id == current_user_id,
+                Project.is_deleted == False
+            ).all()
+            for p in direct_projects:
+                project_ids.add(p.project_id)
 
-        # Source 2 & 3: Assignment via pm_assign_ss table
-        pm_assignments = PMAssignSS.query.filter(
-            PMAssignSS.is_deleted == False,
-            or_(
-                PMAssignSS.assigned_to_se_id == current_user_id,
-                PMAssignSS.ss_ids.any(current_user_id)
-            )
-        ).all()
+            # Source 2 & 3: Assignment via pm_assign_ss table
+            pm_assignments = PMAssignSS.query.filter(
+                PMAssignSS.is_deleted == False,
+                or_(
+                    PMAssignSS.assigned_to_se_id == current_user_id,
+                    PMAssignSS.ss_ids.any(current_user_id)
+                )
+            ).all()
 
-        for assignment in pm_assignments:
-            if assignment.project_id:
-                project_ids.add(assignment.project_id)
+            for assignment in pm_assignments:
+                if assignment.project_id:
+                    project_ids.add(assignment.project_id)
 
         project_ids = list(project_ids)
 

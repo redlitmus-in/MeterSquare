@@ -394,9 +394,11 @@ def create_asset_requisition():
 
 
 def get_my_requisitions():
-    """SE gets their own requisitions"""
+    """SE gets their own requisitions
+    Admin sees ALL requisitions for oversight purposes"""
     try:
         user_id = g.user.get('user_id')
+        user_role = g.user.get('role', '').lower()
         if not user_id:
             return jsonify({'success': False, 'error': 'User not authenticated'}), 401
 
@@ -409,9 +411,16 @@ def get_my_requisitions():
             joinedload(AssetRequisition.category),
             joinedload(AssetRequisition.asset_item)
         ).filter(
-            AssetRequisition.requested_by_user_id == user_id,
             AssetRequisition.is_deleted == False
         )
+
+        # Admin sees ALL requisitions (for oversight when viewing as another role)
+        if user_role == 'admin':
+            current_app.logger.info(f"Admin {user_id} viewing all asset requisitions")
+            # No user filtering - admin sees everything
+        else:
+            # Regular users only see their own requisitions
+            query = query.filter(AssetRequisition.requested_by_user_id == user_id)
 
         if status_filter and status_filter != 'all':
             query = query.filter(AssetRequisition.status == status_filter)
@@ -717,43 +726,13 @@ def update_requisition(requisition_id):
 # ==================== PM ENDPOINTS ====================
 
 def get_pm_pending_requisitions():
-    """PM gets requisitions pending their approval - only from their assigned Site Engineers"""
+    """PM gets requisitions pending their approval - only from their assigned Site Engineers
+    Admin sees ALL requisitions for oversight purposes"""
     try:
         user_id = g.user.get('user_id')
+        user_role = g.user.get('role', '').lower()
         if not user_id:
             return jsonify({'success': False, 'error': 'User not authenticated'}), 401
-
-        # Get projects and Site Engineers assigned to this PM
-        from models.pm_assign_ss import PMAssignSS
-
-        project_ids = []
-        assigned_ss_ids = []
-
-        # Get PM assignments - find projects and SS assigned to this PM
-        pm_assignments = PMAssignSS.query.filter(
-            or_(
-                PMAssignSS.pm_ids == user_id,
-                PMAssignSS.assigned_by_pm_id == user_id
-            ),
-            PMAssignSS.is_deleted == False
-        ).all()
-
-        # Collect project IDs and SS IDs from assignments
-        for assignment in pm_assignments:
-            if assignment.project_id and assignment.project_id not in project_ids:
-                project_ids.append(assignment.project_id)
-
-            # Collect all SS IDs assigned to this PM
-            if assignment.ss_ids:
-                for ss_id in assignment.ss_ids:
-                    if ss_id not in assigned_ss_ids:
-                        assigned_ss_ids.append(ss_id)
-
-            # Also include assigned_to_se_id (single SE assignment)
-            if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in assigned_ss_ids:
-                assigned_ss_ids.append(assignment.assigned_to_se_id)
-
-        current_app.logger.info(f"PM {user_id} - Project IDs: {project_ids}, SS IDs: {assigned_ss_ids}")
 
         status_filter = request.args.get('status', 'pending_pm')
 
@@ -765,28 +744,65 @@ def get_pm_pending_requisitions():
             AssetRequisition.is_deleted == False
         )
 
-        # CRITICAL FIX: Filter by both projects AND assigned Site Engineers
-        # Only show requisitions from SS assigned to this PM
-        if project_ids and assigned_ss_ids:
-            query = query.filter(
-                and_(
-                    AssetRequisition.project_id.in_(project_ids),
-                    AssetRequisition.requested_by_user_id.in_(assigned_ss_ids)
-                )
-            )
-        elif project_ids:
-            # Fallback: if no SS assignments found, filter by project only
-            query = query.filter(AssetRequisition.project_id.in_(project_ids))
-        elif assigned_ss_ids:
-            # Edge case: filter by SS only
-            query = query.filter(AssetRequisition.requested_by_user_id.in_(assigned_ss_ids))
+        # Admin sees ALL requisitions (for oversight when viewing as PM role)
+        if user_role == 'admin':
+            current_app.logger.info(f"Admin {user_id} viewing all PM requisitions")
+            # No project/user filtering for admin - they see everything
         else:
-            # No assignments found - return empty list
-            return jsonify({
-                'success': True,
-                'data': [],
-                'total': 0
-            }), 200
+            # Regular PM logic - filter by their assigned projects/Site Engineers
+            from models.pm_assign_ss import PMAssignSS
+
+            project_ids = []
+            assigned_ss_ids = []
+
+            # Get PM assignments - find projects and SS assigned to this PM
+            pm_assignments = PMAssignSS.query.filter(
+                or_(
+                    PMAssignSS.pm_ids == user_id,
+                    PMAssignSS.assigned_by_pm_id == user_id
+                ),
+                PMAssignSS.is_deleted == False
+            ).all()
+
+            # Collect project IDs and SS IDs from assignments
+            for assignment in pm_assignments:
+                if assignment.project_id and assignment.project_id not in project_ids:
+                    project_ids.append(assignment.project_id)
+
+                # Collect all SS IDs assigned to this PM
+                if assignment.ss_ids:
+                    for ss_id in assignment.ss_ids:
+                        if ss_id not in assigned_ss_ids:
+                            assigned_ss_ids.append(ss_id)
+
+                # Also include assigned_to_se_id (single SE assignment)
+                if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in assigned_ss_ids:
+                    assigned_ss_ids.append(assignment.assigned_to_se_id)
+
+            current_app.logger.info(f"PM {user_id} - Project IDs: {project_ids}, SS IDs: {assigned_ss_ids}")
+
+            # CRITICAL FIX: Filter by both projects AND assigned Site Engineers
+            # Only show requisitions from SS assigned to this PM
+            if project_ids and assigned_ss_ids:
+                query = query.filter(
+                    and_(
+                        AssetRequisition.project_id.in_(project_ids),
+                        AssetRequisition.requested_by_user_id.in_(assigned_ss_ids)
+                    )
+                )
+            elif project_ids:
+                # Fallback: if no SS assignments found, filter by project only
+                query = query.filter(AssetRequisition.project_id.in_(project_ids))
+            elif assigned_ss_ids:
+                # Edge case: filter by SS only
+                query = query.filter(AssetRequisition.requested_by_user_id.in_(assigned_ss_ids))
+            else:
+                # No assignments found - return empty list
+                return jsonify({
+                    'success': True,
+                    'data': [],
+                    'total': 0
+                }), 200
 
         if status_filter == 'pending':
             query = query.filter(AssetRequisition.status == RequisitionStatus.PENDING_PM)

@@ -479,10 +479,12 @@ def create_requisition():
 
 
 def get_my_requisitions():
-    """Get requisitions created by the current user"""
+    """Get requisitions created by the current user
+    Admin viewing as a role sees ALL requisitions created by users of that role"""
     try:
         current_user = g.user
         user_id = current_user.get('user_id')
+        user_role = normalize_role(current_user.get('role', ''))
 
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 15, type=int), 100)
@@ -490,9 +492,16 @@ def get_my_requisitions():
         assignment_status = request.args.get('assignment_status')  # New parameter for filtering by assignment_status
 
         query = LabourRequisition.query.filter(
-            LabourRequisition.requested_by_user_id == user_id,
             LabourRequisition.is_deleted == False
         )
+
+        # Admin sees ALL requisitions (for oversight when viewing as another role)
+        if user_role in SUPER_ADMIN_ROLES:
+            log.info(f"Admin {user_id} viewing all requisitions")
+            # No user filtering - admin sees everything
+        else:
+            # Regular users only see their own requisitions
+            query = query.filter(LabourRequisition.requested_by_user_id == user_id)
 
         if status:
             # Support comma-separated status values (e.g., 'pending,send_to_pm')
@@ -1010,9 +1019,12 @@ def get_pending_requisitions():
         status = request.args.get('status', 'pending')  # Default to pending
         view_as_role = request.args.get('view_as_role', '').lower()  # For admin viewing as other roles
 
+        # Track if original user is admin (for viewing as other roles)
+        is_admin_viewing_as_role = user_role in SUPER_ADMIN_ROLES and view_as_role
+
         # If admin is viewing as another role, use that role for filtering
-        if user_role in SUPER_ADMIN_ROLES and view_as_role:
-            log.info(f"Admin {user_id} viewing as role: {view_as_role}")
+        if is_admin_viewing_as_role:
+            log.info(f"Admin {user_id} viewing as role: {view_as_role} - will show ALL data for that role")
             user_role = view_as_role
 
         # Query labour requisitions
@@ -1034,7 +1046,11 @@ def get_pending_requisitions():
             query = query.filter(LabourRequisition.project_id == project_id)
 
         # Role-based filtering - different logic for pending vs approved/rejected tabs
-        if user_role not in SUPER_ADMIN_ROLES:
+        # Admin viewing as role sees ALL data for that role (no user-specific filtering)
+        if is_admin_viewing_as_role:
+            log.info(f"Admin viewing as {view_as_role} - skipping user-specific filtering")
+            # No additional filtering - admin sees all data for the role
+        elif user_role not in SUPER_ADMIN_ROLES:
             if user_role == 'pm' or user_role == 'projectmanager':
                 # For PENDING tab: filter by project_id (PM's assigned projects)
                 # For APPROVED/REJECTED tabs: filter by approved_by_user_id
@@ -2361,9 +2377,20 @@ def get_attendance_to_lock():
         approval_status = request.args.get('approval_status', 'pending')  # 'pending' or 'locked'
         view_as_role = request.args.get('view_as_role', '').lower()  # For admin viewing as other roles
 
+        # Valid roles for view_as_role parameter
+        VALID_VIEW_AS_ROLES = frozenset(['pm', 'projectmanager', 'mep', 'mepsupervisor', 'mep_supervisor', 'se', 'siteengineer'])
+
+        # Validate view_as_role if provided
+        if view_as_role and view_as_role not in VALID_VIEW_AS_ROLES:
+            log.warning(f"Invalid view_as_role '{view_as_role}' provided by user {user_id}")
+            return jsonify({'success': False, 'error': f'Invalid view_as_role: {view_as_role}'}), 400
+
         # If admin is viewing as another role, use that role for filtering
+        is_admin_viewing_as_role = False
+        original_role = user_role
         if user_role in SUPER_ADMIN_ROLES and view_as_role:
             log.info(f"Admin {user_id} viewing attendance as role: {view_as_role}")
+            is_admin_viewing_as_role = True
             user_role = view_as_role
 
         from models.project import Project
@@ -2372,8 +2399,16 @@ def get_attendance_to_lock():
 
         pm_project_ids = []
 
-        # Role-based project filtering
-        if user_role in ['mep', 'mepsupervisor', 'mep_supervisor']:
+        # Admin viewing as role gets ALL projects (no user-specific filtering)
+        if is_admin_viewing_as_role or original_role in SUPER_ADMIN_ROLES:
+            log.info(f"Admin viewing as {view_as_role or 'admin'} - getting ALL projects for attendance")
+            all_projects = Project.query.filter(
+                Project.is_deleted == False
+            ).all()
+            pm_project_ids = [proj.project_id for proj in all_projects]
+            log.info(f"Admin has access to {len(pm_project_ids)} projects for attendance")
+        # Role-based project filtering for regular users
+        elif user_role in ['mep', 'mepsupervisor', 'mep_supervisor']:
             # MEP: Get projects where mep_supervisor_id contains this user
             all_projects = Project.query.filter(
                 Project.is_deleted == False,
@@ -2478,9 +2513,16 @@ def get_attendance_to_lock():
             DailyAttendance.requisition_id == LabourRequisition.requisition_id
         ).filter(
             DailyAttendance.is_deleted == False,
-            DailyAttendance.project_id.in_(pm_project_ids),  # Still filter by PM's projects
-            LabourRequisition.approved_by_user_id == user_id  # CRITICAL: Only requisitions approved by this PM
+            DailyAttendance.project_id.in_(pm_project_ids)  # Filter by projects
         )
+
+        # Admin viewing as role sees ALL attendance records (no approver filter)
+        if not is_admin_viewing_as_role and original_role not in SUPER_ADMIN_ROLES:
+            # Regular PM only sees requisitions they approved
+            query = query.filter(LabourRequisition.approved_by_user_id == user_id)
+            log.info(f"PM {user_id} filtering by approved requisitions only")
+        else:
+            log.info(f"Admin viewing all attendance records (no approver filter)")
 
         # Filter by approval status
         if approval_status == 'pending':

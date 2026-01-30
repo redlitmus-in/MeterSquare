@@ -432,12 +432,15 @@ const RoleSpecificPurchaseOrders: React.FC = () => {
                              roleId === 'technicalDirector' ||
                              roleIdLower === 'technical_director';
 
-  // TD gets their own dedicated page (ChangeRequestsPage with Vendor Approvals tab), Buyer/Admin get the buyer page
-  if (isTechnicalDirector && !isAdmin) {
+  // TD gets their own dedicated page (ChangeRequestsPage with Vendor Approvals tab)
+  // This includes Admin viewing as TD
+  if (isTechnicalDirector) {
     return <ChangeRequestsPage />;
   }
 
-  if (isBuyer || isAdmin) {
+  // Buyer gets the buyer purchase orders page
+  // Admin without viewingAsRole also gets the buyer page (default admin view)
+  if (isBuyer || (isAdmin && !viewingAsRole)) {
     return <PurchaseOrders />;
   }
 

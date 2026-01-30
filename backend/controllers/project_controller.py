@@ -576,13 +576,30 @@ def get_assigned_projects():
                         ).all()
                     log.info(f"Admin viewing as SE user {effective_user_id}: Fetched {len(projects)} projects for that SE")
                 else:
-                    # No specific user, show all SE projects
-                    projects = Project.query.options(*eager_load_options).filter(
-                        Project.site_supervisor_id.isnot(None),
-                        Project.is_deleted == False,
-                        Project.status != 'completed'
-                    ).all()
-                    log.info(f"Admin viewing as SE role: Fetched {len(projects)} total SE projects")
+                    # No specific user, show ALL SE-related projects
+                    # SE assignments come from: site_supervisor_id OR pm_assign_ss table
+                    pm_assign_project_ids_query = db.session.query(PMAssignSS.project_id).filter(
+                        PMAssignSS.is_deleted == False,
+                        PMAssignSS.project_id.isnot(None)
+                    ).distinct()
+                    pm_project_ids = [row[0] for row in pm_assign_project_ids_query.all()]
+
+                    if pm_project_ids:
+                        projects = Project.query.options(*eager_load_options).filter(
+                            or_(
+                                Project.site_supervisor_id.isnot(None),
+                                Project.project_id.in_(pm_project_ids)
+                            ),
+                            Project.is_deleted == False,
+                            Project.status != 'completed'
+                        ).all()
+                    else:
+                        projects = Project.query.options(*eager_load_options).filter(
+                            Project.site_supervisor_id.isnot(None),
+                            Project.is_deleted == False,
+                            Project.status != 'completed'
+                        ).all()
+                    log.info(f"Admin viewing as SE role: Fetched {len(projects)} total SE projects (site_supervisor_id + pm_assign_ss)")
             else:
                 # Regular SE: Show projects assigned via site_supervisor_id OR pm_assign_ss
                 # Get project IDs from pm_assign_ss assignments
