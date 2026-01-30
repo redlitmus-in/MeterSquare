@@ -14,16 +14,6 @@ def check_ss_or_admin_access():
     return None
 
 
-#Dashboard statistics for site engineer
-@sitesupervisor_routes.route('/sitesupervisor_boq/dashboard', methods=['GET'])
-@jwt_required
-def get_sitesupervisor_dashboard_route():
-    """Site Supervisor or Admin views dashboard stats"""
-    access_check = check_ss_or_admin_access()
-    if access_check:
-        return access_check
-    return get_sitesupervisor_dashboard()
-
 # Site Engineer validates completion request (read-only check)
 @sitesupervisor_routes.route('/validate_completion/<int:project_id>', methods=['GET'])
 @jwt_required
@@ -103,3 +93,29 @@ def get_all_sitesupervisor_boqs_route():
     if access_check:
         return access_check
     return get_all_sitesupervisor_boqs()
+
+
+# ============================================
+# COMPREHENSIVE DASHBOARD ANALYTICS ROUTES
+# ============================================
+
+@sitesupervisor_routes.route('/sitesupervisor/dashboard/analytics', methods=['GET'])
+@jwt_required
+def get_se_dashboard_analytics_route():
+    """Get comprehensive dashboard analytics for Site Engineer"""
+    access_check = check_ss_or_admin_access()
+    if access_check:
+        return access_check
+    from controllers.site_supervisor_controller import get_se_dashboard_analytics
+    return get_se_dashboard_analytics()
+
+
+@sitesupervisor_routes.route('/sitesupervisor/dashboard/activity', methods=['GET'])
+@jwt_required
+def get_se_recent_activity_route():
+    """Get recent activity for Site Engineer"""
+    access_check = check_ss_or_admin_access()
+    if access_check:
+        return access_check
+    from controllers.site_supervisor_controller import get_se_recent_activity
+    return get_se_recent_activity()

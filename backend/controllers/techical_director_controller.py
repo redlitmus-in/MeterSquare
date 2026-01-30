@@ -751,39 +751,54 @@ def get_td_dashboard_stats():
             BOQ.status != 'Pending_PM_Approval'
         ).all()
 
-        # Count BOQs using EXACT same logic as frontend tabs
-        status_counts = {
-            'in_progress': 0,  # Revisions
-            'completed': 0,     # Approved
-            'pending': 0,       # Pending
-            'delayed': 0        # Rejected by TD
-        }
+        # Count BOQs using EXACT same logic as TD tab counts endpoint
+        # Pending tab: Pending_TD_Approval and Pending statuses
+        pending_count = db.session.query(func.count(BOQ.boq_id)).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Pending_TD_Approval', 'Pending'])
+        ).scalar() or 0
 
-        for boq in boqs_query:
-            project = boq.project
-            if not project or project.is_deleted:
-                continue
-
-            # Check PM assignment - matching frontend logic exactly
-            pm_assigned = project.user_id is not None and (
-                (isinstance(project.user_id, list) and len(project.user_id) > 0) or
-                (not isinstance(project.user_id, list) and project.user_id)
+        # Approved tab: Approved, Revision_Approved, Sent_for_Confirmation AND not assigned to PM
+        approved_count = db.session.query(func.count(BOQ.boq_id)).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'Sent_for_Confirmation']),
+            or_(
+                Project.user_id == None,
+                Project.user_id == '[]',
+                Project.user_id == 'null'
             )
+        ).scalar() or 0
 
-            status_lower = boq.status.lower() if boq.status else ''
+        # Revisions tab: revision_number > 0
+        revisions_count = db.session.query(func.count(BOQ.boq_id)).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.revision_number > 0
+        ).scalar() or 0
 
-            # Pending: status='pending' AND no PM assigned
-            if status_lower == 'pending' and not pm_assigned:
-                status_counts['pending'] += 1
-            # Revisions: status='pending_revision'
-            elif status_lower == 'pending_revision':
-                status_counts['in_progress'] += 1
-            # Approved: status in ['approved', 'revision_approved', 'sent_for_confirmation'] AND no PM assigned
-            elif status_lower in ['approved', 'revision_approved', 'sent_for_confirmation'] and not pm_assigned:
-                status_counts['completed'] += 1
-            # Rejected by TD: status='rejected'
-            elif status_lower == 'rejected':
-                status_counts['delayed'] += 1
+        # Rejected by TD tab
+        rejected_count = db.session.query(func.count(BOQ.boq_id)).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Rejected', 'rejected'])
+        ).scalar() or 0
+
+        status_counts = {
+            'in_progress': revisions_count,  # Revisions
+            'completed': approved_count,      # Approved
+            'pending': pending_count,         # Pending
+            'delayed': rejected_count         # Rejected by TD
+        }
 
         # ============ Budget Distribution by Work Type (from same BOQs) ============
         budget_distribution = {}
@@ -939,17 +954,104 @@ def get_td_dashboard_stats():
             monthly_revenue.append(revenue_lakhs)
             month_labels.append(month_start.strftime('%b %Y'))
 
-        # ============ Team Performance (Top Estimators by BOQ Count from same BOQs) ============
-        estimator_counts = {}
-        for boq in boqs_query:
-            if boq.created_by:
-                estimator_counts[boq.created_by] = estimator_counts.get(boq.created_by, 0) + 1
+        # ============ Disposal Trend Statistics (Asset + Material) ============
+        from models.returnable_assets import AssetDisposal
+        from models.inventory import MaterialReturn
+        from dateutil.relativedelta import relativedelta
 
-        # Sort and get top 5
-        top_estimators = [
-            {'name': name, 'count': count}
-            for name, count in sorted(estimator_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-        ]
+        # Get last 6 months of disposal trend data
+        disposal_trend = []
+        disposal_month_labels = []
+
+        current_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        for i in range(5, -1, -1):  # Last 6 months
+            month_start = current_month - relativedelta(months=i)
+            month_end = month_start + relativedelta(months=1)
+
+            # Count Asset Disposals for this month
+            asset_disposals = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
+                AssetDisposal.created_at >= month_start,
+                AssetDisposal.created_at < month_end
+            ).scalar() or 0
+
+            # Count Material Disposals (Damaged/Defective returns) for this month
+            material_disposals = db.session.query(func.count(MaterialReturn.return_id)).filter(
+                MaterialReturn.created_at >= month_start,
+                MaterialReturn.created_at < month_end,
+                MaterialReturn.condition.in_(['Damaged', 'Defective'])
+            ).scalar() or 0
+
+            disposal_trend.append({
+                'month': month_start.strftime('%b'),
+                'asset_disposals': asset_disposals,
+                'material_disposals': material_disposals
+            })
+            disposal_month_labels.append(month_start.strftime('%b'))
+
+        # Count current totals by status
+        # Asset Disposals
+        asset_pending = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
+            AssetDisposal.status == 'pending_review'
+        ).scalar() or 0
+
+        asset_approved = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
+            AssetDisposal.status == 'approved'
+        ).scalar() or 0
+
+        asset_rejected = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
+            AssetDisposal.status == 'rejected'
+        ).scalar() or 0
+
+        # Material Disposals (Damaged/Defective returns)
+        material_pending = db.session.query(func.count(MaterialReturn.return_id)).filter(
+            MaterialReturn.condition.in_(['Damaged', 'Defective']),
+            or_(MaterialReturn.disposal_status == 'pending_review', MaterialReturn.disposal_status == None)
+        ).scalar() or 0
+
+        material_approved = db.session.query(func.count(MaterialReturn.return_id)).filter(
+            MaterialReturn.condition.in_(['Damaged', 'Defective']),
+            MaterialReturn.disposal_status.in_(['approved', 'approved_for_disposal', 'disposed'])
+        ).scalar() or 0
+
+        material_rejected = db.session.query(func.count(MaterialReturn.return_id)).filter(
+            MaterialReturn.condition.in_(['Damaged', 'Defective']),
+            MaterialReturn.disposal_status == 'rejected'
+        ).scalar() or 0
+
+        # Get total estimated value of asset disposals
+        total_disposal_value = db.session.query(
+            func.sum(AssetDisposal.estimated_value)
+        ).filter(
+            AssetDisposal.status.in_(['pending_review', 'approved'])
+        ).scalar() or 0
+
+        # Get total material disposal value
+        total_material_disposal_value = db.session.query(
+            func.sum(MaterialReturn.disposal_value)
+        ).filter(
+            MaterialReturn.condition.in_(['Damaged', 'Defective'])
+        ).scalar() or 0
+
+        disposal_stats = {
+            'asset': {
+                'pending': asset_pending,
+                'approved': asset_approved,
+                'rejected': asset_rejected,
+                'total': asset_pending + asset_approved + asset_rejected
+            },
+            'material': {
+                'pending': material_pending,
+                'approved': material_approved,
+                'rejected': material_rejected,
+                'total': material_pending + material_approved + material_rejected
+            },
+            'trend': disposal_trend,
+            'month_labels': disposal_month_labels,
+            'total_asset_value': round(float(total_disposal_value), 2),
+            'total_material_value': round(float(total_material_disposal_value), 2),
+            'grand_total': (asset_pending + asset_approved + asset_rejected +
+                          material_pending + material_approved + material_rejected)
+        }
 
         # ============ Active Projects Overview ============
         active_projects_query = db.session.query(Project).filter(
@@ -1036,7 +1138,7 @@ def get_td_dashboard_stats():
             'topProjects': top_projects,
             'monthlyRevenue': monthly_revenue,
             'monthLabels': month_labels,
-            'topEstimators': top_estimators,
+            'disposalStats': disposal_stats,
             'activeProjects': active_projects
         }
 

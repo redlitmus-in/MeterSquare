@@ -181,7 +181,11 @@
       "Bash(python migrations/allow_null_project_id_in_delivery_notes.py:*)",
       "Bash(DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" python:*)",
       "Bash(export DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\")",
-      "Bash(DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" python migrations/create_vendor_categories_table.py)"
+      "Bash(DATABASE_URL=\"postgresql://postgres.cbzdvghmrpsolryzdpxi:Meterkol$2025@aws-1-ap-south-1.pooler.supabase.com:6543/postgres\" python migrations/create_vendor_categories_table.py)",
+      "Read(//home/development1/Desktop/MeterSquare/**)",
+      "Bash(git -C /home/development1/Desktop/MeterSquare diff HEAD~5 -- frontend/src/roles/buyer/pages/Dashboard.tsx)",
+      "Bash(git -C /home/development1/Desktop/MeterSquare diff HEAD~3 -- frontend/src/roles/buyer/pages/Dashboard.tsx)",
+      "Bash(git -C /home/development1/Desktop/MeterSquare diff develop -- frontend/src/roles/buyer/pages/Dashboard.tsx)"
     ],
     "deny": [],
     "ask": []

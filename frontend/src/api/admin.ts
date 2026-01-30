@@ -127,17 +127,11 @@ export const adminApi = {
   },
 
   // ============================================
-  // SYSTEM STATISTICS & DASHBOARD
+  // RECENT ACTIVITY
   // ============================================
-
-  async getSystemStats(): Promise<SystemStats> {
-    const response = await apiClient.get(`/admin/stats`);
-    return response.data;
-  },
 
   async getRecentActivity(limit?: number): Promise<{ activities: Activity[] }> {
     const response = await apiClient.get(`/admin/activity`, {
-      
       params: { limit }
     });
     return response.data;
@@ -263,32 +257,6 @@ export interface ProjectsResponse {
   };
 }
 
-export interface SystemStats {
-  users: {
-    total: number;
-    active: number;
-    inactive: number;
-    new_last_30d: number;
-  };
-  projects: {
-    total: number;
-    active: number;
-    completed: number;
-    pending: number;
-    new_last_30d: number;
-  };
-  boq: {
-    total: number;
-    pending: number;
-    approved: number;
-  };
-  role_distribution: Array<{
-    role: string;
-    count: number;
-  }>;
-  system_health: number;
-}
-
 export interface Activity {
   id: string;
   type: string;
@@ -403,5 +371,217 @@ export interface LoginHistoryResponse {
     days: number;
   };
 }
+
+// ============================================
+// DASHBOARD ANALYTICS TYPES
+// ============================================
+
+export interface TrendDataPoint {
+  date: string;
+  count: number;
+}
+
+export interface StatusBreakdown {
+  status: string;
+  count: number;
+}
+
+export interface RoleDistribution {
+  role: string;
+  role_id: number;
+  count: number;
+}
+
+export interface CategoryDistribution {
+  category: string;
+  count: number;
+}
+
+export interface WorkTypeDistribution {
+  work_type: string;
+  count: number;
+}
+
+export interface TransactionMetrics {
+  count: number;
+  amount: number;
+}
+
+export interface PendingApproval {
+  stage: string;
+  count: number;
+}
+
+export interface DashboardAnalytics {
+  success: boolean;
+  period_days: number;
+  generated_at: string;
+
+  users: {
+    total: number;
+    active: number;
+    inactive: number;
+    new_in_period: number;
+    role_distribution: RoleDistribution[];
+    registration_trend: TrendDataPoint[];
+  };
+
+  projects: {
+    total: number;
+    active: number;
+    completed: number;
+    pending: number;
+    on_hold: number;
+    new_in_period: number;
+    status_breakdown: StatusBreakdown[];
+    work_type_distribution: WorkTypeDistribution[];
+  };
+
+  boqs: {
+    total: number;
+    pending: number;
+    approved: number;
+    rejected: number;
+    in_review: number;
+    status_breakdown: StatusBreakdown[];
+    creation_trend: TrendDataPoint[];
+  };
+
+  change_requests: {
+    total: number;
+    pending: number;
+    approved: number;
+    rejected: number;
+    completed: number;
+    purchase_completed: number;
+    total_cost: number;
+    avg_cost: number;
+    status_breakdown: StatusBreakdown[];
+    pending_approvals: PendingApproval[];
+    creation_trend: TrendDataPoint[];
+  };
+
+  vendors: {
+    total: number;
+    active: number;
+    inactive: number;
+    new_in_period: number;
+    category_distribution: CategoryDistribution[];
+  };
+
+  inventory: {
+    total_materials: number;
+    total_stock_value: number;
+    total_stock_quantity: number;
+    backup_stock_quantity: number;
+    low_stock_alerts: number;
+    transactions: {
+      purchases: TransactionMetrics;
+      withdrawals: TransactionMetrics;
+    };
+  };
+
+  deliveries: {
+    total_in_period: number;
+    draft: number;
+    issued: number;
+    in_transit: number;
+    delivered: number;
+    status_breakdown: StatusBreakdown[];
+  };
+
+  material_requests: {
+    total_in_period: number;
+    pending: number;
+    approved: number;
+    dispatched: number;
+    fulfilled: number;
+    rejected: number;
+    status_breakdown: StatusBreakdown[];
+  };
+
+  login_activity: {
+    total_logins_in_period: number;
+    login_trend: TrendDataPoint[];
+    login_methods: Array<{ method: string; count: number }>;
+  };
+
+  system_health: {
+    score: number;
+    status: 'excellent' | 'good' | 'needs_attention';
+    alerts: {
+      low_stock_materials: number;
+      pending_change_requests: number;
+      inactive_users_percentage: number;
+    };
+  };
+}
+
+export interface TopPerformer {
+  user_id: number;
+  name: string;
+  email: string;
+  role?: string;
+  project_count?: number;
+  login_count?: number;
+}
+
+export interface TopPerformersResponse {
+  success: boolean;
+  period_days: number;
+  top_project_managers: TopPerformer[];
+  top_site_engineers: TopPerformer[];
+  most_active_users: TopPerformer[];
+}
+
+export interface FinancialSummary {
+  success: boolean;
+  period_days: number;
+  change_requests: {
+    total_cost: number;
+    average_cost: number;
+    total_count: number;
+    by_status: Array<{
+      status: string;
+      total_cost: number;
+      count: number;
+    }>;
+  };
+  inventory: {
+    current_value: number;
+    backup_value: number;
+    total_value: number;
+  };
+  transactions: Record<string, { total: number; transport: number }>;
+  transport_costs: number;
+  daily_cost_trend: Array<{ date: string; cost: number }>;
+}
+
+// Add to adminApi object
+export const adminApiExtended = {
+  ...adminApi,
+
+  // Get comprehensive dashboard analytics
+  async getDashboardAnalytics(days?: number): Promise<DashboardAnalytics> {
+    const response = await apiClient.get('/admin/dashboard/analytics', {
+      params: { days }
+    });
+    return response.data;
+  },
+
+  // Get top performers
+  async getTopPerformers(params?: { limit?: number; days?: number }): Promise<TopPerformersResponse> {
+    const response = await apiClient.get('/admin/dashboard/top-performers', { params });
+    return response.data;
+  },
+
+  // Get financial summary
+  async getFinancialSummary(days?: number): Promise<FinancialSummary> {
+    const response = await apiClient.get('/admin/dashboard/financial-summary', {
+      params: { days }
+    });
+    return response.data;
+  }
+};
 
 export default adminApi;

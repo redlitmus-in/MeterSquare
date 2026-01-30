@@ -70,368 +70,6 @@ def create_sitesupervisor():
         }), 500
 
 
-def get_sitesupervisor_dashboard():
-    """Get COMPREHENSIVE dashboard statistics for Site Engineer
-
-    Includes:
-    1. Project statistics (from both pm_assign_ss and Project.site_supervisor_id)
-    2. BOQ/Item statistics (total items, items by status)
-    3. Change Request statistics (pending, approved, rejected, purchase completed)
-    4. Recent projects list
-    5. Projects by priority/deadline
-
-    OPTIMIZED: Reduced N+1 queries by using efficient bulk queries and aggregations
-    """
-    try:
-        from models.pm_assign_ss import PMAssignSS
-        from models.change_request import ChangeRequest
-        from models.boq import BOQ, BOQDetails
-        from datetime import timedelta
-
-        current_user = g.user
-        user_id = current_user['user_id']
-        user_role = current_user.get('role', '').lower()
-
-        # Get effective user context (handles admin viewing as other roles)
-        context = get_effective_user_context()
-        effective_role = context.get('effective_role', user_role)
-        is_admin_viewing = context.get('is_admin_viewing', False)
-        effective_user_id = context.get('effective_user_id')
-
-        # Determine target user ID for queries
-        target_user_id = effective_user_id if (is_admin_viewing and effective_user_id) else user_id
-
-        # ========== OPTIMIZED: COLLECT PROJECT IDS & DATA IN FEWER QUERIES ==========
-        all_project_ids = set()
-        all_boq_ids = set()
-        item_assignments = []
-
-        # FIXED: Check if admin is viewing as SE role - should see NO projects (SE role view without specific user)
-        if user_role == 'admin' and not is_admin_viewing:
-            # Pure admin mode (not viewing as any role) - sees all data
-            # OPTIMIZED: Admin - sees all with minimal queries
-            # Single query for all assignments
-            item_assignments = PMAssignSS.query.filter(PMAssignSS.is_deleted == False).all()
-            all_project_ids = {a.project_id for a in item_assignments if a.project_id}
-            all_boq_ids = {a.boq_id for a in item_assignments if a.boq_id}
-
-            # Single query for projects with site supervisors
-            projects_from_table = Project.query.filter(
-                Project.site_supervisor_id.isnot(None),
-                Project.is_deleted == False
-            ).all()
-            all_project_ids.update(p.project_id for p in projects_from_table)
-            log.info(f"Admin viewing dashboard - showing all SS data: {len(all_project_ids)} projects")
-        elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor'] and not effective_user_id:
-            # Admin viewing as SE role (no specific user) - show ALL SE data aggregated
-            # Single query for all assignments
-            item_assignments = PMAssignSS.query.filter(PMAssignSS.is_deleted == False).all()
-            all_project_ids = {a.project_id for a in item_assignments if a.project_id}
-            all_boq_ids = {a.boq_id for a in item_assignments if a.boq_id}
-
-            # Single query for all projects with site supervisors
-            projects_from_table = Project.query.filter(
-                Project.site_supervisor_id.isnot(None),
-                Project.is_deleted == False
-            ).all()
-            all_project_ids.update(p.project_id for p in projects_from_table)
-            log.info(f"Admin viewing as SE role - showing all SE data: {len(all_project_ids)} projects")
-        elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor'] and effective_user_id:
-            # Admin viewing as specific SE user - sees only that SE's assignments
-            item_assignments = PMAssignSS.query.filter(
-                PMAssignSS.assigned_to_se_id == effective_user_id,
-                PMAssignSS.is_deleted == False
-            ).all()
-            all_project_ids = {a.project_id for a in item_assignments if a.project_id}
-            all_boq_ids = {a.boq_id for a in item_assignments if a.boq_id}
-
-            # Also include projects where this specific SE is assigned at project level
-            projects_from_table = Project.query.filter(
-                Project.site_supervisor_id == effective_user_id,
-                Project.is_deleted == False
-            ).all()
-            all_project_ids.update(p.project_id for p in projects_from_table)
-            log.info(f"Admin viewing as SE user {effective_user_id} - showing {len(all_project_ids)} projects")
-        else:
-            # OPTIMIZED: Regular SE - targeted queries for their assignments only
-            # Single query for user's assignments
-            item_assignments = PMAssignSS.query.filter(
-                PMAssignSS.assigned_to_se_id == target_user_id,
-                PMAssignSS.is_deleted == False
-            ).all()
-            all_project_ids = {a.project_id for a in item_assignments if a.project_id}
-            all_boq_ids = {a.boq_id for a in item_assignments if a.boq_id}
-
-            # Single query for user's projects
-            projects_from_table = Project.query.filter(
-                Project.site_supervisor_id == target_user_id,
-                Project.is_deleted == False
-            ).all()
-            all_project_ids.update(p.project_id for p in projects_from_table)
-            log.info(f"SE user {target_user_id} viewing dashboard - showing their data: {len(all_project_ids)} projects")
-
-        # ========== EMPTY STATE ==========
-        if not all_project_ids:
-            return jsonify({
-                "success": True,
-                "stats": {
-                    "total_projects": 0,
-                    "assigned_projects": 0,
-                    "ongoing_projects": 0,
-                    "completed_projects": 0,
-                    "completion_rate": 0
-                },
-                "item_stats": {
-                    "total_items_assigned": 0,
-                    "items_pending": 0,
-                    "items_in_progress": 0,
-                    "items_completed": 0,
-                    "unique_boqs": 0
-                },
-                "change_request_stats": {
-                    "total_crs": 0,
-                    "pending_approval": 0,
-                    "approved": 0,
-                    "rejected": 0,
-                    "purchase_completed": 0,
-                    "vendor_approved": 0
-                },
-                "recent_projects": [],
-                "projects_by_priority": {
-                    "high": 0,
-                    "medium": 0,
-                    "low": 0
-                },
-                "deadline_stats": {
-                    "overdue": 0,
-                    "due_this_week": 0,
-                    "due_this_month": 0,
-                    "on_track": 0
-                }
-            }), 200
-
-        # ========== OPTIMIZED: FETCH PROJECTS WITH EAGER LOADING ==========
-        # Single query to fetch all projects - no N+1 issue
-        projects = Project.query.filter(
-            Project.project_id.in_(list(all_project_ids)),
-            Project.is_deleted == False
-        ).order_by(Project.created_at.desc()).all()
-
-        # ========== PROJECT STATISTICS ==========
-        total_projects = len(projects)
-        assigned_projects = 0
-        ongoing_projects = 0
-        completed_projects = 0
-        priority_high = 0
-        priority_medium = 0
-        priority_low = 0
-        overdue = 0
-        due_this_week = 0
-        due_this_month = 0
-        on_track = 0
-
-        today = datetime.utcnow().date()
-        week_from_now = today + timedelta(days=7)
-        month_from_now = today + timedelta(days=30)
-
-        recent_projects = []
-
-        for project in projects:
-            status = (project.status or '').lower()
-            # "active" means project is assigned/active but work may not be in progress
-            if status in ['assigned', 'pending', 'items_assigned', 'active', 'new']:
-                assigned_projects += 1
-            elif status in ['in_progress', 'ongoing', 'started', 'working']:
-                ongoing_projects += 1
-            elif status in ['completed', 'done', 'finished', 'closed']:
-                completed_projects += 1
-            else:
-                # Default unknown statuses to assigned
-                assigned_projects += 1
-
-            # Priority stats
-            priority = (getattr(project, 'priority', 'medium') or 'medium').lower()
-            if priority == 'high':
-                priority_high += 1
-            elif priority == 'low':
-                priority_low += 1
-            else:
-                priority_medium += 1
-
-            # Deadline stats
-            if project.start_date and project.duration_days:
-                # Handle both date and datetime objects
-                start = project.start_date if isinstance(project.start_date, datetime) else datetime.combine(project.start_date, datetime.min.time())
-                end_date = (start + timedelta(days=project.duration_days)).date()
-                if status != 'completed':
-                    if end_date < today:
-                        overdue += 1
-                    elif end_date <= week_from_now:
-                        due_this_week += 1
-                    elif end_date <= month_from_now:
-                        due_this_month += 1
-                    else:
-                        on_track += 1
-
-            # Recent projects (top 5)
-            if len(recent_projects) < 5:
-                proj_end_date = None
-                if project.start_date and project.duration_days:
-                    start = project.start_date if isinstance(project.start_date, datetime) else datetime.combine(project.start_date, datetime.min.time())
-                    proj_end_date = (start + timedelta(days=project.duration_days)).date().isoformat()
-
-                recent_projects.append({
-                    "project_id": project.project_id,
-                    "project_name": project.project_name,
-                    "project_code": getattr(project, 'project_code', None),
-                    "client": project.client,
-                    "location": project.location,
-                    "status": project.status or 'assigned',
-                    "priority": getattr(project, 'priority', 'medium'),
-                    "start_date": project.start_date.isoformat() if project.start_date else None,
-                    "end_date": proj_end_date,
-                    "duration_days": project.duration_days,
-                    "created_at": project.created_at.isoformat() if project.created_at else None
-                })
-
-        completion_rate = round((completed_projects / total_projects) * 100, 1) if total_projects > 0 else 0
-
-        # ========== ITEM STATISTICS ==========
-        total_items_assigned = 0
-        items_pending = 0
-        items_in_progress = 0
-        items_completed = 0
-
-        for assignment in item_assignments:
-            if assignment.item_indices:
-                count = len(assignment.item_indices)
-                total_items_assigned += count
-                status = (assignment.assignment_status or 'assigned').lower()
-                if status in ['assigned', 'pending']:
-                    items_pending += count
-                elif status in ['in_progress', 'active']:
-                    items_in_progress += count
-                elif status in ['completed', 'done']:
-                    items_completed += count
-                else:
-                    items_pending += count
-
-        # ========== OPTIMIZED: CHANGE REQUEST STATISTICS ==========
-        # Single query for all change requests with proper filtering
-        # Use load_only to avoid columns that don't exist in database
-        from sqlalchemy.orm import load_only
-
-        cr_query = ChangeRequest.query.options(
-            load_only(
-                ChangeRequest.cr_id,
-                ChangeRequest.project_id,
-                ChangeRequest.boq_id,
-                ChangeRequest.status,
-                ChangeRequest.vendor_selection_status,
-                ChangeRequest.requested_by_user_id,
-                ChangeRequest.is_deleted
-            )
-        ).filter(
-            ChangeRequest.project_id.in_(list(all_project_ids)),
-            ChangeRequest.is_deleted == False
-        )
-
-        # FIXED: If not admin, filter by requested_by_user_id (admin sees all)
-        if user_role != 'admin':
-            cr_query = cr_query.filter(
-                db.or_(
-                    ChangeRequest.requested_by_user_id == target_user_id,
-                    ChangeRequest.project_id.in_(list(all_project_ids))
-                )
-            )
-
-        # OPTIMIZED: Fetch all CRs in single query
-        change_requests = cr_query.all()
-
-        total_crs = len(change_requests)
-        cr_pending = 0
-        cr_approved = 0
-        cr_rejected = 0
-        cr_purchase_completed = 0
-        cr_vendor_approved = 0
-        cr_in_progress = 0
-
-        for cr in change_requests:
-            status = (cr.status or '').lower()
-            # Pending statuses
-            if status in ['pending', 'pending_approval', 'pending_pm_approval', 'pending_td_approval',
-                         'pending_estimator_approval', 'pending_vendor_approval', 'vendor_pending',
-                         'waiting_approval', 'draft']:
-                cr_pending += 1
-            # Approved/In-Progress statuses
-            elif status in ['approved', 'pm_approved', 'td_approved', 'estimator_approved',
-                           'assigned_to_buyer', 'vendor_approved', 'vendor_selected',
-                           'in_progress', 'processing', 'buyer_assigned']:
-                cr_approved += 1
-            # Rejected statuses
-            elif status in ['rejected', 'cancelled', 'vendor_rejected', 'denied']:
-                cr_rejected += 1
-            # Completed statuses
-            elif status in ['purchase_completed', 'routed_to_store', 'completed', 'done', 'closed', 'delivered']:
-                cr_purchase_completed += 1
-            else:
-                # Count any other status as pending for visibility
-                cr_pending += 1
-                log.info(f"Unknown CR status '{status}' for CR {cr.cr_id} - counted as pending")
-
-            if cr.vendor_selection_status == 'approved':
-                cr_vendor_approved += 1
-
-        # OPTIMIZED: Comprehensive logging for performance monitoring
-        log.info(f"SE Dashboard stats - User: {user_id}, Role: {user_role}, Projects: {total_projects}, Items: {total_items_assigned}, CRs: {total_crs}, BOQs: {len(all_boq_ids)}")
-
-        return jsonify({
-            "success": True,
-            "stats": {
-                "total_projects": total_projects,
-                "assigned_projects": assigned_projects,
-                "ongoing_projects": ongoing_projects,
-                "completed_projects": completed_projects,
-                "completion_rate": completion_rate
-            },
-            "item_stats": {
-                "total_items_assigned": total_items_assigned,
-                "items_pending": items_pending,
-                "items_in_progress": items_in_progress,
-                "items_completed": items_completed,
-                "unique_boqs": len(all_boq_ids)
-            },
-            "change_request_stats": {
-                "total_crs": total_crs,
-                "pending_approval": cr_pending,
-                "approved": cr_approved,
-                "rejected": cr_rejected,
-                "purchase_completed": cr_purchase_completed,
-                "vendor_approved": cr_vendor_approved
-            },
-            "recent_projects": recent_projects,
-            "projects_by_priority": {
-                "high": priority_high,
-                "medium": priority_medium,
-                "low": priority_low
-            },
-            "deadline_stats": {
-                "overdue": overdue,
-                "due_this_week": due_this_week,
-                "due_this_month": due_this_month,
-                "on_track": on_track
-            }
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        log.error(f"Error fetching dashboard stats for user {g.user.get('user_id', 'unknown')}: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
-            "error": f"Failed to fetch dashboard stats: {str(e)}"
-        }), 500
-
 def get_all_sitesupervisor():
     try:
         from models.pm_assign_ss import PMAssignSS
@@ -3129,4 +2767,583 @@ def get_all_sitesupervisor_boqs():
         return jsonify({
             "error": f"Failed to fetch projects: {str(e)}",
             "error_type": type(e).__name__
+        }), 500
+
+
+def get_se_dashboard_analytics():
+    """Get comprehensive dashboard analytics for Site Engineer
+
+    Similar to admin analytics but filtered to SE's assigned projects/items only.
+    Includes:
+    - Project statistics with trends
+    - BOQ item statistics with completion trends
+    - Change request statistics with approval pipeline
+    - Material delivery tracking
+    - Performance metrics
+    """
+    try:
+        from models.pm_assign_ss import PMAssignSS
+        from models.change_request import ChangeRequest
+        from models.boq import BOQ, BOQDetails
+        from models.inventory import MaterialDeliveryNote
+        from datetime import timedelta
+        from sqlalchemy import func, case, desc, and_
+
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
+
+        # Get period from query params (default 30 days) with input validation
+        try:
+            days = int(request.args.get('days', 30))
+            days = max(1, min(days, 365))  # Clamp between 1 and 365
+        except (ValueError, TypeError):
+            days = 30
+        period_start = datetime.utcnow() - timedelta(days=days)
+
+        # Get effective user context (handles admin viewing as other roles)
+        context = get_effective_user_context()
+        effective_role = context.get('effective_role', user_role)
+        is_admin_viewing = context.get('is_admin_viewing', False)
+        effective_user_id = context.get('effective_user_id')
+
+        # Determine target user ID for queries
+        target_user_id = effective_user_id if (is_admin_viewing and effective_user_id) else user_id
+
+        # ========== GET SE'S PROJECT IDS ==========
+        all_project_ids = set()
+        item_assignments = []
+
+        if user_role == 'admin' and not is_admin_viewing:
+            # Admin mode - sees all SE data
+            item_assignments = PMAssignSS.query.filter(PMAssignSS.is_deleted == False).all()
+            all_project_ids = {a.project_id for a in item_assignments if a.project_id}
+            projects_from_table = Project.query.filter(
+                Project.site_supervisor_id.isnot(None),
+                Project.is_deleted == False
+            ).all()
+            all_project_ids.update(p.project_id for p in projects_from_table)
+        else:
+            # Regular SE - targeted queries for their assignments
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.assigned_to_se_id == target_user_id,
+                PMAssignSS.is_deleted == False
+            ).all()
+            all_project_ids = {a.project_id for a in item_assignments if a.project_id}
+            projects_from_table = Project.query.filter(
+                Project.site_supervisor_id == target_user_id,
+                Project.is_deleted == False
+            ).all()
+            all_project_ids.update(p.project_id for p in projects_from_table)
+
+        project_ids_list = list(all_project_ids)
+
+        # ========== PROJECT STATISTICS ==========
+        projects = Project.query.filter(
+            Project.project_id.in_(project_ids_list),
+            Project.is_deleted == False
+        ).all() if project_ids_list else []
+
+        today = datetime.utcnow().date()
+        week_from_now = today + timedelta(days=7)
+        month_from_now = today + timedelta(days=30)
+
+        project_stats = {
+            'total': len(projects),
+            'active': 0,
+            'in_progress': 0,
+            'completed': 0,
+            'on_hold': 0,
+            'new_in_period': 0,
+            'status_breakdown': [],
+            'deadline_breakdown': {
+                'overdue': 0,
+                'due_this_week': 0,
+                'due_this_month': 0,
+                'on_track': 0
+            }
+        }
+
+        status_counts = {}
+        for project in projects:
+            status = (project.status or 'active').lower()
+            status_counts[status] = status_counts.get(status, 0) + 1
+
+            if status in ['active', 'assigned', 'pending', 'items_assigned', 'new']:
+                project_stats['active'] += 1
+            elif status in ['in_progress', 'ongoing', 'started', 'working']:
+                project_stats['in_progress'] += 1
+            elif status in ['completed', 'done', 'finished', 'closed']:
+                project_stats['completed'] += 1
+            elif status in ['on_hold', 'paused']:
+                project_stats['on_hold'] += 1
+            else:
+                project_stats['active'] += 1
+
+            # Count new projects in period
+            if project.created_at and project.created_at >= period_start:
+                project_stats['new_in_period'] += 1
+
+            # Deadline analysis
+            if project.start_date and project.duration_days:
+                start = project.start_date if isinstance(project.start_date, datetime) else datetime.combine(project.start_date, datetime.min.time())
+                end_date = (start + timedelta(days=project.duration_days)).date()
+                if status not in ['completed', 'done', 'finished', 'closed']:
+                    if end_date < today:
+                        project_stats['deadline_breakdown']['overdue'] += 1
+                    elif end_date <= week_from_now:
+                        project_stats['deadline_breakdown']['due_this_week'] += 1
+                    elif end_date <= month_from_now:
+                        project_stats['deadline_breakdown']['due_this_month'] += 1
+                    else:
+                        project_stats['deadline_breakdown']['on_track'] += 1
+
+        project_stats['status_breakdown'] = [{'status': k, 'count': v} for k, v in status_counts.items()]
+
+        # ========== BOQ ITEM STATISTICS ==========
+        item_stats = {
+            'total_assigned': len(item_assignments),
+            'pending': 0,
+            'in_progress': 0,
+            'completed': 0,
+            'unique_boqs': len({a.boq_id for a in item_assignments if a.boq_id}),
+            'status_breakdown': [],
+            'completion_rate': 0
+        }
+
+        item_status_counts = {}
+        for assignment in item_assignments:
+            status = (assignment.assignment_status or 'assigned').lower()
+            item_status_counts[status] = item_status_counts.get(status, 0) + 1
+
+            if status in ['assigned', 'pending', 'not_started']:
+                item_stats['pending'] += 1
+            elif status in ['in_progress', 'started', 'working']:
+                item_stats['in_progress'] += 1
+            elif status in ['completed', 'done', 'finished']:
+                item_stats['completed'] += 1
+
+        item_stats['status_breakdown'] = [{'status': k, 'count': v} for k, v in item_status_counts.items()]
+        if item_stats['total_assigned'] > 0:
+            item_stats['completion_rate'] = round((item_stats['completed'] / item_stats['total_assigned']) * 100, 1)
+
+        # ========== CHANGE REQUEST STATISTICS ==========
+        cr_query = ChangeRequest.query.filter(
+            ChangeRequest.requested_by_user_id == target_user_id,
+            ChangeRequest.is_deleted == False
+        ) if not (user_role == 'admin' and not is_admin_viewing) else ChangeRequest.query.filter(
+            ChangeRequest.project_id.in_(project_ids_list),
+            ChangeRequest.is_deleted == False
+        )
+
+        change_requests = cr_query.all()
+
+        cr_stats = {
+            'total': len(change_requests),
+            'pending_pm_approval': 0,
+            'pending_td_approval': 0,
+            'approved': 0,
+            'rejected': 0,
+            'vendor_approved': 0,
+            'purchase_completed': 0,
+            'new_in_period': 0,
+            'status_breakdown': [],
+            'total_cost': 0,
+            'avg_cost': 0
+        }
+
+        cr_status_counts = {}
+        total_cost = 0
+        cost_count = 0
+
+        for cr in change_requests:
+            status = (cr.status or 'pending').lower()
+            cr_status_counts[status] = cr_status_counts.get(status, 0) + 1
+
+            # Map to dashboard categories based on actual CR status values
+            # Pending PM: pending, under_review, send_to_pm
+            if status in ['pending', 'under_review', 'send_to_pm', 'send_to_mep']:
+                cr_stats['pending_pm_approval'] += 1
+            # Pending TD: pending_td_approval
+            elif status in ['pending_td_approval']:
+                cr_stats['pending_td_approval'] += 1
+            # Approved: approved_by_pm, approved_by_td, send_to_est, send_to_buyer, assigned_to_buyer
+            elif status in ['approved', 'approved_by_pm', 'approved_by_td', 'send_to_est', 'send_to_buyer', 'assigned_to_buyer']:
+                cr_stats['approved'] += 1
+            # Rejected
+            elif status == 'rejected':
+                cr_stats['rejected'] += 1
+            # Vendor approved
+            elif status == 'vendor_approved':
+                cr_stats['vendor_approved'] += 1
+            # Purchase completed / routed to store
+            elif status in ['purchase_completed', 'routed_to_store']:
+                cr_stats['purchase_completed'] += 1
+
+            if cr.created_at and cr.created_at >= period_start:
+                cr_stats['new_in_period'] += 1
+
+            # Cost tracking - use materials_total_cost field
+            if cr.materials_total_cost:
+                total_cost += float(cr.materials_total_cost)
+                cost_count += 1
+
+        cr_stats['status_breakdown'] = [{'status': k, 'count': v} for k, v in cr_status_counts.items()]
+        cr_stats['total_cost'] = round(total_cost, 2)
+        cr_stats['avg_cost'] = round(total_cost / cost_count, 2) if cost_count > 0 else 0
+
+        # ========== MATERIAL RECEIPT STATISTICS ==========
+        # Tracks material delivery notes sent TO Site Engineer's projects
+        delivery_stats = {
+            'total': 0,
+            'draft': 0,
+            'issued': 0,
+            'in_transit': 0,
+            'delivered': 0,
+            'received_in_period': 0,  # Receipts confirmed within the selected period
+            'pending_receipt': 0,  # Awaiting SE confirmation (issued + in_transit)
+            'status_breakdown': []
+        }
+
+        try:
+            delivery_query = MaterialDeliveryNote.query.filter(
+                MaterialDeliveryNote.project_id.in_(project_ids_list)
+            ) if project_ids_list else None
+
+            if delivery_query:
+                deliveries = delivery_query.all()
+                delivery_stats['total'] = len(deliveries)
+
+                dn_status_counts = {}
+                for dn in deliveries:
+                    status = (dn.status or 'draft').upper()
+                    dn_status_counts[status] = dn_status_counts.get(status, 0) + 1
+
+                    if status == 'DRAFT':
+                        delivery_stats['draft'] += 1
+                    elif status == 'ISSUED':
+                        delivery_stats['issued'] += 1
+                        delivery_stats['pending_receipt'] += 1
+                    elif status == 'IN_TRANSIT':
+                        delivery_stats['in_transit'] += 1
+                        delivery_stats['pending_receipt'] += 1
+                    elif status in ['DELIVERED', 'PARTIAL']:
+                        delivery_stats['delivered'] += 1
+                        # Check if received within period
+                        if dn.received_at and dn.received_at >= start_date:
+                            delivery_stats['received_in_period'] += 1
+
+                delivery_stats['status_breakdown'] = [{'status': k, 'count': v} for k, v in dn_status_counts.items()]
+        except Exception as e:
+            log.warning(f"Could not fetch delivery stats: {e}")
+
+        # ========== TREND DATA (Last N days) - OPTIMIZED: Single query with GROUP BY ==========
+        cr_trend = []
+
+        try:
+            from sqlalchemy import cast, Date as SQLDate
+
+            # Calculate trend period (max 30 days for trend chart)
+            trend_days = min(days, 30)
+            trend_start = datetime.utcnow() - timedelta(days=trend_days)
+
+            # Use same filter as CR stats - project-based for SE's assigned projects
+            if project_ids_list:
+                trend_query = db.session.query(
+                    cast(ChangeRequest.created_at, SQLDate).label('date'),
+                    func.count(ChangeRequest.cr_id).label('count')
+                ).filter(
+                    ChangeRequest.project_id.in_(project_ids_list),
+                    ChangeRequest.created_at >= trend_start,
+                    ChangeRequest.is_deleted == False
+                ).group_by(cast(ChangeRequest.created_at, SQLDate)).all()
+
+                # Convert to dict for O(1) lookups
+                cr_trend_dict = {str(row.date): row.count for row in trend_query}
+
+                # Build trend array with all days (fill missing days with 0)
+                for i in range(trend_days - 1, -1, -1):
+                    day = (datetime.utcnow() - timedelta(days=i)).date()
+                    cr_trend.append({
+                        'date': str(day),
+                        'count': cr_trend_dict.get(str(day), 0)
+                    })
+        except Exception as e:
+            log.warning(f"Could not build CR trend: {e}")
+
+        # ========== PERFORMANCE METRICS ==========
+        performance = {
+            'project_completion_rate': 0,
+            'item_completion_rate': item_stats['completion_rate'],
+            'cr_approval_rate': 0,
+            'avg_cr_processing_days': 0,
+            'efficiency_score': 0
+        }
+
+        if project_stats['total'] > 0:
+            performance['project_completion_rate'] = round(
+                (project_stats['completed'] / project_stats['total']) * 100, 1
+            )
+
+        if cr_stats['total'] > 0:
+            approved_count = cr_stats['approved'] + cr_stats['vendor_approved'] + cr_stats['purchase_completed']
+            performance['cr_approval_rate'] = round(
+                (approved_count / cr_stats['total']) * 100, 1
+            )
+
+        # Calculate efficiency score (weighted average)
+        efficiency = (
+            performance['project_completion_rate'] * 0.3 +
+            performance['item_completion_rate'] * 0.4 +
+            performance['cr_approval_rate'] * 0.3
+        )
+        performance['efficiency_score'] = round(efficiency, 1)
+
+        # ========== LABOUR REQUISITION STATISTICS ==========
+        labour_stats = {
+            'total': 0,
+            'pending': 0,
+            'approved': 0,
+            'rejected': 0,
+            'assigned': 0,
+            'total_workers_requested': 0,
+            'status_breakdown': []
+        }
+
+        try:
+            from models.labour_requisition import LabourRequisition
+            from models.labour_arrival import LabourArrival
+
+            labour_query = LabourRequisition.query.filter(
+                LabourRequisition.project_id.in_(project_ids_list),
+                LabourRequisition.is_deleted == False
+            ) if project_ids_list else None
+
+            if labour_query:
+                labour_reqs = labour_query.all()
+                labour_stats['total'] = len(labour_reqs)
+
+                labour_status_counts = {}
+                for req in labour_reqs:
+                    status = (req.status or 'pending').lower()
+                    labour_status_counts[status] = labour_status_counts.get(status, 0) + 1
+
+                    if status == 'pending':
+                        labour_stats['pending'] += 1
+                    elif status == 'approved':
+                        labour_stats['approved'] += 1
+                    elif status == 'rejected':
+                        labour_stats['rejected'] += 1
+
+                    # Check assignment status
+                    if req.assignment_status == 'assigned':
+                        labour_stats['assigned'] += 1
+
+                    # Count total workers requested
+                    if req.labour_items:
+                        for item in req.labour_items:
+                            labour_stats['total_workers_requested'] += item.get('workers_count', 0)
+                    elif req.workers_count:
+                        labour_stats['total_workers_requested'] += req.workers_count
+
+                labour_stats['status_breakdown'] = [{'status': k, 'count': v} for k, v in labour_status_counts.items()]
+
+                # Get arrival stats for SE's projects
+                arrivals = LabourArrival.query.filter(
+                    LabourArrival.project_id.in_(project_ids_list),
+                    LabourArrival.is_deleted == False
+                ).all() if project_ids_list else []
+
+                arrival_status_counts = {}
+                for arrival in arrivals:
+                    status = (arrival.arrival_status or 'assigned').lower()
+                    arrival_status_counts[status] = arrival_status_counts.get(status, 0) + 1
+
+                labour_stats['arrivals'] = {
+                    'total': len(arrivals),
+                    'confirmed': arrival_status_counts.get('confirmed', 0),
+                    'no_show': arrival_status_counts.get('no_show', 0),
+                    'departed': arrival_status_counts.get('departed', 0)
+                }
+        except Exception as e:
+            log.warning(f"Could not fetch labour stats: {e}")
+            labour_stats['arrivals'] = {'total': 0, 'confirmed': 0, 'no_show': 0, 'departed': 0}
+
+        # ========== ASSET STATISTICS ==========
+        asset_stats = {
+            'total_dispatched': 0,
+            'total_returned': 0,
+            'pending_returns': 0,
+            'at_site': 0,
+            'delivery_notes': {'total': 0, 'draft': 0, 'issued': 0, 'in_transit': 0, 'delivered': 0},
+            'return_notes': {'total': 0, 'draft': 0, 'issued': 0, 'in_transit': 0, 'received': 0}
+        }
+
+        try:
+            from models.returnable_assets import AssetDeliveryNote, AssetReturnDeliveryNote, AssetReturnRequest
+
+            # Asset Delivery Notes to SE's projects
+            adn_query = AssetDeliveryNote.query.filter(
+                AssetDeliveryNote.project_id.in_(project_ids_list)
+            ) if project_ids_list else None
+
+            if adn_query:
+                adns = adn_query.all()
+                asset_stats['delivery_notes']['total'] = len(adns)
+
+                for adn in adns:
+                    status = (adn.status or 'DRAFT').upper()
+                    if status == 'DRAFT':
+                        asset_stats['delivery_notes']['draft'] += 1
+                    elif status == 'ISSUED':
+                        asset_stats['delivery_notes']['issued'] += 1
+                    elif status == 'IN_TRANSIT':
+                        asset_stats['delivery_notes']['in_transit'] += 1
+                    elif status in ['DELIVERED', 'PARTIAL']:
+                        asset_stats['delivery_notes']['delivered'] += 1
+
+                    # Count total items dispatched
+                    if adn.items:
+                        for item in adn.items:
+                            asset_stats['total_dispatched'] += item.quantity or 1
+
+            # Asset Return Delivery Notes from SE's projects
+            ardn_query = AssetReturnDeliveryNote.query.filter(
+                AssetReturnDeliveryNote.project_id.in_(project_ids_list)
+            ) if project_ids_list else None
+
+            if ardn_query:
+                ardns = ardn_query.all()
+                asset_stats['return_notes']['total'] = len(ardns)
+
+                for ardn in ardns:
+                    status = (ardn.status or 'DRAFT').upper()
+                    if status == 'DRAFT':
+                        asset_stats['return_notes']['draft'] += 1
+                    elif status == 'ISSUED':
+                        asset_stats['return_notes']['issued'] += 1
+                    elif status == 'IN_TRANSIT':
+                        asset_stats['return_notes']['in_transit'] += 1
+                    elif status in ['RECEIVED', 'PROCESSED']:
+                        asset_stats['return_notes']['received'] += 1
+
+                    # Count total items returned
+                    if ardn.items:
+                        for item in ardn.items:
+                            asset_stats['total_returned'] += item.quantity or 1
+
+            # Pending return requests
+            pending_returns = AssetReturnRequest.query.filter(
+                AssetReturnRequest.project_id.in_(project_ids_list),
+                AssetReturnRequest.status == 'pending'
+            ).count() if project_ids_list else 0
+            asset_stats['pending_returns'] = pending_returns
+
+            # Calculate assets at site (dispatched - returned)
+            asset_stats['at_site'] = max(0, asset_stats['total_dispatched'] - asset_stats['total_returned'])
+
+        except Exception as e:
+            log.warning(f"Could not fetch asset stats: {e}")
+
+        # ========== WORKLOAD ANALYSIS ==========
+        workload = {
+            'pending_items': item_stats['pending'],
+            'pending_crs': cr_stats['pending_pm_approval'] + cr_stats['pending_td_approval'],
+            'overdue_projects': project_stats['deadline_breakdown']['overdue'],
+            'urgent_items': project_stats['deadline_breakdown']['due_this_week'],
+            'pending_labour': labour_stats['pending'],
+            'pending_asset_returns': asset_stats['pending_returns'],
+            'status': 'normal'
+        }
+
+        # Determine workload status
+        if workload['overdue_projects'] > 0 or workload['pending_items'] > 20:
+            workload['status'] = 'high'
+        elif workload['urgent_items'] > 5 or workload['pending_items'] > 10:
+            workload['status'] = 'moderate'
+
+        return jsonify({
+            'success': True,
+            'period_days': days,
+            'generated_at': datetime.utcnow().isoformat(),
+            'projects': project_stats,
+            'boq_items': item_stats,
+            'change_requests': cr_stats,
+            'deliveries': delivery_stats,
+            'labour': labour_stats,
+            'assets': asset_stats,
+            'trends': {
+                'cr_creation': cr_trend
+            },
+            'performance': performance,
+            'workload': workload
+        }), 200
+
+    except Exception as e:
+        import traceback
+        log.error(f"Error fetching SE dashboard analytics: {str(e)}")
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': f"Failed to fetch analytics: {str(e)}"
+        }), 500
+
+
+def get_se_recent_activity():
+    """Get recent activity for Site Engineer's projects
+
+    Returns recent CRs, deliveries, and project updates
+    """
+    try:
+        from models.pm_assign_ss import PMAssignSS
+        from models.change_request import ChangeRequest
+        from datetime import timedelta
+
+        current_user = g.user
+        user_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
+
+        # Input validation for limit parameter
+        try:
+            limit = int(request.args.get('limit', 20))
+            limit = max(1, min(limit, 50))  # Clamp between 1 and 50
+        except (ValueError, TypeError):
+            limit = 20
+
+        # Get effective user context
+        context = get_effective_user_context()
+        target_user_id = context.get('effective_user_id') or user_id
+
+        activities = []
+
+        # Get recent CRs created by this SE
+        recent_crs = ChangeRequest.query.filter(
+            ChangeRequest.requested_by_user_id == target_user_id,
+            ChangeRequest.is_deleted == False
+        ).order_by(ChangeRequest.created_at.desc()).limit(limit).all()
+
+        for cr in recent_crs:
+            activities.append({
+                'id': f'cr_{cr.cr_id}',
+                'type': 'change_request',
+                'action': f"CR-{cr.cr_id} - {cr.status}",
+                'details': cr.justification[:100] if cr.justification else 'Change Request',
+                'timestamp': cr.created_at.isoformat() if cr.created_at else None,
+                'status': cr.status,
+                'project_id': cr.project_id
+            })
+
+        # Sort by timestamp
+        activities.sort(key=lambda x: x['timestamp'] or '', reverse=True)
+
+        return jsonify({
+            'success': True,
+            'activities': activities[:limit]
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching SE recent activity: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f"Failed to fetch activity: {str(e)}"
         }), 500

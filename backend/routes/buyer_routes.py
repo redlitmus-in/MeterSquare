@@ -3,7 +3,7 @@ from controllers.buyer_controller import *
 from controllers.auth_controller import jwt_required
 from controllers.upload_image_controller import *
 from controllers.boq_controller import get_custom_units
-from utils.response_cache import cached_response, cache_dashboard_data
+from utils.response_cache import cached_response
 
 # Create blueprint with URL prefix
 buyer_routes = Blueprint('buyer_routes', __name__, url_prefix='/api/buyer')
@@ -67,20 +67,8 @@ def check_buyer_td_or_admin_access():
 # - PUT /api/update_buyer/<user_id>
 # - DELETE /api/delete_buyer/<user_id>
 #
-# This file contains buyer-specific operational routes (dashboard, purchases, etc.)
+# This file contains buyer-specific operational routes (purchases, etc.)
 # ============================================================================
-
-
-# Dashboard route
-@buyer_routes.route('/dashboard', methods=['GET'])
-@jwt_required
-@cache_dashboard_data(timeout=30)  # Cache dashboard for 30 seconds
-def get_buyer_dashboard_route():
-    """Get buyer dashboard statistics (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
-    if access_check:
-        return access_check
-    return get_buyer_dashboard()
 
 
 # Material management routes
@@ -708,5 +696,18 @@ def get_buyer_custom_units_route():
     if access_check:
         return access_check
     return get_custom_units()
+
+
+# Dashboard Analytics
+@buyer_routes.route('/dashboard', methods=['GET'])
+@jwt_required
+@cached_response(timeout=30, key_prefix='buyer_dashboard')
+def get_buyer_dashboard_route():
+    """Get comprehensive dashboard analytics for Buyer (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    from controllers.buyer_controller import get_buyer_dashboard_analytics
+    return get_buyer_dashboard_analytics()
 
 

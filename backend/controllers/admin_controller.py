@@ -549,97 +549,8 @@ def assign_project_manager(project_id):
 
 
 # ============================================
-# SYSTEM STATISTICS & DASHBOARD APIs
+# RECENT ACTIVITY API
 # ============================================
-
-@jwt_required
-def get_system_stats():
-    """
-    Get comprehensive system statistics (admin dashboard)
-    """
-    try:
-        current_user = g.get("user")
-
-        # Verify admin role
-        if current_user.get("role") != "admin":
-            return jsonify({"error": "Admin access required"}), 403
-
-        # User statistics
-        total_users = User.query.filter_by(is_deleted=False).count()
-        active_users = User.query.filter_by(is_deleted=False, is_active=True).count()
-        inactive_users = total_users - active_users
-
-        # Project statistics
-        total_projects = Project.query.filter_by(is_deleted=False).count()
-        active_projects = Project.query.filter(
-            Project.is_deleted == False,
-            func.lower(Project.status) == 'active'
-        ).count()
-        completed_projects = Project.query.filter(
-            Project.is_deleted == False,
-            func.lower(Project.status) == 'completed'
-        ).count()
-        pending_projects = Project.query.filter(
-            Project.is_deleted == False,
-            func.lower(Project.status) == 'pending'
-        ).count()
-
-        # BOQ statistics
-        from models.boq import BOQ
-        total_boqs = BOQ.query.filter_by(is_deleted=False).count()
-        pending_boqs = BOQ.query.filter_by(is_deleted=False, status='pending').count()
-        approved_boqs = BOQ.query.filter_by(is_deleted=False, status='approved').count()
-
-        # Role distribution
-        role_distribution = db.session.query(
-            Role.role,
-            func.count(User.user_id).label('count')
-        ).join(
-            User, Role.role_id == User.role_id
-        ).filter(
-            User.is_deleted == False
-        ).group_by(Role.role).all()
-
-        roles_stats = [{"role": role, "count": count} for role, count in role_distribution]
-
-        # Recent activity (last 30 days)
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        new_users_30d = User.query.filter(
-            User.is_deleted == False,
-            User.created_at >= thirty_days_ago
-        ).count()
-        new_projects_30d = Project.query.filter(
-            Project.is_deleted == False,
-            Project.created_at >= thirty_days_ago
-        ).count()
-
-        return jsonify({
-            "users": {
-                "total": total_users,
-                "active": active_users,
-                "inactive": inactive_users,
-                "new_last_30d": new_users_30d
-            },
-            "projects": {
-                "total": total_projects,
-                "active": active_projects,
-                "completed": completed_projects,
-                "pending": pending_projects,
-                "new_last_30d": new_projects_30d
-            },
-            "boq": {
-                "total": total_boqs,
-                "pending": pending_boqs,
-                "approved": approved_boqs
-            },
-            "role_distribution": roles_stats,
-            "system_health": 98.5  # Placeholder - can be calculated from actual metrics
-        }), 200
-
-    except Exception as e:
-        log.error(f"Error fetching system stats: {str(e)}")
-        return jsonify({"error": f"Failed to fetch system stats: {str(e)}"}), 500
-
 
 @jwt_required
 def get_recent_activity():
@@ -1150,3 +1061,674 @@ def get_all_login_history():
     except Exception as e:
         log.error(f"Error fetching all login history: {str(e)}")
         return jsonify({"error": f"Failed to fetch login history: {str(e)}"}), 500
+
+
+# ============================================
+# COMPREHENSIVE DASHBOARD ANALYTICS APIs
+# ============================================
+
+def get_dashboard_analytics():
+    """
+    Get comprehensive dashboard analytics for admin
+    Returns all metrics needed for admin dashboard in a single optimized call
+    Query params:
+    - days: filter trends to last N days (default 30, max 365)
+    """
+    try:
+        current_user = g.get("user")
+
+        # Verify admin role
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        # Validate and cap days parameter to prevent resource exhaustion
+        days = request.args.get('days', 30, type=int)
+        days = max(1, min(days, 365))  # Cap between 1-365 days
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+        # Import required models
+        from models.change_request import ChangeRequest
+        from models.vendor import Vendor
+        from models.inventory import (
+            InventoryMaterial, InventoryTransaction,
+            MaterialDeliveryNote, InternalMaterialRequest
+        )
+        from models.login_history import LoginHistory
+
+        # ============================================
+        # 1. USER ANALYTICS
+        # ============================================
+        total_users = User.query.filter_by(is_deleted=False).count()
+        active_users = User.query.filter_by(is_deleted=False, is_active=True).count()
+        new_users_period = User.query.filter(
+            User.is_deleted == False,
+            User.created_at >= cutoff_date
+        ).count()
+
+        # Role distribution with counts
+        role_distribution = db.session.query(
+            Role.role,
+            Role.role_id,
+            func.count(User.user_id).label('count')
+        ).outerjoin(
+            User, (Role.role_id == User.role_id) & (User.is_deleted == False)
+        ).filter(
+            Role.is_deleted == False
+        ).group_by(Role.role_id, Role.role).order_by(desc('count')).all()
+
+        # User registration trend (daily for the period)
+        user_trend = db.session.query(
+            func.date(User.created_at).label('date'),
+            func.count(User.user_id).label('count')
+        ).filter(
+            User.is_deleted == False,
+            User.created_at >= cutoff_date
+        ).group_by(func.date(User.created_at)).order_by('date').all()
+
+        # ============================================
+        # 2. PROJECT ANALYTICS
+        # ============================================
+        total_projects = Project.query.filter_by(is_deleted=False).count()
+
+        # Project status breakdown
+        project_status = db.session.query(
+            func.lower(Project.status).label('status'),
+            func.count(Project.project_id).label('count')
+        ).filter(
+            Project.is_deleted == False
+        ).group_by(func.lower(Project.status)).all()
+
+        project_status_map = {s: c for s, c in project_status}
+
+        new_projects_period = Project.query.filter(
+            Project.is_deleted == False,
+            Project.created_at >= cutoff_date
+        ).count()
+
+        # Projects by work type
+        work_type_distribution = db.session.query(
+            Project.work_type,
+            func.count(Project.project_id).label('count')
+        ).filter(
+            Project.is_deleted == False,
+            Project.work_type.isnot(None)
+        ).group_by(Project.work_type).order_by(desc('count')).limit(10).all()
+
+        # ============================================
+        # 3. BOQ ANALYTICS
+        # ============================================
+        total_boqs = BOQ.query.filter_by(is_deleted=False).count()
+
+        boq_status = db.session.query(
+            func.lower(BOQ.status).label('status'),
+            func.count(BOQ.boq_id).label('count')
+        ).filter(
+            BOQ.is_deleted == False
+        ).group_by(func.lower(BOQ.status)).all()
+
+        boq_status_map = {s: c for s, c in boq_status}
+
+        # BOQ creation trend
+        boq_trend = db.session.query(
+            func.date(BOQ.created_at).label('date'),
+            func.count(BOQ.boq_id).label('count')
+        ).filter(
+            BOQ.is_deleted == False,
+            BOQ.created_at >= cutoff_date
+        ).group_by(func.date(BOQ.created_at)).order_by('date').all()
+
+        # ============================================
+        # 4. CHANGE REQUEST ANALYTICS
+        # ============================================
+        total_crs = ChangeRequest.query.filter_by(is_deleted=False).count()
+
+        cr_status = db.session.query(
+            ChangeRequest.status,
+            func.count(ChangeRequest.cr_id).label('count')
+        ).filter(
+            ChangeRequest.is_deleted == False
+        ).group_by(ChangeRequest.status).all()
+
+        cr_status_map = {s: c for s, c in cr_status}
+
+        # CR financial metrics
+        cr_financials = db.session.query(
+            func.sum(ChangeRequest.materials_total_cost).label('total_cost'),
+            func.avg(ChangeRequest.materials_total_cost).label('avg_cost')
+        ).filter(
+            ChangeRequest.is_deleted == False
+        ).first()
+
+        # CRs pending approval (by stage)
+        pending_approvals = db.session.query(
+            ChangeRequest.approval_required_from,
+            func.count(ChangeRequest.cr_id).label('count')
+        ).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status.in_(['pending', 'pending_pm_approval', 'pending_td_approval',
+                                       'pending_estimator_approval', 'pending_vendor_approval'])
+        ).group_by(ChangeRequest.approval_required_from).all()
+
+        # CR trend
+        cr_trend = db.session.query(
+            func.date(ChangeRequest.created_at).label('date'),
+            func.count(ChangeRequest.cr_id).label('count')
+        ).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.created_at >= cutoff_date
+        ).group_by(func.date(ChangeRequest.created_at)).order_by('date').all()
+
+        # ============================================
+        # 5. VENDOR ANALYTICS
+        # ============================================
+        total_vendors = Vendor.query.filter_by(is_deleted=False).count()
+        active_vendors = Vendor.query.filter_by(is_deleted=False, status='active').count()
+
+        # Vendor category distribution
+        vendor_categories = db.session.query(
+            Vendor.category,
+            func.count(Vendor.vendor_id).label('count')
+        ).filter(
+            Vendor.is_deleted == False,
+            Vendor.category.isnot(None)
+        ).group_by(Vendor.category).order_by(desc('count')).limit(10).all()
+
+        new_vendors_period = Vendor.query.filter(
+            Vendor.is_deleted == False,
+            Vendor.created_at >= cutoff_date
+        ).count()
+
+        # ============================================
+        # 6. INVENTORY ANALYTICS
+        # ============================================
+        total_materials = InventoryMaterial.query.filter_by(is_active=True).count()
+
+        # Stock value calculation
+        stock_metrics = db.session.query(
+            func.sum(InventoryMaterial.current_stock * InventoryMaterial.unit_price).label('total_value'),
+            func.sum(InventoryMaterial.current_stock).label('total_stock'),
+            func.sum(InventoryMaterial.backup_stock).label('backup_stock')
+        ).filter(
+            InventoryMaterial.is_active == True
+        ).first()
+
+        # Low stock alerts (below min_stock_level)
+        low_stock_count = InventoryMaterial.query.filter(
+            InventoryMaterial.is_active == True,
+            InventoryMaterial.current_stock < InventoryMaterial.min_stock_level,
+            InventoryMaterial.min_stock_level > 0
+        ).count()
+
+        # Inventory transactions summary
+        transaction_summary = db.session.query(
+            InventoryTransaction.transaction_type,
+            func.count(InventoryTransaction.inventory_transaction_id).label('count'),
+            func.sum(InventoryTransaction.total_amount).label('total_amount')
+        ).filter(
+            InventoryTransaction.created_at >= cutoff_date
+        ).group_by(InventoryTransaction.transaction_type).all()
+
+        transaction_map = {t: {'count': c, 'amount': float(a) if a else 0} for t, c, a in transaction_summary}
+
+        # ============================================
+        # 7. DELIVERY NOTES ANALYTICS
+        # ============================================
+        delivery_stats = db.session.query(
+            MaterialDeliveryNote.status,
+            func.count(MaterialDeliveryNote.delivery_note_id).label('count')
+        ).filter(
+            MaterialDeliveryNote.created_at >= cutoff_date
+        ).group_by(MaterialDeliveryNote.status).all()
+
+        delivery_status_map = {s: c for s, c in delivery_stats}
+
+        # ============================================
+        # 8. MATERIAL REQUESTS ANALYTICS
+        # ============================================
+        request_stats = db.session.query(
+            InternalMaterialRequest.status,
+            func.count(InternalMaterialRequest.request_id).label('count')
+        ).filter(
+            InternalMaterialRequest.created_at >= cutoff_date
+        ).group_by(InternalMaterialRequest.status).all()
+
+        request_status_map = {s: c for s, c in request_stats}
+
+        # ============================================
+        # 9. LOGIN ACTIVITY ANALYTICS
+        # ============================================
+        login_count_period = LoginHistory.query.filter(
+            LoginHistory.login_at >= cutoff_date
+        ).count()
+
+        # Login trend (daily)
+        login_trend = db.session.query(
+            func.date(LoginHistory.login_at).label('date'),
+            func.count(LoginHistory.id).label('count')
+        ).filter(
+            LoginHistory.login_at >= cutoff_date
+        ).group_by(func.date(LoginHistory.login_at)).order_by('date').all()
+
+        # Login methods distribution
+        login_methods = db.session.query(
+            LoginHistory.login_method,
+            func.count(LoginHistory.id).label('count')
+        ).filter(
+            LoginHistory.login_at >= cutoff_date
+        ).group_by(LoginHistory.login_method).all()
+
+        # ============================================
+        # 10. SYSTEM HEALTH METRICS
+        # ============================================
+        # Calculate real system health based on various factors
+        health_score = 100
+
+        # Deduct for pending items
+        pending_crs = cr_status_map.get('pending', 0) + cr_status_map.get('pending_pm_approval', 0)
+        if pending_crs > 50:
+            health_score -= 5
+        elif pending_crs > 20:
+            health_score -= 2
+
+        # Deduct for low stock
+        if low_stock_count > 10:
+            health_score -= 5
+        elif low_stock_count > 5:
+            health_score -= 2
+
+        # Deduct for inactive users percentage
+        inactive_percentage = ((total_users - active_users) / total_users * 100) if total_users > 0 else 0
+        if inactive_percentage > 30:
+            health_score -= 3
+
+        # ============================================
+        # COMPILE RESPONSE
+        # ============================================
+        return jsonify({
+            "success": True,
+            "period_days": days,
+            "generated_at": datetime.utcnow().isoformat(),
+
+            # User Analytics
+            "users": {
+                "total": total_users,
+                "active": active_users,
+                "inactive": total_users - active_users,
+                "new_in_period": new_users_period,
+                "role_distribution": [
+                    {"role": r, "role_id": rid, "count": c}
+                    for r, rid, c in role_distribution
+                ],
+                "registration_trend": [
+                    {"date": str(d), "count": c} for d, c in user_trend
+                ]
+            },
+
+            # Project Analytics
+            "projects": {
+                "total": total_projects,
+                "active": project_status_map.get('active', 0),
+                "completed": project_status_map.get('completed', 0),
+                "pending": project_status_map.get('pending', 0),
+                "on_hold": project_status_map.get('on_hold', 0),
+                "new_in_period": new_projects_period,
+                "status_breakdown": [
+                    {"status": s, "count": c} for s, c in project_status
+                ],
+                "work_type_distribution": [
+                    {"work_type": w or "Unspecified", "count": c}
+                    for w, c in work_type_distribution
+                ]
+            },
+
+            # BOQ Analytics
+            "boqs": {
+                "total": total_boqs,
+                "pending": boq_status_map.get('pending', 0),
+                "approved": boq_status_map.get('approved', 0),
+                "rejected": boq_status_map.get('rejected', 0),
+                "in_review": boq_status_map.get('in_review', 0),
+                "status_breakdown": [
+                    {"status": s or "pending", "count": c} for s, c in boq_status
+                ],
+                "creation_trend": [
+                    {"date": str(d), "count": c} for d, c in boq_trend
+                ]
+            },
+
+            # Change Request Analytics
+            "change_requests": {
+                "total": total_crs,
+                "pending": cr_status_map.get('pending', 0),
+                "approved": cr_status_map.get('approved', 0),
+                "rejected": cr_status_map.get('rejected', 0),
+                "completed": cr_status_map.get('completed', 0),
+                "purchase_completed": cr_status_map.get('purchase_completed', 0),
+                "total_cost": float(cr_financials.total_cost) if cr_financials.total_cost else 0,
+                "avg_cost": float(cr_financials.avg_cost) if cr_financials.avg_cost else 0,
+                "status_breakdown": [
+                    {"status": s, "count": c} for s, c in cr_status
+                ],
+                "pending_approvals": [
+                    {"stage": stage or "initial", "count": c}
+                    for stage, c in pending_approvals
+                ],
+                "creation_trend": [
+                    {"date": str(d), "count": c} for d, c in cr_trend
+                ]
+            },
+
+            # Vendor Analytics
+            "vendors": {
+                "total": total_vendors,
+                "active": active_vendors,
+                "inactive": total_vendors - active_vendors,
+                "new_in_period": new_vendors_period,
+                "category_distribution": [
+                    {"category": c or "Uncategorized", "count": cnt}
+                    for c, cnt in vendor_categories
+                ]
+            },
+
+            # Inventory Analytics
+            "inventory": {
+                "total_materials": total_materials,
+                "total_stock_value": float(stock_metrics.total_value) if stock_metrics.total_value else 0,
+                "total_stock_quantity": float(stock_metrics.total_stock) if stock_metrics.total_stock else 0,
+                "backup_stock_quantity": float(stock_metrics.backup_stock) if stock_metrics.backup_stock else 0,
+                "low_stock_alerts": low_stock_count,
+                "transactions": {
+                    "purchases": transaction_map.get('PURCHASE', {'count': 0, 'amount': 0}),
+                    "withdrawals": transaction_map.get('WITHDRAWAL', {'count': 0, 'amount': 0})
+                }
+            },
+
+            # Delivery Analytics
+            "deliveries": {
+                "total_in_period": sum(delivery_status_map.values()),
+                "draft": delivery_status_map.get('DRAFT', 0),
+                "issued": delivery_status_map.get('ISSUED', 0),
+                "in_transit": delivery_status_map.get('IN_TRANSIT', 0),
+                "delivered": delivery_status_map.get('DELIVERED', 0),
+                "status_breakdown": [
+                    {"status": s, "count": c} for s, c in delivery_stats
+                ]
+            },
+
+            # Material Requests Analytics
+            "material_requests": {
+                "total_in_period": sum(request_status_map.values()),
+                "pending": request_status_map.get('PENDING', 0),
+                "approved": request_status_map.get('APPROVED', 0),
+                "dispatched": request_status_map.get('DISPATCHED', 0),
+                "fulfilled": request_status_map.get('FULFILLED', 0),
+                "rejected": request_status_map.get('REJECTED', 0),
+                "status_breakdown": [
+                    {"status": s, "count": c} for s, c in request_stats
+                ]
+            },
+
+            # Login Activity
+            "login_activity": {
+                "total_logins_in_period": login_count_period,
+                "login_trend": [
+                    {"date": str(d), "count": c} for d, c in login_trend
+                ],
+                "login_methods": [
+                    {"method": m or "unknown", "count": c} for m, c in login_methods
+                ]
+            },
+
+            # System Health
+            "system_health": {
+                "score": max(health_score, 0),
+                "status": "excellent" if health_score >= 90 else "good" if health_score >= 70 else "needs_attention",
+                "alerts": {
+                    "low_stock_materials": low_stock_count,
+                    "pending_change_requests": pending_crs,
+                    "inactive_users_percentage": round(inactive_percentage, 1)
+                }
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching dashboard analytics: {str(e)}")
+        import traceback
+        log.error(traceback.format_exc())
+        return jsonify({"error": "Failed to fetch analytics. Please try again later."}), 500
+
+
+def get_top_performers():
+    """
+    Get top performing users across different metrics
+    - Top PMs by projects managed
+    - Top SEs by projects assigned
+    - Most active users by login frequency
+    """
+    try:
+        current_user = g.get("user")
+
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        # Validate and cap parameters to prevent resource exhaustion
+        limit = request.args.get('limit', 5, type=int)
+        limit = max(1, min(limit, 50))  # Cap between 1-50 items
+        days = request.args.get('days', 30, type=int)
+        days = max(1, min(days, 365))  # Cap between 1-365 days
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+        from models.login_history import LoginHistory
+
+        # Top Project Managers by active projects
+        # Note: Project.user_id is a JSONB array storing multiple PM IDs [1, 2, 3]
+        # We need to use JSONB contains operator to check if user_id is in the array
+        from sqlalchemy import cast, text
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        pm_role = Role.query.filter_by(role='projectManager').first()
+        top_pms = []
+        if pm_role:
+            # Get all active PMs first
+            pms = User.query.filter(
+                User.role_id == pm_role.role_id,
+                User.is_deleted == False
+            ).all()
+
+            pm_project_counts = []
+            for pm in pms:
+                # Count projects where this PM's user_id is in the JSONB array
+                # Using raw SQL for JSONB array containment check
+                project_count = db.session.query(func.count(Project.project_id)).filter(
+                    Project.is_deleted == False,
+                    Project.user_id.isnot(None),
+                    # Check if the PM's user_id is contained in the JSONB array
+                    text(f"user_id @> '[{pm.user_id}]'::jsonb")
+                ).scalar() or 0
+
+                if project_count > 0:
+                    pm_project_counts.append({
+                        "user_id": pm.user_id,
+                        "name": pm.full_name,
+                        "email": pm.email,
+                        "project_count": project_count
+                    })
+
+            # Sort by project count descending and limit
+            top_pms = sorted(pm_project_counts, key=lambda x: x['project_count'], reverse=True)[:limit]
+
+        # Top Site Engineers by projects they've worked on
+        # Count distinct projects where SE has created change requests
+        from models.change_request import ChangeRequest
+
+        se_role = Role.query.filter_by(role='siteEngineer').first()
+        top_ses = []
+        if se_role:
+            se_projects = db.session.query(
+                User.user_id,
+                User.full_name,
+                User.email,
+                func.count(func.distinct(ChangeRequest.project_id)).label('project_count')
+            ).outerjoin(
+                ChangeRequest,
+                (ChangeRequest.requested_by_user_id == User.user_id) & (ChangeRequest.is_deleted == False)
+            ).filter(
+                User.role_id == se_role.role_id,
+                User.is_deleted == False
+            ).group_by(User.user_id, User.full_name, User.email).order_by(
+                desc('project_count')
+            ).limit(limit).all()
+
+            top_ses = [
+                {"user_id": uid, "name": name, "email": email, "project_count": cnt}
+                for uid, name, email, cnt in se_projects
+            ]
+
+        # Most active users by login frequency (last N days) - excluding admin role
+        admin_role = Role.query.filter_by(role='admin').first()
+        active_users = db.session.query(
+            User.user_id,
+            User.full_name,
+            User.email,
+            Role.role,
+            func.count(LoginHistory.id).label('login_count')
+        ).join(
+            LoginHistory, LoginHistory.user_id == User.user_id
+        ).join(
+            Role, User.role_id == Role.role_id
+        ).filter(
+            User.is_deleted == False,
+            LoginHistory.login_at >= cutoff_date,
+            Role.role != 'admin'  # Exclude admin users
+        ).group_by(
+            User.user_id, User.full_name, User.email, Role.role
+        ).order_by(desc('login_count')).limit(limit).all()
+
+        most_active = [
+            {"user_id": uid, "name": name, "email": email, "role": role, "login_count": cnt}
+            for uid, name, email, role, cnt in active_users
+        ]
+
+        return jsonify({
+            "success": True,
+            "period_days": days,
+            "top_project_managers": top_pms,
+            "top_site_engineers": top_ses,
+            "most_active_users": most_active
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching top performers: {str(e)}")
+        import traceback
+        log.error(traceback.format_exc())
+        return jsonify({"error": "Failed to fetch top performers. Please try again later."}), 500
+
+
+def get_financial_summary():
+    """
+    Get financial summary for admin dashboard
+    - Total CR costs
+    - Inventory value
+    - Transport costs
+    - Trends over time
+    """
+    try:
+        current_user = g.get("user")
+
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        # Validate and cap days parameter to prevent resource exhaustion
+        days = request.args.get('days', 30, type=int)
+        days = max(1, min(days, 365))  # Cap between 1-365 days
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+        from models.change_request import ChangeRequest
+        from models.inventory import InventoryMaterial, InventoryTransaction
+
+        # CR Financial Summary
+        cr_costs = db.session.query(
+            func.sum(ChangeRequest.materials_total_cost).label('total'),
+            func.avg(ChangeRequest.materials_total_cost).label('average'),
+            func.count(ChangeRequest.cr_id).label('count')
+        ).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.created_at >= cutoff_date
+        ).first()
+
+        # CR costs by status
+        cr_by_status = db.session.query(
+            ChangeRequest.status,
+            func.sum(ChangeRequest.materials_total_cost).label('total'),
+            func.count(ChangeRequest.cr_id).label('count')
+        ).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.created_at >= cutoff_date
+        ).group_by(ChangeRequest.status).all()
+
+        # Inventory value
+        inventory_value = db.session.query(
+            func.sum(InventoryMaterial.current_stock * InventoryMaterial.unit_price).label('current'),
+            func.sum(InventoryMaterial.backup_stock * InventoryMaterial.unit_price).label('backup')
+        ).filter(
+            InventoryMaterial.is_active == True
+        ).first()
+
+        # Transaction totals
+        transactions = db.session.query(
+            InventoryTransaction.transaction_type,
+            func.sum(InventoryTransaction.total_amount).label('total'),
+            func.sum(InventoryTransaction.transport_fee).label('transport')
+        ).filter(
+            InventoryTransaction.created_at >= cutoff_date
+        ).group_by(InventoryTransaction.transaction_type).all()
+
+        transaction_summary = {}
+        total_transport = 0
+        for t_type, total, transport in transactions:
+            transaction_summary[t_type] = {
+                'total': float(total) if total else 0,
+                'transport': float(transport) if transport else 0
+            }
+            total_transport += float(transport) if transport else 0
+
+        # Daily cost trend
+        daily_costs = db.session.query(
+            func.date(ChangeRequest.created_at).label('date'),
+            func.sum(ChangeRequest.materials_total_cost).label('cost')
+        ).filter(
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.created_at >= cutoff_date
+        ).group_by(func.date(ChangeRequest.created_at)).order_by('date').all()
+
+        return jsonify({
+            "success": True,
+            "period_days": days,
+            "change_requests": {
+                "total_cost": float(cr_costs.total) if cr_costs.total else 0,
+                "average_cost": float(cr_costs.average) if cr_costs.average else 0,
+                "total_count": cr_costs.count or 0,
+                "by_status": [
+                    {"status": s, "total_cost": float(t) if t else 0, "count": c}
+                    for s, t, c in cr_by_status
+                ]
+            },
+            "inventory": {
+                "current_value": float(inventory_value.current) if inventory_value.current else 0,
+                "backup_value": float(inventory_value.backup) if inventory_value.backup else 0,
+                "total_value": (float(inventory_value.current) if inventory_value.current else 0) +
+                              (float(inventory_value.backup) if inventory_value.backup else 0)
+            },
+            "transactions": transaction_summary,
+            "transport_costs": total_transport,
+            "daily_cost_trend": [
+                {"date": str(d), "cost": float(c) if c else 0}
+                for d, c in daily_costs
+            ]
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching financial summary: {str(e)}")
+        import traceback
+        log.error(traceback.format_exc())
+        return jsonify({"error": "Failed to fetch financial summary. Please try again later."}), 500

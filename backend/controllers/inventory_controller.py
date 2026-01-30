@@ -858,12 +858,15 @@ def get_inventory_summary():
 
 
 def get_inventory_dashboard():
-    """Get comprehensive inventory dashboard data in a single API call"""
+    """Get comprehensive Production Manager dashboard analytics in a single API call"""
     try:
-        # Get all active materials
+        from datetime import timedelta
+        from sqlalchemy import case
+        from sqlalchemy.orm import joinedload
+
+        # ==================== 1. STOCK HEALTH METRICS ====================
         materials = InventoryMaterial.query.filter_by(is_active=True).all()
 
-        # Calculate stock health metrics
         total_items = len(materials)
         healthy_items = 0
         low_stock_items = 0
@@ -879,7 +882,8 @@ def get_inventory_dashboard():
                     'stock': mat.current_stock,
                     'unit': mat.unit,
                     'status': 'out-of-stock',
-                    'material_code': mat.material_code
+                    'material_code': mat.material_code,
+                    'category': mat.category
                 })
             elif mat.min_stock_level and mat.current_stock <= mat.min_stock_level * 0.5:
                 critical_items += 1
@@ -888,7 +892,8 @@ def get_inventory_dashboard():
                     'stock': mat.current_stock,
                     'unit': mat.unit,
                     'status': 'critical',
-                    'material_code': mat.material_code
+                    'material_code': mat.material_code,
+                    'category': mat.category
                 })
             elif mat.min_stock_level and mat.current_stock <= mat.min_stock_level:
                 low_stock_items += 1
@@ -897,30 +902,154 @@ def get_inventory_dashboard():
                     'stock': mat.current_stock,
                     'unit': mat.unit,
                     'status': 'low',
-                    'material_code': mat.material_code
+                    'material_code': mat.material_code,
+                    'category': mat.category
                 })
             else:
                 healthy_items += 1
 
         # Calculate total inventory value
         total_value = sum(mat.current_stock * mat.unit_price for mat in materials)
+        total_backup_value = sum(mat.backup_stock * mat.unit_price for mat in materials if mat.backup_stock)
 
-        # Get category distribution
+        # ==================== 2. CATEGORY DISTRIBUTION ====================
         category_map = {}
         for mat in materials:
             cat = mat.category or 'Uncategorized'
             if cat not in category_map:
-                category_map[cat] = {'count': 0, 'value': 0}
+                category_map[cat] = {'count': 0, 'value': 0, 'stock': 0}
             category_map[cat]['count'] += 1
             category_map[cat]['value'] += mat.current_stock * mat.unit_price
+            category_map[cat]['stock'] += mat.current_stock
 
-        categories = [
-            {'name': k, 'count': v['count'], 'value': round(v['value'], 2)}
+        categories = sorted([
+            {'name': k, 'count': v['count'], 'value': round(v['value'], 2), 'stock': round(v['stock'], 2)}
             for k, v in category_map.items()
-        ]
+        ], key=lambda x: x['value'], reverse=True)
 
-        # Get transaction data
-        transactions = InventoryTransaction.query.order_by(
+        # ==================== 3. DELIVERY NOTES TRACKING (Optimized single query) ====================
+        dn_counts = db.session.query(
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'DRAFT', 1), else_=0)), 0).label('draft'),
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'ISSUED', 1), else_=0)), 0).label('issued'),
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'IN_TRANSIT', 1), else_=0)), 0).label('in_transit'),
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'DELIVERED', 1), else_=0)), 0).label('delivered'),
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'PARTIAL', 1), else_=0)), 0).label('partial'),
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'CANCELLED', 1), else_=0)), 0).label('cancelled')
+        ).first()
+
+        dn_draft = int(dn_counts.draft) if dn_counts else 0
+        dn_issued = int(dn_counts.issued) if dn_counts else 0
+        dn_in_transit = int(dn_counts.in_transit) if dn_counts else 0
+        dn_delivered = int(dn_counts.delivered) if dn_counts else 0
+        dn_partial = int(dn_counts.partial) if dn_counts else 0
+        dn_cancelled = int(dn_counts.cancelled) if dn_counts else 0
+
+        delivery_notes_status = {
+            'draft': dn_draft,
+            'issued': dn_issued,
+            'in_transit': dn_in_transit,
+            'delivered': dn_delivered,
+            'partial': dn_partial,
+            'cancelled': dn_cancelled,
+            'total': dn_draft + dn_issued + dn_in_transit + dn_delivered + dn_partial,
+            'pending_action': dn_draft + dn_issued
+        }
+
+        # ==================== 4. RETURN DELIVERY NOTES TRACKING (Optimized single query) ====================
+        rdn_counts = db.session.query(
+            func.coalesce(func.sum(case((ReturnDeliveryNote.status == 'DRAFT', 1), else_=0)), 0).label('draft'),
+            func.coalesce(func.sum(case((ReturnDeliveryNote.status == 'ISSUED', 1), else_=0)), 0).label('issued'),
+            func.coalesce(func.sum(case((ReturnDeliveryNote.status == 'IN_TRANSIT', 1), else_=0)), 0).label('in_transit'),
+            func.coalesce(func.sum(case((ReturnDeliveryNote.status == 'RECEIVED', 1), else_=0)), 0).label('received'),
+            func.coalesce(func.sum(case((ReturnDeliveryNote.status == 'PARTIAL', 1), else_=0)), 0).label('partial')
+        ).first()
+
+        rdn_draft = int(rdn_counts.draft) if rdn_counts else 0
+        rdn_issued = int(rdn_counts.issued) if rdn_counts else 0
+        rdn_in_transit = int(rdn_counts.in_transit) if rdn_counts else 0
+        rdn_received = int(rdn_counts.received) if rdn_counts else 0
+        rdn_partial = int(rdn_counts.partial) if rdn_counts else 0
+
+        return_notes_status = {
+            'draft': rdn_draft,
+            'issued': rdn_issued,
+            'in_transit': rdn_in_transit,
+            'received': rdn_received,
+            'partial': rdn_partial,
+            'total': rdn_draft + rdn_issued + rdn_in_transit + rdn_received + rdn_partial,
+            'incoming': rdn_issued + rdn_in_transit
+        }
+
+        # ==================== 5. INTERNAL MATERIAL REQUESTS (Optimized single query) ====================
+        imr_counts = db.session.query(
+            func.coalesce(func.sum(case((InternalMaterialRequest.status.in_(['PENDING', 'send_request']), 1), else_=0)), 0).label('pending'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'awaiting_vendor_delivery', 1), else_=0)), 0).label('awaiting_vendor'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'approved', 1), else_=0)), 0).label('approved'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'dn_pending', 1), else_=0)), 0).label('dn_pending'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'dispatched', 1), else_=0)), 0).label('dispatched'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'fulfilled', 1), else_=0)), 0).label('fulfilled'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'rejected', 1), else_=0)), 0).label('rejected')
+        ).first()
+
+        imr_pending = int(imr_counts.pending) if imr_counts else 0
+        imr_awaiting_vendor = int(imr_counts.awaiting_vendor) if imr_counts else 0
+        imr_approved = int(imr_counts.approved) if imr_counts else 0
+        imr_dn_pending = int(imr_counts.dn_pending) if imr_counts else 0
+        imr_dispatched = int(imr_counts.dispatched) if imr_counts else 0
+        imr_fulfilled = int(imr_counts.fulfilled) if imr_counts else 0
+        imr_rejected = int(imr_counts.rejected) if imr_counts else 0
+
+        material_requests_status = {
+            'pending': imr_pending,
+            'awaiting_vendor': imr_awaiting_vendor,
+            'approved': imr_approved,
+            'dn_pending': imr_dn_pending,
+            'dispatched': imr_dispatched,
+            'fulfilled': imr_fulfilled,
+            'rejected': imr_rejected,
+            'total_active': imr_pending + imr_awaiting_vendor + imr_approved + imr_dn_pending + imr_dispatched,
+            'needs_action': imr_pending + imr_approved + imr_dn_pending
+        }
+
+        # ==================== 6. MATERIAL RETURNS & DISPOSAL (Optimized single query) ====================
+        returns_counts = db.session.query(
+            func.coalesce(func.sum(case((MaterialReturn.disposal_status == 'pending_approval', 1), else_=0)), 0).label('pending_approval'),
+            func.coalesce(func.sum(case((MaterialReturn.disposal_status == 'pending_review', 1), else_=0)), 0).label('pending_review'),
+            func.coalesce(func.sum(case((MaterialReturn.disposal_status == 'sent_for_repair', 1), else_=0)), 0).label('sent_for_repair'),
+            func.coalesce(func.sum(case((MaterialReturn.disposal_status == 'approved', 1), else_=0)), 0).label('approved'),
+            func.coalesce(func.sum(case((MaterialReturn.disposal_status == 'disposed', 1), else_=0)), 0).label('disposed'),
+            func.coalesce(func.sum(case((MaterialReturn.condition == 'Good', 1), else_=0)), 0).label('good'),
+            func.coalesce(func.sum(case((MaterialReturn.condition == 'Damaged', 1), else_=0)), 0).label('damaged'),
+            func.coalesce(func.sum(case((MaterialReturn.condition == 'Defective', 1), else_=0)), 0).label('defective')
+        ).first()
+
+        returns_pending = int(returns_counts.pending_approval) if returns_counts else 0
+        returns_pending_review = int(returns_counts.pending_review) if returns_counts else 0
+        returns_sent_repair = int(returns_counts.sent_for_repair) if returns_counts else 0
+        returns_approved = int(returns_counts.approved) if returns_counts else 0
+        returns_disposed = int(returns_counts.disposed) if returns_counts else 0
+        returns_good = int(returns_counts.good) if returns_counts else 0
+        returns_damaged = int(returns_counts.damaged) if returns_counts else 0
+        returns_defective = int(returns_counts.defective) if returns_counts else 0
+
+        returns_status = {
+            'pending_approval': returns_pending,
+            'pending_review': returns_pending_review,
+            'sent_for_repair': returns_sent_repair,
+            'approved': returns_approved,
+            'disposed': returns_disposed,
+            'by_condition': {
+                'good': returns_good,
+                'damaged': returns_damaged,
+                'defective': returns_defective
+            },
+            'needs_action': returns_pending + returns_pending_review + returns_sent_repair
+        }
+
+        # ==================== 7. RECENT TRANSACTIONS (Eager loading to avoid N+1) ====================
+        transactions = InventoryTransaction.query.options(
+            joinedload(InventoryTransaction.material)
+        ).order_by(
             InventoryTransaction.created_at.desc()
         ).limit(10).all()
 
@@ -932,36 +1061,170 @@ def get_inventory_dashboard():
                 txn_data['material_code'] = txn.material.material_code
             recent_transactions.append(txn_data)
 
-        total_transactions = InventoryTransaction.query.count()
+        # ==================== 8. STOCK MOVEMENT SUMMARY (Last 30 days) ====================
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
 
-        # Get internal request data
-        pending_requests = InternalMaterialRequest.query.filter(
-            InternalMaterialRequest.status.in_(['PENDING', 'send_request'])
+        # Purchases in last 30 days
+        purchases_30d = db.session.query(
+            func.coalesce(func.sum(InventoryTransaction.quantity), 0),
+            func.coalesce(func.sum(InventoryTransaction.total_amount), 0)
+        ).filter(
+            InventoryTransaction.transaction_type == 'PURCHASE',
+            InventoryTransaction.created_at >= thirty_days_ago
+        ).first()
+
+        # Withdrawals in last 30 days
+        withdrawals_30d = db.session.query(
+            func.coalesce(func.sum(InventoryTransaction.quantity), 0),
+            func.coalesce(func.sum(InventoryTransaction.total_amount), 0)
+        ).filter(
+            InventoryTransaction.transaction_type == 'WITHDRAWAL',
+            InventoryTransaction.created_at >= thirty_days_ago
+        ).first()
+
+        stock_movement = {
+            'period': '30_days',
+            'purchases': {
+                'quantity': float(purchases_30d[0]) if purchases_30d[0] else 0,
+                'value': round(float(purchases_30d[1]) if purchases_30d[1] else 0, 2)
+            },
+            'withdrawals': {
+                'quantity': float(withdrawals_30d[0]) if withdrawals_30d[0] else 0,
+                'value': round(float(withdrawals_30d[1]) if withdrawals_30d[1] else 0, 2)
+            }
+        }
+
+        # ==================== 9. PROJECT-WISE DISPATCH SUMMARY ====================
+        project_dispatch = db.session.query(
+            MaterialDeliveryNote.project_id,
+            Project.project_name,
+            func.count(MaterialDeliveryNote.delivery_note_id).label('total_dns'),
+            func.sum(case(
+                (MaterialDeliveryNote.status == 'DELIVERED', 1),
+                else_=0
+            )).label('delivered_count')
+        ).join(
+            Project, MaterialDeliveryNote.project_id == Project.project_id
+        ).filter(
+            MaterialDeliveryNote.project_id.isnot(None)
+        ).group_by(
+            MaterialDeliveryNote.project_id, Project.project_name
+        ).order_by(func.count(MaterialDeliveryNote.delivery_note_id).desc()).limit(5).all()
+
+        top_projects = [{
+            'project_id': p.project_id,
+            'project_name': p.project_name,
+            'total_delivery_notes': p.total_dns,
+            'delivered': p.delivered_count or 0
+        } for p in project_dispatch]
+
+        # ==================== 10. TODAY'S ACTIVITY ====================
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        today_transactions = InventoryTransaction.query.filter(
+            InventoryTransaction.created_at >= today_start
         ).count()
 
-        approved_requests = InternalMaterialRequest.query.filter_by(status='approved').count()
-        rejected_requests = InternalMaterialRequest.query.filter_by(status='rejected').count()
+        today_dns_created = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.created_at >= today_start
+        ).count()
+
+        today_dns_dispatched = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.dispatched_at >= today_start
+        ).count()
+
+        today_activity = {
+            'transactions': today_transactions,
+            'delivery_notes_created': today_dns_created,
+            'delivery_notes_dispatched': today_dns_dispatched
+        }
+
+        # ==================== 11. RECENT DELIVERY NOTES ====================
+        # Use a single query with join to get project names
+        recent_dns_query = db.session.query(
+            MaterialDeliveryNote,
+            Project.project_name
+        ).outerjoin(
+            Project, MaterialDeliveryNote.project_id == Project.project_id
+        ).order_by(
+            MaterialDeliveryNote.created_at.desc()
+        ).limit(5).all()
+
+        recent_delivery_notes = []
+        for dn, project_name in recent_dns_query:
+            # Count items with a subquery to avoid N+1
+            item_count = db.session.query(func.count(DeliveryNoteItem.item_id)).filter(
+                DeliveryNoteItem.delivery_note_id == dn.delivery_note_id
+            ).scalar() or 0
+            recent_delivery_notes.append({
+                'delivery_note_id': dn.delivery_note_id,
+                'delivery_note_number': dn.delivery_note_number,
+                'project_name': project_name or 'N/A',
+                'status': dn.status,
+                'total_items': item_count,
+                'created_at': dn.created_at.isoformat() if dn.created_at else None,
+                'attention_to': dn.attention_to
+            })
+
+        # ==================== 12. PENDING ACTIONS SUMMARY ====================
+        pending_actions = {
+            'delivery_notes_to_issue': dn_draft,
+            'delivery_notes_to_dispatch': dn_issued,
+            'material_requests_to_process': imr_pending + imr_approved,
+            'returns_to_process': returns_pending + returns_pending_review,
+            'incoming_returns': rdn_issued + rdn_in_transit,
+            'total': dn_draft + dn_issued + imr_pending + imr_approved + returns_pending + returns_pending_review + rdn_issued + rdn_in_transit
+        }
 
         return jsonify({
             'dashboard': {
+                # Stock Overview
                 'totalItems': total_items,
                 'totalValue': round(total_value, 2),
+                'totalBackupValue': round(total_backup_value, 2),
                 'healthyStockItems': healthy_items,
                 'lowStockItems': low_stock_items,
                 'criticalItems': critical_items,
                 'outOfStockItems': out_of_stock_items,
-                'stockAlerts': stock_alerts[:10],  # Limit to 10 alerts
+                'stockAlerts': stock_alerts[:10],
                 'categories': categories,
-                'totalTransactions': total_transactions,
+
+                # Delivery Notes
+                'deliveryNotesStatus': delivery_notes_status,
+                'returnNotesStatus': return_notes_status,
+                'recentDeliveryNotes': recent_delivery_notes,
+
+                # Material Requests
+                'materialRequestsStatus': material_requests_status,
+
+                # Returns & Disposal
+                'returnsStatus': returns_status,
+
+                # Transactions & Movement
                 'recentTransactions': recent_transactions,
-                'pendingRequests': pending_requests,
-                'approvedRequests': approved_requests,
-                'rejectedRequests': rejected_requests
+                'stockMovement': stock_movement,
+
+                # Project Summary
+                'topProjects': top_projects,
+
+                # Activity
+                'todayActivity': today_activity,
+
+                # Pending Actions (Action Required)
+                'pendingActions': pending_actions,
+
+                # Legacy fields for backward compatibility
+                'totalTransactions': InventoryTransaction.query.count(),
+                'pendingRequests': imr_pending,
+                'approvedRequests': imr_approved,
+                'rejectedRequests': imr_rejected
             }
         }), 200
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import logging
+        logging.exception("Error in inventory dashboard")
+        return jsonify({'error': 'Failed to load dashboard data'}), 500
 
 
 # ==================== INTERNAL MATERIAL REQUEST APIs ====================

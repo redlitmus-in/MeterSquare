@@ -3521,20 +3521,219 @@ def get_pm_dashboard():
         # Sort by budget descending and take top 5
         top_budget_projects = sorted(top_budget_projects, key=lambda x: x['budget'], reverse=True)[:5]
 
-        # Asset Requisition Stats - Count approved assets for PM's projects
+        # Asset Requisition Stats - Detailed status breakdown for PM's projects
         asset_stats = db.session.query(
+            func.count(func.distinct(AssetRequisition.requisition_id)).label('total'),
             func.count(func.distinct(case(
-                (AssetRequisition.status.in_(['pm_approved', 'prod_mgr_approved', 'dispatched', 'completed']), AssetRequisition.requisition_id),
+                (AssetRequisition.status == 'pending_pm', AssetRequisition.requisition_id),
                 else_=None
-            ))).label('total_approved')
+            ))).label('pending_pm'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'pm_approved', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('pm_approved'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'pm_rejected', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('pm_rejected'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'pending_prod_mgr', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('pending_prod_mgr'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'prod_mgr_approved', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('prod_mgr_approved'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'dispatched', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('dispatched'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'completed', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('completed')
         ).filter(
             AssetRequisition.project_id.in_(project_ids),
             AssetRequisition.is_deleted == False
         ).first()
 
         asset_details = {
-            "total_approved": int(asset_stats.total_approved) if asset_stats.total_approved else 0
+            "total": int(asset_stats.total) if asset_stats.total else 0,
+            "pending_pm": int(asset_stats.pending_pm) if asset_stats.pending_pm else 0,
+            "pm_approved": int(asset_stats.pm_approved) if asset_stats.pm_approved else 0,
+            "pm_rejected": int(asset_stats.pm_rejected) if asset_stats.pm_rejected else 0,
+            "pending_prod_mgr": int(asset_stats.pending_prod_mgr) if asset_stats.pending_prod_mgr else 0,
+            "prod_mgr_approved": int(asset_stats.prod_mgr_approved) if asset_stats.prod_mgr_approved else 0,
+            "dispatched": int(asset_stats.dispatched) if asset_stats.dispatched else 0,
+            "completed": int(asset_stats.completed) if asset_stats.completed else 0,
+            "total_approved": (int(asset_stats.pm_approved or 0) + int(asset_stats.prod_mgr_approved or 0) +
+                             int(asset_stats.dispatched or 0) + int(asset_stats.completed or 0))
         }
+
+        # Change Request Stats for PM's projects
+        cr_stats = db.session.query(
+            func.count(func.distinct(ChangeRequest.cr_id)).label('total'),
+            func.count(func.distinct(case(
+                (ChangeRequest.status == 'pending_pm_approval', ChangeRequest.cr_id),
+                else_=None
+            ))).label('pending_pm'),
+            func.count(func.distinct(case(
+                (ChangeRequest.status == 'pending_td_approval', ChangeRequest.cr_id),
+                else_=None
+            ))).label('pending_td'),
+            func.count(func.distinct(case(
+                (ChangeRequest.status.in_(['approved', 'vendor_approved', 'purchase_completed']), ChangeRequest.cr_id),
+                else_=None
+            ))).label('approved'),
+            func.count(func.distinct(case(
+                (ChangeRequest.status == 'rejected', ChangeRequest.cr_id),
+                else_=None
+            ))).label('rejected'),
+            func.count(func.distinct(case(
+                (ChangeRequest.status == 'purchase_completed', ChangeRequest.cr_id),
+                else_=None
+            ))).label('completed')
+        ).filter(
+            ChangeRequest.project_id.in_(project_ids),
+            ChangeRequest.is_deleted == False
+        ).first()
+
+        change_request_stats = {
+            "total": int(cr_stats.total) if cr_stats.total else 0,
+            "pending_pm": int(cr_stats.pending_pm) if cr_stats.pending_pm else 0,
+            "pending_td": int(cr_stats.pending_td) if cr_stats.pending_td else 0,
+            "approved": int(cr_stats.approved) if cr_stats.approved else 0,
+            "rejected": int(cr_stats.rejected) if cr_stats.rejected else 0,
+            "completed": int(cr_stats.completed) if cr_stats.completed else 0
+        }
+
+        # Project Progress Stats - count projects by status
+        project_status_counts = db.session.query(
+            func.count(func.distinct(case(
+                (Project.status == 'active', Project.project_id),
+                else_=None
+            ))).label('active'),
+            func.count(func.distinct(case(
+                (Project.status == 'in_progress', Project.project_id),
+                else_=None
+            ))).label('in_progress'),
+            func.count(func.distinct(case(
+                (Project.status == 'completed', Project.project_id),
+                else_=None
+            ))).label('completed'),
+            func.count(func.distinct(case(
+                (Project.status == 'on_hold', Project.project_id),
+                else_=None
+            ))).label('on_hold'),
+            func.count(func.distinct(Project.project_id)).label('total')
+        ).filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).first()
+
+        project_stats = {
+            "total": int(project_status_counts.total) if project_status_counts.total else 0,
+            "active": int(project_status_counts.active) if project_status_counts.active else 0,
+            "in_progress": int(project_status_counts.in_progress) if project_status_counts.in_progress else 0,
+            "completed": int(project_status_counts.completed) if project_status_counts.completed else 0,
+            "on_hold": int(project_status_counts.on_hold) if project_status_counts.on_hold else 0
+        }
+
+        # Recent SE Requests - Latest 5 requests from Site Engineers needing PM attention
+        recent_se_requests = []
+
+        # 1. Recent SE Change Requests (send_to_pm status)
+        se_crs = db.session.query(
+            ChangeRequest.cr_id,
+            ChangeRequest.status,
+            ChangeRequest.created_at,
+            ChangeRequest.requested_by_name,
+            ChangeRequest.requested_by_role,
+            Project.project_name
+        ).join(
+            Project, ChangeRequest.project_id == Project.project_id
+        ).filter(
+            ChangeRequest.project_id.in_(project_ids),
+            ChangeRequest.is_deleted == False,
+            func.lower(ChangeRequest.requested_by_role).in_(['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor'])
+        ).order_by(ChangeRequest.created_at.desc()).limit(5).all()
+
+        for cr in se_crs:
+            recent_se_requests.append({
+                "id": f"cr_{cr.cr_id}",
+                "type": "cr",
+                "code": f"PO-{cr.cr_id}",
+                "project_name": cr.project_name,
+                "status": cr.status,
+                "requested_by": cr.requested_by_name,
+                "date": cr.created_at.isoformat() if cr.created_at else None,
+                "timestamp": cr.created_at
+            })
+
+        # 2. Recent SE Labour Requisitions
+        se_labour = db.session.query(
+            LabourRequisition.requisition_id,
+            LabourRequisition.requisition_code,
+            LabourRequisition.status,
+            LabourRequisition.created_at,
+            LabourRequisition.requested_by_name,
+            Project.project_name
+        ).join(
+            Project, LabourRequisition.project_id == Project.project_id
+        ).filter(
+            LabourRequisition.project_id.in_(project_ids),
+            LabourRequisition.is_deleted == False
+        ).order_by(LabourRequisition.created_at.desc()).limit(5).all()
+
+        for lr in se_labour:
+            recent_se_requests.append({
+                "id": f"labour_{lr.requisition_id}",
+                "type": "labour",
+                "code": lr.requisition_code,
+                "project_name": lr.project_name,
+                "status": lr.status,
+                "requested_by": lr.requested_by_name,
+                "date": lr.created_at.isoformat() if lr.created_at else None,
+                "timestamp": lr.created_at
+            })
+
+        # 3. Recent SE Asset Requisitions
+        se_assets = db.session.query(
+            AssetRequisition.requisition_id,
+            AssetRequisition.requisition_code,
+            AssetRequisition.status,
+            AssetRequisition.created_at,
+            AssetRequisition.requested_by_name,
+            Project.project_name
+        ).join(
+            Project, AssetRequisition.project_id == Project.project_id
+        ).filter(
+            AssetRequisition.project_id.in_(project_ids),
+            AssetRequisition.is_deleted == False
+        ).order_by(AssetRequisition.created_at.desc()).limit(5).all()
+
+        for ar in se_assets:
+            recent_se_requests.append({
+                "id": f"asset_{ar.requisition_id}",
+                "type": "asset",
+                "code": ar.requisition_code,
+                "project_name": ar.project_name,
+                "status": ar.status,
+                "requested_by": ar.requested_by_name,
+                "date": ar.created_at.isoformat() if ar.created_at else None,
+                "timestamp": ar.created_at
+            })
+
+        # Sort by timestamp and take top 5
+        recent_se_requests = sorted(
+            [r for r in recent_se_requests if r.get('timestamp')],
+            key=lambda x: x['timestamp'],
+            reverse=True
+        )[:5]
+
+        # Remove timestamp from response
+        for item in recent_se_requests:
+            item.pop('timestamp', None)
 
         return jsonify({
             "success": True,
@@ -3554,7 +3753,10 @@ def get_pm_dashboard():
             "top_budget_projects": top_budget_projects,
             "recent_activities": recent_activities,
             "projects": projects_data,
-            "asset_details": asset_details
+            "asset_details": asset_details,
+            "change_request_stats": change_request_stats,
+            "project_stats": project_stats,
+            "recent_se_requests": recent_se_requests
         }), 200
 
     except Exception as e:

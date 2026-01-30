@@ -1849,4 +1849,166 @@ export interface MaterialAvailabilityResponse {
   error?: string;
 }
 
+// Dashboard Analytics Types
+export interface BuyerDashboardAnalytics {
+  success: boolean;
+  period_days: number;
+  generated_at: string;
+  purchase_orders: {
+    // Ongoing sub-tabs (matching Purchase Orders > Ongoing tab)
+    pending_vendor_selection: number;  // Ongoing > Pending Purchase
+    store_approved: number;            // Ongoing > Store Approved
+    ready_to_complete: number;         // Ongoing > Vendor Approved (parent CRs)
+
+    // Pending Approval sub-tabs (matching Purchase Orders > Pending Approval tab)
+    pending_td_approval: number;       // Vendor Pending TD (deduplicated)
+    store_requests_pending: number;    // Store Pending
+
+    // Completed & Rejected
+    completed: number;
+    routed_to_store: number;
+    rejected: number;
+
+    // Totals
+    total_ongoing: number;
+    total_pending_approval: number;
+    total_pending: number;
+    total_completed: number;
+    total_pending_cost: number;
+    total_completed_cost: number;
+  };
+  po_children: {
+    pending_td_approval: number;
+    vendor_approved: number;
+    completed: number;
+    rejected: number;
+    total: number;
+  };
+  vendors: {
+    total_approved: number;
+    pending_approval: number;
+  };
+  deliveries: {
+    total: number;
+    draft: number;
+    issued: number;
+    in_transit: number;
+    delivered: number;
+    pending_receipt: number;
+  };
+  store_requests: {
+    pending_vendor_delivery: number;
+    delivered_to_store: number;
+    dispatched_to_site: number;
+    delivered_to_site: number;
+    total_in_pipeline: number;
+  };
+  projects: {
+    total_with_purchases: number;
+    active: number;
+  };
+  performance: {
+    completion_rate: number;
+    avg_processing_days: number;
+  };
+  recent_activity: Array<{
+    cr_id: number;
+    formatted_id: string;
+    project_name: string;
+    item_name: string;
+    total_cost: number;
+    status: string;
+    completed_at: string | null;
+    vendor_name: string | null;
+  }>;
+  workload: {
+    pending_actions: number;
+    awaiting_approval: number;
+    pending_deliveries: number;
+    status: 'normal' | 'moderate' | 'high';
+  };
+  // ========== NEW ANALYTICS TYPES ==========
+  trends: {
+    daily: Array<{
+      date: string;
+      count: number;
+      cost: number;
+    }>;
+    weekly: Array<{
+      week: string;
+      count: number;
+      cost: number;
+    }>;
+  };
+  cost_analysis: {
+    by_project: Array<{
+      project_id: number;
+      project_name: string;
+      po_count: number;
+      total_cost: number;
+      completed_cost: number;
+      pending_cost: number;
+    }>;
+    by_vendor: Array<{
+      vendor_id: number;
+      vendor_name: string;
+      po_count: number;
+      total_cost: number;
+      avg_cost: number;
+    }>;
+  };
+  vendor_performance: Array<{
+    vendor_id: number;
+    vendor_name: string;
+    total_orders: number;
+    completed_orders: number;
+    completion_rate: number;
+    avg_fulfillment_days: number;
+    total_spend: number;
+    performance_score: number;
+  }>;
+  material_categories: Array<{
+    category: string;
+    count: number;
+    cost: number;
+  }>;
+  monthly_comparison: {
+    this_month: {
+      count: number;
+      cost: number;
+    };
+    last_month: {
+      count: number;
+      cost: number;
+    };
+    change: {
+      count_pct: number;
+      cost_pct: number;
+    };
+  };
+}
+
+// Add dashboard method to BuyerService class
+// Note: Adding as standalone function since class is already defined above
+
+export async function getBuyerDashboardAnalytics(days: number = 30): Promise<BuyerDashboardAnalytics> {
+  try {
+    const response = await apiClient.get<BuyerDashboardAnalytics>(
+      `/buyer/dashboard`,
+      { params: { days } }
+    );
+
+    if (response.data.success) {
+      return response.data;
+    }
+    throw new Error('Failed to fetch dashboard analytics');
+  } catch (error: any) {
+    console.error('Error fetching buyer dashboard analytics:', error);
+    if (error.response?.status === 401) {
+      throw new Error('Authentication required. Please login again.');
+    }
+    throw new Error(error.response?.data?.error || 'Failed to fetch dashboard analytics');
+  }
+}
+
 export const buyerService = new BuyerService();

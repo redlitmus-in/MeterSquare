@@ -20,15 +20,11 @@ import {
   Table as TableIcon,
   Store,
   Mail,
-  TruckIcon,
   XCircleIcon,
-  Phone,
   X,
   MessageSquare,
-  Pencil,
   TrendingDown,
-  TrendingUp,
-  Send
+  TrendingUp
 } from 'lucide-react';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -445,11 +441,13 @@ const PurchaseOrders: React.FC = () => {
       items = filteredPurchases;
     }
 
-    const startIndex = (currentTabPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
+    // Always use page 1 for display slicing since backend handles pagination
+    // The currentTabPage is used for API calls, not for slicing already-fetched data
+    const startIndex = 0;
+    const endIndex = itemsPerPage;
 
     return items.slice(startIndex, endIndex);
-  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, mergedVendorApprovedItems, filteredPurchases, currentTabPage]);
+  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, mergedVendorApprovedItems, filteredPurchases]);
 
   // Calculate the actual vendor pending count based on filteredPurchases when on that tab
   const vendorPendingActualCount = useMemo(() => {
@@ -841,31 +839,8 @@ const PurchaseOrders: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
-                <ShoppingCart className="w-6 h-6 text-[#243d8a]" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-[#243d8a]">Purchase Orders</h1>
-                <p className="text-sm text-gray-600">
-                  Approved extra materials and purchase orders
-                </p>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-sm text-gray-600">Total Purchases</div>
-              <div className="text-2xl font-bold text-[#243d8a]">{stats.ongoing + stats.pendingApproval + stats.completed}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 pb-4 sm:pb-8">
         {/* Search Bar with Controls */}
         <div className="mb-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
           <div className="relative flex-1 max-w-full sm:max-w-md">
@@ -2681,7 +2656,25 @@ const PurchaseOrders: React.FC = () => {
 
           {/* ✅ PERFORMANCE: Pagination Controls - Show filtered count per tab/subtab */}
           {(() => {
-            // Calculate total based on active tab/subtab (same logic as paginatedItems)
+            // Get server pagination based on active tab
+            let serverPagination: { page: number; per_page: number; total: number; pages: number; has_next: boolean; has_prev: boolean } | undefined;
+            let setCurrentPage: React.Dispatch<React.SetStateAction<number>>;
+
+            if (activeTab === 'ongoing' || activeTab === 'pending_approval') {
+              serverPagination = pendingData?.pagination;
+              setCurrentPage = setPendingPage;
+            } else if (activeTab === 'completed') {
+              serverPagination = completedData?.pagination;
+              setCurrentPage = setCompletedPage;
+            } else if (activeTab === 'rejected') {
+              serverPagination = rejectedData?.pagination;
+              setCurrentPage = setRejectedPage;
+            } else {
+              serverPagination = undefined;
+              setCurrentPage = setPendingPage;
+            }
+
+            // Calculate total based on active tab/subtab
             let totalFiltered: number;
             if (activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved') {
               totalFiltered = mergedVendorApprovedItems.length;
@@ -2689,37 +2682,20 @@ const PurchaseOrders: React.FC = () => {
               totalFiltered = filteredPurchases.length;
             }
 
-            // Client-side pagination for filtered results
-            const clientPerPage = PAGINATION.DEFAULT_PAGE_SIZE;
-            const clientPages = Math.ceil(totalFiltered / clientPerPage);
+            // Use server pagination if available, otherwise show client count
+            const currentPage = serverPagination?.page || 1;
+            const totalItems = serverPagination?.total || totalFiltered;
+            const totalPages = serverPagination?.pages || 1;
+            const has_prev = serverPagination?.has_prev || false;
+            const has_next = serverPagination?.has_next || false;
+            const perPage = serverPagination?.per_page || PAGINATION.DEFAULT_PAGE_SIZE;
 
-            // Get page state based on active tab (for consistency)
-            let currentPage = 1;
-            let setCurrentPage = setPendingPage;
-
-            if (activeTab === 'ongoing' || activeTab === 'pending_approval') {
-              currentPage = pendingPage;
-              setCurrentPage = setPendingPage;
-            } else if (activeTab === 'completed') {
-              currentPage = completedPage;
-              setCurrentPage = setCompletedPage;
-            } else if (activeTab === 'rejected') {
-              currentPage = rejectedPage;
-              setCurrentPage = setRejectedPage;
-            }
-
-            // Reset to page 1 if current page exceeds available pages
-            if (currentPage > clientPages && clientPages > 0) {
-              currentPage = 1;
-            }
-
-            const start = totalFiltered > 0 ? (currentPage - 1) * clientPerPage + 1 : 0;
-            const end = Math.min(currentPage * clientPerPage, totalFiltered);
-            const has_prev = currentPage > 1;
-            const has_next = currentPage < clientPages;
+            // Calculate display range
+            const start = totalItems > 0 ? (currentPage - 1) * perPage + 1 : 0;
+            const end = Math.min(currentPage * perPage, totalItems);
 
             // Only show pagination if there are items
-            if (totalFiltered === 0) {
+            if (totalItems === 0) {
               return (
                 <div className="flex items-center justify-center bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
                   <div className="text-sm text-gray-500 font-medium">
@@ -2732,34 +2708,23 @@ const PurchaseOrders: React.FC = () => {
             return (
               <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
                 <div className="text-sm text-gray-600 font-medium">
-                  Showing {start} to {end} of {totalFiltered} results
+                  Showing {start} to {end} of {totalItems} results
                 </div>
-                {clientPages > 1 && (
+                {totalPages > 1 && (
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setCurrentPage(currentPage - 1)}
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                       disabled={!has_prev}
                       className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       style={{ color: 'rgb(36, 61, 138)' }}
                     >
                       Previous
                     </button>
-                    {Array.from({ length: Math.min(clientPages, 5) }, (_, i) => i + 1).map(page => (
-                      <button
-                        key={page}
-                        onClick={() => setCurrentPage(page)}
-                        className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                          currentPage === page
-                            ? 'border-[rgb(36,61,138)] bg-blue-50'
-                            : 'border-gray-300 hover:bg-gray-50'
-                        }`}
-                        style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
-                      >
-                        {page}
-                      </button>
-                    ))}
+                    <span className="px-3 py-1 text-sm text-gray-600">
+                      Page {currentPage} of {totalPages}
+                    </span>
                     <button
-                      onClick={() => setCurrentPage(currentPage + 1)}
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                       disabled={!has_next}
                       className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       style={{ color: 'rgb(36, 61, 138)' }}

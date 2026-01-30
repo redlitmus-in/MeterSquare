@@ -75,7 +75,6 @@ const SiteAssets = lazy(() => import('@/roles/site-engineer/pages/SiteAssets'));
 const MaterialReceipts = lazy(() => import('@/roles/site-engineer/pages/MaterialReceipts'));
 
 // Buyer Pages
-const BuyerDashboard = lazy(() => import('@/roles/buyer/pages/Dashboard'));
 const MaterialsToPurchase = lazy(() => import('@/roles/buyer/pages/MaterialsToPurchase'));
 const PurchaseOrders = lazy(() => import('@/roles/buyer/pages/PurchaseOrders'));
 const VendorManagement = lazy(() => import('@/roles/buyer/pages/VendorManagement'));
