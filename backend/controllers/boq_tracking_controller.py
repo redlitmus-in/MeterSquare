@@ -8,6 +8,7 @@ from decimal import Decimal
 import json
 from models.change_request import ChangeRequest
 from models.lpo_customization import LPOCustomization
+from utils.get_actual_transport_fee import get_actual_transport_for_project
 
 log = get_logger()
 
@@ -413,7 +414,6 @@ def get_boq_planned_vs_actual(boq_id):
                             'worker_name': worker.full_name if worker else 'Unknown',
                             'notes': attendance.entry_notes
                         })
-                        print(f"DEBUG:   - Worker {worker.full_name if worker else 'Unknown'}: {hours}h @ ₹{cost} -> {determined_labour_role}")
 
         # ALSO fetch old labour_tracking data for backward compatibility
         # Some BOQs may have data in the deprecated labour_tracking table
@@ -517,6 +517,24 @@ def get_boq_planned_vs_actual(boq_id):
                         sub_item_base_total = sub_item_materials_cost + sub_item_labour_cost
 
                 total_items_base_cost += sub_item_base_total
+
+        # Calculate total ACTUAL transport for this project (ONCE for entire BOQ)
+        # This is the REAL transport spending from all delivery/return notes
+        try:
+            total_actual_transport_for_project = get_actual_transport_for_project(boq.project_id)
+            # Ensure it's a Decimal
+            if not isinstance(total_actual_transport_for_project, Decimal):
+                total_actual_transport_for_project = Decimal(str(total_actual_transport_for_project))
+        except Exception as e:
+            log.error(f"Error getting actual transport for project {boq.project_id}: {e}")
+            total_actual_transport_for_project = Decimal('0')
+
+        # Calculate total PLANNED transport across all items for proportional distribution
+        total_planned_transport_for_boq = Decimal('0')
+        for item in boq_data.get('items', []):
+            for sub_item in item.get('sub_items', []):
+                transport_amt = sub_item.get('transport_amount', 0) or 0
+                total_planned_transport_for_boq += Decimal(str(transport_amt))
 
         # Process each item
         for planned_item in boq_data.get('items', []):
@@ -1457,7 +1475,26 @@ def get_boq_planned_vs_actual(boq_id):
                 # Actual percentages stay the same (based on base_total)
                 sub_actual_misc = sub_item_base_total * (misc_pct / 100)  # Same as planned
                 sub_actual_overhead = sub_planned_overhead  # Keep as allocation for tracking
-                sub_actual_transport = sub_planned_transport  # Same as planned
+
+                # ACTUAL TRANSPORT: Distribute total actual transport proportionally based on planned transport
+                # This uses REAL transport fees from all delivery/return notes (not just planned percentage)
+                try:
+                    if total_planned_transport_for_boq > 0:
+                        # Ensure all values are Decimals before calculation
+                        sub_planned_transport_decimal = Decimal(str(sub_planned_transport)) if not isinstance(sub_planned_transport, Decimal) else sub_planned_transport
+                        total_planned_transport_decimal = Decimal(str(total_planned_transport_for_boq)) if not isinstance(total_planned_transport_for_boq, Decimal) else total_planned_transport_for_boq
+                        total_actual_transport_decimal = Decimal(str(total_actual_transport_for_project)) if not isinstance(total_actual_transport_for_project, Decimal) else total_actual_transport_for_project
+
+                        # Distribute actual transport proportionally based on this sub-item's planned transport share
+                        transport_proportion = sub_planned_transport_decimal / total_planned_transport_decimal
+                        sub_actual_transport = total_actual_transport_decimal * transport_proportion
+                    else:
+                        # No planned transport, so no actual transport allocated to this sub-item
+                        sub_actual_transport = Decimal('0')
+                except Exception as e:
+                    log.error(f"Error calculating actual transport for sub-item: {e}. Types: sub_planned={type(sub_planned_transport)}, total_planned={type(total_planned_transport_for_boq)}, total_actual={type(total_actual_transport_for_project)}")
+                    # Fallback to planned value to avoid breaking the entire response
+                    sub_actual_transport = sub_planned_transport
 
                 # Calculate actual spending (NO O&P, NO Profit included in spending)
                 # Actual Spending = Materials + Labour + Misc + Transport
