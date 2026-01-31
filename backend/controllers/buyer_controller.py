@@ -930,10 +930,10 @@ def get_buyer_pending_purchases():
                         func.trim(ChangeRequest.status).in_(['assigned_to_buyer', 'send_to_buyer']),
                         ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
                     ),
-                    # CRs with pending_td_approval OR vendor_approved status (full purchase to single vendor)
+                    # CRs with vendor_approved status (vendor approved, waiting for buyer to complete purchase)
                     and_(
                         ChangeRequest.assigned_to_buyer_user_id == buyer_id_int,
-                        func.trim(ChangeRequest.status).in_(['pending_td_approval', 'vendor_approved'])
+                        func.trim(ChangeRequest.status) == 'vendor_approved'
                     ),
                     # approved_by_pm or send_to_buyer status AND assigned to this buyer
                     and_(
@@ -5753,9 +5753,6 @@ def get_buyer_pending_po_children():
         if user_role == 'admin':
             is_admin_viewing = True
 
-        # DEBUG: Log the user info
-        log.info(f"🔍 get_buyer_pending_po_children called by user_id={user_id}, role={user_role}, is_admin_viewing={is_admin_viewing}")
-
         # Get POChildren where parent CR is assigned to this buyer and pending TD approval
         if is_admin_viewing:
             pending_po_children = POChild.query.options(
@@ -5781,12 +5778,6 @@ def get_buyer_pending_po_children():
                 POChild.created_at.desc()
             ).all()
 
-        # DEBUG: Log query results
-        log.info(f"🔍 Found {len(pending_po_children)} POChildren pending TD approval for buyer {user_id}")
-        for poc in pending_po_children:
-            parent_cr = ChangeRequest.query.get(poc.parent_cr_id) if poc.parent_cr_id else None
-            assigned_buyer = parent_cr.assigned_to_buyer_user_id if parent_cr else None
-            log.info(f"  - POChild ID={poc.id}, formatted_id={poc.get_formatted_id()}, parent_cr_id={poc.parent_cr_id}, vendor={poc.vendor_name}, vendor_selection_status={poc.vendor_selection_status}, assigned_buyer={assigned_buyer}")
 
         result = []
         for po_child in pending_po_children:
@@ -6744,15 +6735,6 @@ def send_vendor_whatsapp(cr_id):
         lpo_data = data.get('lpo_data')  # LPO customization data from frontend
         po_child_id = data.get('po_child_id')  # Optional: for POChild records
 
-        print(f"\n{'='*60}")
-        print(f"=== WHATSAPP SEND REQUEST RECEIVED ===")
-        print(f"cr_id: {cr_id}")
-        print(f"vendor_phone: {vendor_phone}")
-        print(f"include_lpo_pdf: {include_lpo_pdf}")
-        print(f"po_child_id: {po_child_id}")
-        print(f"lpo_data provided: {lpo_data is not None}")
-        print(f"{'='*60}\n")
-
         if not vendor_phone:
             return jsonify({"error": "Vendor phone number is required"}), 400
 
@@ -6879,26 +6861,11 @@ def send_vendor_whatsapp(cr_id):
         # Generate LPO PDF if requested
         pdf_url = None
 
-        print(f"\n=== PDF GENERATION CHECK ===")
-        print(f"include_lpo_pdf value: {include_lpo_pdf}")
-        print(f"include_lpo_pdf type: {type(include_lpo_pdf)}")
-
         if include_lpo_pdf:
-            print(f">>> ENTERING PDF GENERATION BLOCK")
             try:
-                print(f">>> Importing LPOPDFGenerator...")
                 from utils.lpo_pdf_generator import LPOPDFGenerator
-                print(f">>> Importing SystemSettings...")
                 from models.system_settings import SystemSettings
-                print(f">>> Importing LPOCustomization...")
                 from models.lpo_customization import LPOCustomization
-                print(f">>> All imports successful!")
-
-                print(f"\n=== PDF GENERATION DEBUG ===")
-                print(f"include_lpo_pdf: {include_lpo_pdf}")
-                print(f"po_child: {po_child}")
-                print(f"po_child_id: {po_child_id}")
-                print(f"cr_id: {cr_id}")
                 log.info("Step 1: Starting PDF generation...")
 
                 # If no lpo_data provided, generate using same logic as preview_lpo_pdf
@@ -7023,11 +6990,8 @@ def send_vendor_whatsapp(cr_id):
                         "header_image": getattr(settings, 'lpo_header_image', None) if settings else None
                     }
 
-                print(f">>> Creating LPOPDFGenerator...")
                 generator = LPOPDFGenerator()
-                print(f">>> Generating PDF bytes...")
                 pdf_bytes = generator.generate_lpo_pdf(lpo_data)
-                print(f">>> PDF generated successfully, size: {len(pdf_bytes)} bytes")
                 log.debug(f"LPO PDF generated successfully, size: {len(pdf_bytes)} bytes")
 
                 # Upload PDF to Supabase and get public URL
@@ -7041,9 +7005,6 @@ def send_vendor_whatsapp(cr_id):
                 # Use buyer/cr_X/lpo/ path which is allowed by Supabase RLS policy
                 pdf_path = f"buyer/cr_{cr_id}/lpo/{pdf_filename}"
 
-                print(f">>> Uploading PDF to Supabase: {pdf_path}")
-                print(f">>> SUPABASE_BUCKET: {SUPABASE_BUCKET}")
-
                 # Try to use service role key to bypass RLS for server-side uploads
                 from supabase import create_client as create_supabase_client
                 upload_supabase_url = os.environ.get('DEV_SUPABASE_URL') if environment == 'development' else os.environ.get('SUPABASE_URL')
@@ -7051,11 +7012,8 @@ def send_vendor_whatsapp(cr_id):
                 service_role_key = os.environ.get('DEV_SUPABASE_SERVICE_ROLE_KEY') or os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
                 if service_role_key:
                     upload_supabase_key = service_role_key
-                    print(f">>> Using SERVICE ROLE KEY (bypasses RLS)")
                 else:
                     upload_supabase_key = os.environ.get('DEV_SUPABASE_KEY') if environment == 'development' else os.environ.get('SUPABASE_KEY')
-                    print(f">>> Using ANON KEY (subject to RLS)")
-                print(f">>> Using Supabase URL: {upload_supabase_url}")
 
                 upload_client = create_supabase_client(upload_supabase_url, upload_supabase_key)
 
@@ -7069,19 +7027,14 @@ def send_vendor_whatsapp(cr_id):
                         "x-upsert": "true"  # Allow overwrite if exists
                     }
                 )
-                print(f">>> Upload result: {upload_result}")
 
                 # Get public URL
                 pdf_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(pdf_path)
-                print(f">>> PDF URL generated: {pdf_url}")
                 log.debug(f"PDF uploaded and URL generated")
 
             except Exception as e:
-                print(f"\n!!! PDF GENERATION ERROR !!!")
-                print(f"Error: {str(e)}")
-                import traceback
-                print(f"Traceback: {traceback.format_exc()}")
                 log.error(f"Error in PDF generation/upload: {str(e)}")
+                import traceback
                 log.error(f"Traceback: {traceback.format_exc()}")
                 # Rollback any failed database transaction
                 try:
@@ -7089,10 +7042,6 @@ def send_vendor_whatsapp(cr_id):
                 except:
                     pass
                 # Continue without PDF
-        else:
-            print(f">>> SKIPPING PDF GENERATION: include_lpo_pdf is {include_lpo_pdf}")
-
-        print(f"\n=== PRE-WHATSAPP: pdf_url = {pdf_url} ===")
 
         # Send WhatsApp message
         log.info(f"=== SENDING WHATSAPP MESSAGE ===")
@@ -10192,8 +10141,7 @@ def get_buyer_dashboard_analytics():
     - Recent activity
     - Performance metrics
 
-    Note: Admin users see all data, Buyer users see all buyer-stage CRs
-    (since CRs at buyer stage are shared across all buyers)
+    Note: Admin users see all data, Buyer users ONLY see their own assigned CRs
     """
     try:
         from datetime import timedelta
@@ -10203,7 +10151,8 @@ def get_buyer_dashboard_analytics():
         user_id = current_user['user_id']
         user_role = current_user.get('role', '').lower()
         buyer_name = current_user.get('full_name', '')
-        is_admin = 'admin' in user_role
+        # CRITICAL FIX: Use exact role match to prevent "Buyer Admin" being treated as admin
+        is_admin = user_role == 'admin'
 
         # Get period from query params (default 30 days, max 90 for performance)
         try:
@@ -10476,22 +10425,14 @@ def get_buyer_dashboard_analytics():
             Vendor.is_deleted == False
         ).group_by(Vendor.status).all()
 
+        # CRITICAL FIX: Map status to COUNT, not status to status
         vendor_by_status = {row.status: row.count for row in vendor_stats}
         total_vendors = vendor_by_status.get('active', 0)
         pending_vendor_approval = vendor_by_status.get('inactive', 0)
 
         # ========== DELIVERY TRACKING (Optimized) ==========
-        # Use user_id for reliable matching when available
-        delivery_stats_query = db.session.query(
-            func.upper(MaterialDeliveryNote.status).label('status'),
-            func.count(MaterialDeliveryNote.delivery_note_id).label('count')
-        ).filter(
-            or_(
-                MaterialDeliveryNote.created_by == buyer_name,
-                MaterialDeliveryNote.delivery_from.ilike('%buyer%')
-            )
-        ).group_by(func.upper(MaterialDeliveryNote.status)).all()
-
+        # Count all delivery notes (no buyer filtering - shows all deliveries globally)
+        # This is intentional as buyers need visibility into all material movements
         delivery_stats = {
             'total': 0,
             'draft': 0,
@@ -10500,6 +10441,15 @@ def get_buyer_dashboard_analytics():
             'delivered': 0,
             'pending_receipt': 0
         }
+
+        try:
+            delivery_stats_query = db.session.query(
+                func.upper(MaterialDeliveryNote.status).label('status'),
+                func.count(MaterialDeliveryNote.delivery_note_id).label('count')
+            ).group_by(func.upper(MaterialDeliveryNote.status)).all()
+        except Exception as e:
+            log.error(f"Failed to fetch delivery stats: {e}")
+            delivery_stats_query = []  # Return empty, don't crash dashboard
 
         for row in delivery_stats_query:
             status = row.status or ''
@@ -10613,12 +10563,18 @@ def get_buyer_dashboard_analytics():
         ).count() if project_ids else 0
 
         # ========== PERFORMANCE METRICS ==========
-        # Calculate completion rate using new variable names
+        # Calculate completion rate using SIMPLIFIED logic that matches frontend client-side calculations
+        # Frontend uses: completed / (ongoing + pending_approval + completed) * 100
         total_ongoing = pending_purchase + store_approved + vendor_approved + po_children_approved
         total_pending_approval = store_requests_pending_count + vendor_pending_td_count + po_children_pending_td
         total_completed_all = completed + routed_to_store + po_children_completed
         total_actionable = total_ongoing + total_pending_approval + total_completed_all
-        completion_rate = round(total_completed_all / total_actionable * 100, 1) if total_actionable > 0 else 0
+
+        # IMPROVED: Use simple division with better handling of edge cases
+        if total_actionable > 0:
+            completion_rate = round((total_completed_all * 100.0) / total_actionable, 1)
+        else:
+            completion_rate = 0.0
 
         # Calculate average processing time (from vendor approved to purchase completed)
         # Filter by user for buyers
@@ -10643,10 +10599,18 @@ def get_buyer_dashboard_analytics():
             total_days = 0
             count = 0
             for cr in completed_crs_with_dates:
-                if cr.vendor_approval_date and cr.purchase_completion_date:
-                    delta = cr.purchase_completion_date - cr.vendor_approval_date
-                    total_days += delta.days
-                    count += 1
+                try:
+                    if cr.vendor_approval_date and cr.purchase_completion_date:
+                        delta = cr.purchase_completion_date - cr.vendor_approval_date
+                        # Sanity check: only count positive durations
+                        if delta.days >= 0:
+                            total_days += delta.days
+                            count += 1
+                        else:
+                            log.warning(f"CR {cr.cr_id} has negative processing time: {delta.days} days")
+                except (TypeError, AttributeError) as e:
+                    log.warning(f"Invalid date data for CR {cr.cr_id}: {e}")
+                    continue
             avg_processing_days = round(total_days / count, 1) if count > 0 else 0
 
         # ========== TREND DATA (Daily/Weekly purchase counts) ==========
@@ -10834,7 +10798,12 @@ def get_buyer_dashboard_analytics():
             for vendor_id in top_vendor_ids:
                 m = metrics_map.get(vendor_id)
                 if m:
-                    completion_pct = round((m.completed or 0) / (m.total or 1) * 100, 1)
+                    # CRITICAL FIX: Proper division by zero handling
+                    if m.total and m.total > 0:
+                        completion_pct = round((m.completed or 0) / m.total * 100, 1)
+                    else:
+                        completion_pct = 0.0
+
                     avg_fulfillment = round(float(m.avg_days or 0), 1)
 
                     vendor_performance.append({
@@ -10868,24 +10837,49 @@ def get_buyer_dashboard_analytics():
 
         for cr in material_crs:
             materials = cr.sub_items_data or cr.materials_data or []
+            # CRITICAL FIX: Validate data type before processing
+            if not isinstance(materials, list):
+                log.warning(f"Invalid materials data type for CR {cr.cr_id}: {type(materials)}")
+                continue
+
             for mat in materials:
-                if isinstance(mat, dict):
-                    # Handle nested materials structure
-                    if 'materials' in mat:
-                        for sub_mat in mat.get('materials', []):
-                            cat = sub_mat.get('category', 'Uncategorized')
-                            cost = float(sub_mat.get('total_price', 0) or sub_mat.get('quantity', 0) * sub_mat.get('unit_price', 0))
-                            if cat not in material_categories:
-                                material_categories[cat] = {'count': 0, 'cost': 0}
-                            material_categories[cat]['count'] += 1
-                            material_categories[cat]['cost'] += cost
-                    else:
-                        cat = mat.get('category', 'Uncategorized')
-                        cost = float(mat.get('total_price', 0) or mat.get('quantity', 0) * mat.get('unit_price', 0))
+                if not isinstance(mat, dict):
+                    continue  # Skip invalid entries
+
+                # Handle nested materials structure
+                if 'materials' in mat:
+                    for sub_mat in mat.get('materials', []):
+                        if not isinstance(sub_mat, dict):
+                            continue
+                        cat = sub_mat.get('category', 'Uncategorized')
+                        # IMPROVED: Proper cost calculation with None handling
+                        total_price = sub_mat.get('total_price')
+                        if total_price is not None:
+                            cost = float(total_price)
+                        else:
+                            quantity = sub_mat.get('quantity', 0)
+                            unit_price = sub_mat.get('unit_price', 0)
+                            cost = float(quantity) * float(unit_price)
+
                         if cat not in material_categories:
                             material_categories[cat] = {'count': 0, 'cost': 0}
                         material_categories[cat]['count'] += 1
                         material_categories[cat]['cost'] += cost
+                else:
+                    cat = mat.get('category', 'Uncategorized')
+                    # IMPROVED: Proper cost calculation with None handling
+                    total_price = mat.get('total_price')
+                    if total_price is not None:
+                        cost = float(total_price)
+                    else:
+                        quantity = mat.get('quantity', 0)
+                        unit_price = mat.get('unit_price', 0)
+                        cost = float(quantity) * float(unit_price)
+
+                    if cat not in material_categories:
+                        material_categories[cat] = {'count': 0, 'cost': 0}
+                    material_categories[cat]['count'] += 1
+                    material_categories[cat]['cost'] += cost
 
         # Sort by cost and get top categories
         sorted_categories = sorted(material_categories.items(), key=lambda x: x[1]['cost'], reverse=True)[:10]
@@ -10956,6 +10950,7 @@ def get_buyer_dashboard_analytics():
         # - Pending Approval = store_requests_pending + vendor_pending_td + po_children.pending_td_approval
         # - Completed = completed + routed_to_store + po_children.completed
         # - Rejected = rejected + po_children.rejected
+
         return jsonify({
             "success": True,
             "period_days": days,

@@ -22,17 +22,11 @@ def before_cursor_execute(conn, cursor, statement, parameters, context, executem
 
 @event.listens_for(Engine, "after_cursor_execute")
 def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
-    """Log slow queries (>100ms) in development"""
+    """Log slow queries (>100ms) in development - DISABLED"""
     if os.getenv("ENVIRONMENT", "development") == "development":
         start_times = conn.info.get('query_start_time', [])
         if start_times:
-            total_time = time.time() - start_times.pop()
-            # Log queries that take more than 100ms
-            if total_time > 0.1:
-                import logging
-                logging.getLogger('slow_queries').warning(
-                    f"SLOW QUERY ({total_time*1000:.1f}ms): {statement[:200]}..."
-                )
+            start_times.pop()  # Clean up start times without logging
 
 def initialize_db(app):
     """

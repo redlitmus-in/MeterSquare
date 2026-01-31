@@ -3,7 +3,6 @@ from controllers.buyer_controller import *
 from controllers.auth_controller import jwt_required
 from controllers.upload_image_controller import *
 from controllers.boq_controller import get_custom_units
-from utils.response_cache import cached_response
 
 # Create blueprint with URL prefix
 buyer_routes = Blueprint('buyer_routes', __name__, url_prefix='/api/buyer')
@@ -84,7 +83,6 @@ def get_buyer_boq_materials_route():
 
 @buyer_routes.route('/new-purchases', methods=['GET'])
 @jwt_required
-@cached_response(timeout=15, key_prefix='buyer_pending')  # Short cache for frequently updated data
 def get_buyer_pending_purchases_route():
     """Get pending purchases (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()
@@ -95,7 +93,6 @@ def get_buyer_pending_purchases_route():
 
 @buyer_routes.route('/completed-purchases', methods=['GET'])
 @jwt_required
-@cached_response(timeout=30, key_prefix='buyer_completed')  # Longer cache for historical data
 def get_buyer_completed_purchases_route():
     """Get completed purchases (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()
@@ -106,7 +103,6 @@ def get_buyer_completed_purchases_route():
 
 @buyer_routes.route('/rejected-purchases', methods=['GET'])
 @jwt_required
-@cached_response(timeout=30, key_prefix='buyer_rejected')  # Longer cache for historical data
 def get_buyer_rejected_purchases_route():
     """Get rejected purchases (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()
@@ -153,16 +149,6 @@ def select_vendor_for_material_route(cr_id):
     if access_check:
         return access_check
     return select_vendor_for_material(cr_id)
-
-
-@buyer_routes.route('/purchase/<int:cr_id>/create-sub-crs', methods=['POST'])
-@jwt_required
-def create_sub_crs_route(cr_id):
-    """Create separate sub-CRs for each vendor group (Buyer, TD, or Admin) - DEPRECATED, use create-po-children"""
-    access_check = check_buyer_td_or_admin_access()
-    if access_check:
-        return access_check
-    return create_sub_crs_for_vendor_groups(cr_id)
 
 
 @buyer_routes.route('/purchase/<int:cr_id>/create-po-children', methods=['POST'])
@@ -606,22 +592,6 @@ def save_supplier_notes_route(cr_id):
     return save_supplier_notes(cr_id)
 
 
-@buyer_routes.route('/debug/cr/<int:cr_id>/material-selections', methods=['GET'])
-@jwt_required
-def debug_material_selections(cr_id):
-    """Debug endpoint to check material_vendor_selections"""
-    from models.change_request import ChangeRequest
-    cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
-    if cr:
-        return jsonify({
-            "cr_id": cr.cr_id,
-            "material_vendor_selections": cr.material_vendor_selections,
-            "use_per_material_vendors": cr.use_per_material_vendors
-        }), 200
-    else:
-        return jsonify({"error": "CR not found"}), 404
-
-
 # Project Site Engineers route
 @buyer_routes.route('/project/<int:project_id>/site-engineers', methods=['GET'])
 @jwt_required
@@ -701,7 +671,6 @@ def get_buyer_custom_units_route():
 # Dashboard Analytics
 @buyer_routes.route('/dashboard', methods=['GET'])
 @jwt_required
-@cached_response(timeout=30, key_prefix='buyer_dashboard')
 def get_buyer_dashboard_route():
     """Get comprehensive dashboard analytics for Buyer (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()

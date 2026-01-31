@@ -185,7 +185,11 @@
       "Read(//home/development1/Desktop/MeterSquare/**)",
       "Bash(git -C /home/development1/Desktop/MeterSquare diff HEAD~5 -- frontend/src/roles/buyer/pages/Dashboard.tsx)",
       "Bash(git -C /home/development1/Desktop/MeterSquare diff HEAD~3 -- frontend/src/roles/buyer/pages/Dashboard.tsx)",
-      "Bash(git -C /home/development1/Desktop/MeterSquare diff develop -- frontend/src/roles/buyer/pages/Dashboard.tsx)"
+      "Bash(git -C /home/development1/Desktop/MeterSquare diff develop -- frontend/src/roles/buyer/pages/Dashboard.tsx)",
+      "Bash(journalctl:*)",
+      "Bash(ps:*)",
+      "Bash(timeout 15 npm run dev)",
+      "Bash(timeout 8 npm run dev:*)"
     ],
     "deny": [],
     "ask": []

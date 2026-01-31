@@ -32,21 +32,6 @@ def check_pm_or_admin_access():
         }), 403
     return None
 
-def check_mep_or_admin_access():
-    """
-    Check if current user is a MEP Supervisor or Admin.
-    STRICT: Only allows MEP or Admin roles.
-    """
-    current_user = g.user
-    user_role = current_user.get('role', '').lower()
-    if user_role not in ['mep', 'admin']:
-        return jsonify({
-            "error": "Access denied. MEP Supervisor or Admin role required.",
-            "required_roles": ["mep", "admin"],
-            "your_role": user_role
-        }), 403
-    return None
-
 def check_pm_or_mep_or_admin_access():
     """
     Check if current user is a Project Manager, MEP Supervisor, or Admin.

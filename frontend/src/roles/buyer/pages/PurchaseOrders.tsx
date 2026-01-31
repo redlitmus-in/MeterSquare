@@ -88,42 +88,51 @@ const PurchaseOrders: React.FC = () => {
   const [selectedSiteEngineer, setSelectedSiteEngineer] = useState<string>('');
   const [loadingSiteEngineers, setLoadingSiteEngineers] = useState(false);
 
-  // ✅ PERFORMANCE: Add pagination state
+  // ✅ PERFORMANCE: Add pagination state - separate for each tab and sub-tab
+  // Main tab pages (for server-side pagination)
   const [pendingPage, setPendingPage] = useState(1);
   const [completedPage, setCompletedPage] = useState(1);
   const [rejectedPage, setRejectedPage] = useState(1);
+
+  // Sub-tab pages for client-side pagination (each sub-tab has its own page state)
+  // Ongoing tab sub-tabs
+  const [ongoingPendingPurchasePage, setOngoingPendingPurchasePage] = useState(1);
+  const [ongoingStoreApprovedPage, setOngoingStoreApprovedPage] = useState(1);
+  const [ongoingVendorApprovedPage, setOngoingVendorApprovedPage] = useState(1);
+  // Pending Approval tab sub-tabs
+  const [pendingApprovalStoreRequestsPage, setPendingApprovalStoreRequestsPage] = useState(1);
+  const [pendingApprovalVendorApprovalPage, setPendingApprovalVendorApprovalPage] = useState(1);
+
   const perPage = PAGINATION.DEFAULT_PAGE_SIZE; // Items per page
 
   // ✅ OPTIMIZED: Fetch pending purchases - Real-time updates via Supabase (NO POLLING)
-  // BEFORE: Polling every 2 seconds = 30 requests/minute per user
-  // AFTER: Real-time subscriptions only = ~1-2 requests/minute per user (97% reduction)
-  // ✅ PERFORMANCE: Now with pagination support
+  // IMPORTANT: Fetch ALL pending data (no server pagination) because we filter client-side for sub-tabs
+  // Each sub-tab (pending_purchase, store_approved, vendor_approved) filters from this data
   const { data: pendingData, isLoading: isPendingLoading, refetch: refetchPending } = useAutoSync<PurchaseListResponse>({
-    queryKey: ['buyer-pending-purchases', pendingPage],
-    fetchFn: () => buyerService.getPendingPurchases(pendingPage, perPage),
-    realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL], // ✅ Real-time subscriptions from constants
-    staleTime: STALE_TIMES.STANDARD, // ✅ 30 seconds from constants
-    // ❌ REMOVED: refetchInterval - No more polling!
+    queryKey: ['buyer-pending-purchases'],
+    fetchFn: () => buyerService.getPendingPurchases(1, 1000), // Fetch all (up to 1000)
+    realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL],
+    staleTime: STALE_TIMES.STANDARD,
   });
 
   // ✅ OPTIMIZED: Fetch completed purchases - Real-time updates via Supabase (NO POLLING)
-  // Completed purchases are less time-sensitive, so use longer cache time
-  // ✅ PERFORMANCE: Now with pagination support
+  // IMPORTANT: Fetch ALL completed data because we display both parent CRs AND POChildren
+  // Server pagination only tracks parent CRs, so we use client-side pagination for the combined list
   const { data: completedData, isLoading: isCompletedLoading, refetch: refetchCompleted } = useAutoSync<PurchaseListResponse>({
-    queryKey: ['buyer-completed-purchases', completedPage],
-    fetchFn: () => buyerService.getCompletedPurchases(completedPage, perPage),
-    realtimeTables: [...REALTIME_TABLES.PURCHASES], // ✅ Real-time subscriptions from constants
-    staleTime: STALE_TIMES.DASHBOARD, // ✅ 60 seconds from constants (completed data is less time-sensitive)
-    // ❌ REMOVED: refetchInterval - No more polling!
+    queryKey: ['buyer-completed-purchases'],
+    fetchFn: () => buyerService.getCompletedPurchases(1, 1000), // Fetch all (up to 1000)
+    realtimeTables: [...REALTIME_TABLES.PURCHASES],
+    staleTime: STALE_TIMES.DASHBOARD,
   });
 
   // ✅ OPTIMIZED: Fetch rejected purchases - Real-time updates via Supabase
-  // ✅ PERFORMANCE: Now with pagination support
+  // IMPORTANT: Fetch ALL rejected data because we display both parent CRs AND td_rejected_po_children
+  // Server pagination only tracks parent CRs, so we use client-side pagination for the combined list
   const { data: rejectedData, isLoading: isRejectedLoading, refetch: refetchRejected } = useAutoSync<PurchaseListResponse>({
-    queryKey: ['buyer-rejected-purchases', rejectedPage],
-    fetchFn: () => buyerService.getRejectedPurchases(rejectedPage, perPage),
-    realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL], // ✅ Real-time subscriptions from constants
-    staleTime: STALE_TIMES.DASHBOARD, // ✅ 60 seconds from constants
+    queryKey: ['buyer-rejected-purchases'],
+    fetchFn: () => buyerService.getRejectedPurchases(1, 1000), // Fetch all (up to 1000)
+    realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL],
+    staleTime: STALE_TIMES.DASHBOARD,
   });
 
   // ✅ Fetch approved PO children (for Vendor Approved tab)
@@ -415,39 +424,54 @@ const PurchaseOrders: React.FC = () => {
     return sorted;
   }, [activeTab, ongoingSubTab, filteredPurchases, approvedPOChildren, searchTerm]);
 
-  // Get current page for the active tab
-  const currentTabPage = useMemo(() => {
-    if (activeTab === 'ongoing' || activeTab === 'pending_approval') {
-      return pendingPage;
+  // Get current page for the active sub-tab (client-side pagination for sub-tabs, server-side for main tabs)
+  const currentSubTabPage = useMemo(() => {
+    if (activeTab === 'ongoing') {
+      if (ongoingSubTab === 'pending_purchase') return ongoingPendingPurchasePage;
+      if (ongoingSubTab === 'store_approved') return ongoingStoreApprovedPage;
+      if (ongoingSubTab === 'vendor_approved') return ongoingVendorApprovedPage;
+    } else if (activeTab === 'pending_approval') {
+      if (pendingApprovalSubTab === 'store_requests') return pendingApprovalStoreRequestsPage;
+      if (pendingApprovalSubTab === 'vendor_approval') return pendingApprovalVendorApprovalPage;
     } else if (activeTab === 'completed') {
       return completedPage;
     } else if (activeTab === 'rejected') {
       return rejectedPage;
     }
     return 1;
-  }, [activeTab, pendingPage, completedPage, rejectedPage]);
+  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, ongoingPendingPurchasePage, ongoingStoreApprovedPage, ongoingVendorApprovedPage, pendingApprovalStoreRequestsPage, pendingApprovalVendorApprovalPage, completedPage, rejectedPage]);
 
-  // Paginate the items for display (client-side pagination)
+  // Paginate the items for display
+  // - Tabs with sub-tabs (ongoing, pending_approval): Use client-side pagination
+  // Paginate the items for display - ALL tabs use client-side pagination
   const paginatedItems = useMemo(() => {
     const itemsPerPage = PAGINATION.DEFAULT_PAGE_SIZE;
 
     // Determine which items to use based on active tab and subtab
     let items: Array<Purchase | POChild>;
-    if (activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved') {
-      items = mergedVendorApprovedItems;
+
+    if (activeTab === 'ongoing') {
+      // Client-side pagination - server returns ALL data, we filter and paginate
+      if (ongoingSubTab === 'vendor_approved') {
+        items = mergedVendorApprovedItems;
+      } else {
+        items = filteredPurchases;
+      }
+    } else if (activeTab === 'pending_approval') {
+      // Client-side pagination - server returns ALL data, we filter and paginate
+      items = filteredPurchases;
+    } else if (activeTab === 'completed' || activeTab === 'rejected') {
+      // Client-side pagination - server returns ALL data (both parent CRs + POChildren)
+      items = filteredPurchases;
     } else {
-      // For all other tabs (including pending_approval vendor_approval), use filteredPurchases
-      // which already contains the correct merged data from currentPurchases
       items = filteredPurchases;
     }
 
-    // Always use page 1 for display slicing since backend handles pagination
-    // The currentTabPage is used for API calls, not for slicing already-fetched data
-    const startIndex = 0;
-    const endIndex = itemsPerPage;
-
+    // ALL tabs use client-side pagination now
+    const startIndex = (currentSubTabPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
     return items.slice(startIndex, endIndex);
-  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, mergedVendorApprovedItems, filteredPurchases]);
+  }, [activeTab, ongoingSubTab, pendingApprovalSubTab, mergedVendorApprovedItems, filteredPurchases, currentSubTabPage]);
 
   // Calculate the actual vendor pending count based on filteredPurchases when on that tab
   const vendorPendingActualCount = useMemo(() => {
@@ -473,6 +497,17 @@ const PurchaseOrders: React.FC = () => {
   }, [vendorPendingApproval, pendingPOChildren]);
 
   const stats = useMemo(() => {
+    // For completed/rejected tabs: Server pagination only counts parent CRs, not POChildren
+    // We need to add BOTH parent CRs + POChildren for accurate count
+    // Use the counts from the response data which include both
+    const completedPOChildrenCount = completedData?.completed_po_children_count ?? completedPOChildren.length;
+    const completedPurchasesCount = completedData?.completed_purchases_count ?? completedPurchases.length;
+    const completedTotal = completedPurchasesCount + completedPOChildrenCount;
+
+    const rejectedPOChildrenCount = rejectedData?.td_rejected_po_children?.length ?? tdRejectedPOChildren.length;
+    const rejectedPurchasesCount = rejectedData?.rejected_purchases?.length ?? rejectedPurchases.length;
+    const rejectedTotal = rejectedPurchasesCount + rejectedPOChildrenCount;
+
     return {
       ongoing: pendingPurchaseItems.length + storeApprovedItems.length + vendorApprovedItems.length + approvedPOChildren.length,
       pendingPurchase: pendingPurchaseItems.length,
@@ -481,21 +516,24 @@ const PurchaseOrders: React.FC = () => {
       pendingApproval: storeRequestsPending.length + vendorPendingActualCount,
       storeRequestsPending: storeRequestsPending.length,
       vendorPendingApproval: vendorPendingActualCount,
-      completed: completedPurchases.length + completedPOChildren.length,
-      rejected: rejectedPurchases.length + tdRejectedPOChildren.length
+      completed: completedTotal,
+      rejected: rejectedTotal
     };
-  }, [pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, approvedPOChildren, vendorPendingActualCount, completedPurchases, completedPOChildren, rejectedPurchases, tdRejectedPOChildren, storeRequestsPending]);
+  }, [pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, approvedPOChildren, vendorPendingActualCount, completedPurchases, completedPOChildren, rejectedPurchases, tdRejectedPOChildren, storeRequestsPending, completedData, rejectedData]);
 
-  // Reset page to 1 when tab or subtab changes
+  // Reset ALL sub-tab pages when search term changes
+  // This ensures search results start from page 1
   useEffect(() => {
-    setPendingPage(1);
-  }, [activeTab, ongoingSubTab, pendingApprovalSubTab]);
-
-  // Reset page to 1 when search term changes
-  useEffect(() => {
+    // Server-side pagination pages
     setPendingPage(1);
     setCompletedPage(1);
     setRejectedPage(1);
+    // Client-side sub-tab pagination pages
+    setOngoingPendingPurchasePage(1);
+    setOngoingStoreApprovedPage(1);
+    setOngoingVendorApprovedPage(1);
+    setPendingApprovalStoreRequestsPage(1);
+    setPendingApprovalVendorApprovalPage(1);
   }, [searchTerm]);
 
   const handleViewDetails = (purchase: Purchase) => {
@@ -2654,41 +2692,50 @@ const PurchaseOrders: React.FC = () => {
             </div>
           )}
 
-          {/* ✅ PERFORMANCE: Pagination Controls - Show filtered count per tab/subtab */}
+          {/* ✅ PERFORMANCE: Pagination Controls - All tabs use client-side pagination */}
           {(() => {
-            // Get server pagination based on active tab
-            let serverPagination: { page: number; per_page: number; total: number; pages: number; has_next: boolean; has_prev: boolean } | undefined;
             let setCurrentPage: React.Dispatch<React.SetStateAction<number>>;
-
-            if (activeTab === 'ongoing' || activeTab === 'pending_approval') {
-              serverPagination = pendingData?.pagination;
-              setCurrentPage = setPendingPage;
-            } else if (activeTab === 'completed') {
-              serverPagination = completedData?.pagination;
-              setCurrentPage = setCompletedPage;
-            } else if (activeTab === 'rejected') {
-              serverPagination = rejectedData?.pagination;
-              setCurrentPage = setRejectedPage;
-            } else {
-              serverPagination = undefined;
-              setCurrentPage = setPendingPage;
-            }
-
-            // Calculate total based on active tab/subtab
             let totalFiltered: number;
-            if (activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved') {
-              totalFiltered = mergedVendorApprovedItems.length;
+
+            // Determine which page setter and total to use based on active tab AND sub-tab
+            // ALL tabs now use client-side pagination since we fetch ALL data
+            if (activeTab === 'ongoing') {
+              if (ongoingSubTab === 'pending_purchase') {
+                setCurrentPage = setOngoingPendingPurchasePage;
+                totalFiltered = stats.pendingPurchase;
+              } else if (ongoingSubTab === 'store_approved') {
+                setCurrentPage = setOngoingStoreApprovedPage;
+                totalFiltered = stats.storeApproved;
+              } else {
+                setCurrentPage = setOngoingVendorApprovedPage;
+                totalFiltered = mergedVendorApprovedItems.length;
+              }
+            } else if (activeTab === 'pending_approval') {
+              if (pendingApprovalSubTab === 'store_requests') {
+                setCurrentPage = setPendingApprovalStoreRequestsPage;
+                totalFiltered = stats.storeRequestsPending;
+              } else {
+                setCurrentPage = setPendingApprovalVendorApprovalPage;
+                totalFiltered = stats.vendorPendingApproval;
+              }
+            } else if (activeTab === 'completed') {
+              setCurrentPage = setCompletedPage;
+              totalFiltered = stats.completed;
+            } else if (activeTab === 'rejected') {
+              setCurrentPage = setRejectedPage;
+              totalFiltered = stats.rejected;
             } else {
+              setCurrentPage = setPendingPage;
               totalFiltered = filteredPurchases.length;
             }
 
-            // Use server pagination if available, otherwise show client count
-            const currentPage = serverPagination?.page || 1;
-            const totalItems = serverPagination?.total || totalFiltered;
-            const totalPages = serverPagination?.pages || 1;
-            const has_prev = serverPagination?.has_prev || false;
-            const has_next = serverPagination?.has_next || false;
-            const perPage = serverPagination?.per_page || PAGINATION.DEFAULT_PAGE_SIZE;
+            // All pagination is now client-side
+            const currentPage = currentSubTabPage;
+            const perPage = PAGINATION.DEFAULT_PAGE_SIZE;
+            const totalItems = totalFiltered;
+            const totalPages = Math.ceil(totalFiltered / perPage);
+            const has_prev = currentSubTabPage > 1;
+            const has_next = currentSubTabPage < totalPages;
 
             // Calculate display range
             const start = totalItems > 0 ? (currentPage - 1) * perPage + 1 : 0;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
@@ -16,7 +16,9 @@ import {
 } from '@heroicons/react/24/outline';
 import { useAuthStore } from '@/store/authStore';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import { getBuyerDashboardAnalytics, BuyerDashboardAnalytics } from '../services/buyerService';
+import { getBuyerDashboardAnalytics, BuyerDashboardAnalytics, buyerService, Purchase, POChild, TDRejectedPOChild, PurchaseListResponse } from '../services/buyerService';
+import { useAutoSync } from '@/hooks/useAutoSync';
+import { STALE_TIMES, REALTIME_TABLES } from '@/lib/constants';
 
 // Format currency
 const formatCurrency = (value: number) => {
@@ -40,11 +42,9 @@ const formatCompactCurrency = (value: number) => {
 
 const BuyerDashboard: React.FC = () => {
   const { user } = useAuthStore();
-  const [loading, setLoading] = useState(true);
-  const [analytics, setAnalytics] = useState<BuyerDashboardAnalytics | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [error, setError] = useState<string | null>(null);
+  const [analytics, setAnalytics] = useState<BuyerDashboardAnalytics | null>(null);
 
   // Update time every minute
   useEffect(() => {
@@ -52,26 +52,191 @@ const BuyerDashboard: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const fetchAnalytics = async (showRefresh = false) => {
-    try {
-      if (showRefresh) setRefreshing(true);
-      else setLoading(true);
-      setError(null);
+  // ========== FETCH SAME DATA AS PURCHASE ORDERS PAGE ==========
+  // This ensures counts ALWAYS match between Dashboard and Purchase Orders
 
-      const data = await getBuyerDashboardAnalytics(30); // Fixed 30 days
-      setAnalytics(data);
-    } catch (err: any) {
-      console.error('Failed to fetch analytics:', err);
-      setError(err.message || 'Failed to load dashboard data');
+  // Fetch pending purchases (same API as PurchaseOrders)
+  const { data: pendingData, isLoading: isPendingLoading, refetch: refetchPending } = useAutoSync<PurchaseListResponse>({
+    queryKey: ['buyer-pending-purchases-dashboard'],
+    fetchFn: () => buyerService.getPendingPurchases(1, 1000), // Get all for counting
+    realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL],
+    staleTime: STALE_TIMES.STANDARD,
+  });
+
+  // Fetch completed purchases
+  const { data: completedData, isLoading: isCompletedLoading, refetch: refetchCompleted } = useAutoSync<PurchaseListResponse>({
+    queryKey: ['buyer-completed-purchases-dashboard'],
+    fetchFn: () => buyerService.getCompletedPurchases(1, 1000),
+    realtimeTables: [...REALTIME_TABLES.PURCHASES],
+    staleTime: STALE_TIMES.DASHBOARD,
+  });
+
+  // Fetch rejected purchases
+  const { data: rejectedData, isLoading: isRejectedLoading, refetch: refetchRejected } = useAutoSync<PurchaseListResponse>({
+    queryKey: ['buyer-rejected-purchases-dashboard'],
+    fetchFn: () => buyerService.getRejectedPurchases(1, 1000),
+    realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL],
+    staleTime: STALE_TIMES.DASHBOARD,
+  });
+
+  // Fetch approved PO children
+  const { data: approvedPOChildrenData, isLoading: isApprovedPOChildrenLoading, refetch: refetchApprovedPOChildren } = useAutoSync<{
+    success: boolean;
+    approved_count: number;
+    po_children: POChild[];
+  }>({
+    queryKey: ['buyer-approved-po-children-dashboard'],
+    fetchFn: () => buyerService.getApprovedPOChildren(),
+    realtimeTables: ['po_child', ...REALTIME_TABLES.CHANGE_REQUESTS],
+    staleTime: STALE_TIMES.STANDARD,
+  });
+
+  // Fetch pending PO children
+  const { data: pendingPOChildrenData, isLoading: isPendingPOChildrenLoading, refetch: refetchPendingPOChildren } = useAutoSync<{
+    success: boolean;
+    pending_count: number;
+    po_children: POChild[];
+  }>({
+    queryKey: ['buyer-pending-po-children-dashboard'],
+    fetchFn: () => buyerService.getBuyerPendingPOChildren(),
+    realtimeTables: ['po_child', ...REALTIME_TABLES.CHANGE_REQUESTS],
+    staleTime: STALE_TIMES.STANDARD,
+  });
+
+  // Fetch analytics for other data (trends, store requests, deliveries, etc.)
+  useEffect(() => {
+    const fetchOtherAnalytics = async () => {
+      try {
+        const data = await getBuyerDashboardAnalytics(30);
+        setAnalytics(data);
+      } catch (err) {
+        console.error('Failed to fetch analytics:', err);
+      }
+    };
+    fetchOtherAnalytics();
+  }, []);
+
+  // ========== CLIENT-SIDE FILTERING (EXACT SAME AS PurchaseOrders.tsx) ==========
+  // Using 'any' to avoid type conflicts - the data structure is the same
+  const rawPendingPurchases = useMemo(() => {
+    return (pendingData?.pending_purchases || []) as any[];
+  }, [pendingData]);
+
+  const completedPurchases = useMemo(() => {
+    return (completedData?.completed_purchases || []) as any[];
+  }, [completedData]);
+
+  const completedPOChildren = useMemo(() => {
+    return ((completedData as any)?.completed_po_children || []) as any[];
+  }, [completedData]);
+
+  const rejectedPurchases = useMemo(() => {
+    return (rejectedData?.rejected_purchases || []) as any[];
+  }, [rejectedData]);
+
+  const tdRejectedPOChildren = useMemo(() => {
+    return ((rejectedData as any)?.td_rejected_po_children || []) as any[];
+  }, [rejectedData]);
+
+  const approvedPOChildren = useMemo(() => {
+    return (approvedPOChildrenData?.po_children || []) as any[];
+  }, [approvedPOChildrenData]);
+
+  const pendingPOChildren = useMemo(() => {
+    return (pendingPOChildrenData?.po_children || []) as any[];
+  }, [pendingPOChildrenData]);
+
+  // ========== FILTERING LOGIC (EXACT COPY FROM PurchaseOrders.tsx) ==========
+  // Pending Purchase: No vendor, not pending TD, not rejected, not sent to store
+  const pendingPurchaseItems = useMemo(() => {
+    return rawPendingPurchases.filter((p: any) =>
+      !p.vendor_id &&
+      !p.vendor_selection_pending_td_approval &&
+      !p.rejection_type &&
+      !p.store_requests_pending &&
+      !p.all_store_requests_approved
+    );
+  }, [rawPendingPurchases]);
+
+  // Store Approved: All store requests approved, no vendor
+  const storeApprovedItems = useMemo(() => {
+    return rawPendingPurchases.filter((p: any) =>
+      p.all_store_requests_approved &&
+      !p.vendor_id &&
+      !p.rejection_type
+    );
+  }, [rawPendingPurchases]);
+
+  // Vendor Approved: Has vendor, not pending TD approval
+  const vendorApprovedItems = useMemo(() => {
+    return rawPendingPurchases.filter((p: any) => p.vendor_id && !p.vendor_selection_pending_td_approval && !p.rejection_type);
+  }, [rawPendingPurchases]);
+
+  // Store Requests Pending
+  const storeRequestsPending = useMemo(() => {
+    return rawPendingPurchases.filter((p: any) => p.store_requests_pending && !p.rejection_type);
+  }, [rawPendingPurchases]);
+
+  // Vendor Pending TD Approval
+  const vendorPendingApproval = useMemo(() => {
+    return rawPendingPurchases.filter((p: any) => p.vendor_selection_pending_td_approval && !p.rejection_type);
+  }, [rawPendingPurchases]);
+
+  // Calculate vendor pending actual count (same as PurchaseOrders.tsx)
+  const vendorPendingActualCount = useMemo(() => {
+    const parentIdsWithPOChildren = new Set(
+      pendingPOChildren.map((child: any) => child.parent_cr_id).filter(Boolean)
+    );
+    const parentsWithoutChildren = vendorPendingApproval.filter(
+      (p: any) => !parentIdsWithPOChildren.has(p.cr_id)
+    );
+    const items = [...parentsWithoutChildren, ...pendingPOChildren];
+    const seen = new Set<string>();
+    return items.filter((item: any) => {
+      const key = 'parent_cr_id' in item
+        ? `poChild-${item.id}`
+        : `purchase-${item.cr_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).length;
+  }, [vendorPendingApproval, pendingPOChildren]);
+
+  // ========== STATS (EXACT SAME CALCULATION AS PurchaseOrders.tsx line 475-487) ==========
+  const stats = useMemo(() => {
+    return {
+      ongoing: pendingPurchaseItems.length + storeApprovedItems.length + vendorApprovedItems.length + approvedPOChildren.length,
+      pendingPurchase: pendingPurchaseItems.length,
+      storeApproved: storeApprovedItems.length,
+      vendorApproved: vendorApprovedItems.length + approvedPOChildren.length,
+      pendingApproval: storeRequestsPending.length + vendorPendingActualCount,
+      storeRequestsPending: storeRequestsPending.length,
+      vendorPendingApproval: vendorPendingActualCount,
+      completed: completedPurchases.length + completedPOChildren.length,
+      rejected: rejectedPurchases.length + tdRejectedPOChildren.length
+    };
+  }, [pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, approvedPOChildren, vendorPendingActualCount, completedPurchases, completedPOChildren, rejectedPurchases, tdRejectedPOChildren, storeRequestsPending]);
+
+  // Combined loading state
+  const loading = isPendingLoading || isCompletedLoading || isRejectedLoading || isApprovedPOChildrenLoading || isPendingPOChildrenLoading;
+  const error = null; // Errors are handled by individual queries
+
+  // Refresh all data
+  const fetchAnalytics = async (showRefresh = false) => {
+    if (showRefresh) setRefreshing(true);
+    try {
+      await Promise.all([
+        refetchPending(),
+        refetchCompleted(),
+        refetchRejected(),
+        refetchApprovedPOChildren(),
+        refetchPendingPOChildren(),
+        getBuyerDashboardAnalytics(30).then(setAnalytics)
+      ]);
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   };
-
-  useEffect(() => {
-    fetchAnalytics();
-  }, []);
 
   const getWorkloadColor = (status: string) => {
     if (status === 'high') return 'text-red-600';
@@ -112,7 +277,7 @@ const BuyerDashboard: React.FC = () => {
   }
 
   // ========== CHART 1: Purchase Order Pipeline ==========
-  // Chart shows PO flow stages - MUST match KPI cards (including POChildren)
+  // Chart uses client-side stats - GUARANTEED to match KPI cards
   const poPipelineChart: Highcharts.Options = {
     chart: {
       type: 'column',
@@ -149,14 +314,14 @@ const BuyerDashboard: React.FC = () => {
       type: 'column',
       name: 'Orders',
       data: [
-        // Select Vendor: Pending Purchase + Store Approved (awaiting vendor selection)
-        { y: (analytics?.purchase_orders.pending_vendor_selection || 0) + (analytics?.purchase_orders.store_approved || 0), color: '#f59e0b' },
-        // Pending Approval: Vendor Pending TD + Store Pending + POChildren Pending TD (matches KPI Pending Approval)
-        { y: (analytics?.purchase_orders.pending_td_approval || 0) + (analytics?.purchase_orders.store_requests_pending || 0) + (analytics?.po_children.pending_td_approval || 0), color: '#8b5cf6' },
-        // Ready to Complete: Vendor Approved (parent CRs) + POChildren Vendor Approved
-        { y: (analytics?.purchase_orders.ready_to_complete || 0) + (analytics?.po_children.vendor_approved || 0), color: '#3b82f6' },
-        // Completed: All completed (parent CRs + POChildren) - matches KPI Completed
-        { y: (analytics?.purchase_orders.total_completed || 0) + (analytics?.po_children.completed || 0), color: '#10b981' }
+        // Select Vendor: Pending Purchase + Store Approved (from client-side stats)
+        { y: stats.pendingPurchase + stats.storeApproved, color: '#f59e0b' },
+        // Pending Approval: From client-side stats (matches KPI card exactly)
+        { y: stats.pendingApproval, color: '#8b5cf6' },
+        // Ready to Complete: Vendor Approved (from client-side stats)
+        { y: stats.vendorApproved, color: '#3b82f6' },
+        // Completed: From client-side stats (matches KPI card exactly)
+        { y: stats.completed, color: '#10b981' }
       ]
     }],
     credits: { enabled: false },
@@ -377,7 +542,7 @@ const BuyerDashboard: React.FC = () => {
         {/* KPI Cards - 6 cards (NO CLICK/REDIRECT) */}
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           {/* Ongoing - Buyer-actionable items (matches Purchase Orders > Ongoing tab EXACTLY) */}
-          {/* Ongoing = Pending Purchase + Store Approved + Vendor Approved (parent CRs) + POChildren Vendor Approved */}
+          {/* Uses client-side filtering - GUARANTEED to match PurchaseOrders.tsx */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -388,27 +553,27 @@ const BuyerDashboard: React.FC = () => {
               <div className="p-2 bg-amber-50 rounded-lg">
                 <ClockIcon className="w-5 h-5 text-amber-600" />
               </div>
-              <span className="text-2xl font-bold text-gray-900">{(analytics?.purchase_orders.pending_vendor_selection || 0) + (analytics?.purchase_orders.store_approved || 0) + (analytics?.purchase_orders.ready_to_complete || 0) + (analytics?.po_children.vendor_approved || 0)}</span>
+              <span className="text-2xl font-bold text-gray-900">{stats.ongoing}</span>
             </div>
             <h3 className="font-semibold text-gray-900 text-sm">Ongoing</h3>
             <div className="mt-2 text-xs space-y-1">
               <div className="flex justify-between">
                 <span className="text-gray-500">Pending Purchase</span>
-                <span className="font-medium text-amber-600">{analytics?.purchase_orders.pending_vendor_selection || 0}</span>
+                <span className="font-medium text-amber-600">{stats.pendingPurchase}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Store Approved</span>
-                <span className="font-medium text-blue-600">{analytics?.purchase_orders.store_approved || 0}</span>
+                <span className="font-medium text-blue-600">{stats.storeApproved}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Vendor Approved</span>
-                <span className="font-medium text-emerald-600">{(analytics?.purchase_orders.ready_to_complete || 0) + (analytics?.po_children.vendor_approved || 0)}</span>
+                <span className="font-medium text-emerald-600">{stats.vendorApproved}</span>
               </div>
             </div>
           </motion.div>
 
           {/* Pending Approval - Waiting for TD/PM approval (matches Purchase Orders > Pending Approval tab EXACTLY) */}
-          {/* Pending Approval = Store Pending + Vendor Pending TD (parent CRs) + POChildren Pending TD */}
+          {/* Uses client-side filtering - GUARANTEED to match PurchaseOrders.tsx */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -419,17 +584,17 @@ const BuyerDashboard: React.FC = () => {
               <div className="p-2 bg-purple-50 rounded-lg">
                 <DocumentTextIcon className="w-5 h-5 text-purple-600" />
               </div>
-              <span className="text-2xl font-bold text-gray-900">{(analytics?.purchase_orders.store_requests_pending || 0) + (analytics?.purchase_orders.pending_td_approval || 0) + (analytics?.po_children.pending_td_approval || 0)}</span>
+              <span className="text-2xl font-bold text-gray-900">{stats.pendingApproval}</span>
             </div>
             <h3 className="font-semibold text-gray-900 text-sm">Pending Approval</h3>
             <div className="mt-2 text-xs space-y-1">
               <div className="flex justify-between">
                 <span className="text-gray-500">Store Pending</span>
-                <span className="font-medium text-blue-600">{analytics?.purchase_orders.store_requests_pending || 0}</span>
+                <span className="font-medium text-blue-600">{stats.storeRequestsPending}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Vendor Pending TD</span>
-                <span className="font-medium text-purple-600">{(analytics?.purchase_orders.pending_td_approval || 0) + (analytics?.po_children.pending_td_approval || 0)}</span>
+                <span className="font-medium text-purple-600">{stats.vendorPendingApproval}</span>
               </div>
             </div>
           </motion.div>
@@ -445,17 +610,17 @@ const BuyerDashboard: React.FC = () => {
               <div className="p-2 bg-emerald-50 rounded-lg">
                 <CheckCircleIcon className="w-5 h-5 text-emerald-600" />
               </div>
-              <span className="text-2xl font-bold text-gray-900">{(analytics?.purchase_orders.total_completed || 0) + (analytics?.po_children.completed || 0)}</span>
+              <span className="text-2xl font-bold text-gray-900">{stats.completed}</span>
             </div>
             <h3 className="font-semibold text-gray-900 text-sm">Completed</h3>
             <div className="mt-2 text-xs space-y-1">
               <div className="flex justify-between">
                 <span className="text-gray-500">Purchase Orders</span>
-                <span className="font-medium text-emerald-600">{analytics?.purchase_orders.total_completed || 0}</span>
+                <span className="font-medium text-emerald-600">{completedPurchases.length}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Split POs</span>
-                <span className="font-medium text-emerald-600">{analytics?.po_children.completed || 0}</span>
+                <span className="font-medium text-emerald-600">{completedPOChildren.length}</span>
               </div>
             </div>
           </motion.div>
