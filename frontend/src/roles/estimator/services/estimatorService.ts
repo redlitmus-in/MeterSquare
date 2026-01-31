@@ -1211,6 +1211,78 @@ async sendClientRevisionToTD(
     }
   }
 
+  // Get all unique sub-item names for autocomplete suggestions
+  async getAllSubItemNames(): Promise<string[]> {
+    try {
+      const response = await apiClient.get('/all_sub_item_names');
+
+      if (response.data?.success && response.data?.sub_item_names) {
+        return response.data.sub_item_names;
+      }
+
+      return [];
+    } catch (error) {
+      console.error('Failed to fetch sub-item names:', error);
+      return [];
+    }
+  }
+
+  // Get sub-item details by name (with materials and labour)
+  async getSubItemByName(subItemName: string): Promise<{
+    success: boolean;
+    sub_item: {
+      sub_item_id: number;
+      item_id: number;
+      sub_item_name: string;
+      scope: string;
+      description: string;
+      size: string;
+      location: string;
+      brand: string;
+      unit: string;
+      quantity: number;
+      rate: number;
+      misc_percentage: number;
+      overhead_profit_percentage: number;
+      transport_percentage: number;
+      materials: Array<{
+        material_id: number;
+        material_name: string;
+        description: string;
+        size: string;
+        specification: string;
+        quantity: number;
+        brand: string;
+        unit: string;
+        unit_price: number;
+      }>;
+      labour: Array<{
+        labour_id: number;
+        labour_role: string;
+        work_type: string;
+        hours: number;
+        rate_per_hour: number;
+        amount: number;
+      }>;
+    } | null;
+  }> {
+    try {
+      const response = await apiClient.get(`/sub_item_by_name/${encodeURIComponent(subItemName)}`);
+
+      if (response.data?.success && response.data?.sub_item) {
+        return {
+          success: true,
+          sub_item: response.data.sub_item
+        };
+      }
+
+      return { success: false, sub_item: null };
+    } catch (error) {
+      console.error(`Failed to fetch sub-item by name "${subItemName}":`, error);
+      return { success: false, sub_item: null };
+    }
+  }
+
   // Get materials for a specific item
   async getItemMaterials(itemId: number): Promise<{
     material_id: number;

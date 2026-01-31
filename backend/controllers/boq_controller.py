@@ -214,22 +214,31 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
     return master_item_id, master_material_ids, master_labour_ids
 
 def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
-    """Add sub-items, their materials, and labour to master tables"""
+    """Add sub-items, their materials, and labour to master tables.
+
+    Duplicate Prevention:
+    - Sub-items: Checked globally by sub_item_name (case-insensitive)
+    - Materials: Checked globally by material_name (case-insensitive)
+    - Labour: Checked globally by labour_role (case-insensitive)
+
+    If duplicate exists, we reuse the existing record and link it to the current sub-item.
+    """
     master_sub_item_ids = []
 
     for sub_item in sub_items:
-        sub_item_name = sub_item.get("sub_item_name")
+        sub_item_name = sub_item.get("sub_item_name", "").strip()
         if not sub_item_name:
             continue
 
-        # Check if master sub-item already exists for this item and sub-item name
-        master_sub_item = MasterSubItem.query.filter_by(
-            item_id=master_item_id,
-            sub_item_name=sub_item_name
+        # Check if master sub-item already exists GLOBALLY by name (case-insensitive)
+        # This prevents duplicate sub-item names across the entire system
+        master_sub_item = MasterSubItem.query.filter(
+            db.func.lower(MasterSubItem.sub_item_name) == sub_item_name.lower(),
+            MasterSubItem.is_deleted == False
         ).first()
 
         if not master_sub_item:
-            # Create new master sub-item
+            # Create new master sub-item (only if name doesn't exist globally)
             master_sub_item = MasterSubItem(
                 item_id=master_item_id,
                 sub_item_name=sub_item_name,
@@ -256,28 +265,10 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             )
             db.session.add(master_sub_item)
             db.session.flush()
+            log.info(f"Created new master sub-item: '{sub_item_name}'")
         else:
-            # Update existing master sub-item
-            master_sub_item.description = sub_item.get("scope") or sub_item.get("description", "")
-            master_sub_item.size = sub_item.get("size", "")
-            master_sub_item.location = sub_item.get("location", "")
-            master_sub_item.brand = sub_item.get("brand", "")
-            master_sub_item.unit = sub_item.get("unit")
-            master_sub_item.quantity = sub_item.get("quantity")
-            master_sub_item.per_unit_cost = sub_item.get("per_unit_cost")
-            master_sub_item.sub_item_total_cost = sub_item.get("sub_item_total_cost")
-            master_sub_item.misc_percentage = sub_item.get("misc_percentage", 10.0)
-            master_sub_item.misc_amount = sub_item.get("misc_amount", 0.0)
-            master_sub_item.overhead_profit_percentage = sub_item.get("overhead_profit_percentage", 25.0)
-            master_sub_item.overhead_profit_amount = sub_item.get("overhead_profit_amount", 0.0)
-            master_sub_item.transport_percentage = sub_item.get("transport_percentage", 5.0)
-            master_sub_item.transport_amount = sub_item.get("transport_amount", 0.0)
-            master_sub_item.material_cost = sub_item.get("material_cost", 0.0)
-            master_sub_item.labour_cost = sub_item.get("labour_cost", 0.0)
-            master_sub_item.internal_cost = sub_item.get("internal_cost", 0.0)
-            master_sub_item.planned_profit = sub_item.get("planned_profit", 0.0)
-            master_sub_item.negotiable_margin = sub_item.get("negotiable_margin", 0.0)
-            db.session.flush()
+            # Sub-item already exists - just log it, don't update (to preserve existing data)
+            log.info(f"Sub-item '{sub_item_name}' already exists in master table (ID: {master_sub_item.sub_item_id})")
 
         master_sub_item_id = master_sub_item.sub_item_id
         master_sub_item_ids.append(master_sub_item_id)
@@ -285,15 +276,17 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
         # Add materials for this sub-item
         materials = sub_item.get("materials", [])
         if materials:
-            # Filter out materials with empty names before querying
-            material_names = [mat.get("material_name", "").strip() for mat in materials if mat.get("material_name", "").strip()]
+            # Filter out materials with empty names
+            material_names = [mat.get("material_name", "").strip().lower() for mat in materials if mat.get("material_name", "").strip()]
 
+            # Query existing materials GLOBALLY by name (case-insensitive) to prevent duplicates
             existing_materials_map = {}
             if material_names:
                 existing_materials = MasterMaterial.query.filter(
-                    MasterMaterial.material_name.in_(material_names)
+                    db.func.lower(MasterMaterial.material_name).in_(material_names),
+                    MasterMaterial.is_active == True
                 ).all()
-                existing_materials_map = {mat.material_name: mat for mat in existing_materials}
+                existing_materials_map = {mat.material_name.lower(): mat for mat in existing_materials}
 
             for mat in materials:
                 material_name = mat.get("material_name", "").strip()
@@ -304,8 +297,10 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                 unit_price = mat.get("unit_price", 0.0)
                 total_price = mat.get("total_price", quantity * unit_price)
 
-                master_material = existing_materials_map.get(material_name)
+                # Check if material exists GLOBALLY (case-insensitive)
+                master_material = existing_materials_map.get(material_name.lower())
                 if not master_material:
+                    # Create new material only if it doesn't exist globally
                     master_material = MasterMaterial(
                         material_name=material_name,
                         item_id=master_item_id,
@@ -325,35 +320,25 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     )
                     db.session.add(master_material)
                     db.session.flush()
+                    log.info(f"Created new master material: '{material_name}'")
                 else:
-                    # Update existing material
-                    master_material.sub_item_id = master_sub_item_id
-                    if master_material.item_id is None:
-                        master_material.item_id = master_item_id
-                    master_material.description = mat.get("description")
-                    master_material.brand = mat.get("brand")
-                    master_material.size = mat.get("size")
-                    master_material.specification = mat.get("specification")
-                    master_material.quantity = quantity
-                    master_material.current_market_price = unit_price
-                    master_material.total_price = total_price
-                    master_material.vat_percentage = mat.get("vat_percentage", 0.0)
-                    master_material.vat_amount = mat.get("vat_amount", 0.0)
-                    master_material.last_modified_by = created_by
-                    db.session.flush()
+                    # Material already exists globally - just log it, don't create duplicate
+                    log.info(f"Material '{material_name}' already exists in master table (ID: {master_material.material_id})")
 
         # Add labour for this sub-item
         labour_list = sub_item.get("labour", [])
         if labour_list:
-            # Filter out labour with empty roles before querying
-            labour_roles = [labour.get("labour_role", "").strip() for labour in labour_list if labour.get("labour_role", "").strip()]
+            # Filter out labour with empty roles
+            labour_roles = [labour.get("labour_role", "").strip().lower() for labour in labour_list if labour.get("labour_role", "").strip()]
 
+            # Query existing labour GLOBALLY by role (case-insensitive) to prevent duplicates
             existing_labour_map = {}
             if labour_roles:
                 existing_labour = MasterLabour.query.filter(
-                    MasterLabour.labour_role.in_(labour_roles)
+                    db.func.lower(MasterLabour.labour_role).in_(labour_roles),
+                    MasterLabour.is_active == True
                 ).all()
-                existing_labour_map = {labour.labour_role: labour for labour in existing_labour}
+                existing_labour_map = {labour.labour_role.lower(): labour for labour in existing_labour}
 
             for labour in labour_list:
                 labour_role = labour.get("labour_role", "").strip()
@@ -364,11 +349,11 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                 hours = labour.get("hours", 0.0)
                 labour_amount = float(rate_per_hour) * float(hours)
 
-                # Check if labour_role already exists in master table
-                master_labour = existing_labour_map.get(labour_role)
+                # Check if labour_role exists GLOBALLY (case-insensitive)
+                master_labour = existing_labour_map.get(labour_role.lower())
 
                 if not master_labour:
-                    # Insert new labour entry
+                    # Create new labour only if it doesn't exist globally
                     master_labour = MasterLabour(
                         labour_role=labour_role,
                         item_id=master_item_id,
@@ -381,16 +366,10 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     )
                     db.session.add(master_labour)
                     db.session.flush()
+                    log.info(f"Created new master labour: '{labour_role}'")
                 else:
-                    # Update existing labour entry with new values
-                    master_labour.item_id = master_item_id
-                    master_labour.sub_item_id = master_sub_item_id
-                    if labour.get("work_type"):
-                        master_labour.work_type = labour.get("work_type")
-                    master_labour.hours = float(hours)
-                    master_labour.rate_per_hour = float(rate_per_hour)
-                    master_labour.amount = labour_amount
-                    db.session.flush()
+                    # Labour already exists globally - just log it, don't create duplicate
+                    log.info(f"Labour '{labour_role}' already exists in master table (ID: {master_labour.labour_id})")
 
     return master_sub_item_ids
 
@@ -3848,6 +3827,128 @@ def get_all_item():
         db.session.rollback()
         log.error(f"Error fetching item: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+def get_all_sub_item_names():
+    """Get all unique sub-item names from the database for autocomplete suggestions"""
+    try:
+        # Query distinct sub_item_names from boq_sub_items table
+        # Only include non-deleted sub-items
+        sub_item_names = db.session.query(
+            MasterSubItem.sub_item_name
+        ).filter(
+            MasterSubItem.is_deleted == False,
+            MasterSubItem.sub_item_name.isnot(None),
+            MasterSubItem.sub_item_name != ''
+        ).distinct().order_by(
+            MasterSubItem.sub_item_name.asc()
+        ).limit(500).all()
+
+        # Extract names from tuples and return as list
+        names_list = [name[0].strip() for name in sub_item_names if name[0] and name[0].strip()]
+
+        return jsonify({
+            "success": True,
+            "sub_item_names": names_list,
+            "count": len(names_list)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error fetching sub-item names: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+def get_sub_item_by_name(sub_item_name):
+    """Get sub-item details including materials and labour by sub-item name"""
+    try:
+        if not sub_item_name:
+            return jsonify({"error": "Sub-item name is required"}), 400
+
+        # Find the sub-item by name (case-insensitive, get most recent one)
+        sub_item = MasterSubItem.query.filter(
+            db.func.lower(MasterSubItem.sub_item_name) == sub_item_name.lower().strip(),
+            MasterSubItem.is_deleted == False
+        ).order_by(MasterSubItem.created_at.desc()).first()
+
+        if not sub_item:
+            return jsonify({
+                "success": False,
+                "message": "Sub-item not found",
+                "sub_item": None
+            }), 404
+
+        # Get materials for this sub-item
+        materials = MasterMaterial.query.filter_by(
+            sub_item_id=sub_item.sub_item_id,
+            is_active=True
+        ).all()
+
+        material_list = []
+        for material in materials:
+            material_list.append({
+                "material_id": material.material_id,
+                "material_name": material.material_name,
+                "description": material.description,
+                "size": material.size,
+                "specification": material.specification,
+                "quantity": material.quantity or 1,
+                "brand": material.brand,
+                "unit": material.default_unit,
+                "unit_price": material.current_market_price,
+                "current_market_price": material.current_market_price,
+                "is_active": material.is_active
+            })
+
+        # Get labour for this sub-item
+        labours = MasterLabour.query.filter_by(
+            sub_item_id=sub_item.sub_item_id,
+            is_active=True
+        ).all()
+
+        labour_list = []
+        for labour in labours:
+            labour_list.append({
+                "labour_id": labour.labour_id,
+                "labour_role": labour.labour_role,
+                "work_type": labour.work_type or "daily_wages",
+                "hours": labour.hours or 8,
+                "rate_per_hour": labour.rate_per_hour or (labour.amount / 8 if labour.amount else 0),
+                "amount": labour.amount,
+                "is_active": labour.is_active
+            })
+
+        # Return sub-item with materials and labour
+        return jsonify({
+            "success": True,
+            "sub_item": {
+                "sub_item_id": sub_item.sub_item_id,
+                "item_id": sub_item.item_id,
+                "sub_item_name": sub_item.sub_item_name,
+                "scope": sub_item.description,
+                "description": sub_item.description,
+                "size": sub_item.size,
+                "location": sub_item.location,
+                "brand": sub_item.brand,
+                "unit": sub_item.unit or "nos",
+                "quantity": sub_item.quantity or 1,
+                "per_unit_cost": sub_item.per_unit_cost or 0,
+                "rate": sub_item.per_unit_cost or 0,
+                "misc_percentage": sub_item.misc_percentage or 10.0,
+                "overhead_profit_percentage": sub_item.overhead_profit_percentage or 25.0,
+                "transport_percentage": sub_item.transport_percentage or 5.0,
+                "materials": material_list,
+                "labour": labour_list
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error fetching sub-item by name: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
 
 # SEND EMAIL - Send BOQ to Technical Director
 def send_boq_email(boq_id):

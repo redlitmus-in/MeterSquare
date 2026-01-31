@@ -113,6 +113,24 @@ def get_all_item_route():
         return access_check
     return get_all_item()
 
+@boq_routes.route('/all_sub_item_names', methods=['GET'])
+@jwt_required
+def get_all_sub_item_names_route():
+    """Get all unique sub-item names for autocomplete (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_all_sub_item_names()
+
+@boq_routes.route('/sub_item_by_name/<string:sub_item_name>', methods=['GET'])
+@jwt_required
+def get_sub_item_by_name_route(sub_item_name):
+    """Get sub-item details by name with materials and labour (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_sub_item_by_name(sub_item_name)
+
 # BOQ Email Notification technical director
 @boq_routes.route('/boq_email/<int:boq_id>', methods=['GET'])
 @jwt_required

@@ -280,6 +280,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [masterItems, setMasterItems] = useState<MasterItem[]>([]);
   const [itemMaterials, setItemMaterials] = useState<Record<number, MasterMaterial[]>>({});
   const [itemLabours, setItemLabours] = useState<Record<number, MasterLabour[]>>({});
+  const [masterSubItemNames, setMasterSubItemNames] = useState<string[]>([]);
   const [isLoadingMasterData, setIsLoadingMasterData] = useState(false);
   const [isLoadingExistingBoq, setIsLoadingExistingBoq] = useState(false);
 
@@ -291,6 +292,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [loadingItemData, setLoadingItemData] = useState<Record<string, boolean>>({});
   const [materialSearchTerms, setMaterialSearchTerms] = useState<Record<string, string>>({});
   const [labourSearchTerms, setLabourSearchTerms] = useState<Record<string, string>>({});
+  const [subItemNameDropdownOpen, setSubItemNameDropdownOpen] = useState<Record<string, boolean>>({});
+  const [subItemNameSearchTerms, setSubItemNameSearchTerms] = useState<Record<string, string>>({});
 
   // Delete state
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
@@ -746,6 +749,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       console.log('🔵 BOQCreationForm opened - editMode:', editMode, 'isRevision:', isRevision);
       loadProjects();
       loadMasterItems();
+      loadMasterSubItemNames();
       // Always load master preliminaries to show available options
       loadMasterPreliminaries();
       loadCustomUnits();
@@ -787,6 +791,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       showError('Failed to load master items');
     } finally {
       setIsLoadingMasterData(false);
+    }
+  };
+
+  const loadMasterSubItemNames = async () => {
+    try {
+      const names = await estimatorService.getAllSubItemNames();
+      console.log('Master sub-item names loaded:', names.length, 'names');
+      setMasterSubItemNames(names);
+    } catch (error) {
+      console.error('Failed to load master sub-item names:', error);
     }
   };
 
@@ -1384,6 +1398,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   };
 
   const selectMasterItem = async (itemId: string, masterItem: MasterItem) => {
+    // Check for duplicate item names first (ignore spaces and case)
+    const normalizeItemName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+    const usedItemNames = items
+      .filter(i => i.id !== itemId && i.item_name.trim())
+      .map(i => normalizeItemName(i.item_name));
+
+    if (usedItemNames.includes(normalizeItemName(masterItem.item_name))) {
+      showError(`Item "${masterItem.item_name}" already exists in this BOQ`);
+      setItemDropdownOpen(prev => ({ ...prev, [itemId]: false }));
+      return;
+    }
+
     // Set loading state
     setLoadingItemData(prev => ({ ...prev, [itemId]: true }));
 
@@ -1573,20 +1599,33 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   };
 
   const handleItemNameChange = (itemId: string, value: string) => {
+    // Always update search term for filtering
     setItemSearchTerms(prev => ({ ...prev, [itemId]: value }));
 
-    // Update item name for any item being edited
-    setItems(items.map(item => {
-      if (item.id === itemId) {
-        return {
-          ...item,
-          item_name: value,
-          master_item_id: undefined, // Clear master reference when manually editing
-          is_new: true // Mark as new/custom when manually edited
-        };
-      }
-      return item;
-    }));
+    // Normalize function to ignore spaces and case
+    const normalizeItemName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+
+    // Check if this value would be a duplicate (excluding current item)
+    const usedItemNames = items
+      .filter(i => i.id !== itemId && i.item_name.trim())
+      .map(i => normalizeItemName(i.item_name));
+
+    const isDuplicate = value.trim() && usedItemNames.includes(normalizeItemName(value));
+
+    // Only update item name if NOT a duplicate
+    if (!isDuplicate) {
+      setItems(items.map(item => {
+        if (item.id === itemId) {
+          return {
+            ...item,
+            item_name: value,
+            master_item_id: undefined, // Clear master reference when manually editing
+            is_new: true // Mark as new/custom when manually edited
+          };
+        }
+        return item;
+      }));
+    }
 
     // Open dropdown if there's text
     if (value.trim()) {
@@ -1739,6 +1778,96 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     }));
   };
 
+  // Select existing sub-item from database and populate its data including materials and labour
+  const selectExistingSubItem = async (itemId: string, subItemId: string, subItemName: string) => {
+    try {
+      console.log('Fetching sub-item data for:', subItemName);
+      const result = await estimatorService.getSubItemByName(subItemName);
+
+      if (result.success && result.sub_item) {
+        const masterSubItem = result.sub_item;
+        console.log('Loaded sub-item data:', masterSubItem);
+
+        // Map materials from database to form format
+        const mappedMaterials: BOQMaterialForm[] = masterSubItem.materials.map((mat) => ({
+          id: `mat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          material_name: mat.material_name,
+          description: mat.description || '',
+          brand: mat.brand || '',
+          size: mat.size || '',
+          specification: mat.specification || '',
+          quantity: mat.quantity || 1,
+          unit: mat.unit || 'nos',
+          unit_price: mat.unit_price || 0,
+          vat_percentage: 0,
+          master_material_id: mat.material_id,
+          is_from_master: true,
+          is_new: false
+        }));
+
+        // Map labour from database to form format
+        const mappedLabour: BOQLabourForm[] = masterSubItem.labour.map((lab) => ({
+          id: `lab-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          labour_role: lab.labour_role,
+          work_type: (lab.work_type as 'piece_rate' | 'contract' | 'daily_wages') || 'daily_wages',
+          hours: lab.hours || 8,
+          rate_per_hour: lab.rate_per_hour || 0,
+          master_labour_id: lab.labour_id,
+          is_from_master: true,
+          is_new: false
+        }));
+
+        // Update the sub-item with all the fetched data
+        setItems(items.map(item => {
+          if (item.id === itemId) {
+            const updatedSubItems = item.sub_items.map(si => {
+              if (si.id === subItemId) {
+                return {
+                  ...si,
+                  sub_item_name: masterSubItem.sub_item_name,
+                  scope: masterSubItem.scope || masterSubItem.description || '',
+                  size: masterSubItem.size || '',
+                  location: masterSubItem.location || '',
+                  brand: masterSubItem.brand || '',
+                  unit: masterSubItem.unit || 'nos',
+                  quantity: masterSubItem.quantity || 1,
+                  rate: masterSubItem.rate || 0,
+                  misc_percentage: masterSubItem.misc_percentage || 10,
+                  overhead_profit_percentage: masterSubItem.overhead_profit_percentage || 25,
+                  transport_percentage: masterSubItem.transport_percentage || 5,
+                  materials: mappedMaterials,
+                  labour: mappedLabour,
+                  master_sub_item_id: masterSubItem.sub_item_id,
+                  is_new: false
+                };
+              }
+              return si;
+            });
+
+            // Auto-calculate item rate from sub-items total
+            const subItemsTotal = updatedSubItems.reduce((sum, si) => sum + (si.quantity * si.rate), 0);
+
+            return {
+              ...item,
+              sub_items: updatedSubItems,
+              rate: subItemsTotal
+            };
+          }
+          return item;
+        }));
+
+        showSuccess(`Loaded "${subItemName}" with ${mappedMaterials.length} materials and ${mappedLabour.length} labour entries`);
+      } else {
+        // If not found in database, just update the name
+        updateSubItem(itemId, subItemId, 'sub_item_name', subItemName);
+      }
+    } catch (error) {
+      console.error('Error loading sub-item data:', error);
+      // Fallback: just update the name
+      updateSubItem(itemId, subItemId, 'sub_item_name', subItemName);
+    }
+  };
+
   // Sub-item material management
   const addSubItemMaterial = (itemId: string, subItemId: string) => {
     const newMaterial: BOQMaterialForm = {
@@ -1862,6 +1991,30 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     const item = items.find(i => i.id === itemId);
     if (!item?.master_item_id) return [];
     return itemLabours[item.master_item_id] || [];
+  };
+
+  // Get all unique sub-item names from database and current form (for autocomplete suggestions)
+  const getAllSubItemNames = (excludeSubItemId?: string): string[] => {
+    const namesSet = new Set<string>();
+
+    // Add names from database (master sub-item names)
+    masterSubItemNames.forEach(name => {
+      if (name.trim()) {
+        namesSet.add(name.trim());
+      }
+    });
+
+    // Add names from current form items (in case user added new ones not in DB yet)
+    items.forEach(item => {
+      item.sub_items.forEach(subItem => {
+        // Exclude the current sub-item being edited and only add non-empty names
+        if (subItem.id !== excludeSubItemId && subItem.sub_item_name.trim()) {
+          namesSet.add(subItem.sub_item_name.trim());
+        }
+      });
+    });
+
+    return Array.from(namesSet).sort();
   };
 
   const selectMasterLabour = (itemId: string, labourId: string, masterLabour: MasterLabour) => {
@@ -3921,14 +4074,32 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 </div>
 
                                 {/* Item Name Input - Takes remaining space */}
+                                {(() => {
+                                  // Check for duplicate item names (ignore spaces and case)
+                                  const normalizeItemName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+                                  const searchValue = itemSearchTerms[item.id] || item.item_name;
+                                  const usedItemNames = items
+                                    .filter(i => i.id !== item.id && i.item_name.trim())
+                                    .map(i => normalizeItemName(i.item_name));
+                                  const isDuplicateItemName = searchValue.trim() && usedItemNames.includes(normalizeItemName(searchValue));
+
+                                  return (
                                 <div className="flex-1 relative item-dropdown-container">
                                   <div className="relative">
                                     <input
                                       type="text"
                                       value={itemSearchTerms[item.id] || item.item_name}
                                       onChange={(e) => handleItemNameChange(item.id, e.target.value)}
+                                      onBlur={() => {
+                                        // On blur, sync search term back to actual value
+                                        setItemSearchTerms(prev => ({ ...prev, [item.id]: item.item_name }));
+                                      }}
                                       maxLength={BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME}
-                                      className="w-full px-3 py-2 pr-8 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                      className={`w-full px-3 py-2 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 bg-white ${
+                                        isDuplicateItemName
+                                          ? 'border-red-400 focus:ring-red-500 bg-red-50'
+                                          : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                                      }`}
                                       placeholder="Search or type item name"
                                       disabled={isSubmitting || loadingItemData[item.id]}
                                       onFocus={() => {
@@ -3944,8 +4115,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                     )}
                                   </div>
-                                  <div className="flex justify-end mt-1">
-                                    <span className={`text-xs ${(itemSearchTerms[item.id] || item.item_name).length >= BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME ? 'text-red-500' : 'text-gray-400'}`}>
+                                  <div className="flex justify-between items-center mt-1">
+                                    {isDuplicateItemName && (
+                                      <span className="text-xs text-red-500 font-medium">Item already exists - cannot add duplicate</span>
+                                    )}
+                                    <span className={`text-xs ml-auto ${(itemSearchTerms[item.id] || item.item_name).length >= BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME ? 'text-red-500' : 'text-gray-400'}`}>
                                       {(itemSearchTerms[item.id] || item.item_name).length}/{BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME}
                                     </span>
                                   </div>
@@ -3955,6 +4129,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                         const filtered = getFilteredItems(itemSearchTerms[item.id] || '');
                                         const showNewOption = itemSearchTerms[item.id] &&
                                           !filtered.some(i => i.item_name.toLowerCase() === itemSearchTerms[item.id].toLowerCase());
+
+                                        // Get already used item names (ignore spaces and case)
+                                        const normalizeItemName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+                                        const usedItemNames = items
+                                          .filter(i => i.id !== item.id && i.item_name.trim())
+                                          .map(i => normalizeItemName(i.item_name));
+
+                                        // Check if new option would be duplicate
+                                        const isNewOptionDuplicate = itemSearchTerms[item.id] &&
+                                          usedItemNames.includes(normalizeItemName(itemSearchTerms[item.id]));
 
                                         if (filtered.length === 0 && !showNewOption) {
                                           return (
@@ -3966,25 +4150,41 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                                         return (
                                           <>
-                                            {filtered.map(masterItem => (
+                                            {filtered.map(masterItem => {
+                                              const isAlreadyUsed = usedItemNames.includes(normalizeItemName(masterItem.item_name));
+                                              return (
                                               <button
                                                 key={masterItem.item_id}
                                                 type="button"
-                                                onClick={() => selectMasterItem(item.id, masterItem)}
-                                                className={`w-full px-3 text-left text-sm hover:bg-blue-50 transition-colors flex items-center justify-between group border-b border-gray-100 last:border-b-0 ${masterItem.description ? 'py-2' : 'py-1.5'}`}
+                                                onClick={() => {
+                                                  if (isAlreadyUsed) return;
+                                                  selectMasterItem(item.id, masterItem);
+                                                }}
+                                                disabled={isAlreadyUsed}
+                                                className={`w-full px-3 text-left text-sm transition-colors flex items-center justify-between group border-b border-gray-100 last:border-b-0 ${masterItem.description ? 'py-2' : 'py-1.5'} ${
+                                                  isAlreadyUsed
+                                                    ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                    : 'hover:bg-blue-50 cursor-pointer'
+                                                }`}
                                               >
                                                 <div className="flex-1 min-w-0">
-                                                  <div className="font-medium text-gray-900 text-sm">{masterItem.item_name}</div>
+                                                  <div className={`font-medium text-sm ${isAlreadyUsed ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                                    {masterItem.item_name}
+                                                    {isAlreadyUsed && <span className="ml-2 text-xs text-red-500 no-underline">(Already added)</span>}
+                                                  </div>
                                                   {masterItem.description && (
                                                     <div className="text-xs text-gray-500 truncate">{masterItem.description}</div>
                                                   )}
                                                 </div>
-                                                <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity ml-2 flex-shrink-0">
-                                                  Select
-                                                </span>
+                                                {!isAlreadyUsed && (
+                                                  <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity ml-2 flex-shrink-0">
+                                                    Select
+                                                  </span>
+                                                )}
                                               </button>
-                                            ))}
-                                            {showNewOption && (
+                                              );
+                                            })}
+                                            {showNewOption && !isNewOptionDuplicate && (
                                               <button
                                                 type="button"
                                                 onClick={() => {
@@ -4002,12 +4202,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 </div>
                                               </button>
                                             )}
+                                            {showNewOption && isNewOptionDuplicate && (
+                                              <div className="w-full px-3 py-2 text-left text-sm bg-red-50 border-t border-gray-200">
+                                                <div className="flex items-center gap-2">
+                                                  <span className="text-red-500">✗</span>
+                                                  <span className="font-medium text-red-600">
+                                                    "{itemSearchTerms[item.id]}" already exists
+                                                  </span>
+                                                </div>
+                                              </div>
+                                            )}
                                           </>
                                         );
                                       })()}
                                     </div>
                                   )}
                                 </div>
+                                  );
+                                })()}
 
                                 {/* Delete Button - On the Right */}
                                 <button
@@ -4094,16 +4306,128 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     <label className="block text-xs font-medium text-gray-700 mb-1">
                                       Sub Item Name <span className="text-red-500">*</span>
                                     </label>
-                                    <input
-                                      type="text"
-                                      value={subItem.sub_item_name}
-                                      onChange={(e) => updateSubItem(item.id, subItem.id, 'sub_item_name', e.target.value)}
-                                      maxLength={BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME}
-                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                                      placeholder="e.g., Flooring Work"
-                                      required
-                                      disabled={isSubmitting}
-                                    />
+                                    {(() => {
+                                      const subItemNameDropdownId = `${item.id}-${subItem.id}-name`;
+                                      const existingSubItemNames = getAllSubItemNames(subItem.id);
+                                      const searchTerm = subItemNameSearchTerms[subItemNameDropdownId] ?? subItem.sub_item_name;
+                                      const filteredNames = existingSubItemNames.filter(name =>
+                                        !searchTerm || name.toLowerCase().includes(searchTerm.toLowerCase())
+                                      );
+
+                                      // Normalize function to ignore spaces and case
+                                      const normalizeSubItemName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+
+                                      // Check which sub-item names are already used in THIS item (excluding current sub-item)
+                                      const usedInThisItem = item.sub_items
+                                        .filter(si => si.id !== subItem.id && si.sub_item_name.trim())
+                                        .map(si => normalizeSubItemName(si.sub_item_name));
+
+                                      // Check if a value would be duplicate
+                                      const checkSubItemIsDuplicate = (value: string) => {
+                                        if (!value.trim()) return false;
+                                        return usedInThisItem.includes(normalizeSubItemName(value));
+                                      };
+
+                                      const isDuplicateInItem = checkSubItemIsDuplicate(searchTerm);
+
+                                      return (
+                                        <div className="relative">
+                                          <input
+                                            type="text"
+                                            value={subItemNameSearchTerms[subItemNameDropdownId] ?? subItem.sub_item_name}
+                                            onChange={(e) => {
+                                              const newValue = e.target.value;
+                                              // Always update search term for filtering dropdown
+                                              setSubItemNameSearchTerms(prev => ({ ...prev, [subItemNameDropdownId]: newValue }));
+                                              // Only update actual value if NOT a duplicate
+                                              if (!checkSubItemIsDuplicate(newValue)) {
+                                                updateSubItem(item.id, subItem.id, 'sub_item_name', newValue);
+                                              }
+                                              if (existingSubItemNames.length > 0) {
+                                                setSubItemNameDropdownOpen(prev => ({ ...prev, [subItemNameDropdownId]: true }));
+                                              }
+                                            }}
+                                            onFocus={() => {
+                                              if (existingSubItemNames.length > 0) {
+                                                setSubItemNameDropdownOpen(prev => ({ ...prev, [subItemNameDropdownId]: true }));
+                                              }
+                                            }}
+                                            onBlur={() => {
+                                              // On blur, sync search term back to actual value
+                                              setSubItemNameSearchTerms(prev => ({ ...prev, [subItemNameDropdownId]: subItem.sub_item_name }));
+                                              // Delay closing to allow click on dropdown item
+                                              setTimeout(() => {
+                                                setSubItemNameDropdownOpen(prev => ({ ...prev, [subItemNameDropdownId]: false }));
+                                              }, 200);
+                                            }}
+                                            maxLength={BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME}
+                                            className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
+                                              isDuplicateInItem
+                                                ? 'border-red-400 focus:ring-red-500 bg-red-50'
+                                                : 'border-gray-300 focus:ring-green-500'
+                                            } ${existingSubItemNames.length > 0 ? 'pr-8' : ''}`}
+                                            placeholder={existingSubItemNames.length > 0 ? "Type or select existing sub-item" : "e.g., Flooring Work"}
+                                            required
+                                            disabled={isSubmitting}
+                                          />
+                                          {existingSubItemNames.length > 0 && (
+                                            <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                          )}
+
+                                          {/* Warning if duplicate in this item */}
+                                          {isDuplicateInItem && (
+                                            <div className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                                              <span>⚠</span> Sub-item already exists - cannot add duplicate
+                                            </div>
+                                          )}
+
+                                          {/* Dropdown for existing sub-item names */}
+                                          {subItemNameDropdownOpen[subItemNameDropdownId] && filteredNames.length > 0 && (
+                                            <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                                              <div className="px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-50 border-b border-gray-100">
+                                                Existing sub-items
+                                              </div>
+                                              {filteredNames.map((existingName, idx) => {
+                                                const isAlreadyInThisItem = usedInThisItem.includes(normalizeSubItemName(existingName));
+                                                return (
+                                                  <div
+                                                    key={idx}
+                                                    onMouseDown={(e) => e.preventDefault()}
+                                                    onClick={() => {
+                                                      if (isAlreadyInThisItem) {
+                                                        // Don't allow selection - already in this item
+                                                        return;
+                                                      }
+                                                      // Fetch and populate sub-item data from database
+                                                      selectExistingSubItem(item.id, subItem.id, existingName);
+                                                      setSubItemNameSearchTerms(prev => ({ ...prev, [subItemNameDropdownId]: existingName }));
+                                                      setSubItemNameDropdownOpen(prev => ({ ...prev, [subItemNameDropdownId]: false }));
+                                                    }}
+                                                    className={`w-full px-3 py-2 text-left text-sm transition-colors flex items-center gap-2 ${
+                                                      isAlreadyInThisItem
+                                                        ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                        : 'hover:bg-green-50 cursor-pointer'
+                                                    }`}
+                                                  >
+                                                    {isAlreadyInThisItem ? (
+                                                      <span className="text-gray-400">✗</span>
+                                                    ) : (
+                                                      <span className="text-green-600">✓</span>
+                                                    )}
+                                                    <span className={isAlreadyInThisItem ? 'text-gray-400 line-through' : 'text-gray-700'}>
+                                                      {existingName}
+                                                    </span>
+                                                    <span className={`ml-auto text-xs ${isAlreadyInThisItem ? 'text-gray-400' : 'text-gray-400'}`}>
+                                                      {isAlreadyInThisItem ? 'Already added' : 'Click to load'}
+                                                    </span>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
                                     <div className="flex justify-end mt-1">
                                       <span className={`text-xs ${subItem.sub_item_name.length >= BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME ? 'text-red-500' : 'text-gray-400'}`}>
                                         {subItem.sub_item_name.length}/{BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME}
@@ -4505,6 +4829,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                         const materialDropdownId = `${item.id}-${subItem.id}-${material.id}`;
                                         const availableMaterials = getAvailableMaterials(item.id);
 
+                                        // Check for duplicate material names within this sub-item (ignore spaces and case)
+                                        const normalizeForComparison = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+                                        const usedMaterialNamesInSubItem = subItem.materials
+                                          .filter(m => m.id !== material.id && m.material_name.trim())
+                                          .map(m => normalizeForComparison(m.material_name));
+
+                                        // Check if new value would be duplicate
+                                        const checkIsDuplicate = (value: string) => {
+                                          if (!value.trim()) return false;
+                                          return usedMaterialNamesInSubItem.includes(normalizeForComparison(value));
+                                        };
+
                                         return (
                                           <div key={material.id} className="space-y-1">
                                             <div className="flex items-center gap-2">
@@ -4516,13 +4852,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   type="text"
                                                   value={materialSearchTerms[materialDropdownId] || material.material_name}
                                                   onChange={(e) => {
-                                                    setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: e.target.value }));
-                                                    if (!material.is_from_master) {
-                                                      updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', e.target.value);
+                                                    const newValue = e.target.value;
+                                                    // Always update search term for filtering dropdown
+                                                    setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: newValue }));
+
+                                                    // Only update actual material name if NOT a duplicate
+                                                    if (!material.is_from_master && !checkIsDuplicate(newValue)) {
+                                                      updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', newValue);
                                                     }
                                                     if (availableMaterials.length > 0) {
                                                       setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
                                                     }
+                                                  }}
+                                                  onBlur={() => {
+                                                    // On blur, sync search term back to actual value (prevents showing blocked value)
+                                                    setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: material.material_name }));
                                                   }}
                                                   onFocus={() => {
                                                     if (availableMaterials.length > 0) {
@@ -4531,9 +4875,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   }}
                                                   maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME}
                                                   className={`w-full px-3 py-1.5 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
-                                                    material.is_from_master
-                                                      ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                                      : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
+                                                    checkIsDuplicate(materialSearchTerms[materialDropdownId] || '')
+                                                      ? 'border-red-500 bg-red-50 focus:ring-red-500 focus:border-red-500'
+                                                      : material.is_from_master
+                                                        ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
+                                                        : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
                                                   }`}
                                                   placeholder={availableMaterials.length > 0 ? "Search materials or type new" : "Material name"}
                                                   disabled={isSubmitting || material.is_from_master}
@@ -4542,8 +4888,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 {availableMaterials.length > 0 && (
                                                   <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
                                                 )}
-                                                <div className="flex justify-end mt-0.5">
-                                                  <span className={`text-xs ${(materialSearchTerms[materialDropdownId] || material.material_name).length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME ? 'text-red-500' : 'text-gray-400'}`}>
+                                                <div className="flex justify-between items-center mt-0.5">
+                                                  {checkIsDuplicate(materialSearchTerms[materialDropdownId] || '') && (
+                                                    <span className="text-xs text-red-600 font-medium">Material already exists - cannot add duplicate</span>
+                                                  )}
+                                                  <span className={`text-xs ml-auto ${(materialSearchTerms[materialDropdownId] || material.material_name).length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME ? 'text-red-500' : 'text-gray-400'}`}>
                                                     {(materialSearchTerms[materialDropdownId] || material.material_name).length}/{BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME}
                                                   </span>
                                                 </div>
@@ -4555,32 +4904,46 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                         !materialSearchTerms[materialDropdownId] ||
                                                         mat.material_name.toLowerCase().includes(materialSearchTerms[materialDropdownId].toLowerCase())
                                                       )
-                                                      .map(masterMaterial => (
-                                                        <button
-                                                          key={masterMaterial.material_id}
-                                                          type="button"
-                                                          onClick={() => {
-                                                            // Update sub-item material with master data
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', masterMaterial.material_name);
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'description', masterMaterial.description || '');
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'brand', masterMaterial.brand || '');
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'size', masterMaterial.size || '');
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'specification', masterMaterial.specification || '');
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'unit', masterMaterial.default_unit);
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'unit_price', masterMaterial.current_market_price);
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'master_material_id', masterMaterial.material_id);
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'is_from_master', true);
-                                                            setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
-                                                            setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: masterMaterial.material_name }));
-                                                          }}
-                                                          className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors"
-                                                        >
-                                                          <div className="font-medium text-gray-900">{masterMaterial.material_name}</div>
-                                                          <div className="text-xs text-gray-500">
-                                                            AED{masterMaterial.current_market_price}/{masterMaterial.default_unit}
-                                                          </div>
-                                                        </button>
-                                                      ))
+                                                      .map(masterMaterial => {
+                                                        // Check if this material is already added in this sub-item (ignore spaces)
+                                                        const isAlreadyInSubItem = usedMaterialNamesInSubItem.includes(normalizeForComparison(masterMaterial.material_name));
+
+                                                        return (
+                                                          <button
+                                                            key={masterMaterial.material_id}
+                                                            type="button"
+                                                            onClick={() => {
+                                                              if (isAlreadyInSubItem) return;
+                                                              // Update sub-item material with master data
+                                                              updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', masterMaterial.material_name);
+                                                              updateSubItemMaterial(item.id, subItem.id, material.id, 'description', masterMaterial.description || '');
+                                                              updateSubItemMaterial(item.id, subItem.id, material.id, 'brand', masterMaterial.brand || '');
+                                                              updateSubItemMaterial(item.id, subItem.id, material.id, 'size', masterMaterial.size || '');
+                                                              updateSubItemMaterial(item.id, subItem.id, material.id, 'specification', masterMaterial.specification || '');
+                                                              updateSubItemMaterial(item.id, subItem.id, material.id, 'unit', masterMaterial.default_unit);
+                                                              updateSubItemMaterial(item.id, subItem.id, material.id, 'unit_price', masterMaterial.current_market_price);
+                                                              updateSubItemMaterial(item.id, subItem.id, material.id, 'master_material_id', masterMaterial.material_id);
+                                                              updateSubItemMaterial(item.id, subItem.id, material.id, 'is_from_master', true);
+                                                              setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
+                                                              setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: masterMaterial.material_name }));
+                                                            }}
+                                                            className={`w-full px-3 py-2 text-left text-sm transition-colors ${
+                                                              isAlreadyInSubItem
+                                                                ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                                : 'hover:bg-blue-50 cursor-pointer'
+                                                            }`}
+                                                            disabled={isAlreadyInSubItem}
+                                                          >
+                                                            <div className={`font-medium ${isAlreadyInSubItem ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                                              {masterMaterial.material_name}
+                                                              {isAlreadyInSubItem && <span className="ml-2 text-xs text-red-500 no-underline">(Already added)</span>}
+                                                            </div>
+                                                            <div className="text-xs text-gray-500">
+                                                              AED{masterMaterial.current_market_price}/{masterMaterial.default_unit}
+                                                            </div>
+                                                          </button>
+                                                        );
+                                                      })
                                                     }
                                                   </div>
                                                 )}
@@ -4791,7 +5154,25 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                         </div>
                                       )}
 
-                                      {subItem.labour.map((labour, labourIndex) => (
+                                      {subItem.labour.map((labour, labourIndex) => {
+                                        const labourInputId = `${item.id}-${subItem.id}-${labour.id}`;
+                                        // Check for duplicate labour roles within this sub-item (ignore spaces and case)
+                                        const normalizeLabourRole = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+                                        const usedLabourRolesInSubItem = subItem.labour
+                                          .filter(l => l.id !== labour.id && l.labour_role.trim())
+                                          .map(l => normalizeLabourRole(l.labour_role));
+
+                                        // Check if a value would be duplicate
+                                        const checkLabourIsDuplicate = (value: string) => {
+                                          if (!value.trim()) return false;
+                                          return usedLabourRolesInSubItem.includes(normalizeLabourRole(value));
+                                        };
+
+                                        // Check the current input value (what user is typing)
+                                        const currentInputValue = labourSearchTerms[labourInputId] ?? labour.labour_role;
+                                        const isDuplicateLabourInSubItem = checkLabourIsDuplicate(currentInputValue);
+
+                                        return (
                                         <div key={labour.id} className="space-y-1">
                                           <div className="flex items-center gap-2">
                                             <div className="w-10 flex items-center justify-center text-xs font-medium text-gray-600">
@@ -4800,34 +5181,52 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             <div className="flex-1 flex flex-col">
                                               <input
                                                 type="text"
-                                                value={labour.labour_role}
+                                                value={labourSearchTerms[labourInputId] ?? labour.labour_role}
                                                 onChange={(e) => {
-                                                  setItems(items.map(itm =>
-                                                    itm.id === item.id
-                                                      ? {
-                                                          ...itm,
-                                                          sub_items: itm.sub_items.map(si =>
-                                                            si.id === subItem.id
-                                                              ? {
-                                                                  ...si,
-                                                                  labour: si.labour.map(l =>
-                                                                    l.id === labour.id ? { ...l, labour_role: e.target.value } : l
-                                                                  )
-                                                                }
-                                                              : si
-                                                          )
-                                                        }
-                                                      : itm
-                                                  ));
+                                                  const newValue = e.target.value;
+                                                  // Always update the search term (what user sees)
+                                                  setLabourSearchTerms(prev => ({ ...prev, [labourInputId]: newValue }));
+                                                  // Only update actual value if NOT a duplicate
+                                                  if (!checkLabourIsDuplicate(newValue)) {
+                                                    setItems(items.map(itm =>
+                                                      itm.id === item.id
+                                                        ? {
+                                                            ...itm,
+                                                            sub_items: itm.sub_items.map(si =>
+                                                              si.id === subItem.id
+                                                                ? {
+                                                                    ...si,
+                                                                    labour: si.labour.map(l =>
+                                                                      l.id === labour.id ? { ...l, labour_role: newValue } : l
+                                                                    )
+                                                                  }
+                                                                : si
+                                                            )
+                                                          }
+                                                        : itm
+                                                    ));
+                                                  }
+                                                }}
+                                                onBlur={() => {
+                                                  // On blur, sync back to actual saved value
+                                                  setLabourSearchTerms(prev => ({ ...prev, [labourInputId]: labour.labour_role }));
                                                 }}
                                                 maxLength={BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE}
-                                                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                                                className={`w-full px-3 py-1.5 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
+                                                  isDuplicateLabourInSubItem
+                                                    ? 'border-red-500 bg-red-50 focus:ring-red-500 focus:border-red-500'
+                                                    : 'border-gray-300 focus:ring-orange-500 focus:border-orange-500'
+                                                }`}
                                                 placeholder="Labour role (e.g., Fabricator, Installer)"
                                                 disabled={isSubmitting}
+                                                title={isDuplicateLabourInSubItem ? 'This labour role is already added in this sub-item' : ''}
                                               />
-                                              <div className="flex justify-end">
-                                                <span className={`text-xs ${labour.labour_role.length >= BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE ? 'text-red-500' : 'text-gray-400'}`}>
-                                                  {labour.labour_role.length}/{BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE}
+                                              <div className="flex justify-between items-center">
+                                                {isDuplicateLabourInSubItem && (
+                                                  <span className="text-xs text-red-600 font-medium">Labour role already exists - cannot add duplicate</span>
+                                                )}
+                                                <span className={`text-xs ml-auto ${currentInputValue.length >= BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE ? 'text-red-500' : 'text-gray-400'}`}>
+                                                  {currentInputValue.length}/{BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE}
                                                 </span>
                                               </div>
                                             </div>
@@ -4941,7 +5340,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             </button>
                                           </div>
                                         </div>
-                                      ))}
+                                        );
+                                      })}
                                       {subItem.labour.length === 0 && (
                                         <div className="text-center py-3 text-xs text-gray-500 bg-orange-50/30 rounded-lg">
                                           No labour added yet. Click "+ Add Labour" to add one.
