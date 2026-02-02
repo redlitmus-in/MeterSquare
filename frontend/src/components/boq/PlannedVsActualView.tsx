@@ -1898,6 +1898,10 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     <span>Miscellaneous ({(selectedItemForBreakdown.planned.miscellaneous_percentage || 0).toFixed(1)}%):</span>
                     <span className="font-semibold">{formatCurrency(selectedItemForBreakdown.planned.miscellaneous_amount || 0)}</span>
                   </div>
+                  <div className="flex justify-between py-1">
+                    <span>Transport ({(selectedItemForBreakdown.planned.transport_percentage || 0).toFixed(1)}%):</span>
+                    <span className="font-semibold">{formatCurrency(selectedItemForBreakdown.planned.transport_amount || 0)}</span>
+                  </div>
                 </div>
               </div>
 
@@ -1977,44 +1981,17 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       {formatCurrency(Math.abs(selectedItemForBreakdown.actual.labour_total - selectedItemForBreakdown.planned.labour_total))}
                     </span>
                   </div>
-                  {/* REMOVED: O&P Variance - O&P is included in Negotiable Margin, not a separate cost */}
-                  {(() => {
-                    const materialVariance = selectedItemForBreakdown.actual.materials_total - selectedItemForBreakdown.planned.materials_total;
-                    const labourVariance = selectedItemForBreakdown.actual.labour_total - selectedItemForBreakdown.planned.labour_total;
-                    const hasCostVariance = materialVariance !== 0 || labourVariance !== 0;
-
-                    // Only show negotiable margin section if there are cost variances
-                    if (hasCostVariance) {
-                      return (
-                        <div className="mt-3 pt-3 border-t border-yellow-400 bg-blue-50 rounded p-3">
-                          <div className="text-xs font-semibold text-blue-900 mb-2">
-                            Impact on Profit Margin
-                          </div>
-                          <div className="text-xs text-gray-600 mb-2">
-                            Cost overruns have reduced the available profit margin.
-                          </div>
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-xs text-gray-600">Planned Negotiable Margin:</span>
-                            <span className="text-sm font-semibold">{formatCurrency(selectedItemForBreakdown.planned.profit_amount)}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-xs text-gray-600">Actual Margin Available:</span>
-                            <span className={`text-lg font-bold ${
-                              selectedItemForBreakdown.actual.profit_amount >= 0 ? 'text-green-600' : 'text-red-600'
-                            }`}>
-                              {formatCurrency(selectedItemForBreakdown.actual.profit_amount)}
-                            </span>
-                          </div>
-                          {selectedItemForBreakdown.actual.profit_amount < selectedItemForBreakdown.planned.profit_amount && (
-                            <div className="mt-2 text-xs text-orange-700 bg-orange-100 rounded p-2">
-                              ⚠️ Margin reduced by {formatCurrency(selectedItemForBreakdown.planned.profit_amount - selectedItemForBreakdown.actual.profit_amount)} due to cost overruns
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()}
+                  <div className="flex justify-between">
+                    <span>Transport Variance:</span>
+                    <span className={`font-semibold ${
+                      (selectedItemForBreakdown.actual.transport_amount - selectedItemForBreakdown.planned.transport_amount) > 0
+                        ? 'text-red-600'
+                        : 'text-green-600'
+                    }`}>
+                      {(selectedItemForBreakdown.actual.transport_amount - selectedItemForBreakdown.planned.transport_amount) > 0 ? '+' : ''}
+                      {formatCurrency(Math.abs((selectedItemForBreakdown.actual.transport_amount || 0) - (selectedItemForBreakdown.planned.transport_amount || 0)))}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

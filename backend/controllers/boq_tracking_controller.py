@@ -1733,7 +1733,7 @@ def get_boq_planned_vs_actual(boq_id):
                 "planned": {
                     "materials_total": float(planned_materials_total),
                     "labour_total": float(planned_labour_total),
-                    "base_cost": float(planned_base),
+                    "base_cost": float(planned_materials_total + planned_labour_total),
                     "client_amount_before_discount": float(selling_price_before_discount),
                     "discount_amount": float(item_discount_amount),
                     "discount_percentage": float(item_discount_percentage),
