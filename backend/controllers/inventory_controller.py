@@ -6053,8 +6053,8 @@ def check_material_availability():
                 continue
 
             # Validate quantity using existing helper
-            is_valid, error_msg = validate_quantity(requested_qty, 'quantity')
-            if not is_valid:
+            validated_qty, error_msg = validate_quantity(requested_qty, 'quantity')
+            if error_msg:  # Validation failed
                 results.append({
                     "material_name": material_name,
                     "brand": brand or "N/A",
@@ -6066,6 +6066,9 @@ def check_material_availability():
                 })
                 overall_available = False
                 continue
+
+            # Use validated quantity for further processing
+            requested_qty = validated_qty
 
             # Sanitize input to prevent SQL injection
             sanitized_name = sanitize_search_term(material_name)

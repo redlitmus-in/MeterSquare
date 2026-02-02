@@ -133,6 +133,30 @@ class EstimatorService {
     }
   }
 
+  // Get BOQs sent to client (Client Pending) - same as getSentBOQs but with clearer naming
+  async getClientPendingBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+    return this.getSentBOQs();
+  }
+
+  // Get BOQs rejected by client
+  async getClientRejectedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+    try {
+      const response = await apiClient.get('/rejected_boq');
+      // Filter only client-rejected BOQs (status: Client_Rejected or client_rejected)
+      const clientRejected = (response.data?.data || response.data || []).filter((boq: any) =>
+        boq.status === 'Client_Rejected' || boq.status === 'client_rejected'
+      );
+      return {
+        success: true,
+        data: clientRejected,
+        count: clientRejected.length
+      };
+    } catch (error: any) {
+      console.error('Error fetching client rejected BOQs:', error.response?.data || error.message);
+      return { success: false, data: [], count: 0 };
+    }
+  }
+
   async getRevisionsBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
       const response = await apiClient.get('/revisions_boq');
