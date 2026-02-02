@@ -205,7 +205,13 @@ class DNPDFGenerator:
         delivery_from = self._escape_html(dn_data.get('delivery_from', DefaultValues.DEFAULT_STORE_NAME))
         requested_by = self._escape_html(dn_data.get('requested_by')) if dn_data.get('requested_by') else '-'
         request_date = self._format_date(dn_data.get('request_date')) if dn_data.get('request_date') else '-'
-        vehicle_driver = f"{self._escape_html(dn_data.get('vehicle_number', '-'))} / {self._escape_html(dn_data.get('driver_name', '-'))}"
+
+        # Format Vehicle & Driver (without contact - contact gets its own row)
+        vehicle_number = self._escape_html(dn_data.get('vehicle_number', '-'))
+        driver_name = self._escape_html(dn_data.get('driver_name', '-'))
+        driver_contact = self._escape_html(dn_data.get('driver_contact', '-'))
+
+        vehicle_driver = f"{vehicle_number} / {driver_name}"
 
         # Format transport fee
         transport_fee = dn_data.get('transport_fee')
@@ -243,8 +249,8 @@ class DNPDFGenerator:
             [
                 Paragraph('<b>Transport Fee:</b>', self.styles['DNLabel']),
                 Paragraph(transport_fee_str, self.styles['DNNormal']),
-                '',
-                '',
+                Paragraph('<b>Driver Contact:</b>', self.styles['DNLabel']),
+                Paragraph(driver_contact, self.styles['DNNormal']),
             ],
         ]
 

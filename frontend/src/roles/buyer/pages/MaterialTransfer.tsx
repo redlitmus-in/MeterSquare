@@ -68,6 +68,11 @@ const MaterialTransfer: React.FC = () => {
   const [openUnitDropdown, setOpenUnitDropdown] = useState<string | null>(null);
   const unitDropdownRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
+  // Autocomplete State
+  const [activeMaterialInput, setActiveMaterialInput] = useState<string | null>(null);
+  const [materialSuggestions, setMaterialSuggestions] = useState<any[]>([]);
+  const autocompleteRef = useRef<HTMLDivElement | null>(null);
+
   // Dispatch Modal State
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [selectedDNForDispatch, setSelectedDNForDispatch] = useState<{ id: number; number: string } | null>(null);
@@ -248,6 +253,18 @@ const MaterialTransfer: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [openUnitDropdown]);
 
+  // Close autocomplete when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (autocompleteRef.current && !autocompleteRef.current.contains(event.target as Node)) {
+        setActiveMaterialInput(null);
+        setMaterialSuggestions([]);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Get filtered units based on current input
   const getFilteredUnits = (currentValue: string) => {
     if (!currentValue.trim()) return COMMON_UNITS;
@@ -293,11 +310,27 @@ const MaterialTransfer: React.FC = () => {
     );
   };
 
-  // Handle material name change with inventory matching
+  // Handle material name change with inventory matching and autocomplete
   const handleMaterialNameChange = (id: string, value: string) => {
     updateMaterial(id, 'material_name', value);
 
-    // Auto-match with inventory material
+    // Show autocomplete suggestions
+    if (value.trim().length >= 2) {
+      const searchTerm = value.toLowerCase();
+      const suggestions = inventoryMaterials.filter(inv =>
+        inv.name?.toLowerCase().includes(searchTerm) ||
+        inv.specifications?.material_code?.toLowerCase().includes(searchTerm) ||
+        inv.specifications?.brand?.toLowerCase().includes(searchTerm)
+      ).slice(0, 10); // Limit to 10 suggestions
+
+      setMaterialSuggestions(suggestions);
+      setActiveMaterialInput(id);
+    } else {
+      setMaterialSuggestions([]);
+      setActiveMaterialInput(null);
+    }
+
+    // Auto-match with inventory material (exact match)
     if (value.trim()) {
       const matchedMaterial = inventoryMaterials.find(
         inv => inv.name?.toLowerCase() === value.toLowerCase()
@@ -310,6 +343,15 @@ const MaterialTransfer: React.FC = () => {
         updateMaterial(id, 'inventory_material_id', undefined);
       }
     }
+  };
+
+  // Select material from autocomplete suggestions
+  const selectMaterialFromSuggestion = (materialId: string, suggestion: any) => {
+    updateMaterial(materialId, 'material_name', suggestion.name);
+    updateMaterial(materialId, 'inventory_material_id', suggestion.id);
+    updateMaterial(materialId, 'unit', suggestion.unit || 'pcs');
+    setActiveMaterialInput(null);
+    setMaterialSuggestions([]);
   };
 
   // Submit material transfer
@@ -616,15 +658,63 @@ const MaterialTransfer: React.FC = () => {
                               <span className="text-sm text-gray-500">Loading materials...</span>
                             </div>
                           ) : (
-                            <div className="space-y-1">
+                            <div className="space-y-1 relative">
                               <Input
                                 type="text"
-                                placeholder="Type or select material name"
+                                placeholder="Type to search material name..."
                                 value={material.material_name}
                                 onChange={(e) => handleMaterialNameChange(material.id, e.target.value)}
                                 className="w-full border-gray-300 focus:border-blue-500 focus:ring-blue-500"
                                 disabled={isLoadingMaterials}
+                                onFocus={() => {
+                                  if (material.material_name.trim().length >= 2) {
+                                    setActiveMaterialInput(material.id);
+                                  }
+                                }}
                               />
+
+                              {/* Autocomplete Dropdown */}
+                              {activeMaterialInput === material.id && materialSuggestions.length > 0 && (
+                                <div
+                                  ref={autocompleteRef}
+                                  className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                                >
+                                  {materialSuggestions.map((suggestion, idx) => (
+                                    <div
+                                      key={idx}
+                                      onClick={() => selectMaterialFromSuggestion(material.id, suggestion)}
+                                      className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
+                                    >
+                                      <div className="flex items-start justify-between">
+                                        <div className="flex-1">
+                                          <div className="font-medium text-gray-900">{suggestion.name}</div>
+                                          <div className="text-xs text-gray-500 mt-1 space-y-0.5">
+                                            {suggestion.specifications?.material_code && (
+                                              <div>Code: {suggestion.specifications.material_code}</div>
+                                            )}
+                                            {suggestion.specifications?.brand && suggestion.specifications.brand !== 'N/A' && (
+                                              <div>Brand: {suggestion.specifications.brand}</div>
+                                            )}
+                                            {suggestion.specifications?.size && suggestion.specifications.size !== 'N/A' && (
+                                              <div>Size: {suggestion.specifications.size}</div>
+                                            )}
+                                            <div className="flex items-center gap-2">
+                                              <span>Stock: {suggestion.available_quantity || 0} {suggestion.unit}</span>
+                                              {suggestion.category && (
+                                                <span className="text-gray-400">• {suggestion.category}</span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-300 ml-2">
+                                          Select
+                                        </Badge>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
                               {/* Inventory Status Badge (only for M2 Store transfers) */}
                               {transferDestination === 'store' && material.material_name.trim() && (
                                 <div className="flex items-center gap-1">
