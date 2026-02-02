@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react';
 import { boqTrackingService } from '../../roles/project-manager/services/boqTrackingService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
@@ -1796,13 +1798,17 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                 `}</style>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-2xl shadow-lg ${
-                      (data.summary.negotiable_margin || 0) >= 0 ? 'bg-green-600' : 'bg-red-600'
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg ${
+                      (data.summary.negotiable_margin || 0) >= 0 ? 'bg-gradient-to-br from-green-500 to-green-600' : 'bg-gradient-to-br from-red-500 to-red-600'
                     }`}>
-                      {(data.summary.negotiable_margin || 0) >= 0 ? '✓' : '✗'}
+                      {(data.summary.negotiable_margin || 0) >= 0 ? (
+                        <CheckCircle className="w-10 h-10 text-white" strokeWidth={2.5} />
+                      ) : (
+                        <XCircle className="w-10 h-10 text-white" strokeWidth={2.5} />
+                      )}
                     </div>
                     <div>
-                      <p className="text-xs text-gray-600 font-semibold uppercase mb-1">Final Project Status</p>
+                      <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">Final Project Status</p>
                       <p className={`text-2xl font-bold ${
                         (data.summary.negotiable_margin || 0) >= 0 ? 'text-green-700' : 'text-red-700'
                       }`}>
@@ -1810,46 +1816,68 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       </p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className={`text-xs font-semibold mb-1 uppercase px-3 py-1 rounded-full inline-block ${
-                      data.summary.status === 'under_budget' ? 'bg-green-100 text-green-700' :
-                      data.summary.status === 'on_budget' ? 'bg-blue-100 text-blue-700' :
-                      'bg-red-100 text-red-700'
-                    }`}>
-                      {data.summary.status === 'on_budget' ? 'ON BUDGET' : data.summary.status === 'under_budget' ? 'UNDER BUDGET' : 'OVER BUDGET'}
-                    </p>
-                    <p className="text-xs text-gray-600 mt-1">
-                      {data.summary.status === 'over_budget'
-                        ? 'Spent more than planned'
-                        : data.summary.status === 'under_budget'
-                        ? 'Spent less than planned'
-                        : 'Spending as planned'}
-                    </p>
-                    <div className="flex items-center justify-end gap-3 mt-2">
-                      <p className={`text-3xl font-bold ${
-                        (data.summary.negotiable_margin || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        AED{(data.summary.negotiable_margin || 0).toFixed(2)}
-                      </p>
+                  <div className="text-right flex flex-col items-end gap-3">
+                    {/* Budget Status Badge - Only show when profitable or break-even */}
+                    {(data.summary.negotiable_margin || 0) >= 0 && (
+                      <div className="flex flex-col items-end">
+                        <p className={`text-sm font-bold uppercase px-4 py-2 rounded-lg shadow-sm ${
+                          data.summary.status === 'under_budget' ? 'bg-green-100 text-green-800 border-2 border-green-300' :
+                          data.summary.status === 'on_budget' ? 'bg-blue-100 text-blue-800 border-2 border-blue-300' :
+                          'bg-red-100 text-red-800 border-2 border-red-300'
+                        }`}>
+                          {data.summary.status === 'on_budget' ? 'ON BUDGET' : data.summary.status === 'under_budget' ? 'UNDER BUDGET' : 'OVER BUDGET'}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1 font-medium">
+                          {data.summary.status === 'over_budget'
+                            ? 'Spent more than planned'
+                            : data.summary.status === 'under_budget'
+                            ? 'Spent less than planned'
+                            : 'Spending as planned'}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Loss Warning - Show when project is losing money */}
+                    {(data.summary.negotiable_margin || 0) < 0 && (
+                      <div className="flex flex-col items-end">
+                        <div className="bg-red-100 border-2 border-red-300 rounded-lg px-4 py-2">
+                          <p className="text-sm font-bold text-red-800 uppercase">CRITICAL LOSS</p>
+                          <p className="text-xs text-red-600 mt-1 font-medium">
+                            Client payment insufficient
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Amount Display */}
+                    <div className="flex items-center gap-4 bg-white rounded-lg px-4 py-3 shadow-md border border-gray-200">
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Negotiable Margin</p>
+                        <p className={`text-3xl font-bold ${
+                          (data.summary.negotiable_margin || 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          AED {(data.summary.negotiable_margin || 0).toFixed(2)}
+                        </p>
+                      </div>
                       <button
                         onClick={() => setShowProfitCalculationModal(true)}
                         className="relative group"
                         title="View Calculation Details"
                       >
-                        <div className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all float-animation glow-animation ${
+                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center shadow-md hover:shadow-lg transition-all ${
                           (data.summary.negotiable_margin || 0) >= 0 ? 'bg-blue-500 hover:bg-blue-600' : 'bg-orange-500 hover:bg-orange-600'
                         }`}>
-                          <Calculator className="w-7 h-7 text-white" />
+                          <Calculator className="w-6 h-6 text-white" />
                         </div>
                       </button>
                     </div>
+
                     {/* Formula Explanation */}
-                    <div className="text-[10px] text-blue-700 mt-3 italic bg-blue-100 px-3 py-2 rounded border border-blue-300">
-                      <strong>Formula:</strong> Negotiable Margin = Grand Total - Actual Spending
-                      <br />
-                      = {formatCurrency(data.summary.grand_total_with_preliminaries || 0)} - {formatCurrency(data.summary.actual_spending || 0)}
-                      <br />
-                      = {formatCurrency(data.summary.negotiable_margin || 0)}
+                    <div className="text-xs text-gray-600 bg-blue-50 px-4 py-2 rounded-lg border border-blue-200 max-w-md">
+                      <p className="font-semibold text-blue-900 mb-1">Formula: Negotiable Margin = Grand Total - Actual Spending</p>
+                      <p className="text-gray-700">
+                        {formatCurrency(data.summary.grand_total_with_preliminaries || 0)} - {formatCurrency(data.summary.actual_spending || 0)} = {formatCurrency(data.summary.negotiable_margin || 0)}
+                      </p>
                     </div>
                   </div>
                 </div>

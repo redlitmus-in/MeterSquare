@@ -35,7 +35,7 @@ import PurchaseDetailsModal from '../components/PurchaseDetailsModal';
 import MaterialVendorSelectionModal from '../components/MaterialVendorSelectionModal';
 import VendorEmailModal from '../components/VendorEmailModal';
 import EditPricesModal from '../components/EditPricesModal';
-import { removeQueries } from '@/lib/queryClient';
+import { removeQueries, invalidateQueries } from '@/lib/queryClient';
 import { STALE_TIMES, REALTIME_TABLES, PAGINATION } from '@/lib/constants';
 
 // Helper function to check if an item is a POChild (has parent_cr_id) vs a Purchase (has cr_id)
@@ -112,7 +112,7 @@ const PurchaseOrders: React.FC = () => {
     queryKey: ['buyer-pending-purchases'],
     fetchFn: () => buyerService.getPendingPurchases(1, 1000), // Fetch all (up to 1000)
     realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL],
-    staleTime: STALE_TIMES.STANDARD,
+    staleTime: 0, // Always fetch fresh data to ensure immediate updates after email sent
   });
 
   // ✅ OPTIMIZED: Fetch completed purchases - Real-time updates via Supabase (NO POLLING)
@@ -122,7 +122,7 @@ const PurchaseOrders: React.FC = () => {
     queryKey: ['buyer-completed-purchases'],
     fetchFn: () => buyerService.getCompletedPurchases(1, 1000), // Fetch all (up to 1000)
     realtimeTables: [...REALTIME_TABLES.PURCHASES],
-    staleTime: STALE_TIMES.DASHBOARD,
+    staleTime: 0, // Always fetch fresh data to ensure immediate updates after email sent
   });
 
   // ✅ OPTIMIZED: Fetch rejected purchases - Real-time updates via Supabase
@@ -132,7 +132,7 @@ const PurchaseOrders: React.FC = () => {
     queryKey: ['buyer-rejected-purchases'],
     fetchFn: () => buyerService.getRejectedPurchases(1, 1000), // Fetch all (up to 1000)
     realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL],
-    staleTime: STALE_TIMES.DASHBOARD,
+    staleTime: 0, // Always fetch fresh data to ensure immediate updates after email sent
   });
 
   // ✅ Fetch approved PO children (for Vendor Approved tab)
@@ -144,7 +144,7 @@ const PurchaseOrders: React.FC = () => {
     queryKey: ['buyer-approved-po-children'],
     fetchFn: () => buyerService.getApprovedPOChildren(),
     realtimeTables: ['po_child', ...REALTIME_TABLES.CHANGE_REQUESTS], // Real-time subscriptions
-    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
+    staleTime: 0, // Always fetch fresh data to ensure immediate updates after email sent
   });
 
   // Fetch POChildren pending TD approval (for Pending Approval tab)
@@ -156,7 +156,7 @@ const PurchaseOrders: React.FC = () => {
     queryKey: ['buyer-pending-po-children'],
     fetchFn: () => buyerService.getBuyerPendingPOChildren(),
     realtimeTables: ['po_child', ...REALTIME_TABLES.CHANGE_REQUESTS],
-    staleTime: STALE_TIMES.STANDARD, // 30 seconds from constants
+    staleTime: 0, // Always fetch fresh data to ensure immediate updates after email sent
   });
 
   // Helper function for processing purchases (po_children are embedded in parent CR response)
@@ -696,20 +696,33 @@ const PurchaseOrders: React.FC = () => {
 
       showSuccess('Purchase marked as complete successfully!');
 
-      // Remove cache completely and refetch fresh data
-      removeQueries(['purchases']);
-      removeQueries(['pending-purchases']);
-      removeQueries(['buyer-pending-purchases']);
-      removeQueries(['buyer-completed-purchases']);
-      removeQueries(['buyer-approved-po-children']);
-      removeQueries(['change-requests']);
-      removeQueries(['dashboard']);
-      // Small delay to ensure backend has processed the change
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await refetchPending();
-      await refetchCompleted();
-      await refetchApprovedPOChildren();
-      // Switch to completed tab to show the item
+      try {
+        // ✅ FIX: Use invalidateQueries instead of removeQueries for immediate refresh
+        // invalidateQueries marks data as stale and triggers refetch with fresh data
+        await Promise.all([
+          invalidateQueries(['purchases']),
+          invalidateQueries(['pending-purchases']),
+          invalidateQueries(['buyer-pending-purchases']),
+          invalidateQueries(['buyer-completed-purchases']),
+          invalidateQueries(['buyer-approved-po-children']),
+          invalidateQueries(['change-requests']),
+          invalidateQueries(['dashboard'])
+        ]);
+
+        // ✅ FIX: Wait for all refetches to complete in parallel before tab switch
+        await Promise.all([
+          refetchPending(),
+          refetchCompleted(),
+          refetchApprovedPOChildren()
+        ]);
+      } catch (cacheError) {
+        // Log error but don't fail the operation (backend succeeded)
+        console.error('Failed to refresh cache after purchase completion:', cacheError);
+        // Show warning but still proceed with tab switch
+        showWarning('Purchase completed but display may not be fully updated. Please refresh if needed.');
+      }
+
+      // Switch to completed tab (even if cache refresh partially failed)
       setActiveTab('completed');
     } catch (error: any) {
       showError(error.message || 'Failed to complete purchase');
@@ -755,22 +768,31 @@ const PurchaseOrders: React.FC = () => {
 
       showSuccess('Purchase completed and routed to M2 Store! Production Manager will dispatch to site.');
 
-      // Remove cache completely and refetch fresh data (same as handleMarkAsComplete)
-      removeQueries(['purchases']);
-      removeQueries(['pending-purchases']);
-      removeQueries(['buyer-pending-purchases']);
-      removeQueries(['buyer-completed-purchases']);
-      removeQueries(['buyer-approved-po-children']);
-      removeQueries(['buyer-pending-po-children']);
-      removeQueries(['change-requests']);
-      removeQueries(['dashboard']);
+      try {
+        // ✅ FIX: Use invalidateQueries instead of removeQueries for immediate refresh
+        await Promise.all([
+          invalidateQueries(['purchases']),
+          invalidateQueries(['pending-purchases']),
+          invalidateQueries(['buyer-pending-purchases']),
+          invalidateQueries(['buyer-completed-purchases']),
+          invalidateQueries(['buyer-approved-po-children']),
+          invalidateQueries(['buyer-pending-po-children']),
+          invalidateQueries(['change-requests']),
+          invalidateQueries(['dashboard'])
+        ]);
 
-      // Small delay to ensure backend has processed the change
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      await refetchPending();
-      await refetchCompleted();
-      await refetchApprovedPOChildren();
+        // ✅ FIX: Wait for all refetches to complete in parallel
+        await Promise.all([
+          refetchPending(),
+          refetchCompleted(),
+          refetchApprovedPOChildren()
+        ]);
+      } catch (cacheError) {
+        // Log error but don't fail the operation (backend succeeded)
+        console.error('Failed to refresh cache after POChild completion:', cacheError);
+        // Show warning but still proceed
+        showWarning('Purchase completed but display may not be fully updated. Please refresh if needed.');
+      }
 
       // Switch to vendor_approved subtab to show the change
       setOngoingSubTab('vendor_approved');

@@ -189,7 +189,8 @@
       "Bash(journalctl:*)",
       "Bash(ps:*)",
       "Bash(timeout 15 npm run dev)",
-      "Bash(timeout 8 npm run dev:*)"
+      "Bash(timeout 8 npm run dev:*)",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []
