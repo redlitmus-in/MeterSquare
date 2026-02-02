@@ -221,17 +221,27 @@ class LabourAssignmentPDFGenerator:
         story.append(headers_table)
 
         # Build left side: Requisition Details
+        # Use Paragraph for long text fields to enable wrapping
+        site_name_paragraph = Paragraph(
+            requisition_data.get('site_name', 'N/A'),
+            ParagraphStyle('CellWrap', fontSize=9, fontName='Helvetica', leading=11)
+        )
+        project_name_paragraph = Paragraph(
+            requisition_data.get('project_name', 'N/A'),
+            ParagraphStyle('CellWrap', fontSize=9, fontName='Helvetica', leading=11)
+        )
+
         requisition_details_data = [
             ['Requisition Code:', requisition_data.get('requisition_code', 'N/A')],
-            ['Project Name:', requisition_data.get('project_name', 'N/A')],
-            ['Site/Location:', requisition_data.get('site_name', 'N/A')],
+            ['Project Name:', project_name_paragraph],
+            ['Site/Location:', site_name_paragraph],
             ['Required Date:', requisition_data.get('required_date', 'N/A')],
             ['Work Time:', f"{requisition_data.get('start_time', 'N/A')} - {requisition_data.get('end_time', 'N/A')}"],
             ['Status:', requisition_data.get('status', 'N/A').upper()],
             ['Assignment Status:', requisition_data.get('assignment_status', 'N/A').upper()]
         ]
 
-        requisition_table = Table(requisition_details_data, colWidths=[42*mm, 42*mm])
+        requisition_table = Table(requisition_details_data, colWidths=[38*mm, 46*mm])
         requisition_table.setStyle(TableStyle([
             ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
             ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
@@ -289,6 +299,47 @@ class LabourAssignmentPDFGenerator:
 
         story.append(combined_table)
         story.append(Spacer(1, 8*mm))
+
+        # Transport Details Section (if available)
+        has_transport_details = (
+            requisition_data.get('driver_name') or
+            requisition_data.get('vehicle_number') or
+            requisition_data.get('driver_contact') or
+            (requisition_data.get('transport_fee') and requisition_data.get('transport_fee') > 0)
+        )
+
+        if has_transport_details:
+            # Transport section with enhanced styling
+            transport_section = []
+            transport_section.append(Paragraph("Transport Details", self.styles['SectionHeader']))
+
+            # Build transport details data
+            transport_data = []
+            if requisition_data.get('driver_name'):
+                transport_data.append(['Driver Name:', requisition_data.get('driver_name')])
+            if requisition_data.get('driver_contact'):
+                transport_data.append(['Driver Contact:', requisition_data.get('driver_contact')])
+            if requisition_data.get('vehicle_number'):
+                transport_data.append(['Vehicle Number:', requisition_data.get('vehicle_number')])
+            if requisition_data.get('transport_fee') and requisition_data.get('transport_fee') > 0:
+                transport_data.append(['Transport Fee:', f"AED {requisition_data.get('transport_fee', 0):.2f}"])
+
+            transport_table = Table(transport_data, colWidths=[42*mm, 128*mm])
+            transport_table.setStyle(TableStyle([
+                ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
+                ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#333333')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#666666')),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ]))
+
+            transport_section.append(transport_table)
+            story.append(KeepTogether(transport_section))
+            story.append(Spacer(1, 8*mm))
 
         # Assigned Workers Section
         if requisition_data.get('assigned_workers') and len(requisition_data['assigned_workers']) > 0:

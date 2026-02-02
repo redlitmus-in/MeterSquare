@@ -800,6 +800,50 @@ const WorkerAssignments: React.FC = () => {
                 )}
               </div>
 
+              {/* Transport Details Section - Only show for assigned requisitions */}
+              {detailsRequisition.assignment_status === 'assigned' && (
+                detailsRequisition.driver_name ||
+                detailsRequisition.vehicle_number ||
+                detailsRequisition.driver_contact ||
+                (detailsRequisition.transport_fee && detailsRequisition.transport_fee > 0)
+              ) && (
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                    </svg>
+                    <h3 className="text-sm font-semibold text-blue-900">Transport Details</h3>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    {detailsRequisition.driver_name && (
+                      <div>
+                        <h4 className="text-xs font-medium text-gray-600 mb-1">Driver Name</h4>
+                        <p className="text-sm text-gray-900 font-medium">{detailsRequisition.driver_name}</p>
+                      </div>
+                    )}
+                    {detailsRequisition.driver_contact && (
+                      <div>
+                        <h4 className="text-xs font-medium text-gray-600 mb-1">Driver Contact</h4>
+                        <p className="text-sm text-gray-900 font-medium">{detailsRequisition.driver_contact}</p>
+                      </div>
+                    )}
+                    {detailsRequisition.vehicle_number && (
+                      <div>
+                        <h4 className="text-xs font-medium text-gray-600 mb-1">Vehicle Number</h4>
+                        <p className="text-sm text-gray-900 font-medium">{detailsRequisition.vehicle_number}</p>
+                      </div>
+                    )}
+                    {detailsRequisition.transport_fee && detailsRequisition.transport_fee > 0 && (
+                      <div>
+                        <h4 className="text-xs font-medium text-gray-600 mb-1">Transport Fee</h4>
+                        <p className="text-sm text-blue-700 font-semibold">AED {detailsRequisition.transport_fee.toFixed(2)}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Request Info */}
               <div className="border-t border-gray-200 pt-4 space-y-3">
                 <div className="grid grid-cols-2 gap-4">
