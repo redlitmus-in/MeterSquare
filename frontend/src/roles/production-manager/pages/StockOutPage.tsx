@@ -664,7 +664,7 @@ const StockOutPage: React.FC = () => {
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/delivery_note/${dn.delivery_note_id}/download`, {
+      const response = await fetch(`${API_BASE_URL}/inventory/delivery_note/${dn.delivery_note_id}/download`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -700,7 +700,7 @@ const StockOutPage: React.FC = () => {
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/delivery_note/${dn.delivery_note_id}/download`, {
+      const response = await fetch(`${API_BASE_URL}/inventory/delivery_note/${dn.delivery_note_id}/download`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

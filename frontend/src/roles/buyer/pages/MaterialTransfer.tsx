@@ -161,7 +161,7 @@ const MaterialTransfer: React.FC = () => {
   // Download DN PDF
   const handleDownloadDNPDF = async (dnId: number, dnNumber: string) => {
     try {
-      const response = await apiClient.get(`/delivery_note/${dnId}/download`, {
+      const response = await apiClient.get(`/inventory/delivery_note/${dnId}/download`, {
         responseType: 'blob',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
