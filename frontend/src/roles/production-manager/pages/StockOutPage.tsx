@@ -106,10 +106,12 @@ const StockOutPage: React.FC = () => {
     show: boolean;
     materials: any[];
     requestNumber: number | null;
+    parentMaterialName?: string;
   }>({
     show: false,
     materials: [],
-    requestNumber: null
+    requestNumber: null,
+    parentMaterialName: undefined
   });
 
   // Form state for new Delivery Note
@@ -136,6 +138,7 @@ const StockOutPage: React.FC = () => {
     use_backup?: boolean;
     // For vendor delivery materials (not yet in inventory)
     material_name?: string;
+    sub_item_name?: string;
     brand?: string;
     is_vendor_delivery?: boolean;
   }>>([]);
@@ -468,6 +471,7 @@ const StockOutPage: React.FC = () => {
           notes: '',
           internal_request_id: request.request_id,
           material_name: isVendorDelivery ? mat.material_name : undefined,
+          sub_item_name: isVendorDelivery ? mat.sub_item_name : undefined,
           brand: isVendorDelivery ? mat.brand : undefined,
           is_vendor_delivery: isVendorDelivery
         };
@@ -475,7 +479,7 @@ const StockOutPage: React.FC = () => {
       setDnItems(dnItemsList);
     } else {
       // Single material
-      const subItemName = request.brand || request.material_name;
+      const subItemName = request.brand || request.item_name;
       const matchedInventory = materials.find(
         inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
       );
@@ -486,7 +490,8 @@ const StockOutPage: React.FC = () => {
         unit: request.unit || matchedInventory?.unit || 'unit',
         notes: '',
         internal_request_id: request.request_id,
-        material_name: isVendorDelivery ? request.material_name : undefined,
+        material_name: isVendorDelivery ? request.item_name : undefined,
+        sub_item_name: isVendorDelivery ? request.sub_item_name : undefined,
         brand: isVendorDelivery ? request.brand : undefined,
         is_vendor_delivery: isVendorDelivery
       }]);
@@ -541,6 +546,7 @@ const StockOutPage: React.FC = () => {
         // For vendor delivery materials - include info for auto-creating inventory entry
         is_vendor_delivery: item.is_vendor_delivery,
         material_name: item.material_name,
+        sub_item_name: item.sub_item_name,
         brand: item.brand
       }));
 
@@ -742,7 +748,7 @@ const StockOutPage: React.FC = () => {
 
     return currentRequests.filter(req => {
       const matchesSearch =
-        req.material_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        req.item_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         req.project_details?.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         req.requester_details?.full_name?.toLowerCase().includes(searchTerm.toLowerCase());
       return matchesSearch;
@@ -1046,10 +1052,8 @@ const StockOutPage: React.FC = () => {
                                 const isInInventory = !!inventoryMatch;
                                 return (
                                   <div>
+                                    <div className="font-semibold text-gray-900">{req.item_name}</div>
                                     <div className="text-xs text-gray-500">{mat.material_name}</div>
-                                    {mat.brand && (
-                                      <div className="font-semibold text-gray-900">{mat.brand}</div>
-                                    )}
                                     {/* Inventory status indicator - checks sub-item */}
                                     {isInInventory ? (
                                       <div className="flex items-center gap-1 mt-1">
@@ -1066,32 +1070,38 @@ const StockOutPage: React.FC = () => {
                                 );
                               })()
                             ) : (
-                              // Multiple materials - show View button
-                              <button
-                                onClick={() => setMaterialsViewModal({
-                                  show: true,
-                                  materials: req.materials_data || [],
-                                  requestNumber: req.request_number || null
-                                })}
-                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                              >
-                                <Package className="w-3.5 h-3.5 mr-1.5" />
-                                View {req.materials_data.length} Materials
-                              </button>
+                              // Multiple materials - show item name first, then View button
+                              <div>
+                                <div className="font-semibold text-gray-900 mb-2">{req.item_name}</div>
+                                <button
+                                  onClick={() => setMaterialsViewModal({
+                                    show: true,
+                                    materials: req.materials_data || [],
+                                    requestNumber: req.request_number || null,
+                                    parentMaterialName: req.item_name
+                                  })}
+                                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                                >
+                                  <Package className="w-3.5 h-3.5 mr-1.5" />
+                                  View {req.materials_data.length} Materials
+                                </button>
+                              </div>
                             )
                           ) : (
                             // Single material without materials_data
                             (() => {
                               // Check inventory against sub-item (brand) name, not item name
-                              const subItemName = req.brand || req.material_name;
+                              const subItemName = req.brand || req.item_name;
                               const inventoryMatch = materials.find(
                                 inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
                               );
                               const isInInventory = !!inventoryMatch;
                               return (
                                 <div>
-                                  <div className="text-xs text-gray-500">{req.material_name}</div>
-                                  {req.brand && <div className="font-semibold text-gray-900">{req.brand}</div>}
+                                  <div className="font-semibold text-gray-900">{req.item_name}</div>
+                                  {req.sub_item_name && (
+                                    <div className="text-xs text-gray-500">{req.sub_item_name}</div>
+                                  )}
                                   {/* Inventory status indicator - checks sub-item */}
                                   {isInInventory ? (
                                     <div className="flex items-center gap-1 mt-1">
@@ -1132,7 +1142,7 @@ const StockOutPage: React.FC = () => {
                         ) : (
                           (() => {
                             // Get stock from material_details or lookup from materials array
-                            const subItemName = req.brand || req.material_name;
+                            const subItemName = req.brand || req.item_name;
                             const inventoryMatch = materials.find(
                               inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
                             );
@@ -1158,7 +1168,7 @@ const StockOutPage: React.FC = () => {
                             (() => {
                               // Check if sub-item is in inventory - use brand (sub-item) for check
                               const matData = req.materials_data?.[0];
-                              const subItemName = matData?.brand || matData?.material_name || req.brand || req.material_name;
+                              const subItemName = matData?.brand || matData?.material_name || req.brand || req.item_name;
                               const isInInventory = materials.some(
                                 inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
                               );
@@ -1757,7 +1767,7 @@ const StockOutPage: React.FC = () => {
                         {item.is_vendor_delivery ? (
                           <div className="px-2 py-1 text-sm">
                             <div className="font-medium text-gray-900">{item.material_name}</div>
-                            {item.brand && <div className="text-xs text-gray-500">{item.brand}</div>}
+                            {item.sub_item_name && <div className="text-xs text-gray-500">{item.sub_item_name}</div>}
                             <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700">
                               <Package className="w-2.5 h-2.5 mr-0.5" />
                               Vendor Delivery
@@ -1949,8 +1959,8 @@ const StockOutPage: React.FC = () => {
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
+                          <div className="font-semibold text-gray-900">{materialsViewModal.parentMaterialName || mat.material_name}</div>
                           <div className="text-xs text-gray-500">{mat.material_name}</div>
-                          {mat.brand && <div className="font-semibold text-gray-900">{mat.brand}</div>}
                           {mat.specification && <div className="text-xs text-gray-400">{mat.specification}</div>}
                         </div>
                         <div className="text-right">

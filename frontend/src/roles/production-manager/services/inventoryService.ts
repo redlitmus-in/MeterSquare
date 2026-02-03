@@ -58,7 +58,7 @@ export interface InternalMaterialRequest {
   request_number?: number;
   project_id: number;
   request_buyer_id: number;
-  material_name: string;
+  item_name: string;
   quantity: number;
   brand?: string;
   size?: string;

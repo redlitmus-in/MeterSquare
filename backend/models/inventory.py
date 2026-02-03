@@ -109,7 +109,7 @@ class InternalMaterialRequest(db.Model):
     project_id = db.Column(db.Integer, nullable=False)
     cr_id = db.Column(db.Integer, nullable=True)  # Change Request ID
     request_buyer_id = db.Column(db.Integer, nullable=False)
-    material_name = db.Column(db.Text, nullable=False)
+    item_name = db.Column(db.Text, nullable=False)
     quantity = db.Column(db.Float, nullable=False)
     brand = db.Column(db.Text, nullable=True)
     size = db.Column(db.Text, nullable=True)
@@ -155,7 +155,7 @@ class InternalMaterialRequest(db.Model):
             'project_id': self.project_id,
             'cr_id': self.cr_id,
             'request_buyer_id': self.request_buyer_id,
-            'material_name': self.material_name,
+            'item_name': self.item_name,
             'quantity': self.quantity,
             'brand': self.brand,
             'size': self.size,

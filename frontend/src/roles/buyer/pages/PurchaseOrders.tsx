@@ -1160,6 +1160,7 @@ const PurchaseOrders: React.FC = () => {
                   const isPending = poChild.vendor_selection_status === 'pending_td_approval';
                   const isApproved = poChild.vendor_selection_status === 'approved';
                   const isRejected = poChild.vendor_selection_status === 'rejected';
+                  const isCompleted = poChild.status === 'routed_to_store' || poChild.status === 'purchase_completed' || poChild.status === 'completed';
 
                   const borderColor = isPending ? 'border-amber-300' : isApproved ? 'border-green-300' : 'border-red-300';
                   const headerBg = isPending ? 'from-amber-50 to-amber-100' : isApproved ? 'from-green-50 to-green-100' : 'from-red-50 to-red-100';
@@ -1285,13 +1286,24 @@ const PurchaseOrders: React.FC = () => {
                             </div>
                           </div>
                         )}
-                        {isApproved && (
+                        {isApproved && !isCompleted && (
                           <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-3">
                             <div className="flex items-center gap-2">
                               <CheckCircle className="w-4 h-4 text-green-600" />
                               <div>
                                 <div className="text-xs font-semibold text-green-900">TD Approved</div>
                                 <div className="text-[10px] text-green-600">Ready for purchase completion</div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {isCompleted && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-3">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="w-4 h-4 text-blue-600" />
+                              <div>
+                                <div className="text-xs font-semibold text-blue-900">Purchase Completed</div>
+                                <div className="text-[10px] text-blue-600">Routed to M2 Store</div>
                               </div>
                             </div>
                           </div>
@@ -1370,8 +1382,8 @@ const PurchaseOrders: React.FC = () => {
                             </>
                           )}
 
-                          {/* Show buttons ONLY when TD approved */}
-                          {isApproved && (
+                          {/* Show buttons ONLY when TD approved AND not completed */}
+                          {isApproved && !isCompleted && (
                             <>
                               {/* If email OR WhatsApp sent: Show "Sent to Vendor" badge + Complete Purchase button */}
                               {(poChild.vendor_email_sent || poChild.vendor_whatsapp_sent) ? (

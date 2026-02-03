@@ -52,7 +52,8 @@ interface PurchaseTransaction {
   // Transport/Delivery fields
   driver_name?: string;
   vehicle_number?: string;
-  transport_fee?: number;
+  per_unit_transport_fee?: number;  // Per-unit transport fee (default 1 AED)
+  transport_fee?: number;  // Calculated total: per_unit_transport_fee × quantity
   transport_notes?: string;
   delivery_batch_ref?: string;  // e.g., "DB-2026-001"
   created_at?: string;
@@ -192,7 +193,8 @@ const StockInPage: React.FC = () => {
     // Transport fields
     driver_name: '',
     vehicle_number: '',
-    transport_fee: 0,
+    per_unit_transport_fee: 1,  // Default 1 AED per unit
+    transport_fee: 0,  // Will be calculated as per_unit_transport_fee × quantity
     transport_notes: '',
     delivery_batch_ref: ''
   });
@@ -563,6 +565,7 @@ const StockInPage: React.FC = () => {
       // Reset transport fields
       driver_name: '',
       vehicle_number: '',
+      per_unit_transport_fee: 1,  // Default 1 AED per unit
       transport_fee: 0,
       transport_notes: '',
       delivery_batch_ref: ''
@@ -780,10 +783,12 @@ const StockInPage: React.FC = () => {
 
   const handleQuantityChange = (quantity: number) => {
     const total = quantity * purchaseFormData.unit_price;
+    const transportFee = quantity * (purchaseFormData.per_unit_transport_fee || 0);
     setPurchaseFormData({
       ...purchaseFormData,
       quantity,
-      total_amount: total
+      total_amount: total,
+      transport_fee: transportFee
     });
   };
 
@@ -793,6 +798,15 @@ const StockInPage: React.FC = () => {
       ...purchaseFormData,
       unit_price: unitPrice,
       total_amount: total
+    });
+  };
+
+  const handlePerUnitTransportFeeChange = (perUnitFee: number) => {
+    const transportFee = purchaseFormData.quantity * perUnitFee;
+    setPurchaseFormData({
+      ...purchaseFormData,
+      per_unit_transport_fee: perUnitFee,
+      transport_fee: transportFee
     });
   };
 
@@ -1448,6 +1462,7 @@ const StockInPage: React.FC = () => {
                               ...prev,
                               driver_name: mostRecentBatch.driver_name,
                               vehicle_number: mostRecentBatch.vehicle_number,
+                              per_unit_transport_fee: 0,  // Set to 0 for same batch (fee was already paid on first material)
                               transport_fee: 0,  // Set to 0 for same batch (fee was already paid on first material)
                               transport_notes: mostRecentBatch.transport_notes,
                               delivery_batch_ref: mostRecentBatch.delivery_batch_ref
@@ -1498,10 +1513,10 @@ const StockInPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Transport Fee */}
+                {/* Transport Fee Calculation */}
                 <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Transport Fee (AED)
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Transport Fee Calculation
                   </label>
 
                   {/* Show reference info if batch was selected */}
@@ -1511,23 +1526,74 @@ const StockInPage: React.FC = () => {
                         Reference: Original transport fee for this batch was: <span className="font-bold">AED {selectedBatchReference.original_fee.toFixed(2)}</span>
                       </p>
                       <p className="text-amber-700 text-xs mt-2">
-                        You can edit the fee below if there was an additional charge for this specific material.
+                        You can edit the per-unit fee below if there was an additional charge for this specific material.
                       </p>
                     </div>
                   )}
 
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={purchaseFormData.transport_fee || ''}
-                    onChange={(e) => setPurchaseFormData({ ...purchaseFormData, transport_fee: Number(e.target.value) })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    placeholder="Enter transport fee for this delivery"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Enter the transport fee paid for delivering these materials from vendor to store
-                  </p>
+                  {/* Per-Unit Transport Fee Input Box */}
+                  <div className="bg-gray-50 border-2 border-gray-300 rounded-lg p-4 mb-3">
+                    <div className="flex items-center mb-2">
+                      <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <label className="block text-sm font-semibold text-gray-800">
+                        Per-Unit Transport Fee
+                      </label>
+                    </div>
+
+                    <div className="bg-white rounded-lg p-3 border border-gray-200">
+                      <div className="flex items-baseline space-x-2 mb-2">
+                        <span className="text-xs font-medium text-gray-600">Enter fee per unit:</span>
+                        <span className="text-xs text-blue-600 font-medium">(Default: 1.00 AED per unit)</span>
+                      </div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={purchaseFormData.per_unit_transport_fee || ''}
+                        onChange={(e) => handlePerUnitTransportFeeChange(Number(e.target.value))}
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-lg font-semibold"
+                        placeholder="1.00"
+                      />
+                      <p className="text-xs text-gray-600 mt-2 flex items-start">
+                        <svg className="w-4 h-4 text-blue-500 mr-1 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        This is the transport cost paid per unit of material delivered from vendor to store
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Calculated Total Transport Fee Display */}
+                  {purchaseFormData.quantity > 0 && (
+                    <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-lg p-4 shadow-sm">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center">
+                          <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                          </svg>
+                          <span className="text-sm text-blue-900 font-semibold">
+                            Total Transport Fee (Auto-Calculated):
+                          </span>
+                        </div>
+                        <span className="text-2xl font-bold text-blue-900">
+                          AED {(purchaseFormData.transport_fee || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="bg-white rounded-md p-2 border border-blue-200">
+                        <p className="text-xs text-blue-800 font-medium">
+                          📊 Calculation: {purchaseFormData.per_unit_transport_fee?.toFixed(2)} AED/unit × {purchaseFormData.quantity} units = <span className="font-bold">{(purchaseFormData.transport_fee || 0).toFixed(2)} AED</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {!purchaseFormData.quantity && (
+                    <p className="text-xs text-gray-500 italic mt-2">
+                      💡 Total transport fee will be calculated automatically when you enter the quantity
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1899,6 +1965,7 @@ const StockInPage: React.FC = () => {
                         ...prev,
                         driver_name: batch.driver_name,
                         vehicle_number: batch.vehicle_number,
+                        per_unit_transport_fee: 0, // Set to 0 - fee already paid on first material
                         transport_fee: 0, // Set to 0 - fee already paid on first material
                         transport_notes: batch.transport_notes,
                         delivery_batch_ref: batch.delivery_batch_ref

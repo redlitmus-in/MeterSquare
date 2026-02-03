@@ -1236,7 +1236,7 @@ def internal_inventory_material_request():
         current_user = g.user.get('email', 'system')
 
         # Validate required fields
-        required_fields = ['material_name', 'inventory_material_id', 'quantity', 'project_id']
+        required_fields = ['item_name', 'inventory_material_id', 'quantity', 'project_id']
         for field in required_fields:
             if not data.get(field):
                 return jsonify({'error': f'{field} is required'}), 400
@@ -1276,7 +1276,7 @@ def internal_inventory_material_request():
             # request_number=request_number,
             project_id=data['project_id'],
             cr_id=data.get('cr_id'),
-            material_name=data['material_name'],
+            item_name=data['item_name'],
             inventory_material_id=data['inventory_material_id'],
             quantity=float(data['quantity']),
             brand=data.get('brand'),  # Handles null
@@ -1400,8 +1400,8 @@ def update_internal_material_request(request_id):
         current_user = g.user.get('email', 'system')
 
         # Update allowed fields
-        if 'material_name' in data:
-            internal_req.material_name = data['material_name']
+        # if 'item_name' in data:
+        #     internal_req.item_name = data['item_name']
         if 'inventory_material_id' in data:
             internal_req.inventory_material_id = data['inventory_material_id']
         if 'quantity' in data:
@@ -1825,7 +1825,7 @@ def approve_internal_request(request_id):
 
             else:
                 # SINGLE MATERIAL VENDOR DELIVERY
-                mat_name = internal_req.material_name
+                mat_name = internal_req.item_name
                 mat_qty = internal_req.quantity
 
                 # Find matching inventory material
@@ -2150,7 +2150,7 @@ def dispatch_material(request_id):
         material_info = {
             'inventory_material_id': internal_req.inventory_material_id,
             'material_code': material.material_code if material else None,
-            'material_name': material.material_name if material else internal_req.material_name,
+            'material_name': material.material_name if material else internal_req.item_name,
             'quantity': internal_req.quantity,
             'brand': internal_req.brand,
             'size': internal_req.size
@@ -2235,7 +2235,7 @@ def _check_material_availability(internal_req):
 
     # MODE 2: Search by name/brand/size (Fallback)
     query = InventoryMaterial.query.filter(
-        InventoryMaterial.material_name.ilike(f'%{internal_req.material_name}%'),
+        InventoryMaterial.material_name.ilike(f'%{internal_req.item_name}%'),
         InventoryMaterial.is_active == True
     )
 

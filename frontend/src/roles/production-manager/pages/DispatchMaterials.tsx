@@ -59,7 +59,7 @@ const DispatchMaterials: React.FC = () => {
 
     // Try exact match by name, brand, size
     const exactMatch = materials.find(m =>
-      m.material_name?.toLowerCase() === request.material_name?.toLowerCase() &&
+      m.material_name?.toLowerCase() === request.item_name?.toLowerCase() &&
       (!request.brand || m.brand?.toLowerCase() === request.brand?.toLowerCase()) &&
       (!request.size || m.size?.toLowerCase() === request.size?.toLowerCase())
     );
@@ -67,7 +67,7 @@ const DispatchMaterials: React.FC = () => {
 
     // Fallback to name-only match
     return materials.find(m =>
-      m.material_name?.toLowerCase() === request.material_name?.toLowerCase()
+      m.material_name?.toLowerCase() === request.item_name?.toLowerCase()
     );
   };
 
@@ -118,7 +118,7 @@ const DispatchMaterials: React.FC = () => {
   // Filter requests
   const filteredRequests = (statusFilter === 'all' ? allRequests : allRequests.filter(r => r.status === statusFilter))
     .filter(req => {
-      const materialName = req.material_name || '';
+      const materialName = req.item_name || '';
       const requestNumber = req.request_number?.toString() || '';
       return (
         materialName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -181,7 +181,7 @@ const DispatchMaterials: React.FC = () => {
           available: false,
           current_stock: 0,
           requested_quantity: request.quantity || 0,
-          material_name: request.material_name,
+          material_name: request.item_name,
           shortage: request.quantity || 0
         });
       }
@@ -466,7 +466,7 @@ const DispatchMaterials: React.FC = () => {
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
                           <div>
                             <p className="text-gray-500">Material</p>
-                            <p className="font-medium text-gray-900">{request.material_name}</p>
+                            <p className="font-medium text-gray-900">{request.item_name}</p>
                             {request.brand && <p className="text-xs text-gray-500">Brand: {request.brand}</p>}
                             {request.size && <p className="text-xs text-gray-500">Size: {request.size}</p>}
                           </div>

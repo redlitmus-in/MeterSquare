@@ -885,7 +885,7 @@ def get_buyer_pending_purchases():
         # If regular buyer, show only purchases assigned to them
         if is_admin_viewing:
             # SIMPLIFIED QUERY: Show ALL CRs assigned to any buyer (for admin viewing)
-            # Exclude purchase_completed status - those should go to completed tab
+            # Exclude completed, purchase_completed and routed_to_store status - those should go to completed tab
             # Exclude rejected items - those should only show in rejected tab
             # ✅ PERFORMANCE: Add eager loading to prevent N+1 queries + pagination
             paginated_result = ChangeRequest.query.options(
@@ -897,7 +897,7 @@ def get_buyer_pending_purchases():
             ).filter(
                 ChangeRequest.assigned_to_buyer_user_id.isnot(None),
                 ChangeRequest.is_deleted == False,
-                func.trim(ChangeRequest.status) != 'purchase_completed',
+                ~func.trim(ChangeRequest.status).in_(['completed', 'purchase_completed', 'routed_to_store']),
                 or_(
                     ChangeRequest.vendor_selection_status.is_(None),
                     ChangeRequest.vendor_selection_status != 'rejected'
@@ -943,6 +943,8 @@ def get_buyer_pending_purchases():
                     )
                 ),
                 ChangeRequest.is_deleted == False,
+                # Exclude completed items - those should only show in completed tab
+                ~func.trim(ChangeRequest.status).in_(['completed', 'purchase_completed', 'routed_to_store']),
                 # Exclude rejected items - those should only show in rejected tab
                 or_(
                     ChangeRequest.vendor_selection_status.is_(None),
@@ -1078,8 +1080,8 @@ def get_buyer_pending_purchases():
                 # Get list of material names that have ACTIVE store requests (exclude rejected)
                 # Rejected materials should become available for vendor selection again
                 store_requested_material_names = [
-                    r.material_name for r in store_requests
-                    if r.material_name and r.status and r.status.lower() not in ['rejected']
+                    r.item_name for r in store_requests
+                    if r.item_name and r.status and r.status.lower() not in ['rejected']
                 ]
 
                 all_store_requests_approved = approved_count == len(store_requests) and len(store_requests) > 0
@@ -1284,7 +1286,7 @@ def get_buyer_completed_purchases():
                 joinedload(ChangeRequest.vendor),
                 selectinload(ChangeRequest.po_children)
             ).filter(
-                ChangeRequest.status.in_(['purchase_completed', 'routed_to_store']),
+                ChangeRequest.status.in_(['completed', 'purchase_completed', 'routed_to_store']),
                 ChangeRequest.is_deleted == False
             ).order_by(
                 ChangeRequest.updated_at.desc().nulls_last(),
@@ -1301,7 +1303,7 @@ def get_buyer_completed_purchases():
                 joinedload(ChangeRequest.vendor),
                 selectinload(ChangeRequest.po_children)
             ).filter(
-                ChangeRequest.status.in_(['purchase_completed', 'routed_to_store']),
+                ChangeRequest.status.in_(['completed', 'purchase_completed', 'routed_to_store']),
                 or_(
                     ChangeRequest.assigned_to_buyer_user_id == buyer_id,
                     ChangeRequest.purchase_completed_by_user_id == buyer_id
@@ -2134,36 +2136,45 @@ def complete_purchase():
 
                 for idx, sub_item in enumerate(sub_items_data):
                     if isinstance(sub_item, dict):
-                        material_name = sub_item.get('sub_item_name') or sub_item.get('material_name', 'Unknown')
-                        quantity = sub_item.get('quantity', 0)
+                        # Check if this sub-item has nested materials array (same pattern as MasterMaterial loop above)
+                        materials_list = sub_item.get('materials', [])
 
-                        grouped_materials.append({
-                            'material_name': material_name,
-                            'quantity': quantity,
-                            'brand': sub_item.get('brand'),
-                            'size': sub_item.get('size'),
-                            'unit': sub_item.get('unit', 'pcs'),
-                            'unit_price': sub_item.get('unit_price', 0),
-                            'total_price': sub_item.get('total_price', 0)
-                        })
+                        # If no materials array, treat the sub_item itself as a material
+                        if not materials_list:
+                            materials_list = [sub_item]
 
-                        if not primary_material_name:
-                            primary_material_name = material_name
+                        # Process each material (handles both flat and nested structures)
+                        for material in materials_list:
+                            material_name = material.get('material_name', '').strip()
+
+                            # Fallback to sub_item_name if material_name is empty
+                            if not material_name:
+                                material_name = material.get('sub_item_name', 'Unknown').strip()
+
+                            quantity = material.get('quantity', 0)
+
+                            grouped_materials.append({
+                                'material_name': material_name,
+                                'quantity': quantity,
+                                'brand': material.get('brand'),
+                                'size': material.get('size'),
+                                'unit': material.get('unit', 'pcs'),
+                                'unit_price': material.get('unit_price', 0),
+                                'total_price': material.get('total_price', 0)
+                            })
+
+                            if not primary_material_name:
+                                primary_material_name = material_name
                     else:
                         log.warning(f"Skipping material {idx+1}: not a dict, type={type(sub_item)}")
 
                 # Create ONE grouped Internal Material Request (not multiple)
                 if grouped_materials:
-                    # Display name shows item category + count
-                    display_name = cr.item_name or primary_material_name
-                    if len(grouped_materials) > 1:
-                        display_name = f"{display_name} (+{len(grouped_materials)-1} more)"
-
                     imr = InternalMaterialRequest(
                         cr_id=cr.cr_id,
                         project_id=cr.project_id,
                         request_buyer_id=buyer_id,
-                        material_name=display_name,  # Shows "Item Name (+2 more)"
+                        item_name=cr.item_name,  # Store actual item name from CR
                         quantity=len(grouped_materials),  # Number of materials
                         brand=None,
                         size=None,
@@ -2321,8 +2332,8 @@ def get_purchase_by_id(cr_id):
         # Exclude rejected requests - those materials should be available for vendor selection again
         store_requests = InternalMaterialRequest.query.filter_by(cr_id=cr_id).all()
         store_requested_material_names = [
-            r.material_name for r in store_requests
-            if r.material_name and r.status and r.status.lower() not in ['rejected']
+            r.item_name for r in store_requests
+            if r.item_name and r.status and r.status.lower() not in ['rejected']
         ]
 
         # Validate and refresh material_vendor_selections with current vendor data
@@ -5151,36 +5162,48 @@ def complete_po_child_purchase(po_child_id):
             grouped_materials = []
             primary_material_name = None
 
-            for idx, material in enumerate(materials_to_route):
-                if isinstance(material, dict):
-                    material_name = material.get('sub_item_name') or material.get('material_name', 'Unknown')
-                    quantity = material.get('quantity', 0)
-                    log.info(f"  Material {idx+1}/{len(materials_to_route)}: {material_name} x {quantity}")
+            for idx, sub_item in enumerate(materials_to_route):
+                if isinstance(sub_item, dict):
+                    # Check if this sub-item has nested materials array (handle both flat and nested structures)
+                    nested_materials = sub_item.get('materials', [])
 
-                    grouped_materials.append({
-                        'material_name': material_name,
-                        'quantity': quantity,
-                        'brand': material.get('brand'),
-                        'size': material.get('size'),
-                        'unit': material.get('unit', '')
-                    })
-                    if not primary_material_name:
-                        primary_material_name = material_name
+                    # If no materials array, treat the sub_item itself as a material
+                    if not nested_materials:
+                        nested_materials = [sub_item]
+
+                    # Process each material (handles both flat and nested structures)
+                    for material in nested_materials:
+                        material_name = material.get('material_name', '').strip()
+
+                        # Fallback to sub_item_name if material_name is empty
+                        if not material_name:
+                            material_name = material.get('sub_item_name', 'Unknown').strip()
+
+                        quantity = material.get('quantity', 0)
+                        log.info(f"  Material {idx+1}/{len(materials_to_route)}: {material_name} x {quantity}")
+
+                        grouped_materials.append({
+                            'material_name': material_name,
+                            'quantity': quantity,
+                            'brand': material.get('brand'),
+                            'size': material.get('size'),
+                            'unit': material.get('unit', '')
+                        })
+                        if not primary_material_name:
+                            primary_material_name = material_name
                 else:
-                    log.warning(f"  Skipping material {idx+1}: not a dict, type={type(material)}")
+                    log.warning(f"  Skipping material {idx+1}: not a dict, type={type(sub_item)}")
 
             # Create ONE grouped Internal Material Request (not multiple)
             if grouped_materials:
-                # Display name shows item category + count
-                display_name = po_child.item_name or primary_material_name
-                if len(grouped_materials) > 1:
-                    display_name = f"{display_name} (+{len(grouped_materials)-1} more)"
+                # Get item_name from parent CR
+                parent_item_name = po_child.item_name or (parent_cr.item_name if parent_cr else None)
 
                 imr = InternalMaterialRequest(
                     cr_id=po_child.parent_cr_id,
                     project_id=project_id,
                     request_buyer_id=buyer_id,
-                    material_name=display_name,
+                    item_name=parent_item_name,
                     quantity=len(grouped_materials),  # Number of materials
                     brand=None,
                     size=None,
@@ -8103,7 +8126,7 @@ def check_store_availability(cr_id):
 
         # Get materials that have already been sent to store (to exclude them)
         existing_store_requests = InternalMaterialRequest.query.filter_by(cr_id=cr_id).all()
-        already_requested_materials = {req.material_name for req in existing_store_requests}
+        already_requested_materials = {req.item_name for req in existing_store_requests}
 
         available_materials = []
         unavailable_materials = []
@@ -8116,7 +8139,7 @@ def check_store_availability(cr_id):
             # Skip materials that have already been sent to store
             if mat_name in already_requested_materials:
                 # Find the existing request to get status
-                existing_req = next((r for r in existing_store_requests if r.material_name == mat_name), None)
+                existing_req = next((r for r in existing_store_requests if r.item_name == mat_name), None)
                 already_sent_materials.append({
                     'material_name': mat_name,
                     'required_quantity': mat_qty,
@@ -8196,15 +8219,12 @@ def complete_from_store(cr_id):
             if not materials:
                 return jsonify({"error": "No matching materials found in selection"}), 400
 
-        # Check if any of the selected materials were already requested from store
-        for mat in materials:
-            mat_name = mat.get('material_name') or mat.get('name') or ''
-            existing_request = InternalMaterialRequest.query.filter_by(
-                cr_id=cr_id,
-                material_name=mat_name
-            ).first()
-            if existing_request:
-                return jsonify({"error": f"Material '{mat_name}' was already requested from store"}), 400
+        # Check if materials from this CR were already requested from store
+        existing_request = InternalMaterialRequest.query.filter_by(
+            cr_id=cr_id
+        ).first()
+        if existing_request:
+            return jsonify({"error": f"Materials from this CR were already requested from store"}), 400
 
         requests_created = 0
         # Check availability and create internal requests
@@ -8228,7 +8248,7 @@ def complete_from_store(cr_id):
             new_request = InternalMaterialRequest(
                 project_id=cr.project_id,
                 cr_id=cr_id,
-                material_name=mat_name,
+                item_name=cr.item_name,  # Store CR's item name, not material name
                 inventory_material_id=inventory_item.inventory_material_id,
                 quantity=float(mat_qty),
                 notes=f"Requested from CR-{cr_id}",
@@ -8275,7 +8295,7 @@ def get_store_request_status(cr_id):
         for req in requests:
             request_list.append({
                 "request_id": req.request_id,
-                "material_name": req.material_name,
+                "item_name": req.item_name,
                 "quantity": req.quantity,
                 "status": req.status,
                 "created_at": req.created_at.isoformat() if req.created_at else None
@@ -10262,8 +10282,8 @@ def get_buyer_dashboard_analytics():
                 pending_count = sum(1 for r in store_requests if r.status and r.status.lower() in ['pending', 'send_request'])
 
                 store_requested_material_names = [
-                    r.material_name for r in store_requests
-                    if r.material_name and r.status and r.status.lower() not in ['rejected']
+                    r.item_name for r in store_requests
+                    if r.item_name and r.status and r.status.lower() not in ['rejected']
                 ]
                 store_requested_count = len(store_requested_material_names)
 

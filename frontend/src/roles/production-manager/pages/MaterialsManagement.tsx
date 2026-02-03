@@ -648,7 +648,7 @@ const MaterialsManagement: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         <div>
-                          <div className="font-medium">{request.material_name}</div>
+                          <div className="font-medium">{request.item_name}</div>
                           {request.brand && <div className="text-gray-500 text-xs">{request.brand}</div>}
                         </div>
                       </td>
