@@ -783,12 +783,11 @@ const StockInPage: React.FC = () => {
 
   const handleQuantityChange = (quantity: number) => {
     const total = quantity * purchaseFormData.unit_price;
-    const transportFee = quantity * (purchaseFormData.per_unit_transport_fee || 0);
+    // Keep transport_fee as-is (flat fee, not recalculated)
     setPurchaseFormData({
       ...purchaseFormData,
       quantity,
-      total_amount: total,
-      transport_fee: transportFee
+      total_amount: total
     });
   };
 
@@ -801,12 +800,12 @@ const StockInPage: React.FC = () => {
     });
   };
 
-  const handlePerUnitTransportFeeChange = (perUnitFee: number) => {
-    const transportFee = purchaseFormData.quantity * perUnitFee;
+  const handlePerUnitTransportFeeChange = (totalFee: number) => {
+    const perUnitFee = purchaseFormData.quantity > 0 ? totalFee / purchaseFormData.quantity : 0;
     setPurchaseFormData({
       ...purchaseFormData,
       per_unit_transport_fee: perUnitFee,
-      transport_fee: transportFee
+      transport_fee: totalFee
     });
   };
 
@@ -1531,42 +1530,40 @@ const StockInPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Per-Unit Transport Fee Input Box */}
-                  <div className="bg-gray-50 border-2 border-gray-300 rounded-lg p-4 mb-3">
-                    <div className="flex items-center mb-2">
-                      <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  {/* Transport Fee Input */}
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Enter total transport fee <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={purchaseFormData.transport_fee === 0 ? '' : purchaseFormData.transport_fee}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === '') {
+                          handlePerUnitTransportFeeChange(0);
+                        } else {
+                          const numValue = parseFloat(value);
+                          if (!isNaN(numValue)) {
+                            handlePerUnitTransportFeeChange(numValue);
+                          }
+                        }
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      placeholder="0.00"
+                    />
+                    <p className="text-xs text-gray-500 mt-1.5 flex items-start">
+                      <svg className="w-4 h-4 text-gray-400 mr-1 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      <label className="block text-sm font-semibold text-gray-800">
-                        Per-Unit Transport Fee
-                      </label>
-                    </div>
-
-                    <div className="bg-white rounded-lg p-3 border border-gray-200">
-                      <div className="flex items-baseline space-x-2 mb-2">
-                        <span className="text-xs font-medium text-gray-600">Enter fee per unit:</span>
-                        <span className="text-xs text-blue-600 font-medium">(Default: 1.00 AED per unit)</span>
-                      </div>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={purchaseFormData.per_unit_transport_fee || ''}
-                        onChange={(e) => handlePerUnitTransportFeeChange(Number(e.target.value))}
-                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-lg font-semibold"
-                        placeholder="1.00"
-                      />
-                      <p className="text-xs text-gray-600 mt-2 flex items-start">
-                        <svg className="w-4 h-4 text-blue-500 mr-1 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        This is the transport cost paid per unit of material delivered from vendor to store
-                      </p>
-                    </div>
+                      This is the total transport cost paid for material delivered.
+                    </p>
                   </div>
 
-                  {/* Calculated Total Transport Fee Display */}
-                  {purchaseFormData.quantity > 0 && (
+                  {/* Total Transport Fee Display */}
+                  {purchaseFormData.transport_fee > 0 && (
                     <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-lg p-4 shadow-sm">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center">
@@ -1574,7 +1571,7 @@ const StockInPage: React.FC = () => {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                           </svg>
                           <span className="text-sm text-blue-900 font-semibold">
-                            Total Transport Fee (Auto-Calculated):
+                            Total Transport Fee:
                           </span>
                         </div>
                         <span className="text-2xl font-bold text-blue-900">
@@ -1583,7 +1580,7 @@ const StockInPage: React.FC = () => {
                       </div>
                       <div className="bg-white rounded-md p-2 border border-blue-200">
                         <p className="text-xs text-blue-800 font-medium">
-                          📊 Calculation: {purchaseFormData.per_unit_transport_fee?.toFixed(2)} AED/unit × {purchaseFormData.quantity} units = <span className="font-bold">{(purchaseFormData.transport_fee || 0).toFixed(2)} AED</span>
+                          📊 Calculation: 1 × {(purchaseFormData.transport_fee || 0).toFixed(2)} = <span className="font-bold">{(purchaseFormData.transport_fee || 0).toFixed(2)} AED</span>
                         </p>
                       </div>
                     </div>

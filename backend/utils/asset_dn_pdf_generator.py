@@ -234,6 +234,9 @@ class AssetDNPDFGenerator:
         story.append(Spacer(1, 8*mm))
 
         # ==================== ITEMS TABLE ====================
+        # Group individual tracking items by category
+        grouped_items = self._group_items_for_display(items_data)
+
         # Header row
         items_header = [
             Paragraph('<b>#</b>', self.styles['ADNLabel']),
@@ -244,19 +247,10 @@ class AssetDNPDFGenerator:
         items_table_data = [items_header]
 
         # Item rows
-        for idx, item in enumerate(items_data, 1):
-            # Build description - category name and item code if available
-            desc = item.get('category_name', '')
-            if item.get('item_code'):
-                desc += f" ({item.get('item_code')})"
-            elif item.get('serial_number'):
-                desc += f" (S/N: {item.get('serial_number')})"
-
-            # Format quantity
-            qty = item.get('quantity', 1)
-            qty_str = str(int(qty) if isinstance(qty, float) and qty % 1 == 0 else qty)
-
-            condition = item.get('condition_at_dispatch', item.get('condition', 'Good'))
+        for idx, item in enumerate(grouped_items, 1):
+            desc = item['description']
+            qty_str = str(int(item['quantity']) if isinstance(item['quantity'], float) and item['quantity'] % 1 == 0 else item['quantity'])
+            condition = item['condition']
 
             items_table_data.append([
                 Paragraph(str(idx), self.styles['ADNNormal']),
@@ -336,6 +330,68 @@ class AssetDNPDFGenerator:
         doc.build(story)
         buffer.seek(0)
         return buffer
+
+    def _group_items_for_display(self, items_data):
+        """
+        Group individual tracking items by category for cleaner PDF display.
+
+        Quantity-based items: shown as-is
+        Individual tracking items: grouped by category with item codes listed
+
+        Returns:
+            list[dict]: Grouped items with 'description', 'quantity', 'condition'
+        """
+        from collections import defaultdict
+
+        # Group items by category_id and tracking_mode
+        grouped = defaultdict(list)
+
+        for item in items_data:
+            category_id = item.get('category_id')
+            category_name = item.get('category_name', 'Unknown')
+            tracking_mode = item.get('tracking_mode', 'quantity')
+
+            # Determine tracking mode based on presence of asset_item_id or item_code
+            is_individual = (
+                tracking_mode == 'individual' or
+                item.get('asset_item_id') is not None or
+                item.get('item_code') is not None or
+                item.get('serial_number') is not None
+            )
+
+            key = (category_id, category_name, 'individual' if is_individual else 'quantity')
+            grouped[key].append(item)
+
+        # Build display items
+        result = []
+        for (category_id, category_name, tracking_mode), items in grouped.items():
+            if tracking_mode == 'individual' and len(items) > 1:
+                # Group individual items together - show category name only
+                total_qty = len(items)
+                conditions = set()
+
+                for item in items:
+                    conditions.add(item.get('condition_at_dispatch', item.get('condition', 'Good')))
+
+                # Just show category name without item codes for grouped items
+                result.append({
+                    'description': category_name,
+                    'quantity': total_qty,
+                    'condition': conditions.pop() if len(conditions) == 1 else 'Mixed'
+                })
+            else:
+                # Keep quantity-based or single individual items - show category name only
+                for item in items:
+                    # Just show category name without item codes
+                    desc = item.get('category_name', '')
+
+                    result.append({
+                        'description': desc,
+                        'quantity': item.get('quantity', 1),
+                        'condition': item.get('condition_at_dispatch', item.get('condition', 'Good'))
+                    })
+
+        return result
 
     def _format_date(self, date_value):
         """Format date value to readable string"""

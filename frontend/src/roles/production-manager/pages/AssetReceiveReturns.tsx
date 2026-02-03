@@ -480,24 +480,52 @@ const AssetReceiveReturns: React.FC = () => {
               </div>
 
               {/* Transport & Delivery Info */}
-              <div className="grid grid-cols-2 gap-4 mt-3 pt-3 border-t border-gray-200">
-                <div>
-                  <span className="text-xs text-gray-500 font-medium">Transport Fee:</span>
-                  <span className="ml-2 text-sm font-semibold text-gray-700">
-                    {selectedReturn.transport_fee ? `AED ${selectedReturn.transport_fee.toFixed(2)}` : 'AED 0.00'}
-                  </span>
-                </div>
-                {selectedReturn.delivery_note_url && (
-                  <div>
-                    <span className="text-xs text-gray-500 font-medium">Delivery Note:</span>
-                    <a
-                      href={selectedReturn.delivery_note_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ml-2 text-sm text-blue-600 hover:text-blue-700 underline"
-                    >
-                      View Document
-                    </a>
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                {/* Transport Details */}
+                {(selectedReturn.vehicle_number || selectedReturn.driver_name || selectedReturn.driver_contact || (selectedReturn.transport_fee !== undefined && selectedReturn.transport_fee !== null)) && (
+                  <div className="mb-3 pb-3 border-b border-gray-200">
+                    <p className="text-xs text-gray-500 mb-2 font-medium">Transport Details:</p>
+                    <div className="grid grid-cols-4 gap-4 text-xs">
+                      {selectedReturn.vehicle_number && (
+                        <div>
+                          <span className="text-gray-500">Vehicle:</span>
+                          <span className="ml-1 text-gray-900 font-medium">{selectedReturn.vehicle_number}</span>
+                        </div>
+                      )}
+                      {selectedReturn.driver_name && (
+                        <div>
+                          <span className="text-gray-500">Driver:</span>
+                          <span className="ml-1 text-gray-900 font-medium">{selectedReturn.driver_name}</span>
+                        </div>
+                      )}
+                      {selectedReturn.driver_contact && (
+                        <div>
+                          <span className="text-gray-500">Contact:</span>
+                          <span className="ml-1 text-gray-900 font-medium">{selectedReturn.driver_contact}</span>
+                        </div>
+                      )}
+                      {(selectedReturn.transport_fee !== undefined && selectedReturn.transport_fee !== null) && (
+                        <div>
+                          <span className="text-gray-500">Transport Fee:</span>
+                          <span className="ml-1 text-gray-900 font-medium">
+                            AED {Number(selectedReturn.transport_fee).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    {selectedReturn.delivery_note_url && (
+                      <div className="mt-2">
+                        <a
+                          href={selectedReturn.delivery_note_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View Delivery Note Document
+                        </a>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

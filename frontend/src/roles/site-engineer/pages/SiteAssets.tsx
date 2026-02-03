@@ -3039,10 +3039,10 @@ const SiteAssets: React.FC = () => {
                   />
                 </div>
 
-                {/* Transport Fee */}
+                {/* Transport Fee Calculation */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Transport Fee (AED)
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter total transport fee <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
                   </label>
                   <input
                     type="number"
@@ -3050,10 +3050,43 @@ const SiteAssets: React.FC = () => {
                     min="0"
                     value={dispatchTransportFee}
                     onChange={(e) => setDispatchTransportFee(e.target.value)}
-                    placeholder="Enter transport fee for this delivery"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Enter the transport fee paid for delivering these materials from vendor to store</p>
+                  <p className="text-xs text-gray-500 mt-1.5 flex items-start">
+                    <svg className="w-4 h-4 text-gray-400 mr-1 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    This is the total transport cost paid for material delivered.
+                  </p>
+
+                  {/* Total Transport Fee Display */}
+                  {parseFloat(dispatchTransportFee) > 0 && (
+                    <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-lg p-4 shadow-sm mt-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center">
+                          <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                          </svg>
+                          <span className="text-sm text-blue-900 font-semibold">
+                            Total Transport Fee:
+                          </span>
+                        </div>
+                        <span className="text-lg font-bold text-blue-900">
+                          AED {parseFloat(dispatchTransportFee).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="bg-white rounded-md p-2 border border-blue-200">
+                        <p className="text-xs text-blue-800 font-medium">
+                          📊 Calculation: 1 × {parseFloat(dispatchTransportFee).toFixed(2)} = <span className="font-bold">{parseFloat(dispatchTransportFee).toFixed(2)} AED</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-amber-600 italic mt-2">
+                    ⚡ Total transport fee will be calculated automatically when you enter the quantity
+                  </p>
                 </div>
 
                 {/* Delivery Note from Vendor */}

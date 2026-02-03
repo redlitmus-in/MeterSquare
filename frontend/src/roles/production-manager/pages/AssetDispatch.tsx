@@ -68,6 +68,7 @@ interface DispatchItem {
   available: number;
   condition: AssetCondition;
   notes: string;
+  individualItemIds?: number[]; // For grouped individual items (stores multiple asset_item_ids)
 }
 
 const DN_STATUS_COLORS: Record<string, string> = {
@@ -621,8 +622,38 @@ const AssetDispatch: React.FC = () => {
       return;
     }
     for (const item of dispatchItems) {
+      // availableCategories = quantity-based categories only
+      // availableItems = individual tracking items (each has category_id)
+      const isInQuantityCategories = availableCategories.some(c => c.category_id === item.category_id);
+      const categoryHasIndividualItems = availableItems.some(i => i.category_id === item.category_id);
+
+      // If category is not in either list and doesn't have asset_item_id, it's not dispatchable
+      if (!isInQuantityCategories && !categoryHasIndividualItems && !item.asset_item_id) {
+        showError(`"${item.category_name}" is not available in inventory. Please remove it from the dispatch list.`);
+        return;
+      }
+
+      // Check if item has no available stock
+      if (item.available === 0) {
+        showError(`${item.category_name} has no available stock. Please remove it from the dispatch list.`);
+        return;
+      }
       if (item.quantity > item.available) {
         showError(`Quantity exceeds available stock for ${item.category_name}`);
+        return;
+      }
+
+      // Category requires individual tracking if:
+      // 1. Item is explicitly marked as 'individual', OR
+      // 2. Category is NOT in quantity-based list (individual tracking categories don't appear there)
+      const requiresIndividualTracking = item.tracking_mode === 'individual' ||
+        (!isInQuantityCategories && (categoryHasIndividualItems || !item.asset_item_id));
+
+      // For individual tracking, accept either:
+      // - Single item with asset_item_id
+      // - Grouped items with individualItemIds
+      if (requiresIndividualTracking && !item.asset_item_id && (!item.individualItemIds || item.individualItemIds.length === 0)) {
+        showError(`"${item.category_name}" requires individual tracking. Please remove it and select specific items from the "Individual Items" section below.`);
         return;
       }
     }
@@ -639,13 +670,26 @@ const AssetDispatch: React.FC = () => {
         transport_fee: transportFee || undefined,
         notes: notes || undefined,
         requisition_id: linkedRequisitionId || undefined,
-        items: dispatchItems.map(item => ({
-          category_id: item.category_id,
-          asset_item_id: item.asset_item_id,
-          quantity: item.quantity,
-          condition: item.condition,
-          notes: item.notes || undefined
-        }))
+        items: dispatchItems.flatMap(item => {
+          // For grouped individual items, expand them into separate items for the backend
+          if (item.individualItemIds && item.individualItemIds.length > 0) {
+            return item.individualItemIds.map(assetItemId => ({
+              category_id: item.category_id,
+              asset_item_id: assetItemId,
+              quantity: 1,
+              condition: item.condition,
+              notes: item.notes || undefined
+            }));
+          }
+          // For quantity-based or single individual items, send as is
+          return [{
+            category_id: item.category_id,
+            asset_item_id: item.asset_item_id,
+            quantity: item.quantity,
+            condition: item.condition,
+            notes: item.notes || undefined
+          }];
+        })
       });
 
       // If linked to a requisition, mark it as dispatched
@@ -732,6 +776,7 @@ const AssetDispatch: React.FC = () => {
       // Get form data - either from existing state or fetch fresh
       let projectsList = projects;
       let categoriesList = availableCategories;
+      let itemsList = availableItems;
 
       if (!formDataLoaded) {
         const fetchedData = await fetchFormData();
@@ -741,6 +786,7 @@ const AssetDispatch: React.FC = () => {
         }
         projectsList = fetchedData.projects;
         categoriesList = fetchedData.categories;
+        itemsList = fetchedData.items;
       }
 
       // Store the linked requisition
@@ -768,15 +814,53 @@ const AssetDispatch: React.FC = () => {
       if (requisition.items && requisition.items.length > 0) {
         // Multiple items
         for (const item of requisition.items) {
-          // Find the matching category in available assets
+          // Find the matching category in available assets (quantity-based categories)
           const category = categoriesList.find(c => c.category_id === item.category_id);
 
-          if (category) {
+          // Also check if this is an individual tracking category by looking at itemsList
+          const availableItemsForCategory = itemsList.filter(
+            ai => ai.category_id === item.category_id && ai.current_status === 'available'
+          ) || [];
+          const isIndividualTracking = item.tracking_mode === 'individual' || availableItemsForCategory.length > 0;
+
+          if (isIndividualTracking) {
+            // Handle individual tracking mode - show as grouped quantity
+            const requestedQty = item.quantity || 1;
+            const itemsToAdd = availableItemsForCategory.slice(0, requestedQty);
+            const categoryName = item.category_name || category?.category_name || 'Unknown';
+            const categoryCode = item.category_code || category?.category_code || '';
+
+            // Group individual items into a single line item
+            const itemCodes = itemsToAdd.map(ai => ai.item_code).filter(Boolean).join(', ');
+            const note = itemsToAdd.length > 0
+              ? `Individual items: ${itemCodes || itemsToAdd.map((ai, idx) => `#${idx + 1}`).join(', ')}`
+              : `⚠️ No available items - ${requestedQty} needed`;
+
+            prefilledItems.push({
+              category_id: item.category_id,
+              category_name: categoryName,
+              category_code: categoryCode,
+              tracking_mode: 'individual',
+              quantity: itemsToAdd.length > 0 ? itemsToAdd.length : requestedQty,
+              available: availableItemsForCategory.length,
+              condition: 'good',
+              notes: note,
+              // Store the asset_item_ids for backend submission (will be used when creating DN)
+              individualItemIds: itemsToAdd.map(ai => ai.item_id)
+            });
+
+            // Add shortfall warning if needed
+            if (itemsToAdd.length < requestedQty) {
+              const shortfall = requestedQty - itemsToAdd.length;
+              prefilledItems[prefilledItems.length - 1].notes += ` | ⚠️ Shortfall: ${shortfall} more needed`;
+            }
+          } else if (category) {
+            // Quantity-based tracking - add as is
             prefilledItems.push({
               category_id: item.category_id,
               category_name: item.category_name || category.category_name,
               category_code: item.category_code || category.category_code,
-              tracking_mode: category.tracking_mode === 'individual' ? 'individual' : 'quantity',
+              tracking_mode: 'quantity',
               quantity: item.quantity || 1,
               available: category.available_quantity ?? item.quantity ?? 1,
               condition: 'good',
@@ -788,27 +872,82 @@ const AssetDispatch: React.FC = () => {
               category_id: item.category_id,
               category_name: item.category_name || 'Unknown',
               category_code: item.category_code || '',
-              tracking_mode: 'quantity',
+              tracking_mode: item.tracking_mode || 'quantity',
               quantity: item.quantity || 1,
-              available: item.quantity || 1,
+              available: 0,
               condition: 'good',
-              notes: ''
+              notes: '⚠️ Category not found in inventory'
             });
           }
         }
       } else if (requisition.category_id) {
         // Single item (old format)
         const category = categoriesList.find(c => c.category_id === requisition.category_id);
-        prefilledItems.push({
-          category_id: requisition.category_id,
-          category_name: requisition.category_name || (category?.category_name || 'Unknown'),
-          category_code: requisition.category_code || (category?.category_code || ''),
-          tracking_mode: category?.tracking_mode === 'individual' ? 'individual' : 'quantity',
-          quantity: requisition.quantity || 1,
-          available: category?.available_quantity ?? requisition.quantity ?? 1,
-          condition: 'good',
-          notes: ''
-        });
+
+        // Also check for individual tracking items
+        const availableItemsForCategory = (fetchedData?.items || itemsList).filter(
+          ai => ai.category_id === requisition.category_id && ai.current_status === 'available'
+        ) || [];
+        const isIndividualTracking = requisition.tracking_mode === 'individual' ||
+          category?.tracking_mode === 'individual' ||
+          availableItemsForCategory.length > 0;
+
+        if (isIndividualTracking) {
+          // Handle individual tracking for single item requisition - show as grouped quantity
+          const requestedQty = requisition.quantity || 1;
+          const itemsToAdd = availableItemsForCategory.slice(0, requestedQty);
+          const categoryName = requisition.category_name || category?.category_name || 'Unknown';
+          const categoryCode = requisition.category_code || category?.category_code || '';
+
+          // Group individual items into a single line item
+          const itemCodes = itemsToAdd.map(ai => ai.item_code).filter(Boolean).join(', ');
+          const note = itemsToAdd.length > 0
+            ? `Individual items: ${itemCodes || itemsToAdd.map((ai, idx) => `#${idx + 1}`).join(', ')}`
+            : `⚠️ No available items - ${requestedQty} needed`;
+
+          prefilledItems.push({
+            category_id: requisition.category_id,
+            category_name: categoryName,
+            category_code: categoryCode,
+            tracking_mode: 'individual',
+            quantity: itemsToAdd.length > 0 ? itemsToAdd.length : requestedQty,
+            available: availableItemsForCategory.length,
+            condition: 'good',
+            notes: note,
+            // Store the asset_item_ids for backend submission
+            individualItemIds: itemsToAdd.map(ai => ai.item_id)
+          });
+
+          // Add shortfall warning if needed
+          if (itemsToAdd.length < requestedQty) {
+            const shortfall = requestedQty - itemsToAdd.length;
+            prefilledItems[prefilledItems.length - 1].notes += ` | ⚠️ Shortfall: ${shortfall} more needed`;
+          }
+        } else if (category) {
+          // Quantity-based tracking
+          prefilledItems.push({
+            category_id: requisition.category_id,
+            category_name: requisition.category_name || category.category_name,
+            category_code: requisition.category_code || category.category_code,
+            tracking_mode: 'quantity',
+            quantity: requisition.quantity || 1,
+            available: category.available_quantity ?? requisition.quantity ?? 1,
+            condition: 'good',
+            notes: ''
+          });
+        } else {
+          // Category not found anywhere
+          prefilledItems.push({
+            category_id: requisition.category_id,
+            category_name: requisition.category_name || 'Unknown',
+            category_code: requisition.category_code || '',
+            tracking_mode: requisition.tracking_mode || 'quantity',
+            quantity: requisition.quantity || 1,
+            available: 0,
+            condition: 'good',
+            notes: '⚠️ Category not found in inventory'
+          });
+        }
       }
 
       setDispatchItems(prefilledItems);
@@ -1240,22 +1379,65 @@ const AssetDispatch: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Transport Fee */}
+                  {/* Transport Fee Calculation */}
                   <div className="mt-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Transport Fee (AED)
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3">Transport Fee Calculation</h4>
+
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Enter total transport fee <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       min="0"
-                      value={transportFee}
-                      onChange={(e) => setTransportFee(Number(e.target.value))}
-                      placeholder="Enter transport fee for this delivery"
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                      value={transportFee === 0 ? '' : transportFee}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === '') {
+                          setTransportFee(0);
+                        } else {
+                          const numValue = parseFloat(value);
+                          if (!isNaN(numValue)) {
+                            setTransportFee(numValue);
+                          }
+                        }
+                      }}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                     />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Enter the transport fee paid for delivering these materials from vendor to store
+                    <p className="text-xs text-gray-500 mt-1.5 flex items-start">
+                      <svg className="w-4 h-4 text-gray-400 mr-1 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      This is the total transport cost paid for material delivered.
+                    </p>
+
+                    {/* Total Transport Fee Display */}
+                    {transportFee > 0 && (
+                      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-lg p-4 shadow-sm mt-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center">
+                            <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            <span className="text-sm text-blue-900 font-semibold">
+                              Total Transport Fee:
+                            </span>
+                          </div>
+                          <span className="text-2xl font-bold text-blue-900">
+                            AED {transportFee.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="bg-white rounded-md p-2 border border-blue-200">
+                          <p className="text-xs text-blue-800 font-medium">
+                            📊 Calculation: 1 × {transportFee.toFixed(2)} = <span className="font-bold">{transportFee.toFixed(2)} AED</span>
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-amber-600 italic mt-2">
+                      ⚡ Total transport fee will be calculated automatically when you enter the quantity
                     </p>
                   </div>
 
@@ -1283,14 +1465,14 @@ const AssetDispatch: React.FC = () => {
                             <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
                             <span className="text-sm font-semibold text-blue-800">Quantity-based Assets</span>
                             <span className="px-2 py-0.5 bg-blue-200 text-blue-700 text-xs font-bold rounded-full">
-                              {availableCategories.length}
+                              {availableCategories.filter(cat => cat.tracking_mode === 'quantity').length}
                             </span>
                           </div>
                           {quantityExpanded ? <ChevronUp className="w-5 h-5 text-blue-600" /> : <ChevronDown className="w-5 h-5 text-blue-600" />}
                         </button>
                         {quantityExpanded && (
                           <div className="px-4 pb-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-56 overflow-y-auto">
-                            {availableCategories.map(cat => {
+                            {availableCategories.filter(cat => cat.tracking_mode === 'quantity').map(cat => {
                               const isSelected = dispatchItems.some(i => i.category_id === cat.category_id && !i.asset_item_id);
                               return (
                                 <button
@@ -1423,21 +1605,25 @@ const AssetDispatch: React.FC = () => {
                               </span>
                             )}
                           </div>
-                          {item.tracking_mode === 'quantity' && (
-                            <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-1 rounded-lg">
-                              <label className="text-xs text-gray-600 font-medium">Qty:</label>
-                              <input
-                                type="number"
-                                min="1"
-                                max={item.available}
-                                value={item.quantity}
-                                onChange={(e) => updateDispatchItem(index, 'quantity', parseInt(e.target.value) || 1)}
-                                className="w-12 px-1.5 py-0.5 text-sm border rounded text-center font-semibold"
-                                disabled={linkedRequisitionId ? true : false}
-                              />
-                              <span className="text-xs text-gray-400">/ {item.available}</span>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-1 rounded-lg">
+                            <label className="text-xs text-gray-600 font-medium">Qty:</label>
+                            {item.tracking_mode === 'quantity' ? (
+                              <>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max={item.available}
+                                  value={item.quantity}
+                                  onChange={(e) => updateDispatchItem(index, 'quantity', parseInt(e.target.value) || 1)}
+                                  className="w-12 px-1.5 py-0.5 text-sm border rounded text-center font-semibold"
+                                  disabled={linkedRequisitionId ? true : false}
+                                />
+                                <span className="text-xs text-gray-400">/ {item.available}</span>
+                              </>
+                            ) : (
+                              <span className="px-1.5 py-0.5 text-sm font-semibold text-gray-700">{item.quantity || 1}</span>
+                            )}
+                          </div>
                           {!linkedRequisitionId && (
                             <button
                               type="button"

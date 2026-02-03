@@ -1586,23 +1586,65 @@ const WorkerAssignments: React.FC = () => {
                   </div>
 
                   {/* Transport Fee */}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Transport Fee (AED)
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Enter total transport fee <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       min="0"
-                      value={transportFee}
-                      onChange={(e) => setTransportFee(parseFloat(e.target.value) || 0)}
+                      value={transportFee || ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === '' || value === null || value === undefined) {
+                          setTransportFee(0);
+                        } else {
+                          const parsedValue = parseFloat(value);
+                          setTransportFee(isNaN(parsedValue) ? 0 : parsedValue);
+                        }
+                      }}
+                      onBlur={(e) => {
+                        // Ensure value is 0 if field is left empty
+                        if (e.target.value === '' || e.target.value === null) {
+                          setTransportFee(0);
+                        }
+                      }}
                       placeholder="0.00"
-                      className="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
+                    <p className="text-xs text-gray-500 mt-1.5 flex items-start">
+                      <svg className="w-4 h-4 text-gray-400 mr-1 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Enter transport details for bringing workers to site
+                    </p>
+
+                    {/* Total Transport Fee Display */}
+                    {transportFee > 0 && (
+                      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-300 rounded-md p-2.5 shadow-sm mt-3">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center">
+                            <svg className="w-4 h-4 text-blue-600 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            <span className="text-xs text-blue-900 font-semibold">
+                              Total Transport Fee:
+                            </span>
+                          </div>
+                          <span className="text-base font-bold text-blue-900">
+                            AED {transportFee.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="bg-white rounded p-1.5 border border-blue-200">
+                          <p className="text-xs text-blue-800 font-medium">
+                            📊 Calculation: 1 × {transportFee.toFixed(2)} = <span className="font-bold">{transportFee.toFixed(2)} AED</span>
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                <p className="mt-2 text-xs text-blue-700">Enter transport details for bringing workers to site</p>
               </div>
 
               {/* Workers List */}
