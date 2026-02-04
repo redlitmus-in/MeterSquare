@@ -242,8 +242,8 @@ class DailySchedulePDFGenerator:
                 header_details_group = [project_header_table, details_table]
                 story.append(KeepTogether(header_details_group))
 
-                # Add spacing between details and workers table
-                story.append(Spacer(1, 4*mm))
+                # Minimal spacing between details and workers table
+                story.append(Spacer(1, 2*mm))
 
                 # Workers table (can split across pages if needed)
                 if req['assigned_workers']:
@@ -314,16 +314,10 @@ class DailySchedulePDFGenerator:
                     )
                     story.append(no_workers_msg)
 
-            # Add spacing and separator between projects (except after last project)
+            # Add spacing between projects (except after last project)
+            # Reduced spacing - page breaks provide natural separation
             if idx < len(schedule_data['projects']) - 1:
-                story.append(Spacer(1, 6*mm))
-                # Add visual separator line between projects
-                separator_table = Table([['']], colWidths=[180*mm])
-                separator_table.setStyle(TableStyle([
-                    ('LINEABOVE', (0, 0), (-1, -1), 1, colors.HexColor('#d1d5db')),
-                ]))
-                story.append(separator_table)
-                story.append(Spacer(1, 6*mm))
+                story.append(Spacer(1, 8*mm))
 
         # Footer
         story.append(Spacer(1, 10*mm))
