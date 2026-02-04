@@ -2281,10 +2281,11 @@ def get_pm_approved_boq():
         return jsonify({'error': 'Failed to retrieve PM Approval BOQs', 'details': str(e)}), 500
 
 def get_pm_pending_boq():
-    """Get pending projects - projects with approved BOQs not yet completed + items_assigned projects where PM hasn't made assignments - OPTIMIZED FOR SPEED"""
+    """Get pending projects - projects with approved BOQs not yet completed + items_assigned projects where PM hasn't made assignments AND not all items are assigned - OPTIMIZED FOR SPEED"""
     try:
         from sqlalchemy import func, or_, and_, exists
         from models.pm_assign_ss import PMAssignSS
+        from models.boq import BOQDetails
 
         page = request.args.get('page', type=int)
         page_size = request.args.get('page_size', default=20, type=int)
@@ -2295,6 +2296,27 @@ def get_pm_pending_boq():
             return jsonify({'error': 'Authentication required'}), 401
         user_id = current_user.get('user_id')
         user_role = current_user.get('role', '').lower() if current_user else ''
+
+        # Subquery to get total items in BOQ from BOQDetails
+        boq_items_count_subquery = (
+            db.session.query(
+                BOQDetails.boq_id,
+                func.coalesce(BOQDetails.total_items, 0).label('total_items')
+            )
+            .filter(BOQDetails.is_deleted == False)
+            .subquery()
+        )
+
+        # Subquery to get total items assigned by ALL PMs (not just current PM)
+        all_pm_assignments_count = (
+            db.session.query(
+                PMAssignSS.boq_id,
+                func.sum(func.coalesce(func.cardinality(PMAssignSS.item_indices), 0)).label('total_items_assigned')
+            )
+            .filter(PMAssignSS.is_deleted == False)
+            .group_by(PMAssignSS.boq_id)
+            .subquery()
+        )
 
         # OPTIMIZED: Select specific columns instead of entire Project object
         query = (
@@ -2321,6 +2343,8 @@ def get_pm_pending_boq():
                 BOQ.boq_name
             )
             .join(BOQ, Project.project_id == BOQ.project_id)
+            .outerjoin(boq_items_count_subquery, BOQ.boq_id == boq_items_count_subquery.c.boq_id)
+            .outerjoin(all_pm_assignments_count, BOQ.boq_id == all_pm_assignments_count.c.boq_id)
             .filter(
                 Project.is_deleted == False,
                 BOQ.is_deleted == False,
@@ -2347,13 +2371,21 @@ def get_pm_pending_boq():
                 )
 
                 # Add condition: Show projects with status 'approved' OR
-                # projects with status 'items_assigned' where PM hasn't made ANY assignments
+                # projects with status 'items_assigned' where:
+                #   - PM hasn't made ANY assignments AND
+                #   - NOT all items have been assigned by other PMs
                 query = query.filter(
                     or_(
                         BOQ.status.in_(['approved', 'Approved']),
                         and_(
                             BOQ.status == 'items_assigned',
-                            ~pm_has_assignments  # NOT EXISTS - PM has no assignments for this BOQ
+                            ~pm_has_assignments,  # NOT EXISTS - PM has no assignments for this BOQ
+                            or_(
+                                # Either no assignments exist at all
+                                all_pm_assignments_count.c.total_items_assigned == None,
+                                # Or total items assigned < total items in BOQ (items still available)
+                                func.coalesce(all_pm_assignments_count.c.total_items_assigned, 0) < func.coalesce(boq_items_count_subquery.c.total_items, 0)
+                            )
                         )
                     )
                 )
