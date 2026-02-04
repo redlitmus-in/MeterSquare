@@ -1285,9 +1285,11 @@ const MyProjects: React.FC = () => {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Priority
                     </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Site Engineer
-                    </th>
+                    {filterStatus !== 'approved' && filterStatus !== 'completed' && filterStatus !== 'rejected' && (
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Site Engineer
+                      </th>
+                    )}
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Date
                     </th>
@@ -1322,64 +1324,24 @@ const MyProjects: React.FC = () => {
                           {project.priority}
                         </span>
                       </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                        {project.site_supervisor_name ? (
-                          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md w-fit max-w-full">
-                            <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-600 flex-shrink-0" />
-                            <span className="text-[10px] sm:text-xs font-medium text-purple-900 truncate">{project.site_supervisor_name}</span>
-                            {/* Hide edit/delete buttons in Approved tab - view only */}
-                            {filterStatus !== 'approved' && (
-                              <div className="flex items-center gap-0.5 sm:gap-1 ml-auto flex-shrink-0">
-                                <button
-                                  onClick={async () => {
-                                    const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                                    if (se) {
-                                      setEditingSE(se);
-                                      setEditSEData({
-                                        full_name: se.sitesupervisor_name,
-                                        email: se.email || '',
-                                        phone: se.phone || ''
-                                      });
-                                      setShowEditModal(true);
-                                    } else {
-                                      await loadAvailableSEs();
-                                      const refreshedSE = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                                      if (refreshedSE) {
-                                        setEditingSE(refreshedSE);
-                                        setEditSEData({
-                                          full_name: refreshedSE.sitesupervisor_name,
-                                          email: refreshedSE.email || '',
-                                          phone: refreshedSE.phone || ''
-                                        });
-                                        setShowEditModal(true);
-                                      }
-                                    }
-                                  }}
-                                  className="p-0.5 sm:p-1 text-purple-600 hover:text-blue-600 hover:bg-blue-100 rounded transition-all"
-                                  title="Edit Site Engineer Details"
-                                >
-                                  <PencilIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setSeToDelete({
-                                      id: project.site_supervisor_id,
-                                      name: project.site_supervisor_name
-                                    });
-                                    setShowDeleteConfirm(true);
-                                  }}
-                                  className="p-0.5 sm:p-1 text-purple-600 hover:text-red-600 hover:bg-red-100 rounded transition-all"
-                                  title="Delete Site Engineer"
-                                >
-                                  <XMarkIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-xs sm:text-sm text-gray-400">Not assigned</span>
-                        )}
-                      </td>
+                      {filterStatus !== 'approved' && filterStatus !== 'completed' && filterStatus !== 'rejected' && (
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                          {project.total_se_assignments && project.total_se_assignments > 0 ? (
+                            <button
+                              onClick={() => loadCompletionDetails(project.project_id)}
+                              className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md w-fit max-w-full hover:bg-purple-100 hover:border-purple-300 transition-all cursor-pointer"
+                              title="Click to view site engineers"
+                            >
+                              <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-600 flex-shrink-0" />
+                              <span className="text-[10px] sm:text-xs font-medium text-purple-900 truncate">
+                                {project.total_se_assignments} {project.total_se_assignments === 1 ? 'Site Engineer' : 'Site Engineers'}
+                              </span>
+                            </button>
+                          ) : (
+                            <span className="text-xs sm:text-sm text-gray-400">Not assigned</span>
+                          )}
+                        </td>
+                      )}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{formatDate(project.created_at)}</div>
                       </td>

@@ -2554,7 +2554,6 @@ const EstimatorHub: React.FC = () => {
             <TableHead className="text-gray-600">Project</TableHead>
             <TableHead className="text-gray-600">Client</TableHead>
             <TableHead className="text-gray-600">Location</TableHead>
-            <TableHead className="text-right text-gray-600">Total Value</TableHead>
             <TableHead className="text-gray-600">Status</TableHead>
             <TableHead className="text-gray-600">Created</TableHead>
             <TableHead className="text-gray-600">Actions</TableHead>
@@ -2563,7 +2562,7 @@ const EstimatorHub: React.FC = () => {
         <TableBody>
           {boqList.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={9} className="text-center py-12 text-gray-500">
+              <TableCell colSpan={8} className="text-center py-12 text-gray-500">
                 <div className="flex flex-col items-center">
                   <FileText className="h-12 w-12 text-gray-300 mb-3" />
                   <p className="text-base">No BOQs found</p>
@@ -2595,9 +2594,6 @@ const EstimatorHub: React.FC = () => {
                     <MapPin className="h-3 w-3 text-gray-400" />
                     {boq.project.location}
                   </div>
-                </TableCell>
-                <TableCell className="text-right font-medium">
-                  {formatCurrency(boq.summary.grandTotal)}
                 </TableCell>
                 <TableCell>{getStatusBadge(boq.status, boq.client_rejection_reason)}</TableCell>
                 <TableCell className="text-gray-600">
