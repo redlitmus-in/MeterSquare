@@ -2760,9 +2760,10 @@ def get_pm_dashboard():
         project_ids = [row[0] for row in project_ids_query.all()]
 
         # DEBUG: Check if we're missing any projects where PM has BOQs assigned
-        print(f"\n=== PM Projects Debug ===")
-        print(f"User Role: {user_role}, User ID: {filter_user_id}, viewing_as_pm_id: {viewing_as_pm_id}")
-        print(f"Projects found by initial query: {project_ids}")
+        # DEBUG: Commented out verbose logging for production
+        # print(f"\n=== PM Projects Debug ===")
+        # print(f"User Role: {user_role}, User ID: {filter_user_id}, viewing_as_pm_id: {viewing_as_pm_id}")
+        # print(f"Projects found by initial query: {project_ids}")
 
         # For admin viewing general PM dashboard, include ALL projects with PM-assigned BOQs
         if user_role == 'admin' and not viewing_as_pm_id:
@@ -2775,19 +2776,19 @@ def get_pm_dashboard():
                 BOQ.is_deleted == False
             ).distinct().all()
 
-            print(f"\nProjects that have BOQs assigned to ANY PM ({len(projects_with_any_pm_boqs)} total):")
+            # print(f"\nProjects that have BOQs assigned to ANY PM ({len(projects_with_any_pm_boqs)} total):")
             missing_projects = []
             for p in projects_with_any_pm_boqs:
                 in_list = p.project_id in project_ids
-                print(f"  - Project #{p.project_id}: {p.project_name}, is_deleted: {p.is_deleted}, in_list: {in_list}")
+                # print(f"  - Project #{p.project_id}: {p.project_name}, is_deleted: {p.is_deleted}, in_list: {in_list}")
                 if not in_list:
                     missing_projects.append(p.project_id)
-                    print(f"    ⚠️  MISSING - will add (even if deleted)")
+                    # print(f"    ⚠️  MISSING - will add (even if deleted)")
 
             if missing_projects:
-                print(f"\n⚠️  Admin: Adding {len(missing_projects)} projects with PM BOQs: {missing_projects}")
+                # print(f"\n⚠️  Admin: Adding {len(missing_projects)} projects with PM BOQs: {missing_projects}")
                 project_ids.extend(missing_projects)
-                print(f"Updated project_ids: {project_ids}")
+                # print(f"Updated project_ids: {project_ids}")
         else:
             # Regular PM: Find projects that have BOQs assigned to this specific PM
             projects_with_pm_boqs = db.session.query(
@@ -2797,24 +2798,24 @@ def get_pm_dashboard():
                 BOQ.is_deleted == False
             ).distinct().all()
 
-            print(f"\nProjects that have BOQs assigned to PM {filter_user_id}:")
+            # print(f"\nProjects that have BOQs assigned to PM {filter_user_id}:")
             missing_projects = []
             for p in projects_with_pm_boqs:
                 in_list = p.project_id in project_ids
-                print(f"  - Project #{p.project_id}: {p.project_name}")
-                print(f"    user_id: {p.user_id}, is_deleted: {p.is_deleted}")
-                print(f"    In project_ids list? {in_list}")
+                # print(f"  - Project #{p.project_id}: {p.project_name}")
+                # print(f"    user_id: {p.user_id}, is_deleted: {p.is_deleted}")
+                # print(f"    In project_ids list? {in_list}")
                 if not in_list and not p.is_deleted:
                     missing_projects.append(p.project_id)
-                    print(f"    ⚠️  MISSING from project_ids! PM has BOQs here but project not in list")
+                    # print(f"    ⚠️  MISSING from project_ids! PM has BOQs here but project not in list")
 
             if missing_projects:
-                print(f"\n⚠️  PM: Adding {len(missing_projects)} missing projects to project_ids: {missing_projects}")
+                # print(f"\n⚠️  PM: Adding {len(missing_projects)} missing projects to project_ids: {missing_projects}")
                 project_ids.extend(missing_projects)
-                print(f"Updated project_ids: {project_ids}")
+                # print(f"Updated project_ids: {project_ids}")
 
-        print(f"Final project_ids count: {len(project_ids)}")
-        print(f"========================\n")
+        # print(f"Final project_ids count: {len(project_ids)}")
+        # print(f"========================\n")
 
         if not project_ids:
             return jsonify({
@@ -2987,72 +2988,10 @@ def get_pm_dashboard():
             "completed": int(status_counts.completed) if status_counts.completed else 0
         }
 
-        # DEBUG: Print status counts and actual BOQs
-        print(f"\n=== PM Dashboard BOQ Status Counts ===")
-        print(f"User ID: {filter_user_id}, Role: {user_role}")
-        print(f"Project IDs: {project_ids}")
-
-        # Query actual BOQs for debugging
-        debug_boqs = db.session.query(
-            BOQ.boq_id, BOQ.boq_name, BOQ.status, BOQ.last_pm_user_id, BOQ.project_id
-        ).filter(
-            BOQ.project_id.in_(project_ids),
-            BOQ.is_deleted == False
-        ).all()
-
-        print(f"\nAll BOQs in these projects ({len(debug_boqs)} total):")
-        for b in debug_boqs:
-            print(f"  - BOQ #{b.boq_id}: {b.boq_name} (Project #{b.project_id})")
-            print(f"    Status: '{b.status}', last_pm_user_id: {b.last_pm_user_id}")
-            print(f"    Is this PM's BOQ? {b.last_pm_user_id == filter_user_id}")
-            if 'reject' in str(b.status).lower():
-                print(f"    ⚠️  This BOQ has 'reject' in status!")
-
-        # For admin, also check ALL BOQs with any PM assigned
-        if user_role == 'admin' and not viewing_as_pm_id:
-            all_pm_boqs = db.session.query(
-                BOQ.boq_id, BOQ.boq_name, BOQ.status, BOQ.project_id, BOQ.last_pm_user_id
-            ).filter(
-                BOQ.last_pm_user_id.isnot(None),
-                BOQ.is_deleted == False
-            ).all()
-
-            print(f"\nALL BOQs with ANY PM assigned in entire database ({len(all_pm_boqs)} total):")
-            boqs_in_current = 0
-            boqs_missing = 0
-            for b in all_pm_boqs:
-                in_current_projects = b.project_id in project_ids
-                if in_current_projects:
-                    boqs_in_current += 1
-                else:
-                    boqs_missing += 1
-                    print(f"  ⚠️  BOQ #{b.boq_id}: {b.boq_name} (Project #{b.project_id}, PM: {b.last_pm_user_id})")
-                    print(f"      Status: '{b.status}', NOT in project_ids!")
-
-            print(f"\nSummary: {boqs_in_current} BOQs in current projects, {boqs_missing} BOQs MISSING")
-        else:
-            # Also check ALL BOQs assigned to this PM across the entire database
-            all_pm_boqs = db.session.query(
-                BOQ.boq_id, BOQ.boq_name, BOQ.status, BOQ.project_id
-            ).filter(
-                BOQ.last_pm_user_id == filter_user_id,
-                BOQ.is_deleted == False
-            ).all()
-
-            print(f"\nALL BOQs assigned to PM {filter_user_id} in entire database ({len(all_pm_boqs)} total):")
-            for b in all_pm_boqs:
-                in_current_projects = b.project_id in project_ids
-                print(f"  - BOQ #{b.boq_id}: {b.boq_name} (Project #{b.project_id})")
-                print(f"    Status: '{b.status}', In current projects? {in_current_projects}")
-
-        print(f"\nStatus Counts from Query:")
-        print(f"  - for_approval: {boq_status_counts['for_approval']}")
-        print(f"  - pending: {boq_status_counts['pending']}")
-        print(f"  - assigned: {boq_status_counts['assigned']}")
-        print(f"  - approved: {boq_status_counts['approved']} (ALL BOQs where last_pm_user_id={filter_user_id})")
-        print(f"  - rejected: {boq_status_counts['rejected']} (BOQs with PM_Rejected status)")
-        print(f"  - completed: {boq_status_counts['completed']}")
-        print(f"======================================\n")
+        # DEBUG: Commented out verbose logging for production
+        # print(f"\n=== PM Dashboard BOQ Status Counts ===")
+        # print(f"User ID: {filter_user_id}, Role: {user_role}")
+        # print(f"Project IDs: {project_ids}")
 
         # OPTIMIZED: Count assigned items using sum of cardinality (array length)
         # Count ALL items assigned to Site Engineers in PM's projects
@@ -3142,41 +3081,9 @@ def get_pm_dashboard():
 
         # First, debug: Check all PO statuses in PM's projects with parent CR status
         # Debug: Check ChangeRequests to understand status distribution
-        debug_crs = db.session.query(
-            ChangeRequest.cr_id,
-            ChangeRequest.status,
-            ChangeRequest.approval_required_from,
-            ChangeRequest.requested_by_user_id,
-            ChangeRequest.requested_by_role,
-            ChangeRequest.assigned_to_pm_user_id,
-            ChangeRequest.pm_approved_by_user_id,
-            ChangeRequest.project_id
-        ).filter(
-            ChangeRequest.project_id.in_(project_ids),
-            ChangeRequest.is_deleted == False
-        ).all()
-
-        print(f"\n=== Purchase Order Debug (PM Dashboard) ===")
-        print(f"User Role: {user_role}, Filter User ID: {filter_user_id}, Viewing As PM ID: {viewing_as_pm_id}")
-        print(f"Project IDs: {project_ids}")
-        print(f"Total ChangeRequest records found: {len(debug_crs)}")
-
-        # Group by status for easy viewing
-        status_groups = {}
-        for cr in debug_crs:
-            status_key = f"{cr.status}"
-            if cr.approval_required_from:
-                status_key += f" (approval_from={cr.approval_required_from})"
-            if status_key not in status_groups:
-                status_groups[status_key] = []
-            status_groups[status_key].append(cr)
-
-        for status_key, crs in status_groups.items():
-            print(f"\n  Status: {status_key} ({len(crs)} requests)")
-            for cr in crs[:3]:  # Show first 3 of each status
-                print(f"    CR-{cr.cr_id}: requested_by_user={cr.requested_by_user_id}, role={cr.requested_by_role}, "
-                      f"assigned_to_pm={cr.assigned_to_pm_user_id}, pm_approved_by={cr.pm_approved_by_user_id}, project={cr.project_id}")
-        print(f"==========================================\n")
+        # DEBUG: Commented out verbose logging for production
+        # debug_crs = db.session.query(...).all()
+        # print(f"\n=== Purchase Order Debug (PM Dashboard) ===")
 
         # Purchase Order Status Query - Count UNIQUE ChangeRequests (not POChild records)
         # This matches the frontend ChangeRequestsPage.tsx filtering logic
@@ -3315,41 +3222,11 @@ def get_pm_dashboard():
             "rejected": int(po_status_counts.rejected) if po_status_counts.rejected else 0
         }
 
-        print(f"PO Status Counts: {purchase_order_status}")
+        # DEBUG: Commented out verbose logging for production
+        # print(f"PO Status Counts: {purchase_order_status}")
 
         # Labour Data Breakdown
         # Combine Labour Requisition status counts and Attendance Lock status counts
-
-        # Debug: Check what labour data exists
-        debug_labour_reqs = db.session.query(
-            LabourRequisition.requisition_id,
-            LabourRequisition.status,
-            LabourRequisition.project_id,
-            LabourRequisition.requested_by_user_id
-        ).filter(
-            LabourRequisition.project_id.in_(project_ids),
-            LabourRequisition.is_deleted == False
-        ).all()
-
-        debug_attendance = db.session.query(
-            DailyAttendance.attendance_id,
-            DailyAttendance.approval_status,
-            DailyAttendance.project_id,
-            DailyAttendance.entered_by_user_id
-        ).filter(
-            DailyAttendance.project_id.in_(project_ids)
-        ).all()
-
-        print(f"\n=== Labour Data Debug (PM Dashboard) ===")
-        print(f"User Role: {user_role}, Filter User ID: {filter_user_id}, Viewing As PM ID: {viewing_as_pm_id}")
-        print(f"Project IDs: {project_ids}")
-        print(f"\nLabour Requisitions found: {len(debug_labour_reqs)}")
-        for lr in debug_labour_reqs[:5]:  # Show first 5
-            print(f"  REQ-{lr.requisition_id}: status='{lr.status}', project={lr.project_id}, requested_by={lr.requested_by_user_id}")
-        print(f"\nDaily Attendance found: {len(debug_attendance)}")
-        for da in debug_attendance[:5]:  # Show first 5
-            print(f"  ATT-{da.attendance_id}: approval='{da.approval_status}', project={da.project_id}, entered_by={da.entered_by_user_id}")
-        print(f"==========================================\n")
 
         # Labour Requisition status counts (Pending, Approved, Rejected)
         # IMPORTANT: Labour data filtering logic for PM consistency:

@@ -172,6 +172,34 @@ def create_app():
     # with app.app_context():
     #     db.create_all()
 
+    # ✅ CRITICAL: Database session cleanup after each request
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
+        """
+        Remove database session after each request to prevent session leaks
+        This prevents "write() before start_response" errors caused by uncommitted transactions
+        """
+        try:
+            db.session.remove()
+        except Exception as e:
+            logger.error(f"Error removing database session: {str(e)}")
+
+    @app.teardown_request
+    def teardown_request_handler(exception=None):
+        """
+        Ensure database session is properly closed after each request
+        Handles both successful requests and exceptions
+        """
+        if exception:
+            try:
+                db.session.rollback()
+            except Exception as e:
+                logger.error(f"Error rolling back database session: {str(e)}")
+        try:
+            db.session.close()
+        except Exception as e:
+            logger.error(f"Error closing database session: {str(e)}")
+
     # ✅ CRITICAL: Global error handlers to prevent "write() before start_response" errors
     # These catch any unhandled exceptions and ensure a proper HTTP response is returned
     @app.errorhandler(Exception)
