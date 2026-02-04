@@ -823,6 +823,42 @@ class LabourService {
     }
   }
 
+  /**
+   * Download daily worker assignment schedule PDF (poster format)
+   * Shows all assigned workers for a specific date, grouped by project
+   */
+  async downloadDailySchedulePDF(date: string): Promise<void> {
+    try {
+      const response = await apiClient.get(`/labour/daily-schedule/download_pdf`, {
+        params: { date },
+        responseType: 'blob'
+      });
+
+      // Create a blob from the response
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+
+      // Create a temporary URL for the blob
+      const url = window.URL.createObjectURL(blob);
+
+      // Format date for filename
+      const formattedDate = new Date(date).toLocaleDateString('en-GB').replace(/\//g, '-');
+
+      // Create a temporary link element and trigger download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Worker_Assignment_Schedule_${formattedDate}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+
+      // Clean up
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('Error downloading daily schedule PDF:', error);
+      throw new Error('Failed to download daily schedule PDF');
+    }
+  }
+
   // ==========================================================================
   // STEP 5: Arrival Confirmation (Site Engineer)
   // ==========================================================================

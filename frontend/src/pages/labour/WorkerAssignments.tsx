@@ -76,6 +76,10 @@ const WorkerAssignments: React.FC = () => {
   const [selectedFilter, setSelectedFilter] = useState<'low-rate' | 'high-rate' | 'single-skill' | 'multi-skill' | null>(null);
   const [detailsRequisition, setDetailsRequisition] = useState<LabourRequisition | null>(null);
 
+  // Date filter for daily schedule
+  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [downloadingDailySchedule, setDownloadingDailySchedule] = useState(false);
+
   // Scroll position preservation
   const workerListRef = React.useRef<HTMLDivElement>(null);
   const [shouldPreserveScroll, setShouldPreserveScroll] = React.useState(false);
@@ -122,17 +126,31 @@ const WorkerAssignments: React.FC = () => {
     fetchRequisitions();
   }, [activeTab]);
 
+  // Date filtering for assigned tab
+  const filteredRequisitions = useMemo(() => {
+    if (activeTab !== 'assigned') {
+      return requisitions;
+    }
+
+    // Filter by selected date
+    return requisitions.filter(req => {
+      if (!req.required_date) return false;
+      // Compare dates (req.required_date is in YYYY-MM-DD format)
+      return req.required_date === selectedDate;
+    });
+  }, [requisitions, selectedDate, activeTab]);
+
   // Pagination calculations
-  const totalPages = Math.ceil(requisitions.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const totalPages = Math.ceil(filteredRequisitions.length / PAGINATION.DEFAULT_PAGE_SIZE);
   const paginatedRequisitions = useMemo(() => {
     const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
-    return requisitions.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
-  }, [requisitions, currentPage]);
+    return filteredRequisitions.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequisitions, currentPage]);
 
-  // Reset page when tab changes
+  // Reset page when tab or date changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab]);
+  }, [activeTab, selectedDate]);
 
   // Clamp page when total pages decreases
   useEffect(() => {
@@ -499,21 +517,83 @@ const WorkerAssignments: React.FC = () => {
         })}
       </div>
 
+      {/* Daily Schedule Download Section - Only show in Assigned tab */}
+      {activeTab === 'assigned' && (
+        <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-4">
+          <div className="flex flex-col md:flex-row md:items-center gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <CalendarIcon className="w-5 h-5 text-blue-600" />
+                <h3 className="text-sm font-semibold text-blue-900">Daily Worker Assignment Schedule</h3>
+              </div>
+              <p className="text-xs text-blue-700">Download a poster-format PDF showing all assigned workers by project, site, and transport details for the selected date</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex flex-col">
+                <label className="text-xs font-medium text-blue-900 mb-1">Select Date</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="px-3 py-2 border-2 border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <button
+                onClick={async () => {
+                  if (!selectedDate) {
+                    showError('Please select a date');
+                    return;
+                  }
+                  setDownloadingDailySchedule(true);
+                  try {
+                    await labourService.downloadDailySchedulePDF(selectedDate);
+                    showSuccess('Daily schedule PDF downloaded successfully');
+                  } catch (error) {
+                    showError('Failed to download daily schedule');
+                  } finally {
+                    setDownloadingDailySchedule(false);
+                  }
+                }}
+                disabled={downloadingDailySchedule}
+                className="mt-5 flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-md"
+                title="Download Daily Worker Schedule Poster"
+              >
+                {downloadingDailySchedule ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    <span className="text-sm">Generating...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span className="text-sm">Download Daily Schedule</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Requisitions List */}
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
         </div>
-      ) : requisitions.length === 0 ? (
+      ) : filteredRequisitions.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <ClipboardDocumentListIcon className="mx-auto h-12 w-12 text-gray-400" />
           <h3 className="mt-2 text-sm font-medium text-gray-900">
-            {activeTab === 'pending' ? 'All caught up!' : 'No assigned requisitions'}
+            {activeTab === 'pending' ? 'All caught up!' : (requisitions.length === 0 ? 'No assigned requisitions' : 'No assignments for selected date')}
           </h3>
           <p className="mt-1 text-sm text-gray-500">
             {activeTab === 'pending'
               ? 'No requisitions pending assignment.'
-              : 'No requisitions have been assigned yet.'}
+              : (requisitions.length === 0
+                  ? 'No requisitions have been assigned yet.'
+                  : `No worker assignments found for ${new Date(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Try selecting a different date.`)}
           </p>
         </div>
       ) : (
@@ -591,10 +671,13 @@ const WorkerAssignments: React.FC = () => {
           ))}
 
           {/* Pagination */}
-          {requisitions.length > 0 && (
+          {filteredRequisitions.length > 0 && (
             <div className="mt-4 px-4 py-3 bg-white rounded-lg border border-gray-200 flex items-center justify-between text-sm">
               <span className="text-gray-600">
-                Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, requisitions.length)} of {requisitions.length} requisitions
+                Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredRequisitions.length)} of {filteredRequisitions.length} requisitions
+                {activeTab === 'assigned' && filteredRequisitions.length !== requisitions.length && (
+                  <span className="text-gray-400 ml-1">(filtered from {requisitions.length})</span>
+                )}
               </span>
               {totalPages > 1 && (
                 <div className="flex items-center gap-2">

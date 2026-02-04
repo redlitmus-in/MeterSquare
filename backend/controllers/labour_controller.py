@@ -3241,3 +3241,129 @@ def download_assignment_pdf(requisition_id):
     except Exception as e:
         log.error(f"Error generating assignment PDF: {str(e)}")
         return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500
+
+
+def download_daily_schedule_pdf():
+    """Download daily worker assignment schedule PDF (poster format for hostel wall)"""
+    try:
+        from flask import send_file
+        from utils.daily_schedule_pdf_generator import generate_daily_schedule_pdf
+        from datetime import timezone
+
+        # Helper function to convert UTC to local timezone
+        def utc_to_local(utc_dt):
+            """Convert UTC datetime to local system timezone"""
+            if utc_dt.tzinfo is None:
+                utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+            timestamp = utc_dt.timestamp()
+            local_dt = datetime.fromtimestamp(timestamp)
+            return local_dt
+
+        # Get date from query parameter
+        date_str = request.args.get('date')
+        if not date_str:
+            return jsonify({"error": "Date parameter is required"}), 400
+
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        # Fetch all assigned requisitions for this date (not rejected, with assigned workers)
+        requisitions = LabourRequisition.query.filter(
+            LabourRequisition.required_date == target_date,
+            LabourRequisition.assignment_status == 'assigned',
+            LabourRequisition.status != 'rejected',
+            LabourRequisition.is_deleted == False
+        ).options(
+            joinedload(LabourRequisition.project)
+        ).all()
+
+        # Group requisitions by project
+        projects_data = {}
+
+        for req in requisitions:
+            project_id = req.project_id
+            project_name = req.project.project_name if req.project else 'Unknown Project'
+
+            if project_id not in projects_data:
+                projects_data[project_id] = {
+                    'project_id': project_id,
+                    'project_name': project_name,
+                    'site_name': req.site_name,
+                    'requisitions': []
+                }
+
+            # Get assigned workers with full details
+            assigned_workers = []
+            if req.assigned_worker_ids:
+                workers = Worker.query.filter(
+                    Worker.worker_id.in_(req.assigned_worker_ids),
+                    Worker.is_deleted == False
+                ).all()
+
+                assigned_workers = [{
+                    'worker_id': w.worker_id,
+                    'worker_code': w.worker_code,
+                    'full_name': w.full_name,
+                    'skills': w.skills or [],
+                    'phone': w.phone
+                } for w in workers]
+
+            # Format time fields to 12-hour format
+            start_time_formatted = 'N/A'
+            end_time_formatted = 'N/A'
+
+            if req.start_time:
+                time_obj = req.start_time
+                start_time_formatted = datetime.combine(datetime.today(), time_obj).strftime('%I:%M %p')
+
+            if req.end_time:
+                time_obj = req.end_time
+                end_time_formatted = datetime.combine(datetime.today(), time_obj).strftime('%I:%M %p')
+
+            # Add requisition data to project
+            projects_data[project_id]['requisitions'].append({
+                'requisition_code': req.requisition_code,
+                'site_name': req.site_name,
+                'start_time': start_time_formatted,
+                'end_time': end_time_formatted,
+                'driver_name': req.driver_name or 'N/A',
+                'vehicle_number': req.vehicle_number or 'N/A',
+                'driver_contact': req.driver_contact or 'N/A',
+                'transport_fee': float(req.transport_fee) if req.transport_fee else 0.0,
+                'assigned_workers': assigned_workers
+            })
+
+        # Convert to list and sort by project name
+        projects_list = sorted(projects_data.values(), key=lambda x: x['project_name'])
+
+        # Prepare data for PDF generator
+        schedule_data = {
+            'date': target_date.strftime('%B %d, %Y'),  # Format: January 15, 2026
+            'date_short': target_date.strftime('%d-%b-%Y'),  # Format: 15-Jan-2026
+            'projects': projects_list,
+            'total_projects': len(projects_list),
+            'total_workers': sum(
+                len(req['assigned_workers'])
+                for project in projects_list
+                for req in project['requisitions']
+            )
+        }
+
+        # Generate PDF
+        pdf_buffer = generate_daily_schedule_pdf(schedule_data)
+
+        # Create filename
+        filename = f"Daily_Worker_Schedule_{target_date.strftime('%Y%m%d')}.pdf"
+
+        return send_file(
+            pdf_buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        log.error(f"Error generating daily schedule PDF: {str(e)}")
+        return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500

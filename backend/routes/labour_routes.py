@@ -201,6 +201,13 @@ def download_pdf(requisition_id):
     return download_assignment_pdf(requisition_id)
 
 
+@labour_routes.route('/daily-schedule/download_pdf', methods=['GET'])
+@jwt_required
+def download_daily_schedule():
+    """Download daily worker assignment schedule poster PDF (Production Manager)"""
+    return download_daily_schedule_pdf()
+
+
 # ============================================================================
 # STEP 5: Arrival Confirmation (Site Engineer)
 # ============================================================================

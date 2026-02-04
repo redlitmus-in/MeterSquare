@@ -1737,7 +1737,14 @@ const AssetDispatch: React.FC = () => {
                               </td>
                               <td className="px-4 py-4">
                                 <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm font-medium">
-                                  {dn.items?.length || 0} items
+                                  {(() => {
+                                    // Group items by category and count unique categories
+                                    const uniqueCategories = new Set();
+                                    dn.items?.forEach(item => {
+                                      uniqueCategories.add(item.category_name);
+                                    });
+                                    return uniqueCategories.size || 0;
+                                  })()} items
                                 </span>
                               </td>
                               <td className="px-4 py-4 text-sm text-gray-900">{dn.attention_to || '-'}</td>
@@ -1823,33 +1830,55 @@ const AssetDispatch: React.FC = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-gray-100">
-                                        {dn.items.map(item => (
-                                          <tr key={item.item_id} className="hover:bg-gray-50">
-                                            <td className="px-3 py-2 font-medium text-gray-900">{item.category_name}</td>
-                                            <td className="px-3 py-2 text-gray-500">{item.item_code || '-'}</td>
-                                            <td className="px-3 py-2 text-center font-semibold text-blue-600">{item.quantity}</td>
-                                            <td className="px-3 py-2 text-center">
-                                              {item.is_received ? (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                                                  <Check className="w-3 h-3" /> Yes
+                                        {(() => {
+                                          // Group items by category_name for display (matching PDF format)
+                                          const grouped = {};
+                                          dn.items.forEach(item => {
+                                            const key = item.category_name;
+                                            if (!grouped[key]) {
+                                              grouped[key] = {
+                                                category_name: item.category_name,
+                                                quantity: 0,
+                                                is_received_all: true,
+                                                statuses: new Set()
+                                              };
+                                            }
+                                            // For individual items, count each as 1 unit
+                                            grouped[key].quantity += (item.item_code ? 1 : item.quantity);
+                                            if (!item.is_received) grouped[key].is_received_all = false;
+                                            grouped[key].statuses.add(item.status);
+                                          });
+
+                                          return Object.values(grouped).map((groupedItem, idx) => (
+                                            <tr key={idx} className="hover:bg-gray-50">
+                                              <td className="px-3 py-2 font-medium text-gray-900">{groupedItem.category_name}</td>
+                                              <td className="px-3 py-2 text-gray-500">-</td>
+                                              <td className="px-3 py-2 text-center font-semibold text-blue-600">{groupedItem.quantity}</td>
+                                              <td className="px-3 py-2 text-center">
+                                                {groupedItem.is_received_all ? (
+                                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                                    <Check className="w-3 h-3" /> Yes
+                                                  </span>
+                                                ) : (
+                                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                                                    <X className="w-3 h-3" /> No
+                                                  </span>
+                                                )}
+                                              </td>
+                                              <td className="px-3 py-2">
+                                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                                  groupedItem.statuses.size === 1 ? (
+                                                    [...groupedItem.statuses][0] === 'fully_returned' ? 'bg-green-100 text-green-700' :
+                                                    [...groupedItem.statuses][0] === 'partial_return' ? 'bg-yellow-100 text-yellow-700' :
+                                                    'bg-blue-100 text-blue-700'
+                                                  ) : 'bg-gray-100 text-gray-700'
+                                                }`}>
+                                                  {groupedItem.statuses.size === 1 ? [...groupedItem.statuses][0]?.replace('_', ' ') : 'mixed'}
                                                 </span>
-                                              ) : (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
-                                                  <X className="w-3 h-3" /> No
-                                                </span>
-                                              )}
-                                            </td>
-                                            <td className="px-3 py-2">
-                                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                                item.status === 'fully_returned' ? 'bg-green-100 text-green-700' :
-                                                item.status === 'partial_return' ? 'bg-yellow-100 text-yellow-700' :
-                                                'bg-blue-100 text-blue-700'
-                                              }`}>
-                                                {item.status?.replace('_', ' ')}
-                                              </span>
-                                            </td>
-                                          </tr>
-                                        ))}
+                                              </td>
+                                            </tr>
+                                          ));
+                                        })()}
                                       </tbody>
                                     </table>
                                   </div>
