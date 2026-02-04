@@ -93,7 +93,6 @@ interface Project {
   boq_status?: string;
   boq_details?: BOQDetails;
   created_at?: string;
-  priority?: 'high' | 'medium' | 'low';
   boqItems?: BOQItem[];
   existingPurchaseItems?: BOQItem[];
   newPurchaseItems?: BOQItem[];
@@ -272,7 +271,6 @@ const MyProjects: React.FC = () => {
           boq_status: item.boq_status,
           boq_details: undefined,
           created_at: item.created_at,
-          priority: item.priority || 'medium',
           total_boq_items: item.total_boq_items || 0,
           total_items_assigned: item.total_items_assigned || 0,
           items_assigned: item.items_assigned || '0/0',
@@ -791,15 +789,6 @@ const MyProjects: React.FC = () => {
     return new Date(dateString).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const getPriorityColor = (priority?: string) => {
-    switch (priority) {
-      case 'high': return 'bg-red-100 text-red-700';
-      case 'medium': return 'bg-yellow-100 text-yellow-700';
-      case 'low': return 'bg-green-100 text-green-700';
-      default: return 'bg-gray-100 text-gray-700';
-    }
-  };
-
   const getStatusBadge = (project: Project) => {
     // Check if items have been assigned to site engineers
     if (project.total_items_assigned && project.total_items_assigned > 0) {
@@ -1053,9 +1042,6 @@ const MyProjects: React.FC = () => {
                             {project.project_code}
                           </span>
                         )}
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPriorityColor(project.priority)}`}>
-                          {project.priority} priority
-                        </span>
                         <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadge(project).color} flex items-center gap-1`}>
                           <ClockIcon className="w-3 h-3" />
                           {getStatusBadge(project).text}
@@ -1282,9 +1268,6 @@ const MyProjects: React.FC = () => {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Priority
-                    </th>
                     {filterStatus !== 'approved' && filterStatus !== 'completed' && filterStatus !== 'rejected' && (
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Site Engineer
@@ -1317,11 +1300,6 @@ const MyProjects: React.FC = () => {
                         <span className="px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700 flex items-center gap-1 w-fit">
                           <ClockIcon className="w-3 h-3" />
                           {project.boq_status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPriorityColor(project.priority)}`}>
-                          {project.priority}
                         </span>
                       </td>
                       {filterStatus !== 'approved' && filterStatus !== 'completed' && filterStatus !== 'rejected' && (

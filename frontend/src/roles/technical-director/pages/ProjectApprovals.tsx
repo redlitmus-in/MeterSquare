@@ -1626,16 +1626,6 @@ const ProjectApprovals: React.FC = () => {
     }
   };
 
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'bg-red-100 text-red-700 border-red-200';
-      case 'medium': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'low': return 'bg-green-100 text-green-700 border-green-200';
-      default: return 'bg-gray-100 text-gray-700 border-gray-200';
-    }
-  };
-
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'approved': return <CheckCircleIcon className="w-5 h-5 text-green-600" />;
@@ -2044,9 +2034,6 @@ const ProjectApprovals: React.FC = () => {
                           {estimation.projectCode}
                         </span>
                       )}
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${getPriorityColor(estimation.priority)}`}>
-                        {estimation.priority} priority
-                      </span>
                       <div className="flex items-center gap-1">
                         {getStatusIcon(estimation.status)}
                         <span className={`text-xs font-medium ${
@@ -2292,7 +2279,6 @@ const ProjectApprovals: React.FC = () => {
                     <TableHead className="text-right text-gray-600">Total Value</TableHead>
                     <TableHead className="text-right text-gray-600">Items</TableHead>
                     <TableHead className="text-gray-600">Status</TableHead>
-                    <TableHead className="text-gray-600">Priority</TableHead>
                     <TableHead className="text-gray-600">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -2346,11 +2332,6 @@ const ProjectApprovals: React.FC = () => {
                                estimation.status.toUpperCase()}
                             </span>
                           </div>
-                        </TableCell>
-                        <TableCell>
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getPriorityColor(estimation.priority)}`}>
-                            {estimation.priority}
-                          </span>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">

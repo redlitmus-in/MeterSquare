@@ -554,15 +554,6 @@ const MyProjects: React.FC = () => {
     return new Date(dateString).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const getPriorityColor = (priority?: string) => {
-    switch (priority) {
-      case 'high': return 'bg-red-100 text-red-700';
-      case 'medium': return 'bg-yellow-100 text-yellow-700';
-      case 'low': return 'bg-green-100 text-green-700';
-      default: return 'bg-gray-100 text-gray-700';
-    }
-  };
-
   const getStatusBadge = (status?: string) => {
     const statusLower = status?.toLowerCase();
     if (statusLower === 'assigned' || statusLower === 'pending') {
@@ -766,9 +757,6 @@ const MyProjects: React.FC = () => {
                     </div>
                     {/* Row 2: Badges */}
                     <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-                      <span className={`px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium whitespace-nowrap ${getPriorityColor(project.priority)}`}>
-                        {project.priority || 'medium'}
-                      </span>
                       {getStatusBadge(project.status)}
                       {/* Show assigned SE name when admin is viewing as SE role */}
                       {isAdminViewingAsSE && project.assigned_se_name && (
