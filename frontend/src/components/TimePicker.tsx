@@ -10,12 +10,18 @@ interface TimePickerProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  minTime?: string; // Minimum selectable time in HH:mm format
+  maxTime?: string; // Maximum selectable time in HH:mm format
 }
 
-export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange, placeholder = 'HH:MM', className = '' }) => {
+export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange, placeholder = 'HH:MM', className = '', minTime, maxTime }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [selectedTime, setSelectedTime] = useState<Dayjs | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Parse minTime and maxTime
+  const minTimeObj = minTime ? dayjs(minTime, 'HH:mm') : undefined;
+  const maxTimeObj = maxTime ? dayjs(maxTime, 'HH:mm') : undefined;
 
   // Parse existing value
   useEffect(() => {
@@ -87,6 +93,8 @@ export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange, placeho
                 onAccept={handleAccept}
                 onClose={handleCancel}
                 ampm={false}
+                minTime={minTimeObj}
+                maxTime={maxTimeObj}
                 slotProps={{
                   actionBar: {
                     actions: ['cancel', 'accept'],

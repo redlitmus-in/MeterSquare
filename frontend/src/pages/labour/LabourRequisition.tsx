@@ -487,6 +487,20 @@ const LabourRequisition: React.FC = () => {
       return;
     }
 
+    // Validate time range: end time must be after start time
+    if (formData.start_time && formData.end_time) {
+      const [startHour, startMin] = formData.start_time.split(':').map(Number);
+      const [endHour, endMin] = formData.end_time.split(':').map(Number);
+
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+
+      if (endMinutes <= startMinutes) {
+        showError('End Time must be after Start Time');
+        return;
+      }
+    }
+
     setSubmitting(true);
 
     try {
@@ -905,6 +919,20 @@ const LabourRequisition: React.FC = () => {
       }
       if (!item.workers_count || item.workers_count < 1) {
         showError(`Workers count must be at least 1 for labour item ${i + 1}`);
+        return;
+      }
+    }
+
+    // Validate time range: end time must be after start time
+    if (editFormData.start_time && editFormData.end_time) {
+      const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+      const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+
+      if (endMinutes <= startMinutes) {
+        showError('End Time must be after Start Time');
         return;
       }
     }
@@ -1529,7 +1557,9 @@ const LabourRequisition: React.FC = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
                     <TimePicker
                       value={formData.start_time || ''}
-                      onChange={(value) => setFormData({ ...formData, start_time: value })}
+                      onChange={(value) => {
+                        setFormData({ ...formData, start_time: value });
+                      }}
                       placeholder="HH:MM"
                       className="w-full"
                     />
@@ -1538,12 +1568,31 @@ const LabourRequisition: React.FC = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
                     <TimePicker
                       value={formData.end_time || ''}
-                      onChange={(value) => setFormData({ ...formData, end_time: value })}
+                      onChange={(value) => {
+                        setFormData({ ...formData, end_time: value });
+                      }}
                       placeholder="HH:MM"
                       className="w-full"
+                      minTime={formData.start_time || undefined}
                     />
                   </div>
                 </div>
+
+                {/* Time validation error */}
+                {formData.start_time && formData.end_time && (() => {
+                  const [startHour, startMin] = formData.start_time.split(':').map(Number);
+                  const [endHour, endMin] = formData.end_time.split(':').map(Number);
+                  const startMinutes = startHour * 60 + startMin;
+                  const endMinutes = endHour * 60 + endMin;
+                  return endMinutes <= startMinutes;
+                })() && (
+                  <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-sm text-red-700">End Time must be after Start Time</p>
+                  </div>
+                )}
 
                 <div>
                   {(() => {
@@ -1936,9 +1985,26 @@ const LabourRequisition: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleBulkSubmit}
-                    disabled={selectedLabours.length === 0 || !formData.project_id || submitting}
+                    disabled={
+                      selectedLabours.length === 0 ||
+                      !formData.project_id ||
+                      submitting ||
+                      // Disable if times are invalid
+                      (formData.start_time && formData.end_time && (() => {
+                        const [startHour, startMin] = formData.start_time.split(':').map(Number);
+                        const [endHour, endMin] = formData.end_time.split(':').map(Number);
+                        return (endHour * 60 + endMin) <= (startHour * 60 + startMin);
+                      })())
+                    }
                     className={`px-6 py-2 rounded-lg font-medium flex items-center gap-2 ${
-                      selectedLabours.length === 0 || !formData.project_id || submitting
+                      selectedLabours.length === 0 ||
+                      !formData.project_id ||
+                      submitting ||
+                      (formData.start_time && formData.end_time && (() => {
+                        const [startHour, startMin] = formData.start_time.split(':').map(Number);
+                        const [endHour, endMin] = formData.end_time.split(':').map(Number);
+                        return (endHour * 60 + endMin) <= (startHour * 60 + startMin);
+                      })())
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : 'bg-purple-600 text-white hover:bg-purple-700'
                     }`}
@@ -2345,9 +2411,26 @@ const LabourRequisition: React.FC = () => {
                       onChange={(value) => setEditFormData({ ...editFormData, end_time: value })}
                       placeholder="HH:MM"
                       className="w-full"
+                      minTime={editFormData.start_time || undefined}
                     />
                   </div>
                 </div>
+
+                {/* Time validation error */}
+                {editFormData.start_time && editFormData.end_time && (() => {
+                  const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+                  const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+                  const startMinutes = startHour * 60 + startMin;
+                  const endMinutes = endHour * 60 + endMin;
+                  return endMinutes <= startMinutes;
+                })() && (
+                  <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-sm text-red-700">End Time must be after Start Time</p>
+                  </div>
+                )}
 
                 {/* Preferred Workers Notes */}
                 <div>
@@ -2443,9 +2526,22 @@ const LabourRequisition: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleResubmit}
-                  disabled={resubmitting}
+                  disabled={
+                    resubmitting ||
+                    // Disable if times are invalid
+                    (editFormData.start_time && editFormData.end_time && (() => {
+                      const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+                      const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+                      return (endHour * 60 + endMin) <= (startHour * 60 + startMin);
+                    })())
+                  }
                   className={`flex-1 px-4 py-2 rounded-lg font-medium flex items-center justify-center gap-2 ${
-                    resubmitting
+                    resubmitting ||
+                    (editFormData.start_time && editFormData.end_time && (() => {
+                      const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+                      const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+                      return (endHour * 60 + endMin) <= (startHour * 60 + startMin);
+                    })())
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                       : 'bg-orange-600 text-white hover:bg-orange-700'
                   } transition-colors`}
