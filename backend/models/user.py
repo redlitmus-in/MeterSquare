@@ -1,5 +1,6 @@
 from datetime import datetime
 from config.db import db
+from config.security_config import SecurityConfig, is_production
 
 
 class User(db.Model):
@@ -52,13 +53,53 @@ class User(db.Model):
         if last_modified_at is not None:
             self.last_modified_at = last_modified_at
 
-    def to_dict(self):
+    def to_dict(self, current_user_id=None, is_admin=False):
+        """
+        Convert user to dictionary with optional field filtering
+
+        Args:
+            current_user_id: ID of the user making the request (for permission checks)
+            is_admin: Whether the requester is an admin (PM/TD)
+
+        Note: Field filtering ONLY applies in production.
+              In development, all fields are returned for debugging.
+        """
+        # Base data - always returned
+        data = {
+            "user_id": str(self.user_id),
+            "full_name": self.full_name,
+            "role_id": self.role_id,
+            "user_status": self.user_status,
+            "department": self.department,
+            "is_active": self.is_active
+        }
+
+        # ✅ In development OR if admin OR if viewing own profile: return all data
+        # ✅ In production with filtering: only return restricted fields to owner/admin
+        if not is_production() or is_admin or (current_user_id and str(current_user_id) == str(self.user_id)):
+            # Full data access
+            data.update({
+                "email": self.email,
+                "phone": self.phone,
+                "is_deleted": self.is_deleted,
+                "last_login": self.last_login.isoformat() if self.last_login else None,
+                "created_at": self.created_at.isoformat() if self.created_at else None,
+                "last_modified_at": self.last_modified_at.isoformat() if self.last_modified_at else None
+            })
+
+        return data
+
+    def to_dict_full(self):
+        """
+        Return full user data (for internal use only)
+        Always returns all fields regardless of environment
+        """
         return {
             "user_id": str(self.user_id),
             "email": self.email,
             "full_name": self.full_name,
             "role_id": self.role_id,
-            'user_status': self.user_status,
+            "user_status": self.user_status,
             "phone": self.phone,
             "department": self.department,
             "is_active": self.is_active,

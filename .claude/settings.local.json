@@ -190,7 +190,14 @@
       "Bash(ps:*)",
       "Bash(timeout 15 npm run dev)",
       "Bash(timeout 8 npm run dev:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(python tests/security_audit.py:*)",
+      "Bash(ENVIRONMENT=production python:*)",
+      "Bash(# Force kill ALL python processes for the app pkill -9 -f \"\"python.*app.py\"\" sleep 2 # Verify it''s killed pgrep -f \"\"app.py\"\" && echo \"\"Still running!\"\" || echo \"\"Server stopped\"\" # Restart fresh with production mode cd /home/development1/Desktop/MeterSquare/backend source venv/bin/activate ENVIRONMENT=production nohup python app.py 2>&1 & sleep 5 # Verify it''s running curl -s http://localhost:8000/api/health)",
+      "Bash(export ENVIRONMENT=production)",
+      "Bash(python tests/security_pentest.py:*)",
+      "Bash(python tests/full_security_audit.py:*)",
+      "Bash(python tests/stress_test.py:*)"
     ],
     "deny": [],
     "ask": []

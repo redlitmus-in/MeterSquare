@@ -107,6 +107,7 @@ const AdminRoleManagement = lazy(() => import('@/pages/admin/RoleManagement'));
 const AdminBOQManagement = lazy(() => import('@/pages/admin/BOQManagement'));
 const AdminSettings = lazy(() => import('@/pages/admin/Settings'));
 const AdminSignatureUpload = lazy(() => import('@/pages/admin/SignatureUpload'));
+const AdminSecurityDashboard = lazy(() => import('@/pages/admin/SecurityDashboard'));
 const AdminMyProjects = lazy(() => import('@/pages/admin/AdminMyProjects'));
 const AdminSEProjects = lazy(() => import('@/pages/admin/AdminSEProjects'));
 
@@ -1342,6 +1343,11 @@ function App() {
             <Route path="signature-upload" element={
               <AdminRoute>
                 <AdminSignatureUpload />
+              </AdminRoute>
+            } />
+            <Route path="security" element={
+              <AdminRoute>
+                <AdminSecurityDashboard />
               </AdminRoute>
             } />
             <Route path="support-management" element={

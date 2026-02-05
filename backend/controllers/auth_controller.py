@@ -18,6 +18,14 @@ from utils.async_email import send_otp_async
 from utils.sms_service import send_sms_otp
 import os
 
+# Import security logging functions
+try:
+    from utils.advanced_security import on_login_success, on_login_failed
+except ImportError:
+    # Fallback if advanced_security not available
+    def on_login_success(user_id): pass
+    def on_login_failed(email): pass
+
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
 
 log = get_logger()
@@ -479,6 +487,7 @@ def verify_sms_otp_login():
             storage_key = email
             otp_data = otp_storage.get(storage_key)
         if not otp_data:
+            on_login_failed(email or phone)  # Security audit log
             return jsonify({"error": "OTP not found or expired"}), 400
 
         stored_otp = otp_data.get("otp")
@@ -488,10 +497,12 @@ def verify_sms_otp_login():
         current_time = datetime.utcnow()
         if current_time > expires_at:
             del otp_storage[storage_key]
+            on_login_failed(email or phone)  # Security audit log
             return jsonify({"error": "OTP expired"}), 400
 
         # Check if OTP matches
         if otp_input != stored_otp:
+            on_login_failed(email or phone)  # Security audit log
             return jsonify({"error": "Invalid OTP"}), 400
 
         # Find user - for phone login, get email from storage or query
@@ -519,6 +530,7 @@ def verify_sms_otp_login():
 
         if not user:
             del otp_storage[storage_key]
+            on_login_failed(user_email)  # Security audit log
             return jsonify({"error": "User not found or inactive"}), 404
 
         # Update last login
@@ -528,6 +540,9 @@ def verify_sms_otp_login():
         # Record login history for SMS OTP login
         from utils.authentication import record_login_history
         record_login_history(user.user_id, login_method='sms_otp')
+
+        # Security audit log - successful login
+        on_login_success(user.user_id)
 
         # Remove OTP from storage
         del otp_storage[storage_key]

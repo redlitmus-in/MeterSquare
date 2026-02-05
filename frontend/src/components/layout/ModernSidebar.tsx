@@ -34,7 +34,8 @@ import {
   CalendarDaysIcon,
   ClipboardDocumentListIcon,
   BanknotesIcon,
-  DocumentChartBarIcon
+  DocumentChartBarIcon,
+  ShieldCheckIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -53,7 +54,8 @@ import {
   UserPlusIcon as UserPlusSolid,
   CalendarDaysIcon as CalendarDaysSolid,
   ClipboardDocumentListIcon as ClipboardDocumentListSolid,
-  BanknotesIcon as BanknotesSolid
+  BanknotesIcon as BanknotesSolid,
+  ShieldCheckIcon as ShieldCheckSolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
@@ -746,6 +748,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: BanknotesIcon,
         iconSolid: BanknotesSolid,
         color: 'text-green-600'
+      },
+      {
+        name: 'Security Dashboard',
+        href: buildPath('/security'),
+        icon: ShieldCheckIcon,
+        iconSolid: ShieldCheckSolid,
+        color: 'text-red-600'
       }
     ];
 

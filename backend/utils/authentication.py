@@ -23,6 +23,15 @@ except ImportError:
 
 from config.logging import get_logger
 
+# Import audit logging hooks for security tracking
+try:
+    from utils.advanced_security import on_login_success, on_login_failed, audit_log
+except ImportError:
+    # Fallback if advanced_security not available
+    def on_login_success(user_id): pass
+    def on_login_failed(email): pass
+    def audit_log(event_type, **kwargs): pass
+
 log =  get_logger()
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
@@ -396,6 +405,7 @@ def verification_otp():
     # Get OTP data from storage first to check if role was specified
     otp_data = otp_storage.get(email_id)
     if not otp_data:
+        on_login_failed(email_id)  # Audit log - potential brute force attempt
         return jsonify({"error": "OTP not found or expired"}), 400
     
     # Check if a specific role was required during login
@@ -431,12 +441,14 @@ def verification_otp():
 
     # Check if OTP matches
     if otp_input != stored_otp:
+        on_login_failed(email_id)  # Audit log failed attempt
         return jsonify({"error": "Invalid OTP"}), 400
 
     # Check expiry
     current_time = datetime.utcnow()
     if current_time > expires_at:
         del otp_storage[email_id]
+        on_login_failed(email_id)  # Audit log expired OTP attempt
         return jsonify({"error": "OTP expired"}), 400
     
     # Update last login
@@ -445,6 +457,9 @@ def verification_otp():
 
     # Record login history for audit trail
     record_login_history(user.user_id, login_method='email_otp')
+
+    # Audit log successful login for security tracking
+    on_login_success(user.user_id)
 
     # OTP verified, remove from storage
     del otp_storage[email_id]

@@ -7,6 +7,7 @@ from flask import request, jsonify, g
 from datetime import datetime, timedelta
 from sqlalchemy import or_, func, desc
 from config.db import db
+from config.security_config import is_production, SecurityConfig
 from models.user import User
 from models.role import Role
 from models.project import Project
@@ -16,6 +17,7 @@ from config.logging import get_logger
 from config.roles_config import ROLE_HIERARCHY
 from utils.purchase_notifications import notify_project_action
 from utils.comprehensive_notification_service import notification_service
+from utils.security import filter_user_data, filter_user_list
 
 log = get_logger()
 

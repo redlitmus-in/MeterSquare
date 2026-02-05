@@ -181,7 +181,7 @@ class DailySchedulePDFGenerator:
             project_header_data = [[
                 Paragraph(f"PROJECT: {project['project_name'].upper()}", self.styles['ProjectHeader'])
             ]]
-            project_header_table = Table(project_header_data, colWidths=[180*mm])
+            project_header_table = Table(project_header_data, colWidths=[180*mm], hAlign='CENTER')
             project_header_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#243d8a')),
                 ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
@@ -227,7 +227,7 @@ class DailySchedulePDFGenerator:
                         Paragraph(transport_info, self.styles['PosterNormal'])
                     ])
 
-                details_table = Table(details_data, colWidths=[35*mm, 145*mm])
+                details_table = Table(details_data, colWidths=[35*mm, 145*mm], hAlign='CENTER')
                 details_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f3f4f6')),
                     ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d1d5db')),
@@ -274,7 +274,7 @@ class DailySchedulePDFGenerator:
                             skills_paragraph
                         ])
 
-                    workers_table = Table(workers_table_data, colWidths=[10*mm, 25*mm, 70*mm, 75*mm])
+                    workers_table = Table(workers_table_data, colWidths=[10*mm, 25*mm, 70*mm, 75*mm], hAlign='CENTER')
                     workers_table.setStyle(TableStyle([
                         # Header style
                         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#374151')),
@@ -287,7 +287,7 @@ class DailySchedulePDFGenerator:
                         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                         ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # # column
                         ('ALIGN', (1, 1), (1, -1), 'CENTER'),  # EMP CODE column
-                        ('ALIGN', (2, 1), (2, -1), 'LEFT'),    # NAME column
+                        ('ALIGN', (2, 1), (2, -1), 'CENTER'),  # NAME column - centered
                         ('ALIGN', (3, 1), (3, -1), 'LEFT'),    # SKILL column
                         # Alternating row colors
                         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')]),
