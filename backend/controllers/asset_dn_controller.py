@@ -14,6 +14,7 @@ from datetime import datetime
 from flask import request, jsonify, g
 from config.db import db
 from sqlalchemy import func, and_
+from sqlalchemy.orm import joinedload
 
 logger = logging.getLogger(__name__)
 from models.returnable_assets import *
@@ -425,7 +426,13 @@ def get_delivery_notes():
         status = request.args.get('status')
         project_id = request.args.get('project_id', type=int)
 
-        query = AssetDeliveryNote.query
+        # Fix N+1 query: Eager load items and their relationships
+        query = AssetDeliveryNote.query.options(
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.category),
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.asset_item)
+        )
 
         if status:
             query = query.filter_by(status=status)
@@ -465,7 +472,13 @@ def get_delivery_notes():
 def get_delivery_note(adn_id):
     """Get single Asset Delivery Note with details"""
     try:
-        adn = AssetDeliveryNote.query.get(adn_id)
+        # Fix N+1 query: Eager load items and their relationships
+        adn = AssetDeliveryNote.query.options(
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.category),
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.asset_item)
+        ).get(adn_id)
         if not adn:
             return jsonify({'success': False, 'error': 'Delivery note not found'}), 404
 
@@ -665,7 +678,16 @@ def get_return_notes():
         status = request.args.get('status')
         project_id = request.args.get('project_id', type=int)
 
-        query = AssetReturnDeliveryNote.query
+        # Fix N+1 query: Eager load items, original ADN, and their relationships
+        query = AssetReturnDeliveryNote.query.options(
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.category),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.asset_item),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.original_adn_item),
+            joinedload(AssetReturnDeliveryNote.original_adn)
+        )
 
         if status:
             query = query.filter_by(status=status)
@@ -730,7 +752,16 @@ def get_return_notes():
 def get_return_note(ardn_id):
     """Get single Asset Return Delivery Note with details"""
     try:
-        ardn = AssetReturnDeliveryNote.query.get(ardn_id)
+        # Fix N+1 query: Eager load items, original ADN, and their relationships
+        ardn = AssetReturnDeliveryNote.query.options(
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.category),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.asset_item),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.original_adn_item),
+            joinedload(AssetReturnDeliveryNote.original_adn)
+        ).get(ardn_id)
         if not ardn:
             return jsonify({'success': False, 'error': 'Return note not found'}), 404
 
@@ -1271,8 +1302,13 @@ def get_available_for_dispatch():
 def get_project_dispatched_assets(project_id):
     """Get assets dispatched to a specific project (for creating return notes)"""
     try:
-        # Get delivered ADNs for this project
-        adns = AssetDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items and their relationships
+        adns = AssetDeliveryNote.query.options(
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.category),
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.asset_item)
+        ).filter(
             AssetDeliveryNote.project_id == project_id,
             AssetDeliveryNote.status.in_(['DELIVERED', 'IN_TRANSIT'])
         ).all()
@@ -1690,8 +1726,13 @@ def get_se_dispatched_assets():
         project_ids = [p.project_id for p in my_projects]
         projects_map = {p.project_id: p for p in my_projects}
 
-        # Get all ADNs that are IN_TRANSIT, PARTIAL, or DELIVERED for SE's projects
-        adns = AssetDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items and their relationships
+        adns = AssetDeliveryNote.query.options(
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.category),
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.asset_item)
+        ).filter(
             AssetDeliveryNote.project_id.in_(project_ids),
             AssetDeliveryNote.status.in_(['IN_TRANSIT', 'PARTIAL', 'DELIVERED'])
         ).order_by(AssetDeliveryNote.created_at.desc()).all()
@@ -2160,8 +2201,13 @@ def get_se_movement_history():
 
         movements = []
 
-        # Get ADNs (Dispatches) for SE's projects
-        adns = AssetDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items and their relationships
+        adns = AssetDeliveryNote.query.options(
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.category),
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.asset_item)
+        ).filter(
             AssetDeliveryNote.project_id.in_(project_ids),
             AssetDeliveryNote.status.in_(['IN_TRANSIT', 'PARTIAL', 'DELIVERED'])
         ).order_by(AssetDeliveryNote.created_at.desc()).limit(limit).all()
@@ -2211,8 +2257,10 @@ def get_se_movement_history():
                     'created_at': adn.created_at.isoformat()
                 })
 
-        # Get ARDNs (Returns) for SE's projects
-        ardns = AssetReturnDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items (categories and asset_items loaded separately below)
+        ardns = AssetReturnDeliveryNote.query.options(
+            joinedload(AssetReturnDeliveryNote.items)
+        ).filter(
             AssetReturnDeliveryNote.project_id.in_(project_ids),
             AssetReturnDeliveryNote.status.in_(['ISSUED', 'IN_TRANSIT', 'RECEIVED', 'PROCESSED'])
         ).order_by(AssetReturnDeliveryNote.created_at.desc()).limit(limit).all()
@@ -2328,8 +2376,16 @@ def get_ss_return_notes():
                 }
             }), 200
 
-        # Filter return notes by SE's assigned projects
-        query = AssetReturnDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items and their relationships
+        query = AssetReturnDeliveryNote.query.options(
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.category),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.asset_item),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.original_adn_item),
+            joinedload(AssetReturnDeliveryNote.original_adn)
+        ).filter(
             AssetReturnDeliveryNote.project_id.in_(se_project_ids)
         )
 

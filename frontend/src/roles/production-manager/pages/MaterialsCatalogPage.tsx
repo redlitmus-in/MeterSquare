@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Search, Package, CheckCircle, X, RefreshCw, Edit2, Trash2, AlertTriangle
+  Search, Package, CheckCircle, X, RefreshCw, Edit2, AlertTriangle
 } from 'lucide-react';
 import {
   inventoryService,
@@ -366,7 +366,7 @@ const MaterialsCatalogPage: React.FC = () => {
                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Availability</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Stock</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -416,39 +416,21 @@ const MaterialsCatalogPage: React.FC = () => {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {inventoryConfig.currency} {material.unit_price?.toFixed(2)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex items-center gap-2">
-                      {/* Commented out for now - Edit functionality
-                      <button
-                        onClick={() => handleEditClick(material)}
-                        className="text-indigo-600 hover:text-indigo-900"
-                        title="Edit material"
-                        aria-label={`Edit ${material.material_name}`}
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      */}
-
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-center">
+                    <div className="flex items-center justify-center gap-2">
                       {/* Request Disposal for damaged/wasted materials */}
-                      {material.current_stock > 0 && (
+                      {material.current_stock > 0 ? (
                         <button
                           onClick={() => handleDisposalRequest(material)}
-                          className="text-orange-600 hover:text-orange-900"
+                          className="text-orange-600 hover:text-orange-900 transition-colors"
                           title="Request disposal for damaged/wasted material"
                           aria-label={`Request disposal for ${material.material_name}`}
                         >
-                          <AlertTriangle className="h-4 w-4" />
+                          <AlertTriangle className="h-5 w-5" />
                         </button>
+                      ) : (
+                        <span className="text-gray-400">-</span>
                       )}
-
-                      <button
-                        onClick={() => handleDeleteMaterial(material)}
-                        className="text-red-600 hover:text-red-900"
-                        title="Delete material"
-                        aria-label={`Delete ${material.material_name}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
                     </div>
                   </td>
                 </tr>

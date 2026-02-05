@@ -1,5 +1,6 @@
 from flask import jsonify, request, g, send_file
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 from config.db import db
 from models.inventory import *
 from models.project import Project
@@ -702,7 +703,10 @@ def get_all_inventory_transactions():
         if validation_error:
             return jsonify(validation_error[0]), validation_error[1]
 
-        query = InventoryTransaction.query
+        # Eager load material relationship to avoid N+1 queries
+        query = InventoryTransaction.query.options(
+            db.joinedload(InventoryTransaction.material)
+        )
 
         # Apply filters
         if inventory_material_id:
@@ -743,10 +747,11 @@ def get_all_inventory_transactions():
             transactions = query.all()
             total_pages = 1
 
-        # Enrich with material details
+        # Enrich with material details (already loaded via joinedload - no N+1 queries)
         result = []
         for txn in transactions:
             txn_data = txn.to_dict()
+            # Material is already loaded via joinedload, so no additional query here
             if txn.material:
                 txn_data['material_code'] = txn.material.material_code
                 txn_data['material_name'] = txn.material.material_name
@@ -2594,8 +2599,11 @@ def get_dispatched_materials_for_project(project_id):
     with their dispatched quantity, already returned quantity, and returnable quantity.
     """
     try:
-        # Get all delivery notes for this project with delivered status
-        delivery_notes = MaterialDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items and materials
+        delivery_notes = MaterialDeliveryNote.query.options(
+            joinedload(MaterialDeliveryNote.items)
+            .joinedload(DeliveryNoteItem.inventory_material)
+        ).filter(
             MaterialDeliveryNote.project_id == project_id,
             MaterialDeliveryNote.status.in_(RETURNABLE_DN_STATUSES)
         ).order_by(MaterialDeliveryNote.delivery_date.desc()).all()
@@ -2605,7 +2613,7 @@ def get_dispatched_materials_for_project(project_id):
 
         for dn in delivery_notes:
             for item in dn.items:
-                material = InventoryMaterial.query.get(item.inventory_material_id)
+                material = item.inventory_material  # Already loaded via joinedload
                 if not material:
                     continue
 
@@ -3356,7 +3364,11 @@ def get_all_delivery_notes():
         if validation_error:
             return jsonify(validation_error[0]), validation_error[1]
 
-        query = MaterialDeliveryNote.query
+        # Fix N+1 query: Eager load items and materials
+        query = MaterialDeliveryNote.query.options(
+            joinedload(MaterialDeliveryNote.items)
+            .joinedload(DeliveryNoteItem.inventory_material)
+        )
 
         if project_id:
             query = query.filter_by(project_id=int(project_id))
@@ -3391,10 +3403,17 @@ def get_all_delivery_notes():
             notes = query.all()
             total_pages = 1
 
+        # Batch load projects to avoid N+1
+        project_ids = list(set(note.project_id for note in notes if note.project_id))
+        projects_map = {}
+        if project_ids:
+            projects = Project.query.filter(Project.project_id.in_(project_ids)).all()
+            projects_map = {p.project_id: p for p in projects}
+
         result = []
         for note in notes:
             note_data = note.to_dict()
-            project = Project.query.get(note.project_id)
+            project = projects_map.get(note.project_id)
             if project:
                 note_data['project_details'] = {
                     'project_id': project.project_id,
@@ -4061,9 +4080,12 @@ def get_delivery_notes_for_se():
             Project.is_deleted == False
         ).all()
 
-        # Get delivery notes for these projects that have been dispatched or in transit
+        # Fix N+1 query: Eager load items and materials
         status_filter = request.args.get('status')
-        query = MaterialDeliveryNote.query.filter(
+        query = MaterialDeliveryNote.query.options(
+            joinedload(MaterialDeliveryNote.items)
+            .joinedload(DeliveryNoteItem.inventory_material)
+        ).filter(
             MaterialDeliveryNote.project_id.in_(project_ids)
         )
 
@@ -4184,8 +4206,11 @@ def get_returnable_materials_for_se():
         result = []
 
         for project in assigned_projects:
-            # Get delivery notes for this project with returnable status
-            delivery_notes = MaterialDeliveryNote.query.filter(
+            # Fix N+1 query: Eager load items and materials
+            delivery_notes = MaterialDeliveryNote.query.options(
+                joinedload(MaterialDeliveryNote.items)
+                .joinedload(DeliveryNoteItem.inventory_material)
+            ).filter(
                 MaterialDeliveryNote.project_id == project.project_id,
                 MaterialDeliveryNote.status.in_(RETURNABLE_DN_STATUSES)
             ).order_by(MaterialDeliveryNote.delivery_date.desc()).all()
@@ -4198,7 +4223,7 @@ def get_returnable_materials_for_se():
 
             for dn in delivery_notes:
                 for item in dn.items:
-                    material = InventoryMaterial.query.get(item.inventory_material_id)
+                    material = item.inventory_material  # Already loaded via joinedload
                     if not material:
                         continue
 

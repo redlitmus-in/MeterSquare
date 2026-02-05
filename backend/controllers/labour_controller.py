@@ -411,10 +411,13 @@ def create_requisition():
                     except ValueError:
                         return jsonify({"error": "Invalid time format for end_time. Use HH:MM"}), 400
 
-                # Validate times (allow overnight shifts where end_time < start_time, e.g., 22:00 to 06:00)
-                # Only reject if times are exactly the same
-                if start_time and end_time and start_time == end_time:
-                    return jsonify({"error": "End time must be different from start time"}), 400
+                # Validate times: End time must be after start time
+                if start_time and end_time:
+                    # Convert to minutes for comparison
+                    start_minutes = start_time.hour * 60 + start_time.minute
+                    end_minutes = end_time.hour * 60 + end_time.minute
+                    if end_minutes <= start_minutes:
+                        return jsonify({"error": "End time must be after start time"}), 400
 
                 requisition = LabourRequisition(
                     requisition_code=requisition_code,
@@ -519,9 +522,42 @@ def get_my_requisitions():
         query = query.order_by(LabourRequisition.created_at.desc())
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
 
+        # Fix N+1 query: Batch load workers for assigned and preferred worker IDs
+        all_worker_ids = set()
+        for req in paginated.items:
+            if req.assigned_worker_ids:
+                all_worker_ids.update(req.assigned_worker_ids)
+            if req.preferred_worker_ids:
+                all_worker_ids.update(req.preferred_worker_ids)
+
+        workers_map = {}
+        if all_worker_ids:
+            workers = Worker.query.filter(
+                Worker.worker_id.in_(list(all_worker_ids)),
+                Worker.is_deleted == False
+            ).all()
+            workers_map = {w.worker_id: w for w in workers}
+
+        # Add workers_map to each requisition's to_dict context
+        requisitions_data = []
+        for req in paginated.items:
+            req_dict = req.to_dict()
+            # Enrich with pre-loaded worker data to avoid N+1
+            if req.assigned_worker_ids and workers_map:
+                req_dict['assigned_workers'] = [
+                    {'worker_id': wid, 'full_name': workers_map[wid].full_name, 'worker_code': workers_map[wid].worker_code}
+                    for wid in req.assigned_worker_ids if wid in workers_map
+                ]
+            if req.preferred_worker_ids and workers_map:
+                req_dict['preferred_workers'] = [
+                    {'worker_id': wid, 'full_name': workers_map[wid].full_name, 'worker_code': workers_map[wid].worker_code}
+                    for wid in req.preferred_worker_ids if wid in workers_map
+                ]
+            requisitions_data.append(req_dict)
+
         return jsonify({
             "success": True,
-            "requisitions": [r.to_dict() for r in paginated.items],
+            "requisitions": requisitions_data,
             "pagination": {
                 "page": page,
                 "per_page": per_page,
@@ -571,6 +607,22 @@ def get_requisitions_by_project(project_id):
             LabourRequisition.project_id == project_id,
             LabourRequisition.is_deleted == False
         ).all()
+
+        # Fix N+1 query: Batch load workers for all requisitions
+        all_worker_ids = set()
+        for req in requisitions:
+            if req.assigned_worker_ids:
+                all_worker_ids.update(req.assigned_worker_ids)
+            if req.preferred_worker_ids:
+                all_worker_ids.update(req.preferred_worker_ids)
+
+        workers_map = {}
+        if all_worker_ids:
+            workers = Worker.query.filter(
+                Worker.worker_id.in_(list(all_worker_ids)),
+                Worker.is_deleted == False
+            ).all()
+            workers_map = {w.worker_id: w for w in workers}
 
         # Build a lookup map by labour_id for quick status checking
         labour_status_map = {}
@@ -660,6 +712,42 @@ def update_requisition(requisition_id):
             requisition.workers_count = int(data['workers_count'])
         if 'required_date' in data:
             requisition.required_date = datetime.strptime(data['required_date'], '%Y-%m-%d').date()
+        if 'start_time' in data:
+            if data['start_time']:
+                # Parse time string (HH:MM) to time object
+                time_parts = data['start_time'].split(':')
+                requisition.start_time = datetime.strptime(data['start_time'], '%H:%M').time()
+            else:
+                requisition.start_time = None
+        if 'end_time' in data:
+            if data['end_time']:
+                requisition.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
+            else:
+                requisition.end_time = None
+        if 'preferred_workers_notes' in data:
+            requisition.preferred_workers_notes = data['preferred_workers_notes']
+        if 'preferred_worker_ids' in data:
+            requisition.preferred_worker_ids = data['preferred_worker_ids']
+
+        # Update labour items if provided
+        if 'labour_items' in data and data['labour_items']:
+            # Create a new list to ensure SQLAlchemy detects the change
+            # This forces a copy of the data structure
+            requisition.labour_items = [dict(item) for item in data['labour_items']]
+
+            # Mark the labour_items JSON field as modified so SQLAlchemy detects the change
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(requisition, 'labour_items')
+
+            # Force flush to ensure the change is written
+            db.session.flush()
+
+        # Validate time: end_time must be after start_time
+        if requisition.start_time and requisition.end_time:
+            start_minutes = requisition.start_time.hour * 60 + requisition.start_time.minute
+            end_minutes = requisition.end_time.hour * 60 + requisition.end_time.minute
+            if end_minutes <= start_minutes:
+                return jsonify({"error": "End time must be after start time"}), 400
 
         requisition.last_modified_by = current_user.get('full_name', 'System')
 
@@ -734,10 +822,13 @@ def resubmit_requisition(requisition_id):
             else:
                 requisition.end_time = None
 
-        # Validate times (allow overnight shifts where end_time < start_time, e.g., 22:00 to 06:00)
-        # Only reject if times are exactly the same
-        if requisition.start_time and requisition.end_time and requisition.start_time == requisition.end_time:
-            return jsonify({"error": "End time must be different from start time"}), 400
+        # Validate times: End time must be after start time
+        if requisition.start_time and requisition.end_time:
+            # Convert to minutes for comparison
+            start_minutes = requisition.start_time.hour * 60 + requisition.start_time.minute
+            end_minutes = requisition.end_time.hour * 60 + requisition.end_time.minute
+            if end_minutes <= start_minutes:
+                return jsonify({"error": "End time must be after start time"}), 400
 
         # Update preferred_workers_notes if provided
         # Update preferred_worker_ids if provided

@@ -27,6 +27,7 @@ import {
   InformationCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  PencilSquareIcon,
 } from '@heroicons/react/24/outline';
 
 // Tab configuration
@@ -81,6 +82,8 @@ const RequisitionApprovals: React.FC = () => {
   const [pagination, setPagination] = useState<any>(null);
   const perPage = PAGINATION.DEFAULT_PAGE_SIZE;
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingRequisitionId, setEditingRequisitionId] = useState<number | null>(null);
 
   // Tab counts state
   const [tabCounts, setTabCounts] = useState<Record<TabType, number>>({
@@ -182,11 +185,35 @@ const RequisitionApprovals: React.FC = () => {
     preferred_workers_notes: ''
   });
 
+  const [editFormData, setEditFormData] = useState<CreateRequisitionData>({
+    project_id: 0,
+    site_name: '',
+    work_description: '',
+    skill_required: '',
+    workers_count: 1,
+    required_date: new Date().toISOString().split('T')[0],
+    start_time: '',
+    end_time: '',
+    preferred_workers_notes: ''
+  });
+
   // Worker selection state
   const [availableWorkers, setAvailableWorkers] = useState<any[]>([]);
   const [workersLoading, setWorkersLoading] = useState(false);
   const [selectedWorkers, setSelectedWorkers] = useState<any[]>([]);
   const [workerSearchQuery, setWorkerSearchQuery] = useState('');
+
+  // Edit modal worker selection state
+  const [editAvailableWorkers, setEditAvailableWorkers] = useState<any[]>([]);
+  const [editWorkersLoading, setEditWorkersLoading] = useState(false);
+  const [editSelectedWorkers, setEditSelectedWorkers] = useState<any[]>([]);
+  const [editWorkerSearchQuery, setEditWorkerSearchQuery] = useState('');
+
+  // Edit modal labour selection state
+  const [editSelectedProject, setEditSelectedProject] = useState<Project | null>(null);
+  const [editGroupedLabours, setEditGroupedLabours] = useState<GroupedLabour[]>([]);
+  const [editExpandedItems, setEditExpandedItems] = useState<Set<string>>(new Set());
+  const [editSelectedLabours, setEditSelectedLabours] = useState<SelectedLabour[]>([]);
 
   // Fetch counts for all tabs using pagination totals
   const fetchTabCounts = async () => {
@@ -311,6 +338,89 @@ const RequisitionApprovals: React.FC = () => {
   const handleViewDetails = (req: LabourRequisition) => {
     setSelectedRequisition(req);
     setShowDetailsModal(true);
+  };
+
+  const handleEditRequisition = async (req: LabourRequisition) => {
+    setEditingRequisitionId(req.requisition_id);
+
+    // Fetch full requisition details including labour_items
+    try {
+      const reqResponse = await apiClient.get(`/labour/requisitions/${req.requisition_id}`);
+      if (reqResponse.data?.requisition) {
+        req = reqResponse.data.requisition; // Use full data with labour_items
+      }
+    } catch (error) {
+      console.error('Failed to fetch requisition details:', error);
+    }
+
+    // Pre-fill form data
+    setEditFormData({
+      project_id: req.project_id,
+      site_name: req.site_name || '',
+      work_description: req.work_description || '',
+      skill_required: req.skill_required || '',
+      workers_count: req.total_workers_count || req.workers_count || 1,
+      required_date: req.required_date ? new Date(req.required_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      start_time: req.start_time || '',
+      end_time: req.end_time || '',
+      preferred_workers_notes: req.preferred_workers_notes || ''
+    });
+
+    // Load project with full BOQ data
+    try {
+      const response = await apiClient.get('/projects/assigned-to-me');
+      const project = response.data?.projects?.find((p: any) => p.project_id === req.project_id);
+
+      if (project) {
+        setEditSelectedProject(project);
+        // Extract BOQ labour items for this project
+        extractBOQDataForEdit(project);
+
+        // Pre-select labour items from requisition
+        if (req.labour_items && req.labour_items.length > 0) {
+          const preselected = req.labour_items.map((item: any, idx: number) => ({
+            ...item,
+            uniqueKey: `${item.labour_id || item.item_id}-${idx}`,
+            workers_count: item.workers_count || 1
+          }));
+          setEditSelectedLabours(preselected);
+        } else {
+          // If no labour_items, set empty array
+          setEditSelectedLabours([]);
+        }
+      } else {
+        // Fallback: use data from requisition
+        setEditSelectedProject({
+          project_id: req.project_id,
+          project_code: req.project_code || '',
+          project_name: req.project_name || `Project #${req.project_id}`,
+          project_status: '',
+          location: req.site_name || '',
+          floor_name: ''
+        });
+
+        if (req.labour_items && req.labour_items.length > 0) {
+          setEditSelectedLabours(req.labour_items);
+        }
+      }
+    } catch (error) {
+      showError('Failed to load project data');
+      // Use fallback data from requisition
+      setEditSelectedProject({
+        project_id: req.project_id,
+        project_code: req.project_code || '',
+        project_name: req.project_name || `Project #${req.project_id}`,
+        project_status: '',
+        location: req.site_name || '',
+        floor_name: ''
+      });
+
+      if (req.labour_items && req.labour_items.length > 0) {
+        setEditSelectedLabours(req.labour_items);
+      }
+    }
+
+    setShowEditModal(true);
   };
 
   // Labour Requisition Form Helper Functions
@@ -585,6 +695,18 @@ const RequisitionApprovals: React.FC = () => {
       return;
     }
 
+    // Validate that end_time is after start_time
+    if (formData.start_time && formData.end_time) {
+      const [startHour, startMin] = formData.start_time.split(':').map(Number);
+      const [endHour, endMin] = formData.end_time.split(':').map(Number);
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+      if (endMinutes <= startMinutes) {
+        showError('End Time must be after Start Time');
+        return;
+      }
+    }
+
     setSubmitting(true);
 
     try {
@@ -625,6 +747,160 @@ const RequisitionApprovals: React.FC = () => {
       setSubmitting(false);
       showError(error.message || 'Failed to create requisition');
     }
+  };
+
+  const handleUpdateRequisition = async () => {
+    if (!editFormData.required_date) {
+      showError('Please select a required date');
+      return;
+    }
+
+    // Validate that end_time is after start_time
+    if (editFormData.start_time && editFormData.end_time) {
+      const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+      const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+      if (endMinutes <= startMinutes) {
+        showError('End Time must be after Start Time');
+        return;
+      }
+    }
+
+    // Calculate total workers from labour items
+    const totalWorkers = editSelectedLabours.reduce((sum: number, labour: any) =>
+      sum + (labour.workers_count || 1), 0
+    );
+
+    setSubmitting(true);
+
+    try {
+      const requisitionData: any = {
+        site_name: editFormData.site_name,
+        work_description: editFormData.work_description,
+        workers_count: totalWorkers, // Use calculated total from labour items
+        required_date: editFormData.required_date,
+        start_time: editFormData.start_time || null,
+        end_time: editFormData.end_time || null,
+        preferred_workers_notes: editFormData.preferred_workers_notes,
+        labour_items: editSelectedLabours.map((labour: any) => ({
+          work_description: labour.work_description,
+          skill_required: labour.skill_required || labour.labour_role,
+          workers_count: parseInt(labour.workers_count) || 1,
+          boq_id: labour.boq_id,
+          item_id: labour.item_id,
+          labour_id: labour.labour_id
+        }))
+      };
+
+      const response = await apiClient.put(`/labour/requisitions/${editingRequisitionId}`, requisitionData);
+
+      setSubmitting(false);
+
+      if (response.data?.success) {
+        showSuccess('Requisition updated successfully');
+        fetchRequisitions();
+        fetchTabCounts();
+        setShowEditModal(false);
+        resetEditForm();
+      } else {
+        showError(response.data?.error || 'Failed to update requisition');
+      }
+    } catch (error: any) {
+      setSubmitting(false);
+      showError(error.response?.data?.error || error.message || 'Failed to update requisition');
+    }
+  };
+
+  const fetchLaboursForProject = async (projectId: number, isEditMode: boolean = false) => {
+    try {
+      const response = await apiClient.get(`/projects/assigned-to-me`);
+      const project = response.data?.projects?.find((p: any) => p.project_id === projectId);
+      if (project) {
+        if (isEditMode) {
+          extractBOQDataForEdit(project);
+        } else {
+          extractBOQData(project);
+        }
+      }
+    } catch (error) {
+      showError('Failed to load labour items for project');
+    }
+  };
+
+  const extractBOQDataForEdit = (project: Project) => {
+    const labourByItem: Map<string, GroupedLabour> = new Map();
+
+    (project.areas || []).forEach((area) => {
+      (area.boqs || []).forEach((boq) => {
+        (boq.items || []).forEach((item) => {
+          (item.sub_items || []).forEach((subItem) => {
+            if (subItem.labour && subItem.labour.length > 0) {
+              subItem.labour.forEach((lab) => {
+                const labourItem: LabourItem = {
+                  ...lab,
+                  sub_item_name: subItem.sub_item_name,
+                  item_name: item.item_name
+                };
+
+                const key = item.item_id;
+                if (!labourByItem.has(key)) {
+                  labourByItem.set(key, {
+                    item_id: item.item_id,
+                    item_name: item.item_name,
+                    labours: []
+                  });
+                }
+                labourByItem.get(key)!.labours.push(labourItem);
+              });
+            }
+          });
+        });
+      });
+    });
+
+    const grouped = Array.from(labourByItem.values());
+    if (grouped.length > 0) {
+      setEditExpandedItems(new Set([grouped[0].item_id]));
+    } else {
+      setEditExpandedItems(new Set());
+    }
+    setEditGroupedLabours(grouped);
+  };
+
+  const fetchWorkersForEdit = async () => {
+    setEditWorkersLoading(true);
+    try {
+      const response = await apiClient.get('/workers?status=available');
+      if (response.data?.workers) {
+        setEditAvailableWorkers(response.data.workers);
+      }
+    } catch (error) {
+      showError('Failed to load workers');
+    } finally {
+      setEditWorkersLoading(false);
+    }
+  };
+
+  const resetEditForm = () => {
+    setEditFormData({
+      project_id: 0,
+      site_name: '',
+      work_description: '',
+      skill_required: '',
+      workers_count: 1,
+      required_date: new Date().toISOString().split('T')[0],
+      start_time: '',
+      end_time: '',
+      preferred_workers_notes: ''
+    });
+    setEditSelectedProject(null);
+    setEditGroupedLabours([]);
+    setEditExpandedItems(new Set());
+    setEditSelectedLabours([]);
+    setEditSelectedWorkers([]);
+    setEditWorkerSearchQuery('');
+    setEditingRequisitionId(null);
   };
 
   // Fetch projects and workers when modal opens
@@ -789,18 +1065,27 @@ const RequisitionApprovals: React.FC = () => {
                     <span className="hidden sm:inline">View</span>
                   </button>
                   {activeTab === 'my_pending' && req.status === 'pending' && (
-                    <button
-                      onClick={() => handleSendToProduction(req.requisition_id)}
-                      disabled={processing === req.requisition_id}
-                      className="flex items-center justify-center gap-1 px-2 py-1 text-xs bg-teal-600 text-white rounded hover:bg-teal-700 transition-colors disabled:opacity-50"
-                    >
-                      {processing === req.requisition_id ? (
-                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
-                      ) : (
-                        <CheckCircleIcon className="w-3.5 h-3.5" />
-                      )}
-                      <span className="hidden sm:inline">Send to Production</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleEditRequisition(req)}
+                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs border border-blue-300 text-blue-600 rounded hover:bg-blue-50 transition-colors"
+                      >
+                        <PencilSquareIcon className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Edit</span>
+                      </button>
+                      <button
+                        onClick={() => handleSendToProduction(req.requisition_id)}
+                        disabled={processing === req.requisition_id}
+                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs bg-teal-600 text-white rounded hover:bg-teal-700 transition-colors disabled:opacity-50"
+                      >
+                        {processing === req.requisition_id ? (
+                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                        ) : (
+                          <CheckCircleIcon className="w-3.5 h-3.5" />
+                        )}
+                        <span className="hidden sm:inline">Send to Production</span>
+                      </button>
+                    </>
                   )}
                   {activeTab === 'pending' && (
                     <>
@@ -1200,7 +1485,17 @@ const RequisitionApprovals: React.FC = () => {
                       onChange={(value) => setFormData({ ...formData, end_time: value })}
                       placeholder="HH:MM"
                       className="w-full"
+                      minTime={formData.start_time || undefined}
                     />
+                    {formData.start_time && formData.end_time && (() => {
+                      const [startHour, startMin] = formData.start_time.split(':').map(Number);
+                      const [endHour, endMin] = formData.end_time.split(':').map(Number);
+                      const startMinutes = startHour * 60 + startMin;
+                      const endMinutes = endHour * 60 + endMin;
+                      return endMinutes <= startMinutes ? (
+                        <p className="text-red-600 text-xs mt-1">End time must be after start time</p>
+                      ) : null;
+                    })()}
                   </div>
                 </div>
 
@@ -1635,6 +1930,221 @@ const RequisitionApprovals: React.FC = () => {
                   Reject Requisition
                 </button>
               </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Edit Requisition Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900">Edit Labour Requisition</h2>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  resetEditForm();
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="space-y-4">
+                {/* Project (Read-only) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Project <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editSelectedProject?.project_name || 'Loading...'}
+                    disabled
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-500"
+                  />
+                </div>
+
+                {/* Site Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Site Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.site_name}
+                    onChange={(e) => setEditFormData({ ...editFormData, site_name: e.target.value })}
+                    placeholder="Enter site name or location"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                {/* Work Description */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Work Description
+                  </label>
+                  <textarea
+                    value={editFormData.work_description}
+                    onChange={(e) => setEditFormData({ ...editFormData, work_description: e.target.value })}
+                    placeholder="Describe the work to be done"
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                {/* Required Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Required Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={editFormData.required_date}
+                    onChange={(e) => setEditFormData({ ...editFormData, required_date: e.target.value })}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                {/* Time Fields */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Start Time
+                    </label>
+                    <TimePicker
+                      value={editFormData.start_time || ''}
+                      onChange={(value) => setEditFormData({ ...editFormData, start_time: value })}
+                      placeholder="HH:MM"
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      End Time
+                    </label>
+                    <TimePicker
+                      value={editFormData.end_time || ''}
+                      onChange={(value) => setEditFormData({ ...editFormData, end_time: value })}
+                      placeholder="HH:MM"
+                      className="w-full"
+                      minTime={editFormData.start_time || undefined}
+                    />
+                  </div>
+                </div>
+
+                {/* Time Validation Error */}
+                {editFormData.start_time && editFormData.end_time && (() => {
+                  const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+                  const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+                  const startMinutes = startHour * 60 + startMin;
+                  const endMinutes = endHour * 60 + endMin;
+                  return endMinutes <= startMinutes;
+                })() && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                    <p className="text-sm text-red-700">End Time must be after Start Time</p>
+                  </div>
+                )}
+
+                {/* Labour Items Breakdown */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Labour Requirements <span className="text-red-500">*</span>
+                  </label>
+                  {editSelectedLabours && editSelectedLabours.length > 0 ? (
+                    <div className="space-y-3">
+                      {editSelectedLabours.map((labour: any, idx: number) => (
+                        <div key={idx} className="bg-white border border-gray-200 rounded-lg p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900 mb-1">
+                                {labour.work_description || `${labour.item_name || ''} ${labour.sub_item_name ? '- ' + labour.sub_item_name : ''}`}
+                              </p>
+                              <p className="text-xs text-gray-600">
+                                <span className="font-medium">Skill:</span> {labour.skill_required || labour.labour_role || 'N/A'}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs text-gray-500 font-medium">Workers:</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={labour.workers_count || 1}
+                                onChange={(e) => {
+                                  const updated = [...editSelectedLabours];
+                                  updated[idx] = { ...updated[idx], workers_count: parseInt(e.target.value) || 1 };
+                                  setEditSelectedLabours(updated);
+                                }}
+                                className="w-16 px-2 py-1 border border-gray-300 rounded text-center focus:ring-2 focus:ring-purple-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="bg-gray-50 border border-gray-300 rounded-lg p-3 flex items-center justify-between">
+                        <span className="text-sm font-semibold text-gray-900">Total Workers Required:</span>
+                        <span className="text-sm font-bold text-purple-600">
+                          {editSelectedLabours.reduce((sum: number, labour: any) => sum + (parseInt(labour.workers_count) || 1), 0)} workers
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="border border-gray-300 rounded-lg p-4 bg-gray-50 text-gray-500 text-sm text-center">
+                      No labour items found in this requisition
+                    </div>
+                  )}
+                </div>
+
+                {/* Preferred Workers Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Preferred Workers Notes
+                  </label>
+                  <textarea
+                    value={editFormData.preferred_workers_notes}
+                    onChange={(e) => setEditFormData({ ...editFormData, preferred_workers_notes: e.target.value })}
+                    placeholder="Any specific requirements or preferences"
+                    rows={2}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex gap-3 p-6 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  resetEditForm();
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdateRequisition}
+                disabled={submitting || !editFormData.project_id || !editFormData.required_date}
+                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {submitting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Updating...
+                  </>
+                ) : (
+                  'Update Requisition'
+                )}
+              </button>
             </div>
           </motion.div>
         </div>
