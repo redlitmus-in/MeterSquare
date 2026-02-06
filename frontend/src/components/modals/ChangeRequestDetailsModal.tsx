@@ -1418,14 +1418,14 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       (mat.is_new_material === undefined && mat.master_material_id === null)
                     );
                     return (
-                  <table className="w-full">
+                  <table className="w-full table-fixed">
                     <thead className="bg-gray-100 border-b border-gray-200">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Material</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Brand</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Size</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Specification</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Sub-Item</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider" style={{ width: '15%' }}>Material</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider" style={{ width: '8%' }}>Brand</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider" style={{ width: '6%' }}>Size</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider" style={{ width: '18%' }}>Specification</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider" style={{ width: '28%' }}>Sub-Item</th>
                         <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Qty</th>
                         {hasNewMaterials && (
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Notes</th>
@@ -1448,9 +1448,9 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <React.Fragment key={idx}>
                           <tr className="hover:bg-gray-50 transition-colors">
                             {/* Material Name */}
-                            <td className="px-4 py-3 text-sm text-gray-900">
+                            <td className="px-4 py-3 text-sm text-gray-900" style={{ maxWidth: '200px' }}>
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-medium" title={material.material_name}>{material.material_name}</span>
+                                <span className="font-medium break-words" title={material.material_name}>{material.material_name}</span>
                                 {isNewMaterial && (
                                   <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-300 flex-shrink-0">
                                     NEW
@@ -1499,15 +1499,15 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                               )}
                             </td>
                             {/* Sub-Item - Clickable to view in BOQ */}
-                            <td className="px-4 py-3 text-sm">
+                            <td className="px-4 py-3 text-sm" style={{ maxWidth: '300px' }}>
                               {material.sub_item_name ? (
                                 <button
                                   onClick={() => handleViewSubItemInBOQ(material.sub_item_name, material.material_name)}
-                                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 hover:text-purple-900 transition-colors cursor-pointer truncate max-w-full group"
+                                  className="inline-flex items-start gap-1 px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 hover:text-purple-900 transition-colors cursor-pointer max-w-full group text-left"
                                   title={`Click to view "${material.sub_item_name}" in BOQ scope`}
                                 >
-                                  <span className="truncate">{material.sub_item_name}</span>
-                                  <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                                  <span className="break-words whitespace-normal line-clamp-3">{material.sub_item_name}</span>
+                                  <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5" />
                                 </button>
                               ) : <span className="text-gray-400">-</span>}
                             </td>

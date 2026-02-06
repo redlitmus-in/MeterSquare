@@ -679,21 +679,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     const set = new Set<string>();
     materials.forEach(m => {
       if (!m.isNew) {
-        // IMPORTANT: Always use materialName for consistency with dropdown checks
-        // This ensures materials are properly disabled even when backend doesn't provide consistent material_id
+        // Use materialName + subItemName as composite key for uniqueness
+        // sub_item_name is unique per sub-item, unlike sub_item_id which can be shared
         const materialKey = m.materialName;
-        const key = `${materialKey}_${m.subItemId}`;
-        console.log('🔑 Adding to set:', {
-          materialName: m.materialName,
-          materialId: m.materialId,
-          materialKey,
-          subItemId: m.subItemId,
-          key: key
-        });
+        const key = `${materialKey}_${m.subItemName}`;
         set.add(key);
       }
     });
-    console.log('📋 Complete addedMaterialsSet:', Array.from(set));
     return set;
   }, [materials]);
 
@@ -1259,10 +1251,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           </label>
           <div className="border border-gray-300 rounded-lg p-3 bg-white max-h-60 overflow-y-auto space-y-2">
             {selectedItem.sub_items.map(subItem => {
-              const isSelected = selectedSubItems.some(si => si.sub_item_id === subItem.sub_item_id);
+              const isSelected = selectedSubItems.some(si =>
+                si.sub_item_name === subItem.sub_item_name
+              );
               return (
                 <label
-                  key={subItem.sub_item_id}
+                  key={`${subItem.sub_item_id}-${subItem.sub_item_name}`}
                   className={`flex items-center p-3 rounded-lg cursor-pointer transition-all border-2 ${
                     isSelected
                       ? 'bg-blue-50 border-blue-500'
@@ -1274,16 +1268,16 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                     checked={isSelected}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        console.log('🟢 Selected sub-item:', {
-                          sub_item_id: subItem.sub_item_id,
-                          sub_item_name: subItem.sub_item_name,
-                          type: typeof subItem.sub_item_id
-                        });
                         setSelectedSubItems([...selectedSubItems, subItem]);
                       } else {
-                        // Remove this sub-item and its materials
-                        setSelectedSubItems(selectedSubItems.filter(si => si.sub_item_id !== subItem.sub_item_id));
-                        setMaterials(materials.filter(m => m.subItemId !== subItem.sub_item_id));
+                        // Remove this exact sub-item by name (case-sensitive)
+                        setSelectedSubItems(selectedSubItems.filter(si =>
+                          si.sub_item_name !== subItem.sub_item_name
+                        ));
+                        // Also remove materials for this exact sub-item
+                        setMaterials(materials.filter(m =>
+                          m.subItemName !== subItem.sub_item_name
+                        ));
                       }
                     }}
                     className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
@@ -1606,7 +1600,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
           {/* Material selection for each selected sub-item */}
           {selectedSubItems.map(subItem => (
-            <div key={subItem.sub_item_id} className="border border-blue-200 rounded-lg p-4 bg-blue-50/30">
+            <div key={`${subItem.sub_item_id}-${subItem.sub_item_name}`} className="border border-blue-200 rounded-lg p-4 bg-blue-50/30">
               {/* Show BOQ Materials Availability Summary - ALWAYS show this for transparency */}
               {subItem.materials && subItem.materials.length > 0 && (
                 <div className="mb-3 p-3 bg-blue-50 border border-blue-300 rounded-lg">
@@ -1616,15 +1610,6 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                   <div className="space-y-2">
                     {subItem.materials.map(material => {
                       const materialKey = material.material_id || material.material_name;
-
-                      // Debug logging for tracking allocation calculation
-                      console.log('🔍 Calculating allocation for material:', {
-                        materialName: material.material_name,
-                        materialKey,
-                        subItemId: subItem.sub_item_id,
-                        subItemName: subItem.sub_item_name,
-                        totalRequestsAvailable: existingRequests.length
-                      });
 
                       // Uses centralized config to prevent over-allocation
                       const alreadyPurchased = existingRequests
@@ -1788,12 +1773,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
                           // Use functional update to check duplicates and add material with current state
                           setMaterials(currentMaterials => {
-                            // Check for duplicates using material_name for consistency
-                            // IMPORTANT: Use material_name to ensure duplicates are caught even when material_id varies
+                            // Check for duplicates using material_name + sub_item_name
                             const isDuplicate = currentMaterials.some(
                               m => !m.isNew &&
                                    m.materialName === material.material_name &&
-                                   m.subItemId === subItem.sub_item_id
+                                   m.subItemName === subItem.sub_item_name
                             );
 
                             if (isDuplicate) {
@@ -1834,7 +1818,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           e.target.value = "";
                         }}
                         disabled={materialTypeInfo.currentType === 'new' || !hasAvailableMaterials}
-                        className={`pl-3 pr-10 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
+                        className={`w-full pl-3 pr-10 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
                           materialTypeInfo.currentType === 'new' || !hasAvailableMaterials
                             ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed'
                             : 'bg-white border-gray-300'
@@ -1875,10 +1859,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           })
                           .map(material => {
                           // Check if this material is already added using memoized set (fixes closure stale state bug)
-                          // IMPORTANT: Always use material_name for consistency with addedMaterialsSet
+                          // Use material_name + sub_item_name for consistency with addedMaterialsSet
                           const materialKey = material.material_name;
-                          const compositeKey = `${materialKey}_${subItem.sub_item_id}`;
+                          const compositeKey = `${materialKey}_${subItem.sub_item_name}`;
                           const isAlreadyAdded = addedMaterialsSet.has(compositeKey);
+
+                          const displayName = material.material_name.length > 80
+                            ? material.material_name.substring(0, 80) + '...'
+                            : material.material_name;
 
                           return (
                             <option
@@ -1886,8 +1874,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               value={material.material_id || material.material_name}
                               disabled={isAlreadyAdded}
                               className={isAlreadyAdded ? 'text-gray-400 italic' : ''}
+                              title={material.material_name}
                             >
-                              {material.material_name}{isAlreadyAdded ? ' (Already added)' : ''}{isSiteEngineer ? '' : ` - AED${material.unit_price}/${material.unit}`}
+                              {displayName}{isAlreadyAdded ? ' (Already added)' : ''}{isSiteEngineer ? '' : ` - AED${material.unit_price}/${material.unit}`}
                             </option>
                           );
                         })}
@@ -1905,11 +1894,6 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                       }
 
                       // Add new material for this specific sub-item
-                      console.log('🟡 Creating new material for sub-item:', {
-                        sub_item_id: subItem.sub_item_id,
-                        sub_item_name: subItem.sub_item_name,
-                        type: typeof subItem.sub_item_id
-                      });
                       const newMaterial: MaterialItem = {
                         id: `material-${Date.now()}-${Math.random()}`,
                         isNew: true,
@@ -1943,12 +1927,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
               {/* Materials for this sub-item */}
               <div className="space-y-2">
-                {materials.filter(m => m.subItemId === subItem.sub_item_id).length === 0 ? (
+                {materials.filter(m => m.subItemName === subItem.sub_item_name).length === 0 ? (
                   <p className="text-xs text-gray-500 italic text-center py-4">
                     No materials added for this sub-item yet
                   </p>
                 ) : (
-                  materials.filter(m => m.subItemId === subItem.sub_item_id).map((material, index) => (
+                  materials.filter(m => m.subItemName === subItem.sub_item_name).map((material, index) => (
                     <div key={material.id} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
                       <div className="flex justify-between items-start mb-2">
                         <div>
