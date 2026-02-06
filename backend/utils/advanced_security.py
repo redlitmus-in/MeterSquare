@@ -842,6 +842,7 @@ SECURITY_WHITELIST_PATHS = [
     '/api/labour/',  # Labour descriptions and requisitions
     '/api/projects/create',  # Project descriptions might contain keywords
     '/api/projects/update',
+    '/api/buyer/',  # Buyer operations (emails with custom bodies, LPO data)
 ]
 
 # Improved patterns - more context-aware to reduce false positives
