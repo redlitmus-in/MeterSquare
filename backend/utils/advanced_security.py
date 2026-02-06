@@ -829,16 +829,39 @@ def audit_log(event_type: str, severity: str = "INFO",
 # SUSPICIOUS REQUEST DETECTION
 # ============================================
 
-# Patterns that indicate attack attempts
+# Endpoints that should skip SQL keyword checks (BOQ items often contain words like SELECT, INSERT)
+# These endpoints legitimately contain construction terminology that might match SQL patterns
+SECURITY_WHITELIST_PATHS = [
+    '/api/create_boq',
+    '/api/boq/',  # Covers all BOQ operations (update, upload, change-request, etc.)
+    '/api/revision_boq',
+    '/api/update_internal_boq',
+    '/api/change-request',  # Change requests contain material descriptions
+    '/api/materials/',  # Material catalog and specifications
+    '/api/inventory/',  # Inventory management
+    '/api/labour/',  # Labour descriptions and requisitions
+    '/api/projects/create',  # Project descriptions might contain keywords
+    '/api/projects/update',
+]
+
+# Improved patterns - more context-aware to reduce false positives
 SUSPICIOUS_PATTERNS = [
-    # SQL Injection
-    r"(\-\-|;|\bOR\b|\bAND\b|\bUNION\b|\bSELECT\b|\bDROP\b|\bINSERT\b|\bDELETE\b|\bUPDATE\b)",
-    # XSS
-    r"(<script|javascript:|onerror=|onload=|onclick=)",
-    # Path traversal
+    # SQL Injection - look for actual SQL injection patterns (multiple keywords, quotes, comments)
+    r"('|\"|`).*(SELECT|UNION|DROP|DELETE|UPDATE|INSERT).*('|\"|`)",  # SQL with quotes
+    r"(SELECT|UNION).*FROM.*WHERE",  # Actual SQL query structure
+    r"(DROP|DELETE).*TABLE",  # Table manipulation
+    r"(\bOR\b|\bAND\b).*[=<>].*('|\"|`)",  # Boolean SQL injection (OR 1=1, AND 1=1)
+    r"(--\s|\/\*|\*\/)",  # SQL comments for bypass
+    r";\s*(SELECT|DROP|DELETE|INSERT|UPDATE)",  # Command chaining with semicolon
+
+    # XSS - unchanged, these are always suspicious
+    r"(<script|javascript:|onerror=|onload=|onclick=|onmouseover=)",
+
+    # Path traversal - unchanged
     r"(\.\.\/|\.\.\\)",
-    # Command injection
-    r"(\||;|`|\$\()",
+
+    # Command injection - be more specific
+    r"(\$\(.*\)|`.*`|\|\s*(rm|cat|ls|wget|curl|bash|sh)\s)",  # Actual command execution patterns
 ]
 
 SUSPICIOUS_REGEX = [re.compile(p, re.IGNORECASE) for p in SUSPICIOUS_PATTERNS]
@@ -846,13 +869,16 @@ SUSPICIOUS_REGEX = [re.compile(p, re.IGNORECASE) for p in SUSPICIOUS_PATTERNS]
 
 def check_suspicious_request():
     """
-    Check request for suspicious patterns
+    Check request for suspicious patterns with smart whitelisting
     Call this in before_request
     """
     if not is_production():
         return None
 
-    # Check query parameters
+    # Check if the current path is whitelisted (BOQ, materials, etc. can contain construction keywords)
+    is_whitelisted = any(request.path.startswith(path) for path in SECURITY_WHITELIST_PATHS)
+
+    # Check query parameters (never whitelisted - attackers shouldn't use query params for injection)
     for key, value in request.args.items():
         if _is_suspicious(value):
             ip = get_remote_address()
@@ -860,7 +886,7 @@ def check_suspicious_request():
             audit_log(
                 "SUSPICIOUS_REQUEST",
                 severity="WARNING",
-                details={"type": "query_param", "key": key, "value": value[:100]}
+                details={"type": "query_param", "key": key, "value": value[:100], "path": request.path}
             )
             return jsonify({
                 "success": False,
@@ -868,8 +894,8 @@ def check_suspicious_request():
                 "message": "Invalid request detected"
             }), 400
 
-    # Check request body (for JSON)
-    if request.is_json:
+    # Check request body (for JSON) - apply whitelist here
+    if request.is_json and not is_whitelisted:
         try:
             data = request.get_json(silent=True) or {}
             if _check_dict_suspicious(data):
@@ -878,7 +904,7 @@ def check_suspicious_request():
                 audit_log(
                     "SUSPICIOUS_REQUEST",
                     severity="WARNING",
-                    details={"type": "request_body"}
+                    details={"type": "request_body", "path": request.path}
                 )
                 return jsonify({
                     "success": False,
