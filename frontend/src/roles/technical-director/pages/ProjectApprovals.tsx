@@ -41,7 +41,7 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
-import { apiClient } from '@/api/config';
+import { apiClient, API_BASE_URL } from '@/api/config';
 import { formatCurrency } from '@/utils/formatters';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -640,8 +640,10 @@ const ProjectApprovals: React.FC = () => {
       const token = localStorage.getItem('access_token') || localStorage.getItem('token');
       const apiUrl = API_BASE_URL;
 
-      console.log(`Fetching day extensions for BOQ ${boqId}...`);
+      console.log(`🔍 [TD] Fetching pending day extensions for BOQ ${boqId}...`);
+      console.log(`🔍 [TD] API URL: ${apiUrl}/boq/${boqId}/pending-day-extensions`);
 
+      // ✅ Use TD-specific endpoint that returns ALL pending extensions system-wide
       const response = await fetch(`${apiUrl}/boq/${boqId}/pending-day-extensions`, {
         method: 'GET',
         headers: {
@@ -651,24 +653,48 @@ const ProjectApprovals: React.FC = () => {
       });
 
       const data = await response.json();
-      console.log('Day extension API response:', data);
+      console.log('🔍 [TD] API Response Status:', response.status);
+      console.log('🔍 [TD] API Response Data:', data);
 
       if (response.ok && data.success) {
-        if (data.data && data.data.length > 0) {
+        console.log('✅ [TD] API call successful! Count:', data.count);
+        // Get pending extensions from data.data (not data.requests)
+        const pendingExtensions = data.data || [];
+
+        if (pendingExtensions.length > 0) {
           // Sort by request date (most recent first)
-          const extensions = data.data.sort((a: any, b: any) => {
+          const sortedExtensions = pendingExtensions.sort((a: any, b: any) => {
             const dateA = new Date(a.request_date || 0).getTime();
             const dateB = new Date(b.request_date || 0).getTime();
             return dateB - dateA;
           });
 
-          console.log(`Found ${extensions.length} pending extension(s)`);
-          // Set all extensions instead of just the first one
+          // Transform data to match modal's expected structure
+          const extensions = sortedExtensions.map((ext: any) => ({
+            boq_id: ext.boq_id,
+            project_id: ext.project_id,
+            project_name: ext.project_name,
+            requested_by: ext.requested_by || 'Unknown',
+            original_duration: ext.original_duration || 0,
+            requested_days: ext.requested_days || 0,
+            edited_days: ext.edited_days || null,
+            actual_days: ext.actual_days || ext.requested_days || 0,
+            new_duration: ext.new_duration || 0,
+            original_end_date: ext.original_end_date || '',
+            new_end_date: ext.new_end_date || '',
+            reason: ext.reason || 'No reason provided',
+            request_date: ext.request_date || '',
+            status: ext.status || 'day_request_send_td',
+            is_edited: ext.is_edited || ext.status === 'day_edit_td'
+          }));
+
+          console.log(`✅ [TD] Found ${extensions.length} pending extension(s) awaiting TD approval`);
+          // Set all pending extensions for TD to review
           setSelectedDayExtension(extensions);
           setShowDayExtensionModal(true);
         } else {
-          console.log('No pending extensions found');
-          showInfo('No pending day extension requests for this project');
+          console.log('ℹ️ [TD] No pending extensions found');
+          showInfo('No pending day extension requests at this time');
         }
       } else {
         console.error('API error:', data);

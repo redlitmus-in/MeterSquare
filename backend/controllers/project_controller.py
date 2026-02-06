@@ -1602,7 +1602,7 @@ def get_pending_day_extensions(boq_id):
                 "edited_days": actual_days,
                 "actual_days": actual_days,
                 "new_duration": new_duration,
-                "request_date": proj.last_modified_at,
+                "request_date": proj.last_modified_at.isoformat() if proj.last_modified_at else None,
                 "requested_by": proj.last_modified_by,
                 "original_end_date": proj.end_date.isoformat() if proj.end_date else None,
                 "new_end_date": new_end_date.isoformat() if new_end_date else None,
@@ -1613,12 +1613,15 @@ def get_pending_day_extensions(boq_id):
 
             pending_extensions.append(extension_data)
 
-        return jsonify({
+        response_data = {
             "success": True,
             "count": len(pending_extensions),
             "data": pending_extensions
-        }), 200
+        }
+        return jsonify(response_data), 200
 
     except Exception as e:
+        import traceback
         log.error(f"Error getting pending day extensions for BOQ {boq_id}: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to load day extension requests: {str(e)}", "success": False}), 500

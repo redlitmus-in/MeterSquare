@@ -4383,12 +4383,6 @@ const EstimatorHub: React.FC = () => {
                                   <span className="text-xs text-gray-500">Status:</span>
                                   {getStatusBadge(boq.status, boq.client_rejection_reason)}
                                 </div>
-                                {boq.total_cost && (
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs text-gray-500">Total:</span>
-                                    <span className="text-sm font-bold text-green-700">{formatCurrency(boq.total_cost)}</span>
-                                  </div>
-                                )}
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-gray-500">Created:</span>
                                   <span className="text-xs text-gray-700">{boq.created_at ? format(new Date(boq.created_at), 'dd MMM yyyy') : 'N/A'}</span>
