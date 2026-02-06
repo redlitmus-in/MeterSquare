@@ -165,6 +165,15 @@ const StockOutPage: React.FC = () => {
     }
   }, []);
 
+  // Find matching inventory material by trying multiple name strategies
+  const findInventoryMatch = useCallback((matName?: string, matBrand?: string, parentItemName?: string) => {
+    const tryMatch = (name?: string) => {
+      if (!name) return undefined;
+      return materials.find(inv => inv.material_name?.toLowerCase() === name.toLowerCase());
+    };
+    return tryMatch(matBrand) || tryMatch(matName) || tryMatch(parentItemName);
+  }, [materials]);
+
   // Fetch pending requests
   const fetchPendingRequests = useCallback(async () => {
     setLoadingPending(true);
@@ -188,7 +197,7 @@ const StockOutPage: React.FC = () => {
       const requestsData = await inventoryService.getSentInternalRequests();
       const approved = requestsData.filter(req => {
         const status = normalizeStatus(req.status);
-        return status === 'APPROVED' || status === 'DN_PENDING';
+        return status === 'APPROVED';
       });
       setApprovedRequests(approved);
       setApprovedLoaded(true);
@@ -454,17 +463,11 @@ const StockOutPage: React.FC = () => {
       notes: `Material request #${request.request_number || request.request_id}${destinationNote}`
     });
 
-    // For vendor delivery requests, store material info since it's not in inventory
-    // Match inventory by sub-item (brand) name, not item name
-
     // Handle grouped materials (materials_data) or single material
     if (request.materials_data && Array.isArray(request.materials_data) && request.materials_data.length > 0) {
       // Grouped materials - create DN item for each material
       const dnItemsList = request.materials_data.map(mat => {
-        const subItemName = mat.brand || mat.material_name;
-        const matchedInventory = materials.find(
-          inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-        );
+        const matchedInventory = findInventoryMatch(mat.material_name, mat.brand, request.item_name);
         return {
           inventory_material_id: matchedInventory?.inventory_material_id || 0,
           quantity: mat.quantity || 0,
@@ -480,10 +483,7 @@ const StockOutPage: React.FC = () => {
       setDnItems(dnItemsList);
     } else {
       // Single material
-      const subItemName = request.brand || request.item_name;
-      const matchedInventory = materials.find(
-        inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-      );
+      const matchedInventory = findInventoryMatch(request.item_name, request.brand);
 
       setDnItems([{
         inventory_material_id: matchedInventory?.inventory_material_id || request.inventory_material_id || 0,
@@ -525,6 +525,11 @@ const StockOutPage: React.FC = () => {
 
     if (!dnFormData.attention_to) {
       showWarning('Please select a Site Engineer to receive the delivery');
+      return;
+    }
+
+    if (!dnFormData.transport_fee || dnFormData.transport_fee <= 0) {
+      showWarning('Please enter the transport fee');
       return;
     }
 
@@ -1045,11 +1050,7 @@ const StockOutPage: React.FC = () => {
                               // Single material from grouped data - show directly with inventory status
                               (() => {
                                 const mat = req.materials_data[0];
-                                // Check inventory against sub-item (brand) name, not item name
-                                const subItemName = mat.brand || mat.material_name;
-                                const inventoryMatch = materials.find(
-                                  inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-                                );
+                                const inventoryMatch = findInventoryMatch(mat.material_name, mat.brand, req.item_name);
                                 const isInInventory = !!inventoryMatch;
                                 return (
                                   <div>
@@ -1091,11 +1092,7 @@ const StockOutPage: React.FC = () => {
                           ) : (
                             // Single material without materials_data
                             (() => {
-                              // Check inventory against sub-item (brand) name, not item name
-                              const subItemName = req.brand || req.item_name;
-                              const inventoryMatch = materials.find(
-                                inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-                              );
+                              const inventoryMatch = findInventoryMatch(req.item_name, req.brand);
                               const isInInventory = !!inventoryMatch;
                               return (
                                 <div>
@@ -1143,9 +1140,11 @@ const StockOutPage: React.FC = () => {
                         ) : (
                           (() => {
                             // Get stock from material_details or lookup from materials array
-                            const subItemName = req.brand || req.item_name;
-                            const inventoryMatch = materials.find(
-                              inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
+                            const matData0 = req.materials_data?.[0];
+                            const inventoryMatch = findInventoryMatch(
+                              matData0?.material_name || req.item_name,
+                              matData0?.brand || req.brand,
+                              req.item_name
                             );
                             const stockValue = req.material_details?.updated_stock ?? inventoryMatch?.current_stock ?? 0;
                             const unitValue = req.material_details?.unit || inventoryMatch?.unit || '';
@@ -1167,12 +1166,14 @@ const StockOutPage: React.FC = () => {
                         <div className="flex gap-2 flex-wrap">
                           {normalizeStatus(req.status) === 'PENDING' && (
                             (() => {
-                              // Check if sub-item is in inventory - use brand (sub-item) for check
+                              // Check if material is in inventory
                               const matData = req.materials_data?.[0];
-                              const subItemName = matData?.brand || matData?.material_name || req.brand || req.item_name;
-                              const isInInventory = materials.some(
-                                inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
+                              const actionInventoryMatch = findInventoryMatch(
+                                matData?.material_name || req.item_name,
+                                matData?.brand || req.brand,
+                                req.item_name
                               );
+                              const isInInventory = !!actionInventoryMatch;
                               const isAwaitingVendor = !isInInventory;
 
                               return (
@@ -1666,7 +1667,7 @@ const StockOutPage: React.FC = () => {
                   <h4 className="text-sm font-semibold text-gray-700 mb-3">Transport Fee Calculation</h4>
 
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Enter total transport fee <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
+                    Enter total transport fee <span className="text-red-500">*</span> <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
                   </label>
                   <input
                     type="number"
@@ -1817,20 +1818,9 @@ const StockOutPage: React.FC = () => {
                         )}
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        {item.is_vendor_delivery ? (
-                          <div className="w-20 px-2 py-1 text-sm text-center bg-gray-100 border border-gray-300 rounded text-gray-700">
-                            {item.quantity}
-                          </div>
-                        ) : (
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={item.quantity}
-                            onChange={(e) => handleDnItemChange(index, 'quantity', Number(e.target.value))}
-                            className="w-20 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500"
-                          />
-                        )}
+                        <div className="w-20 px-2 py-1 text-sm text-center bg-gray-100 border border-gray-300 rounded text-gray-700">
+                          {item.quantity}
+                        </div>
                         <div className="text-sm text-gray-700 px-1 py-1 whitespace-nowrap">
                           {item.unit || 'unit'}
                         </div>
@@ -1975,10 +1965,7 @@ const StockOutPage: React.FC = () => {
               <div className="space-y-3">
                 {materialsViewModal.materials.map((mat: any, idx: number) => {
                   // Check if material exists in inventory - use sub-item (brand) for check
-                  const subItemName = mat.brand || mat.material_name;
-                  const inventoryMatch = materials.find(
-                    inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-                  );
+                  const inventoryMatch = findInventoryMatch(mat.material_name, mat.brand, materialsViewModal.parentMaterialName);
                   const isInInventory = !!inventoryMatch;
                   const currentStock = inventoryMatch?.current_stock || 0;
                   const hasEnoughStock = isInInventory && currentStock >= (mat.quantity || 0);
