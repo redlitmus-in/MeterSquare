@@ -58,6 +58,23 @@ interface PurchaseTransaction {
   delivery_batch_ref?: string;  // e.g., "DB-2026-001"
   created_at?: string;
   created_by?: string;
+  // Delivery Note details (enriched from backend)
+  delivery_note_number?: string;  // Actual DN number from MaterialDeliveryNote
+  delivery_note_details?: {
+    delivery_note_id: number;
+    delivery_note_number: string;
+    delivery_date: string | null;
+    status: string;
+    driver_name?: string;
+    vehicle_number?: string;
+    driver_contact?: string;
+    transport_fee?: number;
+    project_id?: number;
+  };
+  // Override fields from DN (preferred over transaction-level fields)
+  dn_transport_fee?: number;
+  dn_driver_name?: string;
+  dn_vehicle_number?: string;
 }
 
 // Predefined units organized by category
@@ -446,9 +463,9 @@ const StockInPage: React.FC = () => {
         if (!batchMap.has(txn.delivery_batch_ref)) {
           batchMap.set(txn.delivery_batch_ref, {
             delivery_batch_ref: txn.delivery_batch_ref,
-            driver_name: txn.driver_name || '',
-            vehicle_number: txn.vehicle_number || '',
-            transport_fee: txn.transport_fee || 0,
+            driver_name: txn.dn_driver_name || txn.driver_name || '',
+            vehicle_number: txn.dn_vehicle_number || txn.vehicle_number || '',
+            transport_fee: txn.dn_transport_fee ?? txn.transport_fee ?? 0,
             transport_notes: txn.transport_notes || '',
             created_at: txn.created_at || '',
             material_count: 1,
@@ -457,9 +474,19 @@ const StockInPage: React.FC = () => {
         } else {
           const existing = batchMap.get(txn.delivery_batch_ref)!;
           existing.material_count += 1;
-          // Keep the MAXIMUM transport fee (the one that was actually paid)
-          if (txn.transport_fee && txn.transport_fee > existing.transport_fee) {
-            existing.transport_fee = txn.transport_fee;
+          // Keep the MAXIMUM transport fee (the one that was actually paid, prioritize DN fee)
+          const txnTransportFee = txn.dn_transport_fee ?? txn.transport_fee ?? 0;
+          if (txnTransportFee && txnTransportFee > existing.transport_fee) {
+            existing.transport_fee = txnTransportFee;
+          }
+          // Update driver/vehicle if current transaction has them but existing doesn't (prioritize DN fields)
+          const txnDriver = txn.dn_driver_name || txn.driver_name;
+          if (!existing.driver_name && txnDriver) {
+            existing.driver_name = txnDriver;
+          }
+          const txnVehicle = txn.dn_vehicle_number || txn.vehicle_number;
+          if (!existing.vehicle_number && txnVehicle) {
+            existing.vehicle_number = txnVehicle;
           }
           // Keep delivery note URL if current one is empty but transaction has one
           if (!existing.delivery_note_url && txn.delivery_note_url) {
@@ -476,6 +503,102 @@ const StockInPage: React.FC = () => {
 
     setRecentBatches(batches.slice(0, 10)); // Keep only 10 most recent batches
   };
+
+  // Create batch details map for transport fee and delivery notes lookup
+  const batchDetailsMap = useMemo(() => {
+    const map = new Map<string, {
+      transport_fee: number;
+      material_count: number;
+      delivery_batch_ref: string;
+      material_names: string[];
+      transport_notes: string;
+      driver_name: string;
+      vehicle_number: string;
+    }>();
+
+    // Count materials per batch and collect material names
+    purchaseTransactions.forEach(txn => {
+      if (txn.delivery_batch_ref) {
+        if (!map.has(txn.delivery_batch_ref)) {
+          // Initialize batch with first transaction's data (prioritize DN fields)
+          map.set(txn.delivery_batch_ref, {
+            delivery_batch_ref: txn.delivery_batch_ref,
+            transport_fee: txn.dn_transport_fee ?? txn.transport_fee ?? 0,
+            transport_notes: txn.transport_notes || '',
+            driver_name: txn.dn_driver_name || txn.driver_name || '',
+            vehicle_number: txn.dn_vehicle_number || txn.vehicle_number || '',
+            material_count: 1,
+            material_names: [txn.material_name || 'Unknown']
+          });
+
+          console.log(`Initialized batch ${txn.delivery_batch_ref}:`, {
+            transport_notes: txn.transport_notes,
+            transport_fee: txn.dn_transport_fee ?? txn.transport_fee,
+            driver: txn.dn_driver_name || txn.driver_name,
+            vehicle: txn.dn_vehicle_number || txn.vehicle_number
+          });
+        } else {
+          const existing = map.get(txn.delivery_batch_ref)!;
+          existing.material_count += 1;
+
+          // Add material name if not already in the list
+          const materialName = txn.material_name || 'Unknown';
+          if (!existing.material_names.includes(materialName)) {
+            existing.material_names.push(materialName);
+          }
+
+          // Keep the maximum transport fee (the actual one paid)
+          // Prioritize DN fields over transaction-level fields
+          const txnTransportFee = txn.dn_transport_fee ?? txn.transport_fee ?? 0;
+          if (txnTransportFee && txnTransportFee > existing.transport_fee) {
+            console.log(`Updating batch ${txn.delivery_batch_ref} with higher fee transaction:`, {
+              old_fee: existing.transport_fee,
+              new_fee: txnTransportFee,
+              old_notes: existing.transport_notes,
+              new_notes: txn.transport_notes
+            });
+
+            existing.transport_fee = txnTransportFee;
+            // Update transport notes, driver, and vehicle from the transaction that paid the fee
+            if (txn.transport_notes) {
+              existing.transport_notes = txn.transport_notes;
+            }
+            const txnDriver = txn.dn_driver_name || txn.driver_name;
+            if (txnDriver) {
+              existing.driver_name = txnDriver;
+            }
+            const txnVehicle = txn.dn_vehicle_number || txn.vehicle_number;
+            if (txnVehicle) {
+              existing.vehicle_number = txnVehicle;
+            }
+          } else {
+            // If this transaction doesn't have a higher fee, only fill in empty fields
+            if (!existing.transport_notes && txn.transport_notes) {
+              existing.transport_notes = txn.transport_notes;
+            }
+            const txnDriver = txn.dn_driver_name || txn.driver_name;
+            if (!existing.driver_name && txnDriver) {
+              existing.driver_name = txnDriver;
+            }
+            const txnVehicle = txn.dn_vehicle_number || txn.vehicle_number;
+            if (!existing.vehicle_number && txnVehicle) {
+              existing.vehicle_number = txnVehicle;
+            }
+          }
+        }
+      }
+    });
+
+    console.log('Final batchDetailsMap:', Array.from(map.entries()).map(([key, value]) => ({
+      batch: key,
+      transport_fee: value.transport_fee,
+      transport_notes: value.transport_notes,
+      material_count: value.material_count,
+      materials: value.material_names
+    })));
+
+    return map;
+  }, [purchaseTransactions]);
 
   // Group transactions by material
   const groupedTransactions = useMemo(() => {
@@ -834,14 +957,14 @@ const StockInPage: React.FC = () => {
       let finalBatchRef = purchaseFormData.delivery_batch_ref;
 
       // Check if user made changes that require a new batch ref (different delivery)
+      // Note: Only transport fee changes create a new batch. Delivery notes can be different for materials in the same batch.
       const hasTransportFeeChange = selectedBatchReference &&
         purchaseFormData.transport_fee !== 0 &&
         purchaseFormData.transport_fee !== selectedBatchReference.original_fee;
 
-      const hasNewDeliveryNote = deliveryNoteFile !== null && selectedBatchReference?.delivery_note_url;
-
-      // If user changed transport fee or uploaded new delivery note, this is a different delivery - create new batch
-      if (finalBatchRef && (hasTransportFeeChange || hasNewDeliveryNote)) {
+      // If user changed transport fee, this is a different delivery - create new batch
+      // Note: Uploading a new delivery note does NOT create a new batch - materials in the same batch can have different delivery notes
+      if (finalBatchRef && hasTransportFeeChange) {
         finalBatchRef = ''; // Clear batch ref to force generation of new one
       }
 
@@ -982,7 +1105,7 @@ const StockInPage: React.FC = () => {
       </div>
 
       {/* Purchase Transactions - Grouped by Material */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="bg-white rounded-lg shadow">
         {groupedTransactions.length === 0 ? (
           <div className="px-6 py-12 text-center">
             <Package className="w-12 h-12 text-gray-400 mx-auto mb-3" />
@@ -1091,45 +1214,199 @@ const StockInPage: React.FC = () => {
                                   {txn.reference_number || '-'}
                                 </td>
                                 <td className="px-6 py-3 whitespace-nowrap text-sm">
-                                  {txn.delivery_note_url ? (
-                                    <a
-                                      href={txn.delivery_note_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center space-x-1 text-blue-600 hover:text-blue-800 hover:underline"
-                                      title="View/Download Delivery Note"
-                                    >
-                                      <FileText className="w-4 h-4" />
-                                      <span>View</span>
-                                      <ExternalLink className="w-3 h-3" />
-                                    </a>
+                                  {txn.delivery_note_number ? (
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-gray-900 font-medium">
+                                        {txn.delivery_note_number}
+                                      </span>
+                                      {txn.delivery_note_url && (
+                                        <a
+                                          href={txn.delivery_note_url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center text-blue-600 hover:text-blue-800"
+                                          title="View/Download Delivery Note File"
+                                        >
+                                          <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                      )}
+                                    </div>
+                                  ) : txn.reference_number ? (
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-gray-500 text-xs">Ref:</span>
+                                      <span className="text-gray-600">
+                                        {txn.reference_number}
+                                      </span>
+                                      {txn.delivery_note_url && (
+                                        <a
+                                          href={txn.delivery_note_url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center text-blue-600 hover:text-blue-800"
+                                          title="View/Download Delivery Note File"
+                                        >
+                                          <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                      )}
+                                    </div>
                                   ) : (
                                     <span className="text-gray-400">-</span>
                                   )}
                                 </td>
                                 <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
-                                  {txn.driver_name || '-'}
+                                  {txn.dn_driver_name || txn.driver_name || '-'}
                                 </td>
                                 <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
-                                  {txn.vehicle_number || '-'}
+                                  {txn.dn_vehicle_number || txn.vehicle_number || '-'}
                                 </td>
                                 <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">
-                                  {txn.transport_fee ? formatCurrency(txn.transport_fee) : '-'}
+                                  {(() => {
+                                    // Check if this transaction is part of a batch
+                                    if (txn.delivery_batch_ref && batchDetailsMap.has(txn.delivery_batch_ref)) {
+                                      const batchDetails = batchDetailsMap.get(txn.delivery_batch_ref)!;
+                                      const isMultiMaterial = batchDetails.material_count > 1;
+
+                                      if (batchDetails.transport_fee > 0) {
+                                        return (
+                                          <div className="flex items-center gap-1.5">
+                                            <span>{formatCurrency(batchDetails.transport_fee)}</span>
+                                            {isMultiMaterial && (
+                                              <div className="relative group inline-block">
+                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                                  <Package className="w-3 h-3 mr-0.5" />
+                                                  {batchDetails.material_count}
+                                                </span>
+
+                                                {/* Tooltip - Below badge */}
+                                                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 hidden group-hover:block z-[9999]">
+                                                  <div className="bg-gray-900 text-white rounded-lg shadow-2xl py-2.5 px-3.5 w-[280px]">
+                                                    {/* Header */}
+                                                    <div className="font-semibold text-sm mb-2 pb-2 border-b border-gray-700">
+                                                      Batch Delivery ({batchDetails.material_count} materials)
+                                                    </div>
+
+                                                    {/* Batch Reference */}
+                                                    <div className="mb-2.5 text-xs">
+                                                      <span className="text-gray-400">Batch: </span>
+                                                      <span className="font-medium">{batchDetails.delivery_batch_ref}</span>
+                                                    </div>
+
+                                                    {/* Material Names List */}
+                                                    <div className="space-y-1">
+                                                      <div className="text-gray-400 text-xs mb-1">Materials delivered together:</div>
+                                                      <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                                                        {batchDetails.material_names.map((name, idx) => (
+                                                          <div key={idx} className="flex items-start text-xs">
+                                                            <span className="text-blue-400 mr-2">•</span>
+                                                            <span className="font-medium">{name}</span>
+                                                          </div>
+                                                        ))}
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      }
+                                    }
+
+                                    // Fallback to individual transaction fee (prioritize DN transport fee)
+                                    const transportFee = txn.dn_transport_fee ?? txn.transport_fee;
+                                    return transportFee ? formatCurrency(transportFee) : '-';
+                                  })()}
                                 </td>
                                 <td className="px-6 py-3 text-sm text-gray-600 max-w-xs">
-                                  <div className="space-y-1">
-                                    {txn.notes && (
-                                      <div className="truncate" title={txn.notes}>
-                                        <span className="font-medium text-gray-700">Notes:</span> {txn.notes}
+                                  {(() => {
+                                    const hasTransactionNotes = !!txn.notes;
+                                    let hasDeliveryNotes = false;
+                                    let deliveryNotesElement = null;
+
+                                    // Check for batch-level delivery notes
+                                    if (txn.delivery_batch_ref && batchDetailsMap.has(txn.delivery_batch_ref)) {
+                                      const batchDetails = batchDetailsMap.get(txn.delivery_batch_ref)!;
+                                      const isMultiMaterial = batchDetails.material_count > 1;
+
+                                      if (batchDetails.transport_notes) {
+                                        hasDeliveryNotes = true;
+                                        deliveryNotesElement = (
+                                          <div className="flex items-center gap-1.5">
+                                            <div className="truncate text-blue-600" title={batchDetails.transport_notes}>
+                                              <span className="font-medium">Delivery:</span> {batchDetails.transport_notes}
+                                            </div>
+                                            {isMultiMaterial && (
+                                              <div className="relative group inline-block flex-shrink-0">
+                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 cursor-help">
+                                                  <Package className="w-3 h-3 mr-0.5" />
+                                                  {batchDetails.material_count}
+                                                </span>
+
+                                                {/* Tooltip - Below badge */}
+                                                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 hidden group-hover:block z-[9999]">
+                                                  <div className="bg-gray-900 text-white rounded-lg shadow-2xl py-2.5 px-3.5 w-[280px]">
+                                                    {/* Header */}
+                                                    <div className="font-semibold text-sm mb-2 pb-2 border-b border-gray-700">
+                                                      Batch Delivery ({batchDetails.material_count} materials)
+                                                    </div>
+
+                                                    {/* Batch Reference */}
+                                                    <div className="mb-2.5 text-xs">
+                                                      <span className="text-gray-400">Batch: </span>
+                                                      <span className="font-medium">{batchDetails.delivery_batch_ref}</span>
+                                                    </div>
+
+                                                    {/* Delivery Notes */}
+                                                    <div className="mb-2.5 text-xs">
+                                                      <span className="text-gray-400">Delivery Notes: </span>
+                                                      <span className="font-medium">{batchDetails.transport_notes}</span>
+                                                    </div>
+
+                                                    {/* Material Names List */}
+                                                    <div className="space-y-1">
+                                                      <div className="text-gray-400 text-xs mb-1">Materials in this delivery:</div>
+                                                      <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                                                        {batchDetails.material_names.map((name, idx) => (
+                                                          <div key={idx} className="flex items-start text-xs">
+                                                            <span className="text-blue-400 mr-2">•</span>
+                                                            <span className="font-medium">{name}</span>
+                                                          </div>
+                                                        ))}
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      }
+                                    } else if (txn.transport_notes) {
+                                      // Fallback to individual transaction delivery notes
+                                      hasDeliveryNotes = true;
+                                      deliveryNotesElement = (
+                                        <div className="truncate text-blue-600" title={txn.transport_notes}>
+                                          <span className="font-medium">Delivery:</span> {txn.transport_notes}
+                                        </div>
+                                      );
+                                    }
+
+                                    // Render the notes
+                                    if (!hasTransactionNotes && !hasDeliveryNotes) {
+                                      return <span className="text-gray-400">-</span>;
+                                    }
+
+                                    return (
+                                      <div className="space-y-1">
+                                        {hasTransactionNotes && (
+                                          <div className="truncate" title={txn.notes}>
+                                            <span className="font-medium text-gray-700">Notes:</span> {txn.notes}
+                                          </div>
+                                        )}
+                                        {deliveryNotesElement}
                                       </div>
-                                    )}
-                                    {txn.transport_notes && (
-                                      <div className="truncate text-blue-600" title={txn.transport_notes}>
-                                        <span className="font-medium">Delivery:</span> {txn.transport_notes}
-                                      </div>
-                                    )}
-                                    {!txn.notes && !txn.transport_notes && '-'}
-                                  </div>
+                                    );
+                                  })()}
                                 </td>
                               </tr>
                             ))}

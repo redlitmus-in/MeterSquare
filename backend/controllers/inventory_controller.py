@@ -586,8 +586,47 @@ def create_inventory_transaction():
         transport_fee = float(data.get('transport_fee', 0.0)) if data.get('transport_fee') else None
         # transport_notes = data.get('transport_notes', None)
         delivery_batch_ref = data.get('delivery_batch_ref', None)
+
         # Handle file upload to Supabase if provided
         delivery_note_url = None
+
+        # Check if delivery_note_url is provided in request data (for reusing URLs when creating new batch with different transport fee)
+        if data.get('delivery_note_url'):
+            delivery_note_url = data.get('delivery_note_url')
+            print(f"✓ Using delivery note URL from request: {delivery_note_url}")
+        # If batch reference is provided but no file is uploaded and no URL in request, check if batch already has a file URL
+        elif delivery_batch_ref and not delivery_note_file:
+            existing_batch_txn = InventoryTransaction.query.filter_by(
+                delivery_batch_ref=delivery_batch_ref
+            ).filter(
+                InventoryTransaction.delivery_note_url.isnot(None)
+            ).first()
+
+            if existing_batch_txn and existing_batch_txn.delivery_note_url:
+                delivery_note_url = existing_batch_txn.delivery_note_url
+                print(f"✓ Reusing delivery note URL from batch {delivery_batch_ref}: {delivery_note_url}")
+
+        # If batch reference is provided but no transport details, inherit from first transaction in batch
+        if delivery_batch_ref:
+            if not driver_name or not vehicle_number or not transport_fee:
+                # Find the first transaction in this batch with complete transport details
+                batch_txn_with_transport = InventoryTransaction.query.filter_by(
+                    delivery_batch_ref=delivery_batch_ref
+                ).filter(
+                    InventoryTransaction.driver_name.isnot(None),
+                    InventoryTransaction.vehicle_number.isnot(None),
+                    InventoryTransaction.transport_fee.isnot(None)
+                ).first()
+
+                if batch_txn_with_transport:
+                    if not driver_name:
+                        driver_name = batch_txn_with_transport.driver_name
+                    if not vehicle_number:
+                        vehicle_number = batch_txn_with_transport.vehicle_number
+                    if not transport_fee:
+                        transport_fee = batch_txn_with_transport.transport_fee
+                    print(f"✓ Reusing transport details from batch {delivery_batch_ref}")
+
         if delivery_note_file:
             try:
                 import os
@@ -759,6 +798,116 @@ def get_all_inventory_transactions():
                 txn_data['size'] = txn.material.size
                 txn_data['category'] = txn.material.category
                 txn_data['unit'] = txn.material.unit
+
+            # Try to find associated delivery note
+            delivery_note = None
+
+            # Method 1: Try matching by delivery_batch_ref (most reliable)
+            if txn.delivery_batch_ref:
+                delivery_note = MaterialDeliveryNote.query.filter_by(
+                    delivery_batch_ref=txn.delivery_batch_ref
+                ).first()
+
+            # Method 2: If no batch ref match, try matching by transaction details
+            # This handles cases where transactions were created before proper batch ref linking
+            if not delivery_note and txn.reference_number:
+                # Try to find a delivery note where the reference matches or transport details align
+                from datetime import timedelta
+                date_range_start = txn.created_at - timedelta(days=7) if txn.created_at else None
+                date_range_end = txn.created_at + timedelta(days=7) if txn.created_at else None
+
+                query = MaterialDeliveryNote.query
+
+                # Filter by date range if available
+                if date_range_start and date_range_end:
+                    query = query.filter(
+                        MaterialDeliveryNote.created_at >= date_range_start,
+                        MaterialDeliveryNote.created_at <= date_range_end
+                    )
+
+                # Try matching by driver AND vehicle (strong correlation)
+                if txn.driver_name and txn.vehicle_number:
+                    delivery_note = query.filter_by(
+                        driver_name=txn.driver_name,
+                        vehicle_number=txn.vehicle_number
+                    ).first()
+
+                # If still no match, try just vehicle number (vehicles are more unique than driver names)
+                if not delivery_note and txn.vehicle_number:
+                    delivery_note = query.filter_by(
+                        vehicle_number=txn.vehicle_number
+                    ).first()
+
+            # Add delivery note details if found
+            if delivery_note:
+                txn_data['delivery_note_details'] = {
+                    'delivery_note_id': delivery_note.delivery_note_id,
+                    'delivery_note_number': delivery_note.delivery_note_number,
+                    'delivery_date': delivery_note.delivery_date.isoformat() if delivery_note.delivery_date else None,
+                    'status': delivery_note.status,
+                    'driver_name': delivery_note.driver_name,
+                    'vehicle_number': delivery_note.vehicle_number,
+                    'driver_contact': delivery_note.driver_contact,
+                    'transport_fee': delivery_note.transport_fee,
+                    'project_id': delivery_note.project_id
+                }
+
+                # Override transaction-level fields with delivery note info
+                if delivery_note.delivery_note_number:
+                    txn_data['delivery_note_number'] = delivery_note.delivery_note_number
+                if delivery_note.transport_fee is not None:
+                    txn_data['dn_transport_fee'] = delivery_note.transport_fee
+                if delivery_note.driver_name:
+                    txn_data['dn_driver_name'] = delivery_note.driver_name
+                if delivery_note.vehicle_number:
+                    txn_data['dn_vehicle_number'] = delivery_note.vehicle_number
+                # Use delivery note file URL if transaction doesn't have one
+                if delivery_note.delivery_note_url and not txn_data.get('delivery_note_url'):
+                    txn_data['delivery_note_url'] = delivery_note.delivery_note_url
+
+                # Log successful match for debugging
+                print(f"✓ Matched transaction {txn.inventory_transaction_id} to DN {delivery_note.delivery_note_number}")
+
+            # If transaction still doesn't have a delivery_note_url but has a batch reference,
+            # look up the file URL from other transactions in the same batch
+            if not txn_data.get('delivery_note_url') and txn.delivery_batch_ref:
+                batch_txn_with_file = InventoryTransaction.query.filter_by(
+                    delivery_batch_ref=txn.delivery_batch_ref
+                ).filter(
+                    InventoryTransaction.delivery_note_url.isnot(None)
+                ).first()
+
+                if batch_txn_with_file and batch_txn_with_file.delivery_note_url:
+                    txn_data['delivery_note_url'] = batch_txn_with_file.delivery_note_url
+                    print(f"✓ Found delivery note URL from batch {txn.delivery_batch_ref} for transaction {txn.inventory_transaction_id}")
+
+            # If transaction doesn't have transport details but has a batch reference,
+            # look up transport details from other transactions in the same batch
+            if txn.delivery_batch_ref:
+                needs_transport_data = (
+                    not txn_data.get('driver_name') or
+                    not txn_data.get('vehicle_number') or
+                    not txn_data.get('transport_fee')
+                )
+
+                if needs_transport_data:
+                    batch_txn_with_transport = InventoryTransaction.query.filter_by(
+                        delivery_batch_ref=txn.delivery_batch_ref
+                    ).filter(
+                        InventoryTransaction.driver_name.isnot(None),
+                        InventoryTransaction.vehicle_number.isnot(None),
+                        InventoryTransaction.transport_fee.isnot(None)
+                    ).first()
+
+                    if batch_txn_with_transport:
+                        if not txn_data.get('driver_name'):
+                            txn_data['driver_name'] = batch_txn_with_transport.driver_name
+                        if not txn_data.get('vehicle_number'):
+                            txn_data['vehicle_number'] = batch_txn_with_transport.vehicle_number
+                        if not txn_data.get('transport_fee'):
+                            txn_data['transport_fee'] = batch_txn_with_transport.transport_fee
+                        print(f"✓ Found transport details from batch {txn.delivery_batch_ref} for transaction {txn.inventory_transaction_id}")
+
             result.append(txn_data)
 
         response_data = {
@@ -799,6 +948,44 @@ def get_inventory_transaction_by_id(inventory_transaction_id):
             txn_data['category'] = transaction.material.category
             txn_data['unit'] = transaction.material.unit
 
+        # If transaction doesn't have a delivery_note_url but has a batch reference,
+        # look up the file URL from other transactions in the same batch
+        if not txn_data.get('delivery_note_url') and transaction.delivery_batch_ref:
+            batch_txn_with_file = InventoryTransaction.query.filter_by(
+                delivery_batch_ref=transaction.delivery_batch_ref
+            ).filter(
+                InventoryTransaction.delivery_note_url.isnot(None)
+            ).first()
+
+            if batch_txn_with_file and batch_txn_with_file.delivery_note_url:
+                txn_data['delivery_note_url'] = batch_txn_with_file.delivery_note_url
+
+        # If transaction doesn't have transport details but has a batch reference,
+        # look up transport details from other transactions in the same batch
+        if transaction.delivery_batch_ref:
+            needs_transport_data = (
+                not txn_data.get('driver_name') or
+                not txn_data.get('vehicle_number') or
+                not txn_data.get('transport_fee')
+            )
+
+            if needs_transport_data:
+                batch_txn_with_transport = InventoryTransaction.query.filter_by(
+                    delivery_batch_ref=transaction.delivery_batch_ref
+                ).filter(
+                    InventoryTransaction.driver_name.isnot(None),
+                    InventoryTransaction.vehicle_number.isnot(None),
+                    InventoryTransaction.transport_fee.isnot(None)
+                ).first()
+
+                if batch_txn_with_transport:
+                    if not txn_data.get('driver_name'):
+                        txn_data['driver_name'] = batch_txn_with_transport.driver_name
+                    if not txn_data.get('vehicle_number'):
+                        txn_data['vehicle_number'] = batch_txn_with_transport.vehicle_number
+                    if not txn_data.get('transport_fee'):
+                        txn_data['transport_fee'] = batch_txn_with_transport.transport_fee
+
         return jsonify({'transaction': txn_data}), 200
 
     except Exception as e:
@@ -827,6 +1014,44 @@ def get_item_transaction_history(inventory_material_id):
                 project = Project.query.get(txn.project_id)
                 if project:
                     txn_data['project_details'] = enrich_project_details(project)
+
+            # If transaction doesn't have a delivery_note_url but has a batch reference,
+            # look up the file URL from other transactions in the same batch
+            if not txn_data.get('delivery_note_url') and txn.delivery_batch_ref:
+                batch_txn_with_file = InventoryTransaction.query.filter_by(
+                    delivery_batch_ref=txn.delivery_batch_ref
+                ).filter(
+                    InventoryTransaction.delivery_note_url.isnot(None)
+                ).first()
+
+                if batch_txn_with_file and batch_txn_with_file.delivery_note_url:
+                    txn_data['delivery_note_url'] = batch_txn_with_file.delivery_note_url
+
+            # If transaction doesn't have transport details but has a batch reference,
+            # look up transport details from other transactions in the same batch
+            if txn.delivery_batch_ref:
+                needs_transport_data = (
+                    not txn_data.get('driver_name') or
+                    not txn_data.get('vehicle_number') or
+                    not txn_data.get('transport_fee')
+                )
+
+                if needs_transport_data:
+                    batch_txn_with_transport = InventoryTransaction.query.filter_by(
+                        delivery_batch_ref=txn.delivery_batch_ref
+                    ).filter(
+                        InventoryTransaction.driver_name.isnot(None),
+                        InventoryTransaction.vehicle_number.isnot(None),
+                        InventoryTransaction.transport_fee.isnot(None)
+                    ).first()
+
+                    if batch_txn_with_transport:
+                        if not txn_data.get('driver_name'):
+                            txn_data['driver_name'] = batch_txn_with_transport.driver_name
+                        if not txn_data.get('vehicle_number'):
+                            txn_data['vehicle_number'] = batch_txn_with_transport.vehicle_number
+                        if not txn_data.get('transport_fee'):
+                            txn_data['transport_fee'] = batch_txn_with_transport.transport_fee
 
             enriched_transactions.append(txn_data)
 
@@ -1760,8 +1985,6 @@ def approve_internal_request(request_id):
 
             if materials_data and isinstance(materials_data, list) and len(materials_data) > 0:
                 # GROUPED VENDOR DELIVERY - Multiple materials
-                print(f"Processing grouped vendor delivery: {len(materials_data)} materials")
-
                 for mat in materials_data:
                     mat_name = mat.get('material_name', '')
                     mat_qty = float(mat.get('quantity', 0))
@@ -1817,7 +2040,6 @@ def approve_internal_request(request_id):
                             'unit': mat_unit,
                             'action': 'received_and_dispatched'
                         })
-                        print(f"Vendor delivery: {mat_name} x{mat_qty} {mat_unit} → received and dispatched to {internal_req.final_destination_site}")
                     else:
                         # Material not in inventory - just log it
                         transaction_details.append({
@@ -1826,7 +2048,6 @@ def approve_internal_request(request_id):
                             'unit': mat_unit,
                             'action': 'skipped_not_in_inventory'
                         })
-                        print(f"Material '{mat_name}' not found in inventory - skipping transaction")
 
             else:
                 # SINGLE MATERIAL VENDOR DELIVERY
@@ -1878,14 +2099,12 @@ def approve_internal_request(request_id):
                         'quantity': mat_qty,
                         'action': 'received_and_dispatched'
                     })
-                    print(f"Vendor delivery: {mat_name} x{mat_qty} → received and dispatched to {internal_req.final_destination_site}")
                 else:
                     transaction_details.append({
                         'material_name': mat_name,
                         'quantity': mat_qty,
                         'action': 'skipped_not_in_inventory'
                     })
-                    print(f"Material '{mat_name}' not found in inventory - skipping transaction")
 
             # Approve the request
             internal_req.status = 'APPROVED'
@@ -1914,8 +2133,6 @@ def approve_internal_request(request_id):
 
         if materials_data and isinstance(materials_data, list) and len(materials_data) > 0:
             # GROUPED MATERIALS REQUEST - Handle multiple materials
-            print(f"Processing grouped materials request: {len(materials_data)} materials")
-
             # Step 1: Find inventory items for all materials and check stock
             materials_to_deduct = []
             insufficient_stock = []
@@ -1997,8 +2214,6 @@ def approve_internal_request(request_id):
                     'new_stock': inv_mat.current_stock,
                     'unit': item['unit']
                 })
-
-                print(f"Deducted {qty} {item['unit']} of '{item['material_name']}' from inventory (was {previous_stock}, now {inv_mat.current_stock})")
 
             # Step 3: Approve the request
             internal_req.status = 'APPROVED'
@@ -3020,7 +3235,6 @@ def request_disposal_from_repair(return_id):
                     action_url=f'/inventory/disposal-requests'
                 )
 
-            print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
         except Exception as email_error:
             print(f"Failed to send TD notification: {str(email_error)}")
 
@@ -4857,8 +5071,6 @@ def issue_return_delivery_note(return_note_id):
         # Send notification to PM
         try:
             project = Project.query.get(rdn.project_id)
-            # TODO: Implement notification - RDN ready for pickup
-            print(f"Notification: RDN {rdn.return_note_number} ready for pickup from {project.project_name}")
         except Exception as notif_err:
             print(f"Error sending RDN issue notification: {notif_err}")
 
@@ -4905,7 +5117,6 @@ def dispatch_return_delivery_note(return_note_id):
         # Send notification to PM
         try:
             project = Project.query.get(rdn.project_id)
-            print(f"Notification: RDN {rdn.return_note_number} dispatched from {project.project_name}, materials in transit")
         except Exception as notif_err:
             print(f"Error sending RDN dispatch notification: {notif_err}")
 
@@ -4963,8 +5174,6 @@ def confirm_return_delivery_receipt(return_note_id):
         # Send notification to SE
         try:
             project = Project.query.get(rdn.project_id)
-            # TODO: Implement notification - RDN received at store
-            print(f"Notification: RDN {rdn.return_note_number} received at store from {project.project_name}")
         except Exception as notif_err:
             print(f"Error sending RDN receipt notification: {notif_err}")
 
@@ -5157,8 +5366,6 @@ def process_return_delivery_item(return_note_id, item_id):
                         notification_type='disposal_request',
                         action_url=f'/inventory/disposal-requests'
                     )
-
-                print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
 
             except Exception as notif_error:
                 print(f"Error sending disposal request notification: {notif_error}")
@@ -5971,7 +6178,6 @@ def request_material_disposal(material_id):
                     action_url=f'/inventory/disposal-requests'
                 )
 
-            print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
 
         except Exception as notif_error:
             print(f"Error sending disposal request notification: {notif_error}")
