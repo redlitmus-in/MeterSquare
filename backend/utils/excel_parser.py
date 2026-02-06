@@ -62,9 +62,6 @@ class BOQExcelParser:
             # Clean column names
             self.df.columns = self.df.columns.str.strip()
 
-            # Debug: Print found columns
-            print(f"Found columns in Excel: {list(self.df.columns)}")
-
             # Validate required columns exist
             required_columns = {
                 'Work type': ['Work type', 'work type', 'Work Type', 'Worktype'],
@@ -94,9 +91,7 @@ class BOQExcelParser:
                         column_mapping[col] = target_col
                         break
 
-            print(f"Column mapping: {column_mapping}")
             self.df.rename(columns=column_mapping, inplace=True)
-            print(f"Columns after mapping: {list(self.df.columns)}")
 
             # Check if all required columns are present (exclude optional ones)
             optional_columns = ['profit_margin_percentage', 'overhead_percentage']
@@ -108,8 +103,6 @@ class BOQExcelParser:
                     missing_columns.append(required_col)
 
             if missing_columns:
-                print(f"Missing columns: {missing_columns}")
-                print(f"Available columns: {list(self.df.columns)}")
                 self.errors.append(f"Missing required columns: {', '.join(missing_columns)}")
                 self.errors.append("Please ensure your Excel file matches the template format exactly")
                 self.errors.append(f"Found columns: {', '.join(self.df.columns)}")

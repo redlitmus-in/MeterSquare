@@ -121,9 +121,7 @@ class ModernBOQPDFGenerator:
         elements = []
 
         # Prefetch all images in parallel for performance
-        print(f"[INTERNAL_PDF] Starting image prefetch for items...")
         self._prefetch_all_images(items)
-        print(f"[INTERNAL_PDF] Image prefetch completed. Cache has {len(self.image_cache)} images")
 
         # Header
         elements.extend(self._internal_header(project))
@@ -988,7 +986,6 @@ class ModernBOQPDFGenerator:
                     # Get all images from sub_item_image JSONB array (from cache)
                     image_cell = ''
                     sub_item_images = sub_item.get('sub_item_image', [])
-                    print(f"[INTERNAL_PDF] Sub-item {sub_item.get('sub_item_name')}: Found {len(sub_item_images) if isinstance(sub_item_images, list) else 0} images")
 
                     if sub_item_images and isinstance(sub_item_images, list) and len(sub_item_images) > 0:
                         # Load all images from cache
@@ -1005,7 +1002,6 @@ class ModernBOQPDFGenerator:
                                     img = self.image_cache.get(image_url)
                                     if img:
                                         loaded_images.append(img)
-                                        print(f"[INTERNAL_PDF] ✓ Loaded image from cache: {image_url[:50]}...")
                                     else:
                                         print(f"[INTERNAL_PDF] ✗ Image not in cache: {image_url[:50]}...")
 
@@ -1024,7 +1020,6 @@ class ModernBOQPDFGenerator:
                                     ('BOTTOMPADDING', (0,0), (-1,-1), 2),
                                 ]))
                                 image_cell = img_table
-                            print(f"[INTERNAL_PDF] ✓ Added {len(loaded_images)} image(s) to sub-item")
 
                     table_data.append([
                         f'{item_index}.{sub_idx}',
