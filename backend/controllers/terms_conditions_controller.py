@@ -11,11 +11,6 @@ from config.logging import get_logger
 
 log = get_logger()
 
-terms_bp = Blueprint('terms', __name__, url_prefix='/api')
-
-
-@terms_bp.route('/terms', methods=['GET'])
-@jwt_required
 def get_all_terms():
     """
     Get all active Terms & Conditions
@@ -64,9 +59,6 @@ def get_all_terms():
         log.error(f"Error fetching terms: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch terms: {str(e)}'}), 500
 
-
-@terms_bp.route('/terms/default', methods=['GET'])
-@jwt_required
 def get_default_terms():
     """Get the first active term (for backward compatibility)"""
     try:
@@ -102,9 +94,6 @@ def get_default_terms():
         log.error(f"Error fetching default terms: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch default terms: {str(e)}'}), 500
 
-
-@terms_bp.route('/terms/<int:term_id>', methods=['GET'])
-@jwt_required
 def get_term_by_id(term_id):
     """Get a specific term by ID"""
     try:
@@ -138,9 +127,6 @@ def get_term_by_id(term_id):
         log.error(f"Error fetching term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch term: {str(e)}'}), 500
 
-
-@terms_bp.route('/terms', methods=['POST'])
-@jwt_required
 def create_term():
     """
     Create a new term
@@ -203,9 +189,6 @@ def create_term():
         log.error(f"Error creating term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to create term: {str(e)}'}), 500
 
-
-@terms_bp.route('/terms/<int:term_id>', methods=['PUT'])
-@jwt_required
 def update_term(term_id):
     """Update an existing term"""
     try:
@@ -265,9 +248,6 @@ def update_term(term_id):
         log.error(f"Error updating term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to update term: {str(e)}'}), 500
 
-
-@terms_bp.route('/terms/<int:term_id>', methods=['DELETE'])
-@jwt_required
 def delete_term(term_id):
     """
     Soft delete a term (set is_deleted = TRUE)
@@ -318,8 +298,6 @@ def delete_term(term_id):
 
 # ===== BOQ-SPECIFIC TERMS ENDPOINTS (Similar to Preliminaries) =====
 
-@terms_bp.route('/boq/<int:boq_id>/terms', methods=['GET'])
-@jwt_required
 def get_boq_terms(boq_id):
     """
     Get ALL terms with their selection status for a specific BOQ
@@ -374,9 +352,6 @@ def get_boq_terms(boq_id):
         log.error(f"Error fetching BOQ terms: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch BOQ terms: {str(e)}'}), 500
 
-
-@terms_bp.route('/boq/<int:boq_id>/terms', methods=['POST'])
-@jwt_required
 def save_boq_terms(boq_id):
     """
     Save term selections for a BOQ
@@ -457,9 +432,6 @@ def save_boq_terms(boq_id):
         log.error(f"Error saving BOQ terms: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to save terms selections: {str(e)}'}), 500
 
-
-@terms_bp.route('/boq/<int:boq_id>/terms/selected', methods=['GET'])
-@jwt_required
 def get_boq_selected_terms(boq_id):
     """
     Get only SELECTED terms for a BOQ
@@ -505,9 +477,6 @@ def get_boq_selected_terms(boq_id):
         log.error(f"Error fetching selected BOQ terms: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch selected terms: {str(e)}'}), 500
 
-
-@terms_bp.route('/terms-master', methods=['GET'])
-@jwt_required
 def get_all_terms_master():
     """
     Get all active terms for dropdown/selection (simplified endpoint)
@@ -541,9 +510,6 @@ def get_all_terms_master():
         log.error(f"Error fetching terms master: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to fetch terms: {str(e)}'}), 500
 
-
-@terms_bp.route('/terms-master', methods=['POST'])
-@jwt_required
 def create_term_master():
     """
     Create a new master term (simplified - only terms_text required)
@@ -598,9 +564,6 @@ def create_term_master():
         log.error(f"Error creating term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to create term: {str(e)}'}), 500
 
-
-@terms_bp.route('/terms-master/<int:term_id>', methods=['PUT'])
-@jwt_required
 def update_term_master(term_id):
     """Update a master term (simplified)"""
     try:
@@ -652,9 +615,6 @@ def update_term_master(term_id):
         log.error(f"Error updating term: {str(e)}")
         return jsonify({'success': False, 'message': f'Failed to update term: {str(e)}'}), 500
 
-
-@terms_bp.route('/terms-master/<int:term_id>', methods=['DELETE'])
-@jwt_required
 def delete_term_master(term_id):
     """Soft delete a master term"""
     try:

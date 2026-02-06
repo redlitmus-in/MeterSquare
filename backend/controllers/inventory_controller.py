@@ -3680,7 +3680,6 @@ def add_items_to_delivery_note_bulk(delivery_note_id):
 
                         material = new_material
                         inventory_material_id = new_material.inventory_material_id
-                        print(f"Auto-created inventory material: {material_name} (ID: {inventory_material_id})")
 
                 elif inventory_material_id:
                     material = InventoryMaterial.query.get(inventory_material_id)

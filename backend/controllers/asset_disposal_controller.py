@@ -7,7 +7,7 @@ import os
 import uuid
 import logging
 from datetime import datetime
-from flask import Blueprint, request, jsonify, g
+from flask import request, jsonify, g
 from config.db import db
 from models.returnable_assets import (
     AssetDisposal,
@@ -17,19 +17,14 @@ from models.returnable_assets import (
     AssetReturnDeliveryNote
 )
 from models.project import Project
-from utils.authentication import jwt_required
 
 logger = logging.getLogger(__name__)
 
-asset_disposal_bp = Blueprint('asset_disposal', __name__)
-
 
 # ============================================================================
-# DISPOSAL REQUEST ENDPOINTS
+# DISPOSAL REQUEST FUNCTIONS
 # ============================================================================
 
-@asset_disposal_bp.route('/api/assets/disposal', methods=['GET'])
-@jwt_required
 def get_disposal_requests():
     """Get all asset disposal requests
 
@@ -86,8 +81,6 @@ def get_disposal_requests():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_disposal_bp.route('/api/assets/disposal', methods=['POST'])
-@jwt_required
 def create_disposal_request():
     """Create a new asset disposal request (requires TD approval)"""
     try:
@@ -169,8 +162,6 @@ def create_disposal_request():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_disposal_bp.route('/api/assets/disposal/<int:disposal_id>/upload-image', methods=['POST'])
-@jwt_required
 def upload_disposal_image(disposal_id):
     """Upload image documentation for disposal request"""
     try:
@@ -253,11 +244,9 @@ def upload_disposal_image(disposal_id):
 
 
 # ============================================================================
-# TD APPROVAL ENDPOINTS
+# TD APPROVAL FUNCTIONS
 # ============================================================================
 
-@asset_disposal_bp.route('/api/assets/disposal/<int:disposal_id>/approve', methods=['PUT'])
-@jwt_required
 def approve_disposal(disposal_id):
     """TD approves disposal request - reduces inventory"""
     try:
@@ -310,8 +299,6 @@ def approve_disposal(disposal_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_disposal_bp.route('/api/assets/disposal/<int:disposal_id>/reject', methods=['PUT'])
-@jwt_required
 def reject_disposal(disposal_id):
     """TD rejects disposal request - return to stock or repair"""
     try:
@@ -366,8 +353,6 @@ def reject_disposal(disposal_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@asset_disposal_bp.route('/api/assets/disposal/<int:disposal_id>', methods=['GET'])
-@jwt_required
 def get_disposal_detail(disposal_id):
     """Get detailed information about a disposal request"""
     try:
@@ -404,11 +389,9 @@ def get_disposal_detail(disposal_id):
 
 
 # ============================================================================
-# CATALOG DISPOSAL - Direct disposal from catalog
+# CATALOG DISPOSAL FUNCTIONS - Direct disposal from catalog
 # ============================================================================
 
-@asset_disposal_bp.route('/api/assets/catalog/<int:category_id>/dispose', methods=['POST'])
-@jwt_required
 def request_catalog_disposal(category_id):
     """Request disposal of assets directly from catalog (requires TD approval)"""
     try:
