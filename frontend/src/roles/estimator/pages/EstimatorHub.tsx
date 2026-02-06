@@ -84,14 +84,51 @@ const ProjectCreationForm: React.FC<{
     location: initialData?.location || '',
     client: initialData?.client || '',
     work_type: initialData?.work_type || '',
-    working_hours: initialData?.working_hours || '',
-    floor_name: initialData?.floor_name || '',
+    working_hours: initialData?.working_hours || initialData?.hours || '',
+    floor_name: initialData?.floor_name || initialData?.floor || '',
     area: initialData?.area || '',
     start_date: initialData?.start_date || '',
-    duration_days: initialData?.duration_days || '',
+    duration_days: initialData?.duration_days ? String(initialData.duration_days) : '',
     end_date: initialData?.end_date || '',
-    status: initialData?.status || 'draft'
+    status: initialData?.project_status || initialData?.status || 'draft'
   });
+
+  // Update form data when initialData changes (for edit mode)
+  useEffect(() => {
+    if (initialData) {
+      console.log('📝 Editing project with data:', initialData);
+      setFormData({
+        project_name: initialData.project_name || '',
+        description: initialData.description || '',
+        location: initialData.location || '',
+        client: initialData.client || '',
+        work_type: initialData.work_type || '',
+        working_hours: initialData.working_hours || initialData.hours || '',
+        floor_name: initialData.floor_name || initialData.floor || '',
+        area: initialData.area || '',
+        start_date: initialData.start_date || '',
+        duration_days: initialData.duration_days ? String(initialData.duration_days) : '',
+        end_date: initialData.end_date || '',
+        status: initialData.project_status || initialData.status || 'draft'
+      });
+    } else {
+      // Reset form when initialData is null (create mode)
+      setFormData({
+        project_name: '',
+        description: '',
+        location: '',
+        client: '',
+        work_type: '',
+        working_hours: '',
+        floor_name: '',
+        area: '',
+        start_date: '',
+        duration_days: '',
+        end_date: '',
+        status: 'draft'
+      });
+    }
+  }, [initialData]);
 
   // Calculate end date whenever start date or duration changes
   useEffect(() => {

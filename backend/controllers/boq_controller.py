@@ -681,10 +681,12 @@ def create_boq():
 
             final_selling_price = after_discount + vat_amount
             # Now add to master tables with calculated values (using ALL materials and labour)
+            # Use project's work_type as default instead of hardcoded "contract"
+            default_work_type = project.work_type if project and project.work_type else "contract"
             master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
                 item_data.get("item_name"),
                 item_data.get("description"),
-                item_data.get("work_type", "contract"),
+                item_data.get("work_type", default_work_type),
                 all_materials,
                 all_labour,
                 created_by,
@@ -835,7 +837,7 @@ def create_boq():
                 item_json = {
                     "item_name": item_data.get("item_name"),
                     "description": item_data.get("description", ""),
-                    "work_type": item_data.get("work_type", "contract"),
+                    "work_type": item_data.get("work_type", default_work_type),
                     "has_sub_items": True,
                     "sub_items": sub_items_list,
                     "quantity": item_quantity,
@@ -931,7 +933,7 @@ def create_boq():
                 master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
                     item_data.get("item_name"),
                     item_data.get("description"),
-                    item_data.get("work_type", "contract"),
+                    item_data.get("work_type", default_work_type),
                     materials_data,
                     labour_data,
                     created_by,
@@ -1836,6 +1838,10 @@ def update_boq(boq_id):
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
 
+        # Get project for default work_type
+        project = Project.query.filter_by(project_id=boq.project_id).first()
+        default_work_type = project.work_type if project and project.work_type else "contract"
+
         # Validate that BOQ can be edited based on status
         # Cannot edit if PM has approved or items are assigned
         restricted_statuses = ["PM_Approved", "Items_Assigned", "Approved"]
@@ -1933,7 +1939,7 @@ def update_boq(boq_id):
                     master_item_id, _, _ = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description", ""),
-                        item_data.get("work_type", "contract"),
+                        item_data.get("work_type", default_work_type),
                         [],  # Don't add materials here, will add per sub-item
                         [],  # Don't add labour here, will add per sub-item
                         created_by,
@@ -2138,7 +2144,7 @@ def update_boq(boq_id):
                     item_json = {
                         "item_name": item_data.get("item_name"),
                         "description": item_data.get("description", ""),
-                        "work_type": item_data.get("work_type", "contract"),
+                        "work_type": item_data.get("work_type", default_work_type),
                         "has_sub_items": True,
                         "sub_items": sub_items_list,
                         "quantity": item_quantity,
@@ -2170,7 +2176,7 @@ def update_boq(boq_id):
                     master_item_id, _, _ = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description", ""),
-                        item_data.get("work_type", "contract"),
+                        item_data.get("work_type", default_work_type),
                         [],  # Don't add materials here, will add per sub-item
                         [],  # Don't add labour here, will add per sub-item
                         created_by,
@@ -2577,6 +2583,10 @@ def revision_boq(boq_id):
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
 
+        # Get project for default work_type
+        project = Project.query.filter_by(project_id=boq.project_id).first()
+        default_work_type = project.work_type if project and project.work_type else "contract"
+
         # Get existing BOQ details BEFORE any updates
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
         if not boq_details:
@@ -2766,7 +2776,7 @@ def revision_boq(boq_id):
                     master_item_id, _, _ = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description", ""),
-                        item_data.get("work_type", "contract"),
+                        item_data.get("work_type", default_work_type),
                         [],  # Don't add materials here, will add per sub-item
                         [],  # Don't add labour here, will add per sub-item
                         created_by,
@@ -3011,7 +3021,7 @@ def revision_boq(boq_id):
                     item_json = {
                         "item_name": item_data.get("item_name"),
                         "description": item_data.get("description", ""),
-                        "work_type": item_data.get("work_type", "contract"),
+                        "work_type": item_data.get("work_type", default_work_type),
                         "has_sub_items": True,
                         "sub_items": sub_items_list,
                         "quantity": item_quantity,
@@ -3043,7 +3053,7 @@ def revision_boq(boq_id):
                     master_item_id, _, _ = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description", ""),
-                        item_data.get("work_type", "contract"),
+                        item_data.get("work_type", default_work_type),
                         [],  # Don't add materials here, will add per sub-item
                         [],  # Don't add labour here, will add per sub-item
                         created_by,
@@ -3156,7 +3166,7 @@ def revision_boq(boq_id):
                     master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description"),
-                        item_data.get("work_type", "contract"),
+                        item_data.get("work_type", default_work_type),
                         materials_data,
                         labour_data,
                         created_by,
@@ -4745,8 +4755,13 @@ def get_estimator_tab_counts():
 
         # Rejected tab: TD rejected, PM rejected, client rejected, internal revision pending
         # Note: 'rejected' status = TD rejected in the workflow
+        # Must match frontend filtering logic in EstimatorHub.tsx line 1252
         rejected_count = (
-            counts_dict.get('rejected', 0)
+            counts_dict.get('rejected', 0) +
+            counts_dict.get('td_rejected', 0) +
+            counts_dict.get('client_rejected', 0) +
+            counts_dict.get('pm_rejected', 0) +
+            counts_dict.get('internal_revision_pending', 0)
         )
 
         completed_count = counts_dict.get('completed', 0)
@@ -5082,6 +5097,12 @@ def get_pending_boq():
                 Project.location,
                 Project.floor_name,
                 Project.working_hours,
+                Project.area,
+                Project.description,
+                Project.start_date,
+                Project.duration_days,
+                Project.end_date,
+                Project.status.label('project_status'),
                 Project.user_id,
                 User.full_name.label('last_pm_name')
             )
@@ -5138,7 +5159,15 @@ def get_pending_boq():
                 "client": row.client,
                 "location": row.location,
                 "floor": row.floor_name,
+                "floor_name": row.floor_name,
                 "hours": row.working_hours,
+                "working_hours": row.working_hours,
+                "area": row.area,
+                "description": row.description,
+                "start_date": row.start_date.isoformat() if row.start_date else None,
+                "duration_days": row.duration_days,
+                "end_date": row.end_date.isoformat() if row.end_date else None,
+                "project_status": row.project_status,
                 "status": row.status if row.status else "No BOQ",
                 "client_status": row.client_status,
                 "revision_number": row.revision_number or 0,
