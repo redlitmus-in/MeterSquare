@@ -908,7 +908,9 @@ def resubmit_requisition(requisition_id):
 
 
 def send_to_production(requisition_id):
-    """PM sends a pending (draft) requisition to production for worker assignment"""
+    """PM sends a requisition to production for worker assignment.
+    Handles both PM-created drafts (status='pending') and SE-created requests (status='send_to_pm').
+    """
     try:
         current_user = g.user
         user_role = normalize_role(current_user.get('role', ''))
@@ -925,16 +927,13 @@ def send_to_production(requisition_id):
         if not requisition:
             return jsonify({"error": "Requisition not found"}), 404
 
-        # Verify this is a PM's requisition
-        if requisition.requester_role != 'PM':
-            return jsonify({"error": "Only PM-created requisitions can be sent to production"}), 400
-
-        # Verify it's in pending status (draft)
-        if requisition.status != 'pending':
+        # Accept both PM drafts ('pending') and SE requests sent to PM ('send_to_pm')
+        allowed_statuses = ['pending', 'send_to_pm']
+        if requisition.status not in allowed_statuses:
             return jsonify({"error": f"Can only send pending requisitions to production. Current status: {requisition.status}"}), 400
 
-        # Verify PM owns this requisition
-        if requisition.requested_by_user_id != current_user.get('user_id'):
+        # For PM-created requisitions, verify PM owns it
+        if requisition.requester_role == 'PM' and requisition.requested_by_user_id != current_user.get('user_id'):
             return jsonify({"error": "You can only send your own requisitions to production"}), 403
 
         # Update status to 'approved' - ready for production manager to assign workers
@@ -950,7 +949,7 @@ def send_to_production(requisition_id):
 
         db.session.commit()
 
-        log.info(f"PM requisition sent to production: {requisition.requisition_code} by {current_user.get('full_name')}")
+        log.info(f"Requisition sent to production: {requisition.requisition_code} (created by {requisition.requester_role}) approved by {current_user.get('full_name')}")
 
         # TODO: Send notification to production manager
 
