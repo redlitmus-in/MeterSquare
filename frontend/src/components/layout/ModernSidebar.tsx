@@ -1358,7 +1358,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
 
         {/* Version Info */}
         <div className="mt-4 px-4 text-center">
-          <p className="text-xs text-gray-400">Version 1.0.2.1</p>
+          <p className="text-xs text-gray-400">Version 1.0.3.0</p>
           <div className="mt-2 w-full h-0.5 bg-gradient-to-r from-transparent via-[#243d8a]/30 to-transparent"></div>
         </div>
       </div>
