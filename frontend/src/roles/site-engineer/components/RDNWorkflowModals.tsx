@@ -87,76 +87,191 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
   onSaveSelection,
   selectedProjectId,
 }) => {
-  // Filter selection to only show materials for the selected project
-  const initialSelection = selectedProjectId
-    ? selectedMaterialsCart.filter(m => m.project_id === selectedProjectId)
-    : selectedMaterialsCart;
+  // Track which materials are checked (by delivery_note_item_id)
+  const [checkedItems, setCheckedItems] = React.useState<Set<number>>(new Set());
 
-  const [tempSelection, setTempSelection] = React.useState<Material[]>(initialSelection);
+  // Multi-condition split state per material
+  const [conditionSplits, setConditionSplits] = React.useState<Record<number, {
+    good: number;
+    damaged: number;
+    defective: number;
+    return_reason: string;
+    damage_description_damaged: string;
+    damage_description_defective: string;
+    // Store material info for building cart later
+    _meta: {
+      delivery_note_item_id: number;
+      inventory_material_id: number;
+      material_name: string;
+      material_code: string;
+      unit: string;
+      max_quantity: number;
+      original_dn: string;
+      project_id: number;
+      project_name: string;
+    };
+  }>>({});
 
   React.useEffect(() => {
     if (show) {
-      // When modal opens, filter to selected project's materials only
+      // Rebuild checked items and condition splits from existing cart
       const filtered = selectedProjectId
         ? selectedMaterialsCart.filter(m => m.project_id === selectedProjectId)
         : selectedMaterialsCart;
-      setTempSelection(filtered);
+
+      const checked = new Set<number>();
+      const splits: typeof conditionSplits = {};
+
+      // Group existing cart entries by delivery_note_item_id
+      const grouped = new Map<number, Material[]>();
+      for (const m of filtered) {
+        const existing = grouped.get(m.delivery_note_item_id) || [];
+        existing.push(m);
+        grouped.set(m.delivery_note_item_id, existing);
+      }
+
+      for (const [itemId, materials] of grouped) {
+        checked.add(itemId);
+        const first = materials[0];
+        splits[itemId] = {
+          good: materials.filter(m => m.condition === 'Good').reduce((s, m) => s + m.quantity, 0),
+          damaged: materials.filter(m => m.condition === 'Damaged').reduce((s, m) => s + m.quantity, 0),
+          defective: materials.filter(m => m.condition === 'Defective').reduce((s, m) => s + m.quantity, 0),
+          return_reason: first.return_reason || '',
+          damage_description_damaged: '',
+          damage_description_defective: '',
+          _meta: {
+            delivery_note_item_id: first.delivery_note_item_id,
+            inventory_material_id: first.inventory_material_id,
+            material_name: first.material_name,
+            material_code: first.material_code,
+            unit: first.unit,
+            max_quantity: first.max_quantity,
+            original_dn: first.original_dn,
+            project_id: first.project_id,
+            project_name: first.project_name,
+          },
+        };
+      }
+
+      setCheckedItems(checked);
+      setConditionSplits(splits);
     }
   }, [show, selectedMaterialsCart, selectedProjectId]);
 
   const handleToggleSelect = (project: ReturnableProject, material: ReturnableProject['materials'][0]) => {
-    const existing = tempSelection.find(m => m.delivery_note_item_id === material.delivery_note_item_id);
+    const itemId = material.delivery_note_item_id;
 
-    if (existing) {
-      setTempSelection(tempSelection.filter(m => m.delivery_note_item_id !== material.delivery_note_item_id));
+    if (checkedItems.has(itemId)) {
+      // Uncheck - remove from checked and splits
+      setCheckedItems(prev => { const next = new Set(prev); next.delete(itemId); return next; });
+      setConditionSplits(prev => { const next = { ...prev }; delete next[itemId]; return next; });
     } else {
-      setTempSelection([...tempSelection, {
-        delivery_note_item_id: material.delivery_note_item_id,
-        inventory_material_id: material.inventory_material_id,
-        material_name: material.material_name,
-        material_code: material.material_code,
-        unit: material.unit,
-        quantity: material.returnable_quantity,
-        max_quantity: material.returnable_quantity,
-        condition: 'Good',
-        return_reason: '',
-        original_dn: material.delivery_note_number,
-        project_id: project.project_id,
-        project_name: project.project_name,
-      }]);
+      // Check - add with all qty defaulting to Good
+      setCheckedItems(prev => new Set(prev).add(itemId));
+      setConditionSplits(prev => ({
+        ...prev,
+        [itemId]: {
+          good: material.returnable_quantity,
+          damaged: 0,
+          defective: 0,
+          return_reason: '',
+          damage_description_damaged: '',
+          damage_description_defective: '',
+          _meta: {
+            delivery_note_item_id: material.delivery_note_item_id,
+            inventory_material_id: material.inventory_material_id,
+            material_name: material.material_name,
+            material_code: material.material_code,
+            unit: material.unit,
+            max_quantity: material.returnable_quantity,
+            original_dn: material.delivery_note_number,
+            project_id: project.project_id,
+            project_name: project.project_name,
+          },
+        },
+      }));
     }
   };
 
-  const handleUpdateMaterial = (delivery_note_item_id: number, updates: Partial<Material>) => {
-    setTempSelection(tempSelection.map(m =>
-      m.delivery_note_item_id === delivery_note_item_id ? { ...m, ...updates } : m
-    ));
+  const updateSplit = (itemId: number, field: string, value: number | string) => {
+    setConditionSplits(prev => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], [field]: value },
+    }));
   };
 
   const handleSave = () => {
-    // Validate quantities
-    const invalidMaterials = tempSelection.filter(
-      m => !m.quantity || m.quantity <= 0 || m.quantity > m.max_quantity || isNaN(m.quantity)
-    );
-
-    if (invalidMaterials.length > 0) {
-      showError('Please enter valid quantities for all selected materials');
-      return;
-    }
-
-    if (tempSelection.length === 0) {
+    if (checkedItems.size === 0) {
       showError('Please select at least one material');
       return;
     }
 
-    // Merge with existing selections from OTHER projects (keep them, update this project's selections)
+    // Validate each checked material's condition split
+    for (const itemId of checkedItems) {
+      const split = conditionSplits[itemId];
+      if (!split) continue;
+      const total = split.good + split.damaged + split.defective;
+      if (total === 0) {
+        showError(`Please enter at least 1 unit for "${split._meta.material_name}"`);
+        return;
+      }
+      if (total > split._meta.max_quantity) {
+        showError(`Total (${total}) exceeds available (${split._meta.max_quantity}) for "${split._meta.material_name}"`);
+        return;
+      }
+      if (split.damaged > 0 && !split.damage_description_damaged.trim()) {
+        showError(`Please provide description for Damaged condition on "${split._meta.material_name}"`);
+        return;
+      }
+      if (split.defective > 0 && !split.damage_description_defective.trim()) {
+        showError(`Please provide description for Defective condition on "${split._meta.material_name}"`);
+        return;
+      }
+    }
+
+    // Build cart entries - one Material per condition with qty > 0
+    const newSelections: Material[] = [];
+    for (const itemId of checkedItems) {
+      const split = conditionSplits[itemId];
+      if (!split) continue;
+      const { _meta } = split;
+
+      const conditions: Array<{ key: 'good' | 'damaged' | 'defective'; label: 'Good' | 'Damaged' | 'Defective'; descKey?: 'damage_description_damaged' | 'damage_description_defective' }> = [
+        { key: 'good', label: 'Good' },
+        { key: 'damaged', label: 'Damaged', descKey: 'damage_description_damaged' },
+        { key: 'defective', label: 'Defective', descKey: 'damage_description_defective' },
+      ];
+
+      for (const { key, label, descKey } of conditions) {
+        if (split[key] > 0) {
+          newSelections.push({
+            delivery_note_item_id: _meta.delivery_note_item_id,
+            inventory_material_id: _meta.inventory_material_id,
+            material_name: _meta.material_name,
+            material_code: _meta.material_code,
+            unit: _meta.unit,
+            quantity: split[key],
+            max_quantity: _meta.max_quantity,
+            condition: label,
+            return_reason: (descKey ? split[descKey] : split.return_reason) || split.return_reason,
+            original_dn: _meta.original_dn,
+            project_id: _meta.project_id,
+            project_name: _meta.project_name,
+          });
+        }
+      }
+    }
+
+    // Merge with existing selections from OTHER projects
     if (selectedProjectId) {
       const otherProjectSelections = selectedMaterialsCart.filter(m => m.project_id !== selectedProjectId);
-      onSaveSelection([...otherProjectSelections, ...tempSelection]);
+      onSaveSelection([...otherProjectSelections, ...newSelections]);
     } else {
-      onSaveSelection(tempSelection);
+      onSaveSelection(newSelections);
     }
-    showSuccess(`${tempSelection.length} material(s) saved to cart`);
+    const totalUnits = newSelections.reduce((s, m) => s + m.quantity, 0);
+    showSuccess(`${checkedItems.size} material(s) saved (${totalUnits} units across ${newSelections.length} condition line(s))`);
     onClose();
   };
 
@@ -186,7 +301,7 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
                   </div>
                   <div className="text-white">
                     <h3 className="text-lg font-semibold">STEP 1: Select Materials to Return</h3>
-                    <p className="text-sm text-white/80">Choose materials and save your selection</p>
+                    <p className="text-sm text-white/80">View details and select returnable materials</p>
                   </div>
                 </div>
                 <button
@@ -200,115 +315,191 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
 
             {/* Content */}
             <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)] space-y-4">
-              {returnableProjects.filter(p => p.materials.some(m => m.returnable_quantity > 0)).length === 0 ? (
+              {returnableProjects.length === 0 ? (
                 <div className="text-center py-12">
                   <CubeIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500">No returnable materials available</p>
+                  <p className="text-gray-500">No materials found</p>
                 </div>
               ) : (
-                returnableProjects
-                  .filter((project) => project.materials.some(m => m.returnable_quantity > 0))
-                  .map((project) => (
+                returnableProjects.map((project) => (
                   <div key={project.project_id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                     <div className="flex items-center gap-2 mb-3">
                       <BuildingOfficeIcon className="w-5 h-5 text-indigo-600" />
                       <h5 className="font-semibold text-gray-900">{project.project_name}</h5>
                       <span className="text-xs text-gray-500">({project.project_code})</span>
                     </div>
-                    <div className="space-y-3">
-                      {project.materials
-                        .filter((material) => material.returnable_quantity > 0)
-                        .map((material) => {
-                        const isSelected = tempSelection.some(
-                          m => m.delivery_note_item_id === material.delivery_note_item_id
-                        );
-                        const selectedMaterial = tempSelection.find(
-                          m => m.delivery_note_item_id === material.delivery_note_item_id
-                        );
+
+                    {/* Table header for material details */}
+                    <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-x-3 items-center px-3 py-2 bg-gray-100 rounded-t-lg border border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <div className="w-4"></div>
+                      <div>Material</div>
+                      <div className="text-center w-16">Dispatched</div>
+                      <div className="text-center w-16">Returned</div>
+                      <div className="text-center w-16">Returnable</div>
+                      <div className="w-20"></div>
+                    </div>
+
+                    <div className="space-y-0 border-x border-b border-gray-200 rounded-b-lg overflow-hidden">
+                      {project.materials.map((material) => {
+                        const isReturnable = material.returnable_quantity > 0;
+                        const itemId = material.delivery_note_item_id;
+                        const isSelected = checkedItems.has(itemId);
+                        const split = conditionSplits[itemId];
 
                         return (
-                          <div
-                            key={material.delivery_note_item_id}
-                            className={`bg-white p-3 rounded border-2 transition-all ${
-                              isSelected
-                                ? 'border-purple-400 bg-purple-50'
-                                : 'border-gray-200 hover:border-purple-300 hover:bg-purple-50/50'
-                            }`}
-                          >
-                            <div className="flex items-start gap-3">
+                          <div key={itemId}>
+                            {/* Material Row */}
+                            <div
+                              className={`grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-x-3 items-center px-3 py-3 transition-all ${
+                                isSelected
+                                  ? 'bg-purple-50 border-l-2 border-l-purple-400'
+                                  : isReturnable
+                                  ? 'bg-white hover:bg-purple-50/50'
+                                  : 'bg-gray-50'
+                              }`}
+                            >
                               <input
                                 type="checkbox"
                                 checked={isSelected}
-                                onChange={() => handleToggleSelect(project, material)}
-                                className="mt-1 w-4 h-4 text-purple-600 cursor-pointer"
+                                onChange={() => isReturnable && handleToggleSelect(project, material)}
+                                disabled={!isReturnable}
+                                className={`w-4 h-4 ${isReturnable ? 'text-purple-600 cursor-pointer' : 'text-gray-300 cursor-not-allowed'}`}
                               />
-                              <div className="flex-1">
-                                <div
-                                  className="flex items-center justify-between mb-2 cursor-pointer"
-                                  onClick={() => handleToggleSelect(project, material)}
-                                >
-                                  <div>
-                                    <p className="font-medium text-gray-900">{material.material_name}</p>
-                                    <p className="text-xs text-gray-500">
-                                      {material.material_code} • DN: {material.delivery_note_number}
-                                    </p>
-                                  </div>
-                                  <span className="text-sm font-semibold text-purple-600">
-                                    Max: {material.returnable_quantity} {material.unit}
-                                  </span>
-                                </div>
-
-                                {isSelected && selectedMaterial && (
-                                  <div className="mt-3 space-y-2 pl-2 border-l-2 border-purple-200" onClick={(e) => e.stopPropagation()}>
-                                    <div className="grid grid-cols-2 gap-3">
-                                      <div>
-                                        <label className="block text-xs font-medium text-gray-700 mb-1">Quantity *</label>
-                                        <input
-                                          type="number"
-                                          min="0"
-                                          max={material.returnable_quantity}
-                                          step="0.001"
-                                          value={selectedMaterial.quantity}
-                                          onChange={(e) => handleUpdateMaterial(material.delivery_note_item_id, {
-                                            quantity: parseFloat(e.target.value)
-                                          })}
-                                          onClick={(e) => e.stopPropagation()}
-                                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-purple-500"
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="block text-xs font-medium text-gray-700 mb-1">Condition *</label>
-                                        <select
-                                          value={selectedMaterial.condition}
-                                          onChange={(e) => handleUpdateMaterial(material.delivery_note_item_id, {
-                                            condition: e.target.value as 'Good' | 'Damaged' | 'Defective'
-                                          })}
-                                          onClick={(e) => e.stopPropagation()}
-                                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-purple-500"
-                                        >
-                                          <option value="Good">Good</option>
-                                          <option value="Damaged">Damaged</option>
-                                          <option value="Defective">Defective</option>
-                                        </select>
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <label className="block text-xs font-medium text-gray-700 mb-1">Return Reason</label>
-                                      <input
-                                        type="text"
-                                        value={selectedMaterial.return_reason}
-                                        onChange={(e) => handleUpdateMaterial(material.delivery_note_item_id, {
-                                          return_reason: e.target.value
-                                        })}
-                                        onClick={(e) => e.stopPropagation()}
-                                        placeholder="Why is this being returned?"
-                                        className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-purple-500"
-                                      />
-                                    </div>
-                                  </div>
+                              <div
+                                className={isReturnable ? 'cursor-pointer' : ''}
+                                onClick={() => isReturnable && handleToggleSelect(project, material)}
+                              >
+                                <p className={`font-medium text-sm ${isReturnable ? 'text-gray-900' : 'text-gray-400'}`}>{material.material_name}</p>
+                                <p className="text-xs text-gray-400">
+                                  {material.material_code} • DN: {material.delivery_note_number}
+                                </p>
+                              </div>
+                              <div className="text-center w-16 text-sm text-gray-700">{material.dispatched_quantity} {material.unit}</div>
+                              <div className="text-center w-16 text-sm text-gray-700">{material.returned_quantity} {material.unit}</div>
+                              <div className={`text-center w-16 text-sm font-semibold ${isReturnable ? 'text-purple-600' : 'text-red-500'}`}>
+                                {material.returnable_quantity} {material.unit}
+                              </div>
+                              <div className="w-20 text-right">
+                                {!isReturnable && (
+                                  <span className="text-xs text-gray-400 italic">Fully returned</span>
                                 )}
                               </div>
                             </div>
+
+                            {/* Expanded: Multi-Condition Split */}
+                            {isSelected && split && (
+                              <div className="px-6 pb-3 pt-2 bg-purple-50 border-l-2 border-l-purple-400" onClick={(e) => e.stopPropagation()}>
+                                <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">Split by Condition</p>
+                                <div className="space-y-2">
+                                  {/* Good */}
+                                  <div className="flex items-center gap-3">
+                                    <span className="w-20 text-xs font-medium text-green-700 bg-green-50 px-2 py-1 rounded text-center">Good</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max={material.returnable_quantity}
+                                      step="0.001"
+                                      value={split.good || ''}
+                                      placeholder="0"
+                                      onChange={(e) => updateSplit(itemId, 'good', Math.max(0, parseFloat(e.target.value) || 0))}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-purple-500 text-center"
+                                    />
+                                  </div>
+
+                                  {/* Damaged */}
+                                  <div className="flex items-start gap-3">
+                                    <span className="w-20 text-xs font-medium text-orange-700 bg-orange-50 px-2 py-1 rounded text-center mt-0.5">Damaged</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max={material.returnable_quantity}
+                                      step="0.001"
+                                      value={split.damaged || ''}
+                                      placeholder="0"
+                                      onChange={(e) => updateSplit(itemId, 'damaged', Math.max(0, parseFloat(e.target.value) || 0))}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-purple-500 text-center"
+                                    />
+                                    {split.damaged > 0 && (
+                                      <input
+                                        type="text"
+                                        value={split.damage_description_damaged}
+                                        onChange={(e) => updateSplit(itemId, 'damage_description_damaged', e.target.value)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        placeholder="Describe damage..."
+                                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-purple-500"
+                                      />
+                                    )}
+                                  </div>
+
+                                  {/* Defective */}
+                                  <div className="flex items-start gap-3">
+                                    <span className="w-20 text-xs font-medium text-red-700 bg-red-50 px-2 py-1 rounded text-center mt-0.5">Defective</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max={material.returnable_quantity}
+                                      step="0.001"
+                                      value={split.defective || ''}
+                                      placeholder="0"
+                                      onChange={(e) => updateSplit(itemId, 'defective', Math.max(0, parseFloat(e.target.value) || 0))}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-purple-500 text-center"
+                                    />
+                                    {split.defective > 0 && (
+                                      <input
+                                        type="text"
+                                        value={split.damage_description_defective}
+                                        onChange={(e) => updateSplit(itemId, 'damage_description_defective', e.target.value)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        placeholder="Describe defect..."
+                                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-purple-500"
+                                      />
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Total + Return Reason */}
+                                {(() => {
+                                  const total = split.good + split.damaged + split.defective;
+                                  const isOver = total > material.returnable_quantity;
+                                  const isEmpty = total === 0;
+                                  return (
+                                    <>
+                                      <div className={`mt-2 pt-2 border-t flex items-center justify-between text-xs font-medium ${isOver ? 'border-red-300' : 'border-purple-200'}`}>
+                                        <span className={isOver ? 'text-red-600' : isEmpty ? 'text-amber-600' : 'text-gray-600'}>
+                                          Total: {total} of {material.returnable_quantity}
+                                        </span>
+                                        {isOver && <span className="text-red-600">Exceeds available!</span>}
+                                        {isEmpty && <span className="text-amber-600">Enter at least 1 unit</span>}
+                                        {!isOver && !isEmpty && total < material.returnable_quantity && (
+                                          <span className="text-gray-400">Partial return ({material.returnable_quantity - total} remaining)</span>
+                                        )}
+                                      </div>
+                                      {split.damaged > 0 && !split.damage_description_damaged.trim() && (
+                                        <p className="text-xs text-amber-600 mt-1">* Description required for Damaged</p>
+                                      )}
+                                      {split.defective > 0 && !split.damage_description_defective.trim() && (
+                                        <p className="text-xs text-amber-600 mt-1">* Description required for Defective</p>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+
+                                {/* Return Reason */}
+                                <div className="mt-2">
+                                  <input
+                                    type="text"
+                                    value={split.return_reason}
+                                    onChange={(e) => updateSplit(itemId, 'return_reason', e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    placeholder="Return reason (optional)"
+                                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-purple-500"
+                                  />
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -317,14 +508,14 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
                 ))
               )}
 
-              {tempSelection.length > 0 && (
+              {checkedItems.size > 0 && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium text-green-800">
-                      {tempSelection.length} material(s) selected
+                      {checkedItems.size} material(s) selected
                     </p>
                     <button
-                      onClick={() => setTempSelection([])}
+                      onClick={() => { setCheckedItems(new Set()); setConditionSplits({}); }}
                       className="text-sm text-red-600 hover:text-red-700 font-medium"
                     >
                       Clear All
@@ -344,10 +535,10 @@ export const MaterialSelectionModal: React.FC<MaterialSelectionModalProps> = ({
               </button>
               <button
                 onClick={handleSave}
-                disabled={tempSelection.length === 0}
+                disabled={checkedItems.size === 0}
                 className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
               >
-                Save Selection ({tempSelection.length})
+                Save Selection ({checkedItems.size})
               </button>
             </div>
           </motion.div>
