@@ -186,7 +186,15 @@ const SiteAssets: React.FC = () => {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnADN, setReturnADN] = useState<GroupedADN | null>(null);
   const [returnItems, setReturnItems] = useState<DispatchedAsset[]>([]);
-  const [returnItemConditions, setReturnItemConditions] = useState<Record<number, { condition: string; damage_description: string; quantity: number }>>({});
+  const [returnItemConditions, setReturnItemConditions] = useState<Record<number, {
+    good: number;
+    fair: number;
+    poor: number;
+    damaged: number;
+    damage_description_fair: string;
+    damage_description_poor: string;
+    damage_description_damaged: string;
+  }>>({});
   const [returnNotes, setReturnNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -1296,10 +1304,10 @@ const SiteAssets: React.FC = () => {
       return;
     }
 
-    // Initialize conditions for each item with quantity
-    const conditions: Record<number, { condition: string; damage_description: string; quantity: number }> = {};
+    // Initialize multi-condition split for each item (all qty defaults to good)
+    const conditions: Record<number, { good: number; fair: number; poor: number; damaged: number; damage_description_fair: string; damage_description_poor: string; damage_description_damaged: string }> = {};
     selectedItems.forEach(item => {
-      conditions[item.adn_item_id] = { condition: 'good', damage_description: '', quantity: item.quantity };
+      conditions[item.adn_item_id] = { good: item.quantity, fair: 0, poor: 0, damaged: 0, damage_description_fair: '', damage_description_poor: '', damage_description_damaged: '' };
     });
 
     setReturnADN(adn);
@@ -1311,8 +1319,8 @@ const SiteAssets: React.FC = () => {
 
   // Open return modal for single item
   const openSingleReturnModal = (adn: GroupedADN, item: DispatchedAsset) => {
-    const conditions: Record<number, { condition: string; damage_description: string; quantity: number }> = {
-      [item.adn_item_id]: { condition: 'good', damage_description: '', quantity: item.quantity }
+    const conditions: Record<number, { good: number; fair: number; poor: number; damaged: number; damage_description_fair: string; damage_description_poor: string; damage_description_damaged: string }> = {
+      [item.adn_item_id]: { good: item.quantity, fair: 0, poor: 0, damaged: 0, damage_description_fair: '', damage_description_poor: '', damage_description_damaged: '' }
     };
 
     setReturnADN(adn);
@@ -1322,8 +1330,8 @@ const SiteAssets: React.FC = () => {
     setShowReturnModal(true);
   };
 
-  // Update condition for a specific item
-  const updateItemCondition = (itemId: number, field: 'condition' | 'damage_description' | 'quantity', value: string | number) => {
+  // Update a specific condition quantity or description for an item
+  const updateReturnSplit = (itemId: number, field: string, value: number | string) => {
     setReturnItemConditions(prev => ({
       ...prev,
       [itemId]: {
@@ -1336,54 +1344,86 @@ const SiteAssets: React.FC = () => {
   const handleBulkReturnRequest = async () => {
     if (!returnADN || returnItems.length === 0) return;
 
-    // Validate - if any item is not 'good', it needs a damage description
-    const invalidItems = returnItems.filter(item => {
+    // Validate each item's condition split
+    for (const item of returnItems) {
       const cond = returnItemConditions[item.adn_item_id];
-      return cond.condition !== 'good' && !cond.damage_description.trim();
-    });
+      if (!cond) continue;
+      const totalQty = cond.good + cond.fair + cond.poor + cond.damaged;
 
-    if (invalidItems.length > 0) {
-      showError(`Please provide damage description for items with condition other than "good"`);
-      return;
-    }
-
-    // Validate quantity
-    const invalidQuantityItems = returnItems.filter(item => {
-      const cond = returnItemConditions[item.adn_item_id];
-      return !cond.quantity || cond.quantity <= 0 || cond.quantity > item.quantity;
-    });
-
-    if (invalidQuantityItems.length > 0) {
-      showError(`Please enter valid return quantity (1 to available quantity)`);
-      return;
+      if (totalQty === 0) {
+        showError(`Please enter at least 1 unit to return for "${item.category_name}"`);
+        return;
+      }
+      if (totalQty > item.quantity) {
+        showError(`Total return quantity (${totalQty}) exceeds available (${item.quantity}) for "${item.category_name}"`);
+        return;
+      }
+      if (cond.fair > 0 && !cond.damage_description_fair.trim()) {
+        showError(`Please provide description for Fair condition on "${item.category_name}"`);
+        return;
+      }
+      if (cond.poor > 0 && !cond.damage_description_poor.trim()) {
+        showError(`Please provide description for Poor condition on "${item.category_name}"`);
+        return;
+      }
+      if (cond.damaged > 0 && !cond.damage_description_damaged.trim()) {
+        showError(`Please provide description for Damaged condition on "${item.category_name}"`);
+        return;
+      }
     }
 
     try {
       setSubmitting(true);
 
-      // Create return note via ARDN flow with multiple items
+      // Build items array - one entry per condition with qty > 0
+      const items: Array<{
+        category_id: number;
+        asset_item_id: number | null;
+        original_adn_item_id: number;
+        quantity: number;
+        reported_condition: string;
+        damage_description?: string;
+        notes?: string;
+      }> = [];
+
+      for (const item of returnItems) {
+        const cond = returnItemConditions[item.adn_item_id];
+        if (!cond) continue;
+
+        const conditionEntries: Array<{ key: 'good' | 'fair' | 'poor' | 'damaged'; descKey?: 'damage_description_fair' | 'damage_description_poor' | 'damage_description_damaged' }> = [
+          { key: 'good' },
+          { key: 'fair', descKey: 'damage_description_fair' },
+          { key: 'poor', descKey: 'damage_description_poor' },
+          { key: 'damaged', descKey: 'damage_description_damaged' },
+        ];
+
+        for (const { key, descKey } of conditionEntries) {
+          if (cond[key] > 0) {
+            items.push({
+              category_id: item.category_id,
+              asset_item_id: item.asset_item_id ?? null,
+              original_adn_item_id: item.adn_item_id,
+              quantity: cond[key],
+              reported_condition: key,
+              damage_description: descKey ? cond[descKey] : undefined,
+              notes: returnNotes
+            });
+          }
+        }
+      }
+
       const payload = {
         project_id: returnADN.project_id,
         original_adn_id: returnADN.adn_id,
         return_reason: returnNotes || 'Return request',
         notes: returnNotes,
-        items: returnItems.map(item => {
-          const cond = returnItemConditions[item.adn_item_id];
-          return {
-            category_id: item.category_id,
-            asset_item_id: item.asset_item_id,
-            original_adn_item_id: item.adn_item_id,
-            quantity: cond.quantity,
-            reported_condition: cond.condition,
-            damage_description: cond.condition !== 'good' ? cond.damage_description : undefined,
-            notes: returnNotes
-          };
-        })
+        items
       };
 
       const response = await apiClient.post('/assets/return-notes', payload);
 
-      showSuccess(`Return note created: ${response.data.data?.ardn_number || 'Success'} with ${returnItems.length} item(s)`);
+      const totalReturnQty = items.reduce((sum, i) => sum + i.quantity, 0);
+      showSuccess(`Return note created: ${response.data.data?.ardn_number || 'Success'} with ${items.length} item(s), ${totalReturnQty} total units`);
       setShowReturnModal(false);
       setReturnADN(null);
       setReturnItems([]);
@@ -3021,17 +3061,21 @@ const SiteAssets: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Items with Condition Selection */}
+                {/* Items with Multi-Condition Split */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Condition for Each Item
+                    Split Quantity by Condition
                   </label>
-                  <div className="space-y-3 max-h-[300px] overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
+                  <div className="space-y-4 max-h-[400px] overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
                     {returnItems.map((item) => {
-                      const cond = returnItemConditions[item.adn_item_id] || { condition: 'good', damage_description: '', quantity: item.quantity };
+                      const cond = returnItemConditions[item.adn_item_id] || { good: item.quantity, fair: 0, poor: 0, damaged: 0, damage_description_fair: '', damage_description_poor: '', damage_description_damaged: '' };
+                      const totalQty = cond.good + cond.fair + cond.poor + cond.damaged;
+                      const isOverLimit = totalQty > item.quantity;
+                      const isEmpty = totalQty === 0;
                       return (
-                        <div key={item.adn_item_id} className="bg-white rounded-lg p-3 border border-gray-200">
-                          <div className="flex items-start gap-3">
+                        <div key={item.adn_item_id} className="bg-white rounded-lg p-4 border border-gray-200">
+                          {/* Item Header */}
+                          <div className="flex items-center gap-3 mb-3">
                             <div className="p-2 bg-gray-100 rounded-lg flex-shrink-0">
                               <CubeIcon className="w-4 h-4 text-gray-700" />
                             </div>
@@ -3040,69 +3084,120 @@ const SiteAssets: React.FC = () => {
                               <p className="text-xs text-gray-500">
                                 Available: {item.quantity} unit(s) • {item.item_code || item.serial_number || item.category_code}
                               </p>
+                            </div>
+                          </div>
 
-                              {/* Quantity Input */}
-                              <div className="mt-2">
-                                <label className="block text-xs font-medium text-gray-700 mb-1">Return Quantity</label>
-                                <div>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max={item.quantity}
-                                    value={cond.quantity}
-                                    onChange={(e) => updateItemCondition(item.adn_item_id, 'quantity', parseInt(e.target.value) || 1)}
-                                    className={`w-24 px-2 py-1 text-sm border rounded focus:ring-1 ${
-                                      cond.quantity <= 0 || cond.quantity > item.quantity
-                                        ? 'border-gray-500 focus:ring-gray-500 focus:border-gray-500 bg-gray-50'
-                                        : 'border-gray-300 focus:ring-gray-500 focus:border-gray-500'
-                                    }`}
-                                  />
-                                  <span className="ml-2 text-xs text-gray-500">of {item.quantity} available</span>
-                                  {(cond.quantity <= 0 || cond.quantity > item.quantity) && (
-                                    <p className="text-xs text-gray-700 mt-1 font-medium">
-                                      {cond.quantity <= 0 ? '* Quantity must be at least 1' : `* Cannot exceed ${item.quantity} available`}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
+                          {/* Condition Split Grid */}
+                          <div className="space-y-2">
+                            {/* Good */}
+                            <div className="flex items-center gap-3">
+                              <span className="w-20 text-xs font-medium text-green-700 bg-green-50 px-2 py-1 rounded text-center">Good</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.quantity}
+                                value={cond.good}
+                                onChange={(e) => updateReturnSplit(item.adn_item_id, 'good', Math.max(0, parseInt(e.target.value) || 0))}
+                                className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 text-center"
+                              />
+                            </div>
 
-                              {/* Condition Buttons */}
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {['good', 'fair', 'poor', 'damaged'].map((condition) => (
-                                  <button
-                                    key={condition}
-                                    onClick={() => updateItemCondition(item.adn_item_id, 'condition', condition)}
-                                    className={`px-2 py-1 rounded text-xs font-medium border transition-all ${
-                                      cond.condition === condition
-                                        ? condition === 'good' ? 'bg-gray-100 border-gray-500 text-gray-800'
-                                          : condition === 'fair' ? 'bg-gray-100 border-gray-500 text-gray-800'
-                                          : condition === 'poor' ? 'bg-gray-100 border-gray-500 text-gray-800'
-                                          : 'bg-gray-100 border-gray-500 text-gray-800'
-                                        : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'
-                                    }`}
-                                  >
-                                    {condition.charAt(0).toUpperCase() + condition.slice(1)}
-                                  </button>
-                                ))}
-                              </div>
+                            {/* Fair */}
+                            <div className="flex items-start gap-3">
+                              <span className="w-20 text-xs font-medium text-yellow-700 bg-yellow-50 px-2 py-1 rounded text-center mt-0.5">Fair</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.quantity}
+                                value={cond.fair || ''}
+                                placeholder="0"
+                                onChange={(e) => updateReturnSplit(item.adn_item_id, 'fair', Math.max(0, parseInt(e.target.value) || 0))}
+                                className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 text-center"
+                              />
+                              {cond.fair > 0 && (
+                                <input
+                                  type="text"
+                                  value={cond.damage_description_fair}
+                                  onChange={(e) => updateReturnSplit(item.adn_item_id, 'damage_description_fair', e.target.value)}
+                                  placeholder="Describe fair condition..."
+                                  className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500"
+                                />
+                              )}
+                            </div>
 
-                              {/* Damage Description if not good */}
-                              {cond.condition !== 'good' && (
-                                <div className="mt-2">
-                                  <textarea
-                                    rows={3}
-                                    value={cond.damage_description}
-                                    onChange={(e) => updateItemCondition(item.adn_item_id, 'damage_description', e.target.value)}
-                                    placeholder={cond.condition === 'damaged' ? 'Describe damage...' : 'Describe condition...'}
-                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 resize-none"
-                                  />
-                                  {!cond.damage_description.trim() && (
-                                    <p className="text-xs text-gray-600 mt-1">* Required for non-good condition</p>
-                                  )}
-                                </div>
+                            {/* Poor */}
+                            <div className="flex items-start gap-3">
+                              <span className="w-20 text-xs font-medium text-orange-700 bg-orange-50 px-2 py-1 rounded text-center mt-0.5">Poor</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.quantity}
+                                value={cond.poor || ''}
+                                placeholder="0"
+                                onChange={(e) => updateReturnSplit(item.adn_item_id, 'poor', Math.max(0, parseInt(e.target.value) || 0))}
+                                className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 text-center"
+                              />
+                              {cond.poor > 0 && (
+                                <input
+                                  type="text"
+                                  value={cond.damage_description_poor}
+                                  onChange={(e) => updateReturnSplit(item.adn_item_id, 'damage_description_poor', e.target.value)}
+                                  placeholder="Describe poor condition..."
+                                  className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500"
+                                />
+                              )}
+                            </div>
+
+                            {/* Damaged */}
+                            <div className="flex items-start gap-3">
+                              <span className="w-20 text-xs font-medium text-red-700 bg-red-50 px-2 py-1 rounded text-center mt-0.5">Damaged</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.quantity}
+                                value={cond.damaged || ''}
+                                placeholder="0"
+                                onChange={(e) => updateReturnSplit(item.adn_item_id, 'damaged', Math.max(0, parseInt(e.target.value) || 0))}
+                                className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 text-center"
+                              />
+                              {cond.damaged > 0 && (
+                                <input
+                                  type="text"
+                                  value={cond.damage_description_damaged}
+                                  onChange={(e) => updateReturnSplit(item.adn_item_id, 'damage_description_damaged', e.target.value)}
+                                  placeholder="Describe damage..."
+                                  className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500"
+                                />
                               )}
                             </div>
                           </div>
+
+                          {/* Total Row */}
+                          <div className={`mt-3 pt-2 border-t flex items-center justify-between text-xs font-medium ${isOverLimit ? 'border-red-300' : 'border-gray-200'}`}>
+                            <span className={isOverLimit ? 'text-red-600' : isEmpty ? 'text-amber-600' : 'text-gray-600'}>
+                              Total: {totalQty} of {item.quantity}
+                            </span>
+                            {isOverLimit && (
+                              <span className="text-red-600">Exceeds available quantity!</span>
+                            )}
+                            {isEmpty && (
+                              <span className="text-amber-600">Enter at least 1 unit</span>
+                            )}
+                            {!isOverLimit && !isEmpty && totalQty < item.quantity && (
+                              <span className="text-gray-400">Partial return ({item.quantity - totalQty} remaining)</span>
+                            )}
+                          </div>
+
+                          {/* Missing description warnings */}
+                          {cond.fair > 0 && !cond.damage_description_fair.trim() && (
+                            <p className="text-xs text-amber-600 mt-1">* Description required for Fair condition</p>
+                          )}
+                          {cond.poor > 0 && !cond.damage_description_poor.trim() && (
+                            <p className="text-xs text-amber-600 mt-1">* Description required for Poor condition</p>
+                          )}
+                          {cond.damaged > 0 && !cond.damage_description_damaged.trim() && (
+                            <p className="text-xs text-amber-600 mt-1">* Description required for Damaged condition</p>
+                          )}
                         </div>
                       );
                     })}
@@ -3127,7 +3222,20 @@ const SiteAssets: React.FC = () => {
               {/* Modal Footer */}
               <div className="px-5 py-4 border-t border-gray-200 flex justify-between items-center flex-shrink-0 bg-gray-50">
                 <p className="text-sm text-gray-500">
-                  RDN will be created for {returnItems.length} item{returnItems.length !== 1 ? 's' : ''}
+                  {(() => {
+                    let totalUnits = 0;
+                    let condCount = 0;
+                    returnItems.forEach(item => {
+                      const c = returnItemConditions[item.adn_item_id];
+                      if (!c) return;
+                      if (c.good > 0) condCount++;
+                      if (c.fair > 0) condCount++;
+                      if (c.poor > 0) condCount++;
+                      if (c.damaged > 0) condCount++;
+                      totalUnits += c.good + c.fair + c.poor + c.damaged;
+                    });
+                    return `${totalUnits} unit(s) across ${condCount} condition line(s)`;
+                  })()}
                 </p>
                 <div className="flex gap-3">
                   <button
@@ -3142,7 +3250,13 @@ const SiteAssets: React.FC = () => {
                       submitting ||
                       returnItems.some(item => {
                         const cond = returnItemConditions[item.adn_item_id];
-                        return !cond || cond.quantity <= 0 || cond.quantity > item.quantity;
+                        if (!cond) return true;
+                        const total = cond.good + cond.fair + cond.poor + cond.damaged;
+                        if (total === 0 || total > item.quantity) return true;
+                        if (cond.fair > 0 && !cond.damage_description_fair.trim()) return true;
+                        if (cond.poor > 0 && !cond.damage_description_poor.trim()) return true;
+                        if (cond.damaged > 0 && !cond.damage_description_damaged.trim()) return true;
+                        return false;
                       })
                     }
                     className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
@@ -3416,10 +3530,10 @@ const SiteAssets: React.FC = () => {
                   </p>
                 </div>
 
-                {/* Delivery Note from Vendor */}
+                {/* Delivery Note */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Delivery Note from Vendor
+                    Delivery Note
                   </label>
                   <div className="relative">
                     <input
