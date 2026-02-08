@@ -21,7 +21,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
-      react(),
+      react({
+        jsxRuntime: 'automatic',
+        jsxImportSource: 'react'
+      }),
 
       // Inject anti-debugging code globally
       ENABLE_OBFUSCATION && inject({
@@ -72,6 +75,8 @@ export default defineConfig(({ mode }) => {
       dedupe: [
         'react',
         'react-dom',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
         'react-router-dom',
         '@tanstack/react-query',
         'zustand'
@@ -83,6 +88,8 @@ export default defineConfig(({ mode }) => {
       include: [
         'react',
         'react-dom',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
         'react-router-dom',
         'zustand',
         'axios',
@@ -95,7 +102,10 @@ export default defineConfig(({ mode }) => {
         // These are now lazy loaded on-demand using loadChartLibraries() from utils/lazyImports.ts
         // Saves 300KB from initial bundle, improves load time by 1.2s
         // Charts still work identically, just load 100ms later when dashboard opens
-      ]
+      ],
+      esbuildOptions: {
+        jsx: 'automatic'
+      }
     },
 
     build: {
@@ -156,13 +166,15 @@ export default defineConfig(({ mode }) => {
           // ⚠️ CRITICAL: React and React-dependent libs stay in main bundle (no chunk name)
           // Only split out libraries that are lazy-loaded or used on specific pages
           manualChunks: (id) => {
-            // ⚠️ NEVER split React - must stay with main bundle
+            // ⚠️ CRITICAL: NEVER split React or JSX runtime - must stay with main bundle
             // Returning undefined = stays with main entry chunk
             if (id.includes('node_modules/react/') ||
                 id.includes('node_modules/react-dom/') ||
                 id.includes('node_modules/react-router-dom/') ||
                 id.includes('node_modules/scheduler/') ||
-                id.includes('node_modules/@remix-run/')) {
+                id.includes('node_modules/@remix-run/') ||
+                id.includes('node_modules/react/jsx-runtime') ||
+                id.includes('node_modules/react/jsx-dev-runtime')) {
               return; // Stay with main bundle
             }
             // React context-dependent libs - stay with main bundle

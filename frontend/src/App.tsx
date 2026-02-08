@@ -81,6 +81,7 @@ const VendorManagement = lazy(() => import('@/roles/buyer/pages/VendorManagement
 const VendorDetails = lazy(() => import('@/roles/buyer/pages/VendorDetails'));
 const BuyerStore = lazy(() => import('@/roles/buyer/pages/Store'));
 const MaterialTransfer = lazy(() => import('@/roles/buyer/pages/MaterialTransfer'));
+const RawMaterialsCatalog = lazy(() => import('@/roles/buyer/pages/RawMaterialsCatalog'));
 
 // Production Manager Pages - M2 Store Management
 const ProductionManagerDashboard = lazy(() => import('@/roles/production-manager/pages/ProductionManagerDashboard'));
@@ -1020,6 +1021,11 @@ function App() {
             <Route path="material-transfer" element={
               <BuyerRoute>
                 <MaterialTransfer />
+              </BuyerRoute>
+            } />
+            <Route path="raw-materials" element={
+              <BuyerRoute>
+                <RawMaterialsCatalog />
               </BuyerRoute>
             } />
 

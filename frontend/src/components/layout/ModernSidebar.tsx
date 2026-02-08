@@ -24,6 +24,7 @@ import {
   DocumentPlusIcon,
   DocumentTextIcon,
   CubeIcon,
+  RectangleGroupIcon,
   UserGroupIcon,
   PencilSquareIcon as PencilIcon,
   BugAntIcon,
@@ -48,6 +49,7 @@ import {
   BuildingOfficeIcon as BuildingOfficeSolid,
   ClipboardDocumentCheckIcon as ClipboardDocumentCheckSolid,
   CubeIcon as CubeSolid,
+  RectangleGroupIcon as RectangleGroupSolid,
   PencilSquareIcon as PencilSolid,
   ExclamationTriangleIcon as ExclamationTriangleSolid,
   ClockIcon as ClockSolid,
@@ -591,6 +593,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             icon: ShoppingCartIcon,
             iconSolid: ShoppingSolid,
             color: 'text-orange-500'
+          },
+          {
+            name: 'Raw Materials',
+            href: buildPath('/raw-materials'),
+            icon: RectangleGroupIcon,
+            iconSolid: RectangleGroupSolid,
+            color: 'text-indigo-500'
           }
         ]
       }
