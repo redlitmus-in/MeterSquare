@@ -9,13 +9,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   PlusIcon,
   MagnifyingGlassIcon,
-  FunnelIcon,
   PencilIcon,
   TrashIcon,
   CubeIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  TagIcon,
   RectangleGroupIcon,
   QueueListIcon,
 } from '@heroicons/react/24/outline';
@@ -244,39 +242,6 @@ const RawMaterialsCatalog: React.FC = () => {
         <CatalogItemsManager />
       ) : (
       <>
-      {/* Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg p-6 text-white shadow-lg">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-blue-100 text-sm">Total Materials</p>
-              <p className="text-3xl font-bold mt-2">{allMaterials.length}</p>
-            </div>
-            <CubeIcon className="w-12 h-12 text-blue-200" />
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-lg p-6 text-white shadow-lg">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-green-100 text-sm">Categories</p>
-              <p className="text-3xl font-bold mt-2">{categories.length}</p>
-            </div>
-            <TagIcon className="w-12 h-12 text-green-200" />
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg p-6 text-white shadow-lg">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-purple-100 text-sm">Filtered Results</p>
-              <p className="text-3xl font-bold mt-2">{materials.length}</p>
-            </div>
-            <FunnelIcon className="w-12 h-12 text-purple-200" />
-          </div>
-        </div>
-      </div>
-
       {/* Filters */}
       <div className="bg-white rounded-lg shadow-md p-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
