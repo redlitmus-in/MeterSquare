@@ -162,73 +162,10 @@ export default defineConfig(({ mode }) => {
             }
           },
 
-          // ✅ PERFORMANCE: Manual chunk splitting for lazy-loaded heavy libraries
-          // ⚠️ CRITICAL: React and React-dependent libs stay in main bundle (no chunk name)
-          // Only split out libraries that are lazy-loaded or used on specific pages
-          manualChunks: (id) => {
-            // ⚠️ CRITICAL: NEVER split React or JSX runtime - must stay with main bundle
-            // Returning undefined = stays with main entry chunk
-            if (id.includes('node_modules/react/') ||
-                id.includes('node_modules/react-dom/') ||
-                id.includes('node_modules/react-router-dom/') ||
-                id.includes('node_modules/scheduler/') ||
-                id.includes('node_modules/@remix-run/') ||
-                id.includes('node_modules/react/jsx-runtime') ||
-                id.includes('node_modules/react/jsx-dev-runtime')) {
-              return; // Stay with main bundle
-            }
-            // React context-dependent libs - stay with main bundle
-            if (id.includes('node_modules/@tanstack/') ||
-                id.includes('node_modules/zustand/') ||
-                id.includes('node_modules/react-hook-form/') ||
-                id.includes('node_modules/@hookform/') ||
-                id.includes('node_modules/sonner/')) {
-              return; // Stay with main bundle
-            }
-            // Data export libs - LAZY LOADED, safe to split
-            if (id.includes('node_modules/xlsx/')) {
-              return 'xlsx-export';
-            }
-            if (id.includes('node_modules/jspdf/') ||
-                id.includes('node_modules/jspdf-autotable/')) {
-              return 'pdf-export';
-            }
-            // Charts - LAZY LOADED on dashboard, safe to split
-            if (id.includes('node_modules/highcharts/') ||
-                id.includes('node_modules/highcharts-react-official/')) {
-              return 'charts';
-            }
-            // Supabase - used for auth/realtime, safe to split
-            if (id.includes('node_modules/@supabase/')) {
-              return 'supabase';
-            }
-            // Socket.io - realtime, safe to split
-            if (id.includes('node_modules/socket.io')) {
-              return 'realtime';
-            }
-            // Radix UI - used everywhere but large, split for parallel loading
-            if (id.includes('node_modules/@radix-ui/')) {
-              return 'ui-radix';
-            }
-            // Icons - large bundle, split for parallel loading
-            if (id.includes('node_modules/lucide-react/') ||
-                id.includes('node_modules/@heroicons/')) {
-              return 'ui-icons';
-            }
-            // Date utilities
-            if (id.includes('node_modules/date-fns/') ||
-                id.includes('node_modules/react-datepicker/')) {
-              return 'date-utils';
-            }
-            // Zod validation - used everywhere
-            if (id.includes('node_modules/zod/')) {
-              return 'validation';
-            }
-            // All other node_modules go to vendor chunk
-            if (id.includes('node_modules/')) {
-              return 'vendor';
-            }
-          }
+          // ⚠️ CRITICAL: DISABLE chunk splitting completely
+          // Manual chunk splitting causes React dependency issues
+          // Let Vite handle chunking automatically or use ONE big vendor bundle
+          manualChunks: undefined
         },
 
         // Tree-shaking and side-effects optimization
