@@ -5025,7 +5025,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                     // Always open dropdown to allow selecting different material
                                                     if (availableMaterials.length > 0) {
                                                       setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
->>>>>>> 3e96a3743f5f6dfff7a84e002e18267b8906c2ee
                                                     }
                                                   }}
                                                   onBlur={() => {
@@ -5063,30 +5062,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   </span>
                                                 </div>
 
-<<<<<<< HEAD
                                                 {showDropdown && (
                                                   <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg" style={{ maxHeight: 280, overflowY: 'auto' }}>
                                                     {isGlobalLoading && (
                                                       <div className="px-3 py-2 text-xs text-gray-500 text-center">Searching materials...</div>
                                                     )}
                                                     {dropdownMaterials.map(masterMaterial => {
-=======
-                                                {materialDropdownOpen[materialDropdownId] && availableMaterials.length > 0 && (
-                                                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                                                    {availableMaterials
-                                                      .filter(mat => {
-                                                        if (!materialSearchTerms[materialDropdownId]) return true;
-                                                        const searchLower = materialSearchTerms[materialDropdownId].toLowerCase();
-                                                        return (
-                                                          mat.material_name.toLowerCase().includes(searchLower) ||
-                                                          (mat.brand && mat.brand.toLowerCase().includes(searchLower)) ||
-                                                          (mat.size && mat.size.toLowerCase().includes(searchLower)) ||
-                                                          (mat.description && mat.description.toLowerCase().includes(searchLower)) ||
-                                                          (mat.specification && mat.specification.toLowerCase().includes(searchLower))
-                                                        );
-                                                      })
-                                                      .map(masterMaterial => {
->>>>>>> 3e96a3743f5f6dfff7a84e002e18267b8906c2ee
                                                         // Check if this material is already added in this sub-item (ignore spaces)
                                                         const isAlreadyInSubItem = usedMaterialNamesInSubItem.includes(normalizeForComparison(masterMaterial.material_name));
 
