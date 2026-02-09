@@ -4,7 +4,7 @@
  * Modal dialog for creating and editing raw materials in the catalog.
  */
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { XMarkIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { rawMaterialsService, RawMaterial, CreateRawMaterialData } from '@/services/rawMaterialsService';
 import { apiClient } from '@/api/config';
@@ -77,39 +77,35 @@ const AddRawMaterialModal: React.FC<AddRawMaterialModalProps> = ({
     return existingMaterials.some(em => em.id !== material?.id && em.material_name.trim().toLowerCase() === term);
   }, [formData.material_name, existingMaterials, material?.id]);
 
-  // Master Materials search (from materials table / existing BOQs)
-  const [masterResults, setMasterResults] = useState<MasterMaterial[]>([]);
+  // Master Materials from BOQ tables (loaded once on mount, filtered client-side)
+  const [allMasterMaterials, setAllMasterMaterials] = useState<MasterMaterial[]>([]);
   const [masterLoading, setMasterLoading] = useState(false);
-  const masterSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const masterSearchRef = useRef(0);
+  const masterLoadedRef = useRef(false);
 
-  const searchMasterMaterials = useCallback((query: string) => {
-    if (masterSearchTimer.current) clearTimeout(masterSearchTimer.current);
-    if (!query.trim() || query.trim().length < 2) {
-      setMasterResults([]);
-      setMasterLoading(false);
-      return;
-    }
-    setMasterLoading(true);
-    masterSearchTimer.current = setTimeout(async () => {
-      const searchId = ++masterSearchRef.current;
+  useEffect(() => {
+    if (masterLoadedRef.current) return;
+    masterLoadedRef.current = true;
+    const loadMasterMaterials = async () => {
+      setMasterLoading(true);
       try {
-        const response = await apiClient.get('/raw-materials/master-search', {
-          params: { q: query.trim(), limit: 10 }
-        });
-        if (searchId !== masterSearchRef.current) return;
+        const response = await apiClient.get('/raw-materials/master-materials');
         if (response.data?.success && response.data?.materials) {
-          setMasterResults(response.data.materials);
-        } else {
-          setMasterResults([]);
+          setAllMasterMaterials(response.data.materials);
         }
       } catch {
-        if (searchId === masterSearchRef.current) setMasterResults([]);
+        // Silently fail - master data is supplementary
       } finally {
-        if (searchId === masterSearchRef.current) setMasterLoading(false);
+        setMasterLoading(false);
       }
-    }, 300);
+    };
+    loadMasterMaterials();
   }, []);
+
+  const filteredMasterMaterials = useMemo(() => {
+    const term = formData.material_name?.trim().toLowerCase();
+    if (!term) return allMasterMaterials.slice(0, 10);
+    return allMasterMaterials.filter(m => m.material_name.toLowerCase().includes(term)).slice(0, 10);
+  }, [formData.material_name, allMasterMaterials]);
 
   // Populate form if editing
   useEffect(() => {
@@ -234,8 +230,8 @@ const AddRawMaterialModal: React.FC<AddRawMaterialModalProps> = ({
                 type="text"
                 name="material_name"
                 value={formData.material_name}
-                onChange={e => { handleChange(e); setShowSuggestions(true); searchMasterMaterials(e.target.value); }}
-                onFocus={() => { setShowSuggestions(true); searchMasterMaterials(formData.material_name || ''); }}
+                onChange={e => { handleChange(e); setShowSuggestions(true); }}
+                onFocus={() => setShowSuggestions(true)}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                 placeholder="e.g., Cement OPC 53 Grade"
                 className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
@@ -252,7 +248,7 @@ const AddRawMaterialModal: React.FC<AddRawMaterialModalProps> = ({
                   <span>A material with this exact name already exists</span>
                 </div>
               )}
-              {showSuggestions && (matchedMaterials.length > 0 || masterResults.length > 0 || masterLoading) && (
+              {showSuggestions && (matchedMaterials.length > 0 || filteredMasterMaterials.length > 0 || masterLoading) && (
                 <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[280px] overflow-y-auto">
                   {/* Buyer's Raw Materials Catalog section - only show when there are matches */}
                   {matchedMaterials.length > 0 && (
@@ -261,7 +257,7 @@ const AddRawMaterialModal: React.FC<AddRawMaterialModalProps> = ({
                         Raw Materials Catalog ({matchedMaterials.length})
                       </div>
                       {matchedMaterials.map(em => (
-                        <div key={em.id} className="px-3 py-2 text-sm border-b border-gray-50 bg-amber-50/30">
+                        <div key={em.id} className="px-3 py-2 text-sm border-b border-gray-50 bg-amber-50/30 cursor-pointer hover:bg-amber-100/50" onClick={() => { setFormData(prev => ({ ...prev, material_name: em.material_name, brand: em.brand || prev.brand, size: em.size || prev.size, unit: em.unit || prev.unit, unit_price: em.unit_price || prev.unit_price, category: em.category || prev.category })); setShowSuggestions(false); }}>
                           <div className="flex items-center justify-between">
                             <div>
                               <span className="font-medium text-gray-800">{em.material_name}</span>
@@ -279,15 +275,15 @@ const AddRawMaterialModal: React.FC<AddRawMaterialModalProps> = ({
 
                   {/* Master Materials section (from existing BOQs) */}
                   {masterLoading && (
-                    <div className="px-3 py-2 text-xs text-gray-500 text-center">Searching master materials...</div>
+                    <div className="px-3 py-2 text-xs text-gray-500 text-center">Loading master materials...</div>
                   )}
-                  {masterResults.length > 0 && (
+                  {filteredMasterMaterials.length > 0 && (
                     <>
                       <div className="px-3 py-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border-y border-purple-100 sticky top-0 z-10">
-                        Master Materials
+                        Master Materials ({filteredMasterMaterials.length})
                       </div>
-                      {masterResults.map(gMat => (
-                        <div key={gMat.material_id} className="px-3 py-2 text-sm border-b border-gray-50">
+                      {filteredMasterMaterials.map(gMat => (
+                        <div key={gMat.material_id} className="px-3 py-2 text-sm border-b border-gray-50 bg-purple-50/30 cursor-pointer hover:bg-purple-100/50" onClick={() => { setFormData(prev => ({ ...prev, material_name: gMat.material_name, brand: gMat.brand || prev.brand, size: gMat.size || prev.size, unit: gMat.default_unit || prev.unit, specification: gMat.specification || prev.specification })); setShowSuggestions(false); }}>
                           <div className="font-medium text-gray-800">{gMat.material_name}</div>
                           <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
                             {gMat.brand && <span>Brand: {gMat.brand}</span>}
@@ -303,7 +299,7 @@ const AddRawMaterialModal: React.FC<AddRawMaterialModalProps> = ({
                   )}
 
                   {/* No results message */}
-                  {formData.material_name?.trim() && matchedMaterials.length === 0 && masterResults.length === 0 && !masterLoading && (
+                  {formData.material_name?.trim() && matchedMaterials.length === 0 && filteredMasterMaterials.length === 0 && !masterLoading && (
                     <div className="px-3 py-2 text-sm text-gray-500 text-center">
                       No matching materials found
                     </div>

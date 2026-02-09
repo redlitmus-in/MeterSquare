@@ -6074,6 +6074,45 @@ def search_all_materials():
         return jsonify({"success": False, "error": "Failed to search materials"}), 500
 
 
+def get_all_master_materials():
+    """Get all distinct master materials for dropdown/autocomplete (no search required).
+    Returns up to 500 distinct materials with their latest details.
+    """
+    try:
+        latest_material = db.session.query(
+            func.max(MasterMaterial.material_id).label('max_id')
+        ).filter(
+            MasterMaterial.is_active == True
+        ).group_by(
+            func.lower(func.trim(MasterMaterial.material_name))
+        ).subquery()
+
+        materials = db.session.query(MasterMaterial).filter(
+            MasterMaterial.material_id.in_(
+                db.session.query(latest_material.c.max_id)
+            )
+        ).order_by(MasterMaterial.material_name).limit(500).all()
+
+        results = []
+        for mat in materials:
+            results.append({
+                "material_id": mat.material_id,
+                "material_name": mat.material_name,
+                "brand": mat.brand or '',
+                "size": mat.size or '',
+                "specification": mat.specification or '',
+                "description": mat.description or '',
+                "default_unit": mat.default_unit,
+                "current_market_price": mat.current_market_price or 0
+            })
+
+        return jsonify({"success": True, "materials": results}), 200
+
+    except Exception as e:
+        log.error(f"[get_all_master_materials] Error: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to fetch materials"}), 500
+
+
 def search_all_labours():
     """Search all labours across all BOQs for autocomplete suggestions.
     Returns distinct labour roles with their latest details (work_type, hours, rate).

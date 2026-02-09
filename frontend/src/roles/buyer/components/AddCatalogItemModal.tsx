@@ -290,7 +290,7 @@ const AddCatalogItemModal: React.FC<AddCatalogItemModalProps> = ({
                           Catalog Items ({(matched as CatalogItem[]).length})
                         </div>
                         {(matched as CatalogItem[]).map(ei => (
-                          <div key={ei.id} className="px-3 py-2 text-sm border-b border-gray-50 bg-amber-50/30">
+                          <div key={ei.id} className="px-3 py-2 text-sm border-b border-gray-50 bg-amber-50/30 cursor-pointer hover:bg-amber-100/50" onClick={() => { setItemName(ei.item_name); setShowSuggestions(false); }}>
                             <span className="font-medium text-gray-800">{ei.item_name}</span>
                             {ei.category && <span className="ml-2 text-xs text-gray-500">{ei.category}</span>}
                             {ei.sub_items_count != null && (
@@ -306,7 +306,7 @@ const AddCatalogItemModal: React.FC<AddCatalogItemModalProps> = ({
                           Master Items ({filteredMasterItems.length})
                         </div>
                         {filteredMasterItems.map(mi => (
-                          <div key={mi.item_id} className="px-3 py-2 text-sm border-b border-gray-50 bg-purple-50/30">
+                          <div key={mi.item_id} className="px-3 py-2 text-sm border-b border-gray-50 bg-purple-50/30 cursor-pointer hover:bg-purple-100/50" onClick={() => { setItemName(mi.item_name); setShowSuggestions(false); }}>
                             <span className="font-medium text-gray-800">{mi.item_name}</span>
                             {mi.description && <span className="ml-2 text-xs text-gray-500">{mi.description}</span>}
                           </div>
@@ -371,7 +371,7 @@ const AddCatalogItemModal: React.FC<AddCatalogItemModalProps> = ({
                           Catalog Sub-Items ({(matched as CatalogSubItem[]).length})
                         </div>
                         {(matched as CatalogSubItem[]).map(si => (
-                          <div key={si.id} className="px-3 py-2 text-sm border-b border-gray-50 bg-amber-50/30">
+                          <div key={si.id} className="px-3 py-2 text-sm border-b border-gray-50 bg-amber-50/30 cursor-pointer hover:bg-amber-100/50" onClick={() => { setSubItemName(si.sub_item_name); setShowSuggestions(false); }}>
                             <span className="font-medium text-gray-800">{si.sub_item_name}</span>
                             {si.unit && <span className="ml-2 text-xs text-gray-500">{si.unit}</span>}
                             {si.brand && <span className="ml-2 text-xs text-gray-400">{si.brand}</span>}
@@ -385,7 +385,7 @@ const AddCatalogItemModal: React.FC<AddCatalogItemModalProps> = ({
                           Master Sub-Items ({filteredMasterSubItems.length})
                         </div>
                         {filteredMasterSubItems.map((name, idx) => (
-                          <div key={idx} className="px-3 py-2 text-sm border-b border-gray-50 bg-purple-50/30">
+                          <div key={idx} className="px-3 py-2 text-sm border-b border-gray-50 bg-purple-50/30 cursor-pointer hover:bg-purple-100/50" onClick={() => { setSubItemName(name); setShowSuggestions(false); }}>
                             <span className="font-medium text-gray-800">{name}</span>
                           </div>
                         ))}
