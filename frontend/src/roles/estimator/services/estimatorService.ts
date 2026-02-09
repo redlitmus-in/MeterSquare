@@ -3,7 +3,7 @@
  * Handles all API interactions for BOQ management
  */
 
-import { apiClient } from '@/api/config';
+import { apiClient, deduplicatedGet } from '@/api/config';
 import {
   BOQ,
   BOQFilter,
@@ -51,7 +51,7 @@ class EstimatorService {
   // Get BOQs by status - specific API endpoints
   async getPendingBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/pending_boq');
+      const response = await deduplicatedGet('/pending_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -65,7 +65,7 @@ class EstimatorService {
 
   async getApprovedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/approved_boq');
+      const response = await deduplicatedGet('/approved_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -79,7 +79,7 @@ class EstimatorService {
 
   async getRejectedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/rejected_boq');
+      const response = await deduplicatedGet('/rejected_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -93,7 +93,7 @@ class EstimatorService {
 
   async getCompletedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/completed_boq');
+      const response = await deduplicatedGet('/completed_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -107,7 +107,7 @@ class EstimatorService {
 
   async getCancelledBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/cancelled_boq');
+      const response = await deduplicatedGet('/cancelled_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -121,7 +121,7 @@ class EstimatorService {
 
   async getSentBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/all_send_boq');
+      const response = await deduplicatedGet('/all_send_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -141,7 +141,7 @@ class EstimatorService {
   // Get BOQs rejected by client
   async getClientRejectedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/rejected_boq');
+      const response = await deduplicatedGet('/rejected_boq');
       // Filter only client-rejected BOQs (status: Client_Rejected or client_rejected)
       const clientRejected = (response.data?.data || response.data || []).filter((boq: any) =>
         boq.status === 'Client_Rejected' || boq.status === 'client_rejected'
@@ -159,7 +159,7 @@ class EstimatorService {
 
   async getRevisionsBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/revisions_boq');
+      const response = await deduplicatedGet('/revisions_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -185,7 +185,7 @@ class EstimatorService {
     };
   }> {
     try {
-      const response = await apiClient.get('/estimator_tab_counts');
+      const response = await deduplicatedGet('/estimator_tab_counts');
       return {
         success: true,
         counts: response.data?.counts || {
@@ -1100,7 +1100,7 @@ async sendClientRevisionToTD(
     message?: string;
   }> {
     try {
-      const response = await apiClient.get('/boq/revision-tabs');
+      const response = await deduplicatedGet('/boq/revision-tabs');
 
       if (response.data) {
         return {

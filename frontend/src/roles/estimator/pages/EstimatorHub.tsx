@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -496,6 +496,12 @@ const EstimatorHub: React.FC = () => {
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes BOQs reload automatically!
   const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
 
+  // Refs to access current values in realtime update effect without adding them as dependencies
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const selectedRevisionTabRef = useRef(selectedRevisionTab);
+  selectedRevisionTabRef.current = selectedRevisionTab;
+
   // Debug full-screen state changes
   useEffect(() => {
     console.log('🔍 Full Screen State Changed:', {
@@ -516,26 +522,29 @@ const EstimatorHub: React.FC = () => {
   }, [fetchAllTabCounts]);
 
   // ✅ RELOAD data when real-time update is received (e.g., TD approves BOQ)
+  // FIXED: Only depends on boqUpdateTimestamp - uses refs for activeTab/selectedRevisionTab
+  // to prevent duplicate API calls when switching tabs (tab switching is handled by its own useEffect)
   useEffect(() => {
     // Skip initial mount (timestamp is set on mount)
     if (boqUpdateTimestamp === 0) return;
+
+    const currentTab = activeTabRef.current;
+    const currentRevisionTab = selectedRevisionTabRef.current;
 
     // Reload tab-specific data (NO all_project API call)
     const reloadTabData = async () => {
       try {
         let response;
-        switch (activeTab) {
+        switch (currentTab) {
           case 'projects':
-            // Pending tab - reload projects without BOQ
             response = await estimatorService.getPendingBOQs();
             if (response && response.success && response.data) {
               setProjects(response.data);
               setFilteredProjects(response.data);
               setTotalProjects(response.count || response.data.length);
             }
-            // Also refresh tab counts
             fetchAllTabCounts();
-            return; // Exit early
+            return;
           case 'sent':
             response = await estimatorService.getSentBOQs();
             break;
@@ -552,15 +561,16 @@ const EstimatorHub: React.FC = () => {
             response = await estimatorService.getCancelledBOQs();
             break;
           case 'revisions':
-            // Revisions tab has its own special handling
-            // Let the existing revision logic in the useEffect below handle it
             fetchAllTabCounts();
+            loadRevisionTabs();
+            if (currentRevisionTab) {
+              loadRevisionProjects(currentRevisionTab);
+            }
             return;
           default:
             response = await estimatorService.getPendingBOQs();
         }
 
-        // Also refresh tab counts when data changes
         fetchAllTabCounts();
 
         if (response && response.success && response.data) {
@@ -609,15 +619,7 @@ const EstimatorHub: React.FC = () => {
     };
 
     reloadTabData();
-
-    // If user is on revisions tab, also reload revision-specific data
-    if (activeTab === 'revisions') {
-      loadRevisionTabs(); // Reload revision tabs (client/internal revisions)
-      if (selectedRevisionTab) {
-        loadRevisionProjects(selectedRevisionTab); // Reload projects for selected revision tab
-      }
-    }
-  }, [boqUpdateTimestamp, activeTab, selectedRevisionTab, currentPage]); // Reload whenever timestamp, tab, revision tab, or page changes
+  }, [boqUpdateTimestamp]); // Only reload on realtime updates - NOT on tab/page changes
 
   useEffect(() => {
     // Filter logic based on search term
@@ -765,8 +767,11 @@ const EstimatorHub: React.FC = () => {
             break;
           case 'revisions':
             // Revisions tab needs BOQs with revision_number > 0 for RevisionComparisonPage
-            // Also load revision tabs for the sub-tabs display
+            // Load revision tabs and projects for the selected sub-tab
             loadRevisionTabs();
+            if (selectedRevisionTab) {
+              loadRevisionProjects(selectedRevisionTab);
+            }
             // Use the revisions_boq API to get BOQs with revisions
             response = await estimatorService.getRevisionsBOQs();
             break;
@@ -928,7 +933,6 @@ const EstimatorHub: React.FC = () => {
             setBOQs(mappedBOQs);
             setFilteredBOQs(mappedBOQs);
           }
-          // Refresh tab counts
           fetchAllTabCounts();
           return;
         case 'sent':
@@ -947,7 +951,6 @@ const EstimatorHub: React.FC = () => {
           response = await estimatorService.getCancelledBOQs();
           break;
         case 'revisions':
-          // Revisions tab has its own special handling
           loadRevisionTabs();
           fetchAllTabCounts();
           return;
@@ -955,7 +958,7 @@ const EstimatorHub: React.FC = () => {
           response = await estimatorService.getPendingBOQs();
       }
 
-      // Refresh tab counts after any action
+      // Single tab counts refresh after data load (not per-case)
       fetchAllTabCounts();
 
       if (response.success && response.data) {
@@ -1032,8 +1035,6 @@ const EstimatorHub: React.FC = () => {
         setFilteredProjects(response.data || []);
         setTotalProjects(response.count || response.data?.length || 0);
       }
-      // Also refresh tab counts
-      fetchAllTabCounts();
     } catch (error) {
       console.error('Error loading projects:', error);
     }
@@ -1074,14 +1075,6 @@ const EstimatorHub: React.FC = () => {
       setLoadingRevisionProjects(false);
     }
   };
-
-  // Load revision tabs when Revisions tab is active
-  useEffect(() => {
-    if (activeTab === 'revisions') {
-      loadRevisionTabs();
-      loadRevisionProjects(selectedRevisionTab);
-    }
-  }, [activeTab]);
 
   // Reload projects when revision tab changes
   useEffect(() => {

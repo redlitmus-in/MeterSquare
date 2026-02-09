@@ -11,12 +11,12 @@ import { realtimeNotificationHub } from './realtimeNotificationHub';
 
 class NotificationPollingService {
   private static instance: NotificationPollingService;
-  private pollingInterval: NodeJS.Timeout | null = null;
   private isPolling = false;
-  private pollIntervalMs = 10000; // Poll every 10 seconds when Socket.IO is disconnected
+  private pollIntervalMs = 30000; // Poll every 30 seconds when Socket.IO is disconnected
   private lastFetchTime: number = 0;
   private backoffMultiplier = 1; // Exponential backoff if no new notifications
-  private maxBackoffMultiplier = 6; // Max 1 minute (10s * 6 = 60s)
+  private maxBackoffMultiplier = 4; // Max 2 minutes (30s * 4 = 120s)
+  private pollTimeout: NodeJS.Timeout | null = null; // Used for backoff-aware scheduling
   private processedNotificationIds: Set<string> = new Set(); // Track processed IDs
   private maxProcessedIds = 500; // Limit to prevent memory leaks
 
@@ -42,17 +42,33 @@ class NotificationPollingService {
     }
 
     if (import.meta.env.DEV) {
-      console.log('[Polling] Starting notification polling (every 10s when Socket.IO disconnected)');
+      console.log('[Polling] Starting notification polling (every 30s when Socket.IO disconnected)');
     }
     this.isPolling = true;
 
     // Fetch immediately
     this.fetchNotifications();
 
-    // Then poll at intervals
-    this.pollingInterval = setInterval(() => {
-      this.fetchNotifications();
-    }, this.pollIntervalMs);
+    // Schedule next poll with backoff-aware timeout
+    this.scheduleNextPoll();
+  }
+
+  /**
+   * Schedule the next poll using setTimeout so backoff multiplier actually takes effect.
+   * Unlike setInterval, this adjusts the delay dynamically based on backoffMultiplier.
+   */
+  private scheduleNextPoll() {
+    if (!this.isPolling) return;
+
+    const delay = this.pollIntervalMs * this.backoffMultiplier;
+    if (import.meta.env.DEV) {
+      console.log(`[Polling] Next poll in ${delay / 1000}s (backoff: ${this.backoffMultiplier}x)`);
+    }
+
+    this.pollTimeout = setTimeout(async () => {
+      await this.fetchNotifications();
+      this.scheduleNextPoll();
+    }, delay);
   }
 
   /**
@@ -68,9 +84,9 @@ class NotificationPollingService {
     }
     this.isPolling = false;
 
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
+    if (this.pollTimeout) {
+      clearTimeout(this.pollTimeout);
+      this.pollTimeout = null;
     }
 
     // Reset backoff multiplier

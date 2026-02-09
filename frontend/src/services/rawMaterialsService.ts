@@ -73,6 +73,82 @@ export interface UpdateRawMaterialData extends Partial<CreateRawMaterialData> {
 }
 
 // ============================================================================
+// CATALOG ITEMS INTERFACES
+// ============================================================================
+
+export interface CatalogLinkedMaterial {
+  id: number;
+  catalog_sub_item_id: number;
+  raw_material_id: number;
+  quantity: number;
+  created_at?: string;
+  is_active?: boolean;
+  material_name: string;
+  brand?: string;
+  size?: string;
+  specification?: string;
+  unit?: string;
+  unit_price: number;
+  category?: string;
+}
+
+export interface CatalogSubItem {
+  id?: number;
+  catalog_item_id: number;
+  sub_item_name: string;
+  description?: string;
+  size?: string;
+  specification?: string;
+  brand?: string;
+  unit?: string;
+  created_by?: number;
+  created_at?: string;
+  updated_at?: string;
+  is_active?: boolean;
+  creator_name?: string;
+  materials_count?: number;
+  materials?: CatalogLinkedMaterial[];
+}
+
+export interface CatalogItem {
+  id?: number;
+  item_name: string;
+  description?: string;
+  category?: string;
+  created_by?: number;
+  created_at?: string;
+  updated_at?: string;
+  is_active?: boolean;
+  creator_name?: string;
+  sub_items_count?: number;
+  sub_items?: CatalogSubItem[];
+}
+
+export interface CatalogItemsListResponse {
+  success: boolean;
+  items: CatalogItem[];
+  total_count: number;
+  page: number;
+  per_page: number;
+  total_pages: number;
+}
+
+export interface CreateCatalogItemData {
+  item_name: string;
+  description?: string;
+  category?: string;
+}
+
+export interface CreateCatalogSubItemData {
+  sub_item_name: string;
+  description?: string;
+  size?: string;
+  specification?: string;
+  brand?: string;
+  unit?: string;
+}
+
+// ============================================================================
 // RAW MATERIALS SERVICE CLASS
 // ============================================================================
 
@@ -309,6 +385,174 @@ class RawMaterialsService {
       return material;
     } catch (error: any) {
       console.error('Error fetching raw material by ID:', error);
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // CATALOG ITEMS METHODS
+  // ============================================================================
+
+  private catalogUrl = '/catalog-items';
+
+  async getCatalogItems(params?: {
+    active_only?: boolean;
+    include_full?: boolean;
+    page?: number;
+    per_page?: number;
+  }): Promise<CatalogItemsListResponse> {
+    try {
+      const queryParams: Record<string, any> = {
+        active_only: params?.active_only !== undefined ? params.active_only : true,
+        include_full: params?.include_full || false,
+        page: params?.page || 1,
+        per_page: params?.per_page || 50,
+      };
+      Object.keys(queryParams).forEach(key => {
+        if (queryParams[key] === undefined) delete queryParams[key];
+      });
+      const response = await apiClient.get(this.catalogUrl, { params: queryParams });
+      if (response.data.success) return response.data;
+      throw new Error(response.data.message || 'Failed to fetch catalog items');
+    } catch (error: any) {
+      console.error('Error fetching catalog items:', error);
+      throw error;
+    }
+  }
+
+  async getCatalogItem(itemId: number): Promise<CatalogItem> {
+    try {
+      const response = await apiClient.get(`${this.catalogUrl}/${itemId}`);
+      if (response.data.success) return response.data.item;
+      throw new Error(response.data.message || 'Failed to fetch catalog item');
+    } catch (error: any) {
+      console.error('Error fetching catalog item:', error);
+      throw error;
+    }
+  }
+
+  async searchCatalogItems(query: string, limit: number = 20): Promise<CatalogItem[]> {
+    try {
+      const response = await apiClient.get(`${this.catalogUrl}/search`, {
+        params: { q: query.trim(), limit }
+      });
+      if (response.data.success) return response.data.items;
+      throw new Error(response.data.message || 'Failed to search catalog items');
+    } catch (error: any) {
+      console.error('Error searching catalog items:', error);
+      throw error;
+    }
+  }
+
+  async getFullTree(): Promise<CatalogItem[]> {
+    try {
+      const response = await apiClient.get(`${this.catalogUrl}/full-tree`);
+      if (response.data.success) return response.data.items;
+      throw new Error(response.data.message || 'Failed to fetch catalog tree');
+    } catch (error: any) {
+      console.error('Error fetching catalog tree:', error);
+      throw error;
+    }
+  }
+
+  async getCatalogCategories(): Promise<string[]> {
+    try {
+      const response = await apiClient.get(`${this.catalogUrl}/categories`);
+      if (response.data.success) return response.data.categories;
+      throw new Error(response.data.message || 'Failed to fetch catalog categories');
+    } catch (error: any) {
+      console.error('Error fetching catalog categories:', error);
+      throw error;
+    }
+  }
+
+  async createCatalogItem(data: CreateCatalogItemData): Promise<CatalogItem> {
+    try {
+      const response = await apiClient.post(this.catalogUrl, data);
+      if (response.data.success) return response.data.item;
+      throw new Error(response.data.message || 'Failed to create catalog item');
+    } catch (error: any) {
+      console.error('Error creating catalog item:', error);
+      throw error;
+    }
+  }
+
+  async updateCatalogItem(itemId: number, data: Partial<CreateCatalogItemData>): Promise<CatalogItem> {
+    try {
+      const response = await apiClient.put(`${this.catalogUrl}/${itemId}`, data);
+      if (response.data.success) return response.data.item;
+      throw new Error(response.data.message || 'Failed to update catalog item');
+    } catch (error: any) {
+      console.error('Error updating catalog item:', error);
+      throw error;
+    }
+  }
+
+  async deleteCatalogItem(itemId: number): Promise<string> {
+    try {
+      const response = await apiClient.delete(`${this.catalogUrl}/${itemId}`);
+      if (response.data.success) return response.data.message;
+      throw new Error(response.data.message || 'Failed to delete catalog item');
+    } catch (error: any) {
+      console.error('Error deleting catalog item:', error);
+      throw error;
+    }
+  }
+
+  async addSubItem(itemId: number, data: CreateCatalogSubItemData): Promise<CatalogSubItem> {
+    try {
+      const response = await apiClient.post(`${this.catalogUrl}/${itemId}/sub-items`, data);
+      if (response.data.success) return response.data.sub_item;
+      throw new Error(response.data.message || 'Failed to create sub-item');
+    } catch (error: any) {
+      console.error('Error creating sub-item:', error);
+      throw error;
+    }
+  }
+
+  async updateSubItem(subItemId: number, data: Partial<CreateCatalogSubItemData>): Promise<CatalogSubItem> {
+    try {
+      const response = await apiClient.put(`${this.catalogUrl}/sub-items/${subItemId}`, data);
+      if (response.data.success) return response.data.sub_item;
+      throw new Error(response.data.message || 'Failed to update sub-item');
+    } catch (error: any) {
+      console.error('Error updating sub-item:', error);
+      throw error;
+    }
+  }
+
+  async deleteSubItem(subItemId: number): Promise<string> {
+    try {
+      const response = await apiClient.delete(`${this.catalogUrl}/sub-items/${subItemId}`);
+      if (response.data.success) return response.data.message;
+      throw new Error(response.data.message || 'Failed to delete sub-item');
+    } catch (error: any) {
+      console.error('Error deleting sub-item:', error);
+      throw error;
+    }
+  }
+
+  async linkMaterial(subItemId: number, rawMaterialId: number, quantity: number = 1): Promise<CatalogLinkedMaterial> {
+    try {
+      const response = await apiClient.post(`${this.catalogUrl}/sub-items/${subItemId}/materials`, {
+        raw_material_id: rawMaterialId,
+        quantity
+      });
+      if (response.data.success) return response.data.link;
+      throw new Error(response.data.message || 'Failed to link material');
+    } catch (error: any) {
+      console.error('Error linking material:', error);
+      throw error;
+    }
+  }
+
+  async unlinkMaterial(subItemId: number, materialId: number): Promise<string> {
+    try {
+      const response = await apiClient.delete(`${this.catalogUrl}/sub-items/${subItemId}/materials/${materialId}`);
+      if (response.data.success) return response.data.message;
+      throw new Error(response.data.message || 'Failed to unlink material');
+    } catch (error: any) {
+      console.error('Error unlinking material:', error);
       throw error;
     }
   }

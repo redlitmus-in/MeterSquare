@@ -48,6 +48,40 @@ export const clearCache = (pattern?: string): void => {
   }
 };
 
+// ✅ PERFORMANCE: In-flight GET request deduplication
+// Prevents duplicate simultaneous requests to the same endpoint
+const inflightGets = new Map<string, Promise<any>>();
+
+/**
+ * Deduplicated GET request wrapper.
+ * If an identical GET request is already in-flight, returns the same promise
+ * instead of making a duplicate network call. Also returns cached responses.
+ */
+export const deduplicatedGet = async (url: string, config?: any): Promise<any> => {
+  const key = getCacheKey(url, config?.params);
+
+  // Return cached response if available
+  // Note: Cache stores response.data (the payload), so we wrap it back into { data: cached }
+  // to match the AxiosResponse shape. Only .data is reliable on cached responses.
+  const cached = getFromCache(key);
+  if (cached) {
+    return { data: cached, status: 200, statusText: 'OK', headers: {}, config: { ...config, url } };
+  }
+
+  // Return in-flight request if same request is already pending
+  if (inflightGets.has(key)) {
+    return inflightGets.get(key)!;
+  }
+
+  // Make the request and track it
+  const promise = apiClient.get(url, config).finally(() => {
+    inflightGets.delete(key);
+  });
+
+  inflightGets.set(key, promise);
+  return promise;
+};
+
 // Clear cache on page load/refresh to ensure fresh data
 // This prevents stale data after hard refresh
 if (typeof window !== 'undefined') {

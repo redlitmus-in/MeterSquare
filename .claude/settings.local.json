@@ -197,7 +197,10 @@
       "Bash(export ENVIRONMENT=production)",
       "Bash(python tests/security_pentest.py:*)",
       "Bash(python tests/full_security_audit.py:*)",
-      "Bash(python tests/stress_test.py:*)"
+      "Bash(python tests/stress_test.py:*)",
+      "Bash(xargs cat:*)",
+      "Bash(npx vite build:*)",
+      "Bash(python migrations/create_catalog_items_tables.py:*)"
     ],
     "deny": [],
     "ask": []
