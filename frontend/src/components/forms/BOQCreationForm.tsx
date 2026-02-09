@@ -49,7 +49,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { rawMaterialsService, RawMaterial, CatalogItem, CatalogSubItem, CatalogLinkedMaterial } from '@/services/rawMaterialsService';
-import CatalogImportModal from '@/components/modals/CatalogImportModal';
+
 import { ProjectOption, BOQMaterial, BOQLabour, BOQCreatePayload, WorkType, TermsConditionsItem } from '@/roles/estimator/types';
 import { ModernSelect } from '@/components/ui/modern-select';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -274,7 +274,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [overallProfit, setOverallProfit] = useState(15);
   const [overallDiscount, setOverallDiscount] = useState(0); // Overall BOQ discount percentage
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showCatalogImport, setShowCatalogImport] = useState(false);
+
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [isUploadingBulk, setIsUploadingBulk] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -1471,86 +1471,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     setItems(prevItems => [...prevItems, newItem]); // Add new item at the end
     setExpandedItems(prev => [...prev, newItem.id]);
     setItemSearchTerms(prev => ({ ...prev, [newItem.id]: '' }));
-  };
-
-  // Import items from buyer's catalog
-  const handleCatalogImport = (selectedItems: CatalogItem[]) => {
-    const newItems: BOQItemForm[] = selectedItems.map(catalogItem => {
-      const itemId = Date.now().toString() + Math.random().toString(36).slice(2, 7);
-      const subItems: SubItemForm[] = (catalogItem.sub_items || []).map(si => {
-        const subId = Date.now().toString() + Math.random().toString(36).slice(2, 7);
-        const materials: BOQMaterialForm[] = (si.materials || []).map(mat => ({
-          id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
-          material_name: mat.material_name || '',
-          brand: mat.brand || '',
-          size: mat.size || '',
-          specification: mat.specification || '',
-          quantity: mat.quantity || 1,
-          unit: mat.unit || 'nos',
-          unit_price: mat.unit_price || 0,
-          is_new: true,
-          is_from_master: false,
-        }));
-
-        return {
-          id: subId,
-          sub_item_name: si.sub_item_name || '',
-          scope: '',
-          size: si.size || '',
-          location: '',
-          brand: si.brand || '',
-          quantity: 1,
-          unit: si.unit || 'nos',
-          rate: 0,
-          misc_percentage: BOQ_CONFIG.DEFAULT_MISC_PERCENTAGE,
-          overhead_profit_percentage: BOQ_CONFIG.DEFAULT_OVERHEAD_PROFIT_PERCENTAGE,
-          transport_percentage: BOQ_CONFIG.DEFAULT_TRANSPORT_PERCENTAGE,
-          materials,
-          labour: [{
-            id: `lab-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-            labour_role: '',
-            hours: 8,
-            rate_per_hour: 0,
-            work_type: 'daily_wages' as const,
-            is_new: true,
-          }],
-          is_new: true,
-        };
-      });
-
-      return {
-        id: itemId,
-        item_name: catalogItem.item_name || '',
-        description: catalogItem.description || '',
-        quantity: 1,
-        unit: 'nos',
-        rate: 0,
-        work_type: 'daily_wages' as WorkType,
-        sub_items: subItems,
-        materials: [],
-        labour: [{
-          id: `lab-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-          labour_role: '',
-          hours: 8,
-          rate_per_hour: 0,
-          work_type: 'daily_wages' as const,
-          is_new: true,
-        }],
-        overhead_percentage: overallOverhead,
-        profit_margin_percentage: overallProfit,
-        discount_percentage: 0,
-        vat_percentage: 0,
-        is_new: true,
-      };
-    });
-
-    setItems(prevItems => [...prevItems, ...newItems]);
-    newItems.forEach(item => {
-      setExpandedItems(prev => [...prev, item.id]);
-      setItemSearchTerms(prev => ({ ...prev, [item.id]: '' }));
-    });
-    setShowCatalogImport(false);
-    showSuccess(`Imported ${newItems.length} item${newItems.length !== 1 ? 's' : ''} from catalog`);
   };
 
   // Select a buyer catalog item and populate the form slot with all sub-items + materials
@@ -6616,15 +6536,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   <Plus className="w-5 h-5" />
                   Add Item
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowCatalogImport(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all font-semibold shadow-md"
-                  disabled={isSubmitting}
-                >
-                  <Upload className="w-5 h-5" />
-                  Import from Catalog
-                </button>
               </div>
             </div>
 
@@ -7450,13 +7361,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         document.body
       )}
 
-      {/* Catalog Import Modal */}
-      {showCatalogImport && (
-        <CatalogImportModal
-          onClose={() => setShowCatalogImport(false)}
-          onImport={handleCatalogImport}
-        />
-      )}
     </>
   );
 };
