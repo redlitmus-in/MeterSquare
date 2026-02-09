@@ -15,6 +15,7 @@ from controllers.raw_materials_controller import (
     delete_raw_material,
     get_material_categories
 )
+from controllers.boq_controller import search_all_materials, get_all_item, get_all_sub_item_names
 from controllers.auth_controller import jwt_required
 
 # Create blueprint with URL prefix
@@ -124,3 +125,43 @@ def delete_material_route(material_id):
     Sets is_active to False instead of actually deleting the record.
     """
     return delete_raw_material(material_id)
+
+
+@raw_materials_routes.route('/master-search', methods=['GET'])
+@jwt_required
+def master_materials_search_route():
+    """
+    GET /api/raw-materials/master-search
+
+    Search master materials (from existing BOQs) for duplicate-check in buyer's catalog.
+    Calls the same search function as /api/materials/search but accessible to Buyer role.
+
+    Query Parameters:
+    - q (required): Search query
+    - limit (optional): Maximum results (default: 20, max: 50)
+    """
+    return search_all_materials()
+
+
+@raw_materials_routes.route('/master-items', methods=['GET'])
+@jwt_required
+def master_items_search_route():
+    """
+    GET /api/raw-materials/master-items
+
+    Get all master items (from existing BOQs) for duplicate-check in buyer's catalog.
+    Accessible to Buyer role (bypasses check_boq_access).
+    """
+    return get_all_item()
+
+
+@raw_materials_routes.route('/master-sub-items', methods=['GET'])
+@jwt_required
+def master_sub_items_search_route():
+    """
+    GET /api/raw-materials/master-sub-items
+
+    Get all master sub-item names (from existing BOQs) for duplicate-check in buyer's catalog.
+    Accessible to Buyer role (bypasses check_boq_access).
+    """
+    return get_all_sub_item_names()

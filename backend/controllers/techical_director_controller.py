@@ -1653,6 +1653,7 @@ def get_td_assign_boq():
         user_role = current_user.get('role', '').lower() if current_user else ''
 
         # OPTIMIZED: Join BOQDetails to eliminate N+1 queries
+        # Include Project.extension_status for day extension indicator
         query = (
             db.session.query(
                 BOQ,
@@ -1663,6 +1664,7 @@ def get_td_assign_boq():
                 Project.floor_name,
                 Project.working_hours,
                 Project.user_id,
+                Project.extension_status,
                 User.full_name.label('last_pm_name'),
                 BOQDetails
             )
@@ -1710,6 +1712,10 @@ def get_td_assign_boq():
             # Calculate financial data
             financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
 
+            # Check if project has a pending day extension request
+            ext_status = row.extension_status
+            has_pending_ext = ext_status in ('day_request_send_td', 'day_edit_td') if ext_status else False
+
             boq_entry = {
                 "boq_id": boq_obj.boq_id,
                 "boq_name": boq_obj.boq_name,
@@ -1730,6 +1736,9 @@ def get_td_assign_boq():
                 "client_rejection_reason": boq_obj.client_rejection_reason,
                 "last_pm_user_id": boq_obj.last_pm_user_id,
                 "last_pm_name": row.last_pm_name,
+                # Day extension status for TD clock indicator
+                "has_pending_day_extension": has_pending_ext,
+                "pending_day_extension_count": 1 if has_pending_ext else 0,
                 # Add financial data
                 **financial_data
             }

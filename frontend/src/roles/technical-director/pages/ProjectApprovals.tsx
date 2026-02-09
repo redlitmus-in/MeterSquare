@@ -2024,7 +2024,7 @@ const ProjectApprovals: React.FC = () => {
                         onClick={() => handleOpenDayExtensionModal(estimation.id)}
                         className={`rounded-full p-2 shadow-sm hover:shadow-md transition-all cursor-pointer group hover:scale-105 ${
                           hasRequests
-                            ? 'bg-blue-500 text-white animate-pulse'
+                            ? 'bg-blue-500 text-white blink-alert'
                             : 'bg-gray-100 text-gray-500'
                         }`}
                         title={hasRequests ? `${requestCount} pending day extension request${requestCount > 1 ? 's' : ''}` : 'No pending day extension requests'}

@@ -4452,7 +4452,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     </span>
                                   </div>
                                   {itemDropdownOpen[item.id] && (
-                                    <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl" style={{ maxHeight: '320px', overflowY: 'auto', height: 'auto' }}>
+                                    <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl" style={{ maxHeight: '280px', overflowY: 'auto', height: 'auto' }}>
                                       {(() => {
                                         const filtered = getFilteredItems(itemSearchTerms[item.id] || '');
                                         const showNewOption = itemSearchTerms[item.id] &&
@@ -4770,7 +4770,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                                             if (!showSubDropdown) return null;
                                             return (
-                                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[280px] overflow-y-auto">
                                                 {/* Existing sub-items section */}
                                                 {filteredNames.length > 0 && (
                                                   <>
@@ -5341,7 +5341,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 </div>
 
                                                 {showDropdown && (
-                                                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg" style={{ maxHeight: 320, overflowY: 'auto' }}>
+                                                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg" style={{ maxHeight: 280, overflowY: 'auto' }}>
                                                     {isGlobalLoading && (
                                                       <div className="px-3 py-2 text-xs text-gray-500 text-center">Searching materials...</div>
                                                     )}

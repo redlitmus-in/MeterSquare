@@ -469,6 +469,7 @@ const RawMaterialsCatalog: React.FC = () => {
           material={editingMaterial}
           onClose={handleModalClose}
           categories={categories}
+          existingMaterials={allMaterials}
         />
       )}
     </div>

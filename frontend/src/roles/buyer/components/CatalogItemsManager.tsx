@@ -469,7 +469,7 @@ const CatalogItemsManager: React.FC = () => {
                                       <p className="mt-1 text-xs text-orange-600">No materials found. Add materials in the "Materials" tab first.</p>
                                     )}
                                     {materialResults.length > 0 && (
-                                      <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded bg-white">
+                                      <div className="mt-2 max-h-[280px] overflow-y-auto border border-gray-200 rounded bg-white">
                                         {materialResults.map(mat => (
                                           <button
                                             key={mat.id}
@@ -542,6 +542,7 @@ const CatalogItemsManager: React.FC = () => {
           item={editingItem}
           onClose={handleItemModalClose}
           mode="item"
+          existingItems={items}
         />
       )}
 
@@ -552,6 +553,9 @@ const CatalogItemsManager: React.FC = () => {
           parentItemId={parentItemIdForSub}
           onClose={handleSubItemModalClose}
           mode="sub-item"
+          existingSubItems={
+            items.find(i => i.id === parentItemIdForSub)?.sub_items?.filter(si => si.is_active !== false) || []
+          }
         />
       )}
     </div>
