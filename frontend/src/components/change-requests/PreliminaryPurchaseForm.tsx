@@ -501,7 +501,8 @@ const PreliminaryPurchaseForm: React.FC<PreliminaryPurchaseFormProps> = ({ onClo
                       type="number"
                       min="0"
                       step="0.01"
-                      value={item.amount}
+                      value={item.amount || ''}
+                      placeholder="0.00"
                       onChange={(e) => updatePreliminaryItem(item.id, { amount: parseFloat(e.target.value) || 0 })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
                     />

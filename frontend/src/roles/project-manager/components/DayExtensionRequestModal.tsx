@@ -340,7 +340,7 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
               <input
                 type="number"
                 min="1"
-                value={additionalDays}
+                value={additionalDays || ''}
                 onChange={(e) => setAdditionalDays(parseInt(e.target.value) || 1)}
                 className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-sm"
                 placeholder="Enter number of additional days"

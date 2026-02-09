@@ -295,6 +295,26 @@ def client_revision_td_mail_send_route():
         return access_check
     return client_revision_td_mail_send()
 
+# Material Search (Global autocomplete)
+@boq_routes.route('/materials/search', methods=['GET'])
+@jwt_required
+def search_all_materials_route():
+    """Search all materials for autocomplete (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return search_all_materials()
+
+# Labour Search (Global autocomplete)
+@boq_routes.route('/labours/search', methods=['GET'])
+@jwt_required
+def search_all_labours_route():
+    """Search all labours for autocomplete (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return search_all_labours()
+
 # Custom Units Management
 @boq_routes.route('/boq/custom-units', methods=['GET'])
 @jwt_required

@@ -806,7 +806,8 @@ const MaterialsManagement: React.FC = () => {
                     <input
                       type="number"
                       name="current_stock"
-                      value={formData.current_stock}
+                      value={formData.current_stock || ''}
+                      placeholder="0"
                       onChange={handleInputChange}
                       min="0"
                       step="0.01"
@@ -821,7 +822,8 @@ const MaterialsManagement: React.FC = () => {
                     <input
                       type="number"
                       name="min_stock_level"
-                      value={formData.min_stock_level}
+                      value={formData.min_stock_level || ''}
+                      placeholder="0"
                       onChange={handleInputChange}
                       min="0"
                       step="0.01"
@@ -837,7 +839,8 @@ const MaterialsManagement: React.FC = () => {
                   <input
                     type="number"
                     name="unit_price"
-                    value={formData.unit_price}
+                    value={formData.unit_price || ''}
+                    placeholder="0.00"
                     onChange={handleInputChange}
                     min="0"
                     step="0.01"
@@ -996,7 +999,8 @@ const MaterialsManagement: React.FC = () => {
                     <input
                       type="number"
                       name="current_stock"
-                      value={formData.current_stock}
+                      value={formData.current_stock || ''}
+                      placeholder="0"
                       onChange={handleInputChange}
                       min="0"
                       step="0.01"
@@ -1011,7 +1015,8 @@ const MaterialsManagement: React.FC = () => {
                     <input
                       type="number"
                       name="min_stock_level"
-                      value={formData.min_stock_level}
+                      value={formData.min_stock_level || ''}
+                      placeholder="0"
                       onChange={handleInputChange}
                       min="0"
                       step="0.01"
@@ -1027,7 +1032,8 @@ const MaterialsManagement: React.FC = () => {
                   <input
                     type="number"
                     name="unit_price"
-                    value={formData.unit_price}
+                    value={formData.unit_price || ''}
+                    placeholder="0.00"
                     onChange={handleInputChange}
                     min="0"
                     step="0.01"

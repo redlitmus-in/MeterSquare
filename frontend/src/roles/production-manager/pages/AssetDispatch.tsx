@@ -1613,7 +1613,8 @@ const AssetDispatch: React.FC = () => {
                                   type="number"
                                   min="1"
                                   max={item.available}
-                                  value={item.quantity}
+                                  value={item.quantity || ''}
+                                  placeholder="1"
                                   onChange={(e) => updateDispatchItem(index, 'quantity', parseInt(e.target.value) || 1)}
                                   className="w-12 px-1.5 py-0.5 text-sm border rounded text-center font-semibold"
                                   disabled={linkedRequisitionId ? true : false}

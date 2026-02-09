@@ -3096,7 +3096,8 @@ const SiteAssets: React.FC = () => {
                                 type="number"
                                 min="0"
                                 max={item.quantity}
-                                value={cond.good}
+                                value={cond.good || ''}
+                                placeholder="0"
                                 onChange={(e) => updateReturnSplit(item.adn_item_id, 'good', Math.max(0, parseInt(e.target.value) || 0))}
                                 className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 text-center"
                               />
@@ -3489,7 +3490,7 @@ const SiteAssets: React.FC = () => {
                     type="number"
                     step="0.01"
                     min="0"
-                    value={dispatchTransportFee}
+                    value={dispatchTransportFee || ''}
                     onChange={(e) => setDispatchTransportFee(e.target.value)}
                     placeholder="0.00"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
@@ -3814,7 +3815,8 @@ const SiteAssets: React.FC = () => {
                         <input
                           type="number"
                           min={1}
-                          value={requisitionForm.quantity ?? 1}
+                          value={requisitionForm.quantity || ''}
+                          placeholder="1"
                           onChange={(e) => setRequisitionForm(prev => ({ ...prev, quantity: Number(e.target.value) }))}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 text-sm"
                         />
@@ -3861,7 +3863,8 @@ const SiteAssets: React.FC = () => {
                                 <input
                                   type="number"
                                   min={1}
-                                  value={item.quantity}
+                                  value={item.quantity || ''}
+                                  placeholder="1"
                                   onChange={(e) => updateItemQuantity(item.id, Number(e.target.value))}
                                   className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
                                 />
@@ -4242,7 +4245,8 @@ const SiteAssets: React.FC = () => {
                       <input
                         type="number"
                         min={1}
-                        value={requisitionForm.quantity ?? 1}
+                        value={requisitionForm.quantity || ''}
+                          placeholder="1"
                         onChange={(e) => setRequisitionForm(prev => ({ ...prev, quantity: Number(e.target.value) }))}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 text-sm"
                       />
@@ -4279,7 +4283,8 @@ const SiteAssets: React.FC = () => {
                             <input
                               type="number"
                               min="1"
-                              value={item.quantity}
+                              value={item.quantity || ''}
+                              placeholder="1"
                               onChange={(e) => {
                                 const newValue = Math.max(1, parseInt(e.target.value) || 1);
                                 const category = assetCategories.find(c => c.category_id === item.category_id);

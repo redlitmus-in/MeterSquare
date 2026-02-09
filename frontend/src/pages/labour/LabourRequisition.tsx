@@ -2498,7 +2498,8 @@ const LabourRequisition: React.FC = () => {
                           <input
                             type="number"
                             min="1"
-                            value={item.workers_count || 1}
+                            value={item.workers_count || ''}
+                            placeholder="1"
                             onChange={(e) => updateLabourItemField(index, 'workers_count', Math.max(1, parseInt(e.target.value) || 1))}
                             className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                           />

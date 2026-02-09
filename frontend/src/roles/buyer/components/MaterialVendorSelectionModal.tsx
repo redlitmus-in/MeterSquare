@@ -3113,7 +3113,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                     min="0"
                                     max="100"
                                     step="0.5"
-                                    value={lpoData.totals.vat_percent}
+                                    value={lpoData.totals.vat_percent || ''}
+                                    placeholder="0"
                                     onChange={(e) => {
                                       const newVatPercent = parseFloat(e.target.value) || 0;
                                       const newVatAmount = (lpoData.totals.subtotal * newVatPercent) / 100;
@@ -3819,7 +3820,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                       min="0"
                                       max="100"
                                       step="0.5"
-                                      value={lpoData.totals.vat_percent}
+                                      value={lpoData.totals.vat_percent || ''}
+                                    placeholder="0"
                                       onChange={(e) => {
                                         const newVatPercent = parseFloat(e.target.value) || 0;
                                         const newVatAmount = (lpoData.totals.subtotal * newVatPercent) / 100;

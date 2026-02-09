@@ -6014,3 +6014,114 @@ def get_revisions_boq():
             'error': 'Failed to retrieve revision BOQs',
             'details': str(e)
         }), 500
+
+
+def search_all_materials():
+    """Search all materials across all BOQs for autocomplete suggestions.
+    Returns distinct material names with their latest details (brand, size, unit, price).
+    Query params: q (search term), limit (max results, default 20)
+    """
+    try:
+        search_term = request.args.get('q', '').strip()
+        try:
+            limit = min(int(request.args.get('limit', 20)), 50)
+        except (ValueError, TypeError):
+            limit = 20
+
+        if len(search_term) < 1:
+            return jsonify({"success": True, "materials": []}), 200
+
+        # Subquery to get the latest material_id for each unique material_name
+        latest_material = db.session.query(
+            func.max(MasterMaterial.material_id).label('max_id')
+        ).filter(
+            MasterMaterial.is_active == True,
+            MasterMaterial.material_name.ilike(f'%{search_term}%')
+        ).group_by(
+            func.lower(func.trim(MasterMaterial.material_name))
+        ).subquery()
+
+        materials = db.session.query(MasterMaterial).filter(
+            MasterMaterial.material_id.in_(
+                db.session.query(latest_material.c.max_id)
+            )
+        ).order_by(
+            # Prioritize exact prefix matches
+            db.case(
+                (MasterMaterial.material_name.ilike(f'{search_term}%'), 0),
+                else_=1
+            ),
+            MasterMaterial.material_name
+        ).limit(limit).all()
+
+        results = []
+        for mat in materials:
+            results.append({
+                "material_id": mat.material_id,
+                "material_name": mat.material_name,
+                "brand": mat.brand or '',
+                "size": mat.size or '',
+                "specification": mat.specification or '',
+                "description": mat.description or '',
+                "default_unit": mat.default_unit,
+                "current_market_price": mat.current_market_price or 0
+            })
+
+        return jsonify({"success": True, "materials": results}), 200
+
+    except Exception as e:
+        log.error(f"[search_all_materials] Error: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to search materials"}), 500
+
+
+def search_all_labours():
+    """Search all labours across all BOQs for autocomplete suggestions.
+    Returns distinct labour roles with their latest details (work_type, hours, rate).
+    Query params: q (search term), limit (max results, default 20)
+    """
+    try:
+        search_term = request.args.get('q', '').strip()
+        try:
+            limit = min(int(request.args.get('limit', 20)), 50)
+        except (ValueError, TypeError):
+            limit = 20
+
+        if len(search_term) < 1:
+            return jsonify({"success": True, "labours": []}), 200
+
+        # Subquery to get the latest labour_id for each unique labour_role
+        latest_labour = db.session.query(
+            func.max(MasterLabour.labour_id).label('max_id')
+        ).filter(
+            MasterLabour.is_active == True,
+            MasterLabour.labour_role.ilike(f'%{search_term}%')
+        ).group_by(
+            func.lower(func.trim(MasterLabour.labour_role))
+        ).subquery()
+
+        labours = db.session.query(MasterLabour).filter(
+            MasterLabour.labour_id.in_(
+                db.session.query(latest_labour.c.max_id)
+            )
+        ).order_by(
+            db.case(
+                (MasterLabour.labour_role.ilike(f'{search_term}%'), 0),
+                else_=1
+            ),
+            MasterLabour.labour_role
+        ).limit(limit).all()
+
+        results = [{
+            "labour_id": lab.labour_id,
+            "labour_role": lab.labour_role,
+            "work_type": lab.work_type or 'daily_wages',
+            "hours": lab.hours or 0,
+            "rate_per_hour": lab.rate_per_hour or 0,
+            "amount": lab.amount or 0
+        } for lab in labours]
+
+        return jsonify({"success": True, "labours": results}), 200
+
+    except Exception as e:
+        log.error(f"[search_all_labours] Error: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to search labours"}), 500

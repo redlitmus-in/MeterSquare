@@ -542,7 +542,8 @@ const MaterialsCatalogPage: React.FC = () => {
                     <input
                       type="number"
                       name="current_stock"
-                      value={formData.current_stock}
+                      value={formData.current_stock || ''}
+                      placeholder="0"
                       onChange={handleInputChange}
                       required
                       min="0"
@@ -555,7 +556,8 @@ const MaterialsCatalogPage: React.FC = () => {
                     <input
                       type="number"
                       name="min_stock_level"
-                      value={formData.min_stock_level}
+                      value={formData.min_stock_level || ''}
+                      placeholder="0"
                       onChange={handleInputChange}
                       min="0"
                       step="0.01"
@@ -567,7 +569,8 @@ const MaterialsCatalogPage: React.FC = () => {
                     <input
                       type="number"
                       name="unit_price"
-                      value={formData.unit_price}
+                      value={formData.unit_price || ''}
+                      placeholder="0.00"
                       onChange={handleInputChange}
                       required
                       min="0"
@@ -665,7 +668,8 @@ const MaterialsCatalogPage: React.FC = () => {
                     <input
                       type="number"
                       name="quantity"
-                      value={disposalFormData.quantity}
+                      value={disposalFormData.quantity || ''}
+                      placeholder="0"
                       onChange={handleDisposalInputChange}
                       required
                       min="0.01"
@@ -679,7 +683,8 @@ const MaterialsCatalogPage: React.FC = () => {
                     <input
                       type="number"
                       name="estimated_value"
-                      value={disposalFormData.estimated_value}
+                      value={disposalFormData.estimated_value || ''}
+                      placeholder="0.00"
                       onChange={handleDisposalInputChange}
                       required
                       min="0"

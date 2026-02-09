@@ -268,10 +268,10 @@ export default function RecordLabourHours() {
                   <input
                     type="number"
                     step="0.5"
-                    value={formData.actual_hours}
+                    value={formData.actual_hours || ''}
                     onChange={(e) => setFormData(prev => ({ ...prev, actual_hours: e.target.value }))}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="Enter actual hours"
+                    placeholder="0"
                     required
                   />
                 </div>
@@ -283,10 +283,10 @@ export default function RecordLabourHours() {
                   <input
                     type="number"
                     step="0.01"
-                    value={formData.actual_rate_per_hour}
+                    value={formData.actual_rate_per_hour || ''}
                     onChange={(e) => setFormData(prev => ({ ...prev, actual_rate_per_hour: e.target.value }))}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="Enter actual rate"
+                    placeholder="0.00"
                     required
                   />
                 </div>

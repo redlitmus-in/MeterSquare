@@ -2078,7 +2078,8 @@ const RequisitionApprovals: React.FC = () => {
                               <input
                                 type="number"
                                 min="1"
-                                value={labour.workers_count || 1}
+                                value={labour.workers_count || ''}
+                                placeholder="1"
                                 onChange={(e) => {
                                   const updated = [...editSelectedLabours];
                                   updated[idx] = { ...updated[idx], workers_count: parseInt(e.target.value) || 1 };

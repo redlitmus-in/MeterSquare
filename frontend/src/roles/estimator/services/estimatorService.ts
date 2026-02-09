@@ -1337,6 +1337,54 @@ async sendClientRevisionToTD(
     }
   }
 
+  // Search all materials globally for autocomplete
+  async searchMaterials(query: string, limit: number = 20): Promise<{
+    material_id: number;
+    material_name: string;
+    brand: string;
+    size: string;
+    specification: string;
+    description: string;
+    default_unit: string;
+    current_market_price: number;
+  }[]> {
+    try {
+      const response = await apiClient.get('/materials/search', {
+        params: { q: query, limit }
+      });
+      if (response.data?.success && response.data?.materials) {
+        return response.data.materials;
+      }
+      return [];
+    } catch (error) {
+      console.error(`Failed to search materials for "${query}":`, error);
+      return [];
+    }
+  }
+
+  // Search all labours globally for autocomplete
+  async searchLabours(query: string, limit: number = 20): Promise<{
+    labour_id: number;
+    labour_role: string;
+    work_type: string;
+    hours: number;
+    rate_per_hour: number;
+    amount: number;
+  }[]> {
+    try {
+      const response = await apiClient.get('/labours/search', {
+        params: { q: query, limit }
+      });
+      if (response.data?.success && response.data?.labours) {
+        return response.data.labours;
+      }
+      return [];
+    } catch (error) {
+      console.error(`Failed to search labours for "${query}":`, error);
+      return [];
+    }
+  }
+
   // Get sub-items for a specific item with materials and labour
   async getItemSubItems(itemId: number): Promise<{
     sub_items: Array<{

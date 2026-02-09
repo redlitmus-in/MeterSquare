@@ -381,7 +381,8 @@ const EditPricesModal: React.FC<EditPricesModalProps> = ({
                                 <div className="flex items-center justify-end gap-2">
                                   <Input
                                     type="number"
-                                    value={material.tempPrice}
+                                    value={material.tempPrice || ''}
+                                    placeholder="0.00"
                                     onChange={(e) => {
                                       setMaterialPrices(prev => prev.map(m =>
                                         m.material_name === material.material_name
