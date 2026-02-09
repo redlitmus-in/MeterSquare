@@ -6113,6 +6113,45 @@ def get_all_master_materials():
         return jsonify({"success": False, "error": "Failed to fetch materials"}), 500
 
 
+def get_all_master_sub_items():
+    """Get all distinct master sub-items for dropdown/autocomplete (no search required).
+    Returns up to 500 distinct sub-items with their latest details.
+    """
+    try:
+        latest_sub_item = db.session.query(
+            func.max(MasterSubItem.sub_item_id).label('max_id')
+        ).filter(
+            MasterSubItem.is_deleted == False,
+            MasterSubItem.sub_item_name.isnot(None),
+            MasterSubItem.sub_item_name != ''
+        ).group_by(
+            func.lower(func.trim(MasterSubItem.sub_item_name))
+        ).subquery()
+
+        sub_items = db.session.query(MasterSubItem).filter(
+            MasterSubItem.sub_item_id.in_(
+                db.session.query(latest_sub_item.c.max_id)
+            )
+        ).order_by(MasterSubItem.sub_item_name).limit(500).all()
+
+        results = []
+        for si in sub_items:
+            results.append({
+                "sub_item_id": si.sub_item_id,
+                "sub_item_name": si.sub_item_name,
+                "description": si.description or '',
+                "size": si.size or '',
+                "brand": si.brand or '',
+                "unit": si.unit or '',
+            })
+
+        return jsonify({"success": True, "sub_items": results}), 200
+
+    except Exception as e:
+        log.error(f"[get_all_master_sub_items] Error: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to fetch sub-items"}), 500
+
+
 def search_all_labours():
     """Search all labours across all BOQs for autocomplete suggestions.
     Returns distinct labour roles with their latest details (work_type, hours, rate).

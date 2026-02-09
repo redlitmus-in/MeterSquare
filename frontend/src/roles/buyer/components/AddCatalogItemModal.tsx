@@ -18,6 +18,15 @@ interface MasterItem {
   description?: string;
 }
 
+interface MasterSubItemDetail {
+  sub_item_id: number;
+  sub_item_name: string;
+  description?: string;
+  size?: string;
+  brand?: string;
+  unit?: string;
+}
+
 interface AddCatalogItemModalProps {
   item?: CatalogItem | CatalogSubItem | null;
   parentItemId?: number;
@@ -59,7 +68,7 @@ const AddCatalogItemModal: React.FC<AddCatalogItemModalProps> = ({
 
   // Master items/sub-items from BOQ tables
   const [masterItems, setMasterItems] = useState<MasterItem[]>([]);
-  const [masterSubItemNames, setMasterSubItemNames] = useState<string[]>([]);
+  const [masterSubItems, setMasterSubItems] = useState<MasterSubItemDetail[]>([]);
   const [masterLoading, setMasterLoading] = useState(false);
   const masterLoadedRef = useRef(false);
 
@@ -110,7 +119,7 @@ const AddCatalogItemModal: React.FC<AddCatalogItemModalProps> = ({
           setMasterItems(response.data?.item_list || []);
         } else {
           const response = await apiClient.get('/raw-materials/master-sub-items');
-          setMasterSubItemNames(response.data?.sub_item_names || []);
+          setMasterSubItems(response.data?.sub_items || []);
         }
       } catch {
         // Silently fail - master data is supplementary
@@ -129,13 +138,13 @@ const AddCatalogItemModal: React.FC<AddCatalogItemModalProps> = ({
     return masterItems.filter(mi => mi.item_name.toLowerCase().includes(term)).slice(0, 10);
   }, [mode, itemName, masterItems]);
 
-  // Filter master sub-item names by search term
+  // Filter master sub-items by search term
   const filteredMasterSubItems = useMemo(() => {
     if (mode !== 'sub-item') return [];
     const term = subItemName.trim().toLowerCase();
-    if (!term) return masterSubItemNames.slice(0, 10);
-    return masterSubItemNames.filter(name => name.toLowerCase().includes(term)).slice(0, 10);
-  }, [mode, subItemName, masterSubItemNames]);
+    if (!term) return masterSubItems.slice(0, 10);
+    return masterSubItems.filter(si => si.sub_item_name.toLowerCase().includes(term)).slice(0, 10);
+  }, [mode, subItemName, masterSubItems]);
 
   // Handle Escape key to close modal
   useEffect(() => {
@@ -384,9 +393,12 @@ const AddCatalogItemModal: React.FC<AddCatalogItemModalProps> = ({
                         <div className="px-3 py-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border-b border-purple-100 sticky top-0 z-10">
                           Master Sub-Items ({filteredMasterSubItems.length})
                         </div>
-                        {filteredMasterSubItems.map((name, idx) => (
-                          <div key={idx} className="px-3 py-2 text-sm border-b border-gray-50 bg-purple-50/30 cursor-pointer hover:bg-purple-100/50" onClick={() => { setSubItemName(name); setShowSuggestions(false); }}>
-                            <span className="font-medium text-gray-800">{name}</span>
+                        {filteredMasterSubItems.map(msi => (
+                          <div key={msi.sub_item_id} className="px-3 py-2 text-sm border-b border-gray-50 bg-purple-50/30 cursor-pointer hover:bg-purple-100/50" onClick={() => { setSubItemName(msi.sub_item_name); if (msi.size) setSize(msi.size); if (msi.brand) setBrand(msi.brand); if (msi.unit) setUnit(msi.unit); setShowSuggestions(false); }}>
+                            <span className="font-medium text-gray-800">{msi.sub_item_name}</span>
+                            {msi.unit && <span className="ml-2 text-xs text-gray-500">{msi.unit}</span>}
+                            {msi.brand && <span className="ml-2 text-xs text-gray-400">{msi.brand}</span>}
+                            {msi.size && <span className="ml-2 text-xs text-gray-400">{msi.size}</span>}
                           </div>
                         ))}
                       </>

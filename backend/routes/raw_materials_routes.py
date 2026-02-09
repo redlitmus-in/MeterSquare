@@ -15,7 +15,7 @@ from controllers.raw_materials_controller import (
     delete_raw_material,
     get_material_categories
 )
-from controllers.boq_controller import search_all_materials, get_all_item, get_all_sub_item_names, get_all_master_materials
+from controllers.boq_controller import search_all_materials, get_all_item, get_all_master_materials, get_all_master_sub_items
 from controllers.auth_controller import jwt_required
 
 # Create blueprint with URL prefix
@@ -161,10 +161,10 @@ def master_sub_items_search_route():
     """
     GET /api/raw-materials/master-sub-items
 
-    Get all master sub-item names (from existing BOQs) for duplicate-check in buyer's catalog.
+    Get all master sub-items with details (from existing BOQs) for duplicate-check in buyer's catalog.
     Accessible to Buyer role (bypasses check_boq_access).
     """
-    return get_all_sub_item_names()
+    return get_all_master_sub_items()
 
 
 @raw_materials_routes.route('/master-materials', methods=['GET'])
