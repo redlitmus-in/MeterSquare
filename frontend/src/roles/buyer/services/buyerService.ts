@@ -1325,7 +1325,8 @@ class BuyerService {
       }>;
       supplier_notes?: string | null;
     }>,
-    submissionGroupId: string
+    submissionGroupId: string,
+    sendNotification: boolean = false
   ): Promise<{
     success: boolean;
     message: string;
@@ -1352,7 +1353,8 @@ class BuyerService {
         `/buyer/purchase/${crId}/create-po-children`,
         {
           vendor_groups: vendorGroups,
-          submission_group_id: submissionGroupId
+          submission_group_id: submissionGroupId,
+          send_notification: sendNotification
         }
       );
 
@@ -1369,6 +1371,31 @@ class BuyerService {
         throw new Error('Purchase not found');
       }
       throw new Error(error.response?.data?.error || 'Failed to create separate purchase orders');
+    }
+  }
+
+  // Send vendor-routed PO children for TD approval (manual notification)
+  async sendForTDApproval(
+    crId: number,
+    poChildIds?: number[]
+  ): Promise<{
+    success: boolean;
+    message: string;
+    po_children_sent: number;
+    po_child_ids: number[];
+  }> {
+    try {
+      const response = await apiClient.post(
+        `/buyer/purchase/${crId}/send-for-approval`,
+        { po_child_ids: poChildIds }
+      );
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to send for approval');
+    } catch (error: any) {
+      console.error('Error sending for approval:', error);
+      throw new Error(error.response?.data?.error || 'Failed to send for approval');
     }
   }
 

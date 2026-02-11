@@ -331,8 +331,10 @@ const ChangeRequestsPage: React.FC = () => {
       if (response.success) {
         console.log('✅ Approved PO Children loaded:', response.po_children?.length || 0, 'items');
         const children = response.po_children || [];
+        // Exclude store-routed POChildren - TD only manages vendor approvals
+        const vendorOnly = children.filter((pc: any) => pc.routing_type !== 'store');
         // Sort by updated_at (latest first), fallback to created_at
-        const sorted = children.sort((a, b) => {
+        const sorted = vendorOnly.sort((a, b) => {
           const dateA = new Date(a.updated_at || a.created_at).getTime();
           const dateB = new Date(b.updated_at || b.created_at).getTime();
           return dateB - dateA; // Descending (newest first)

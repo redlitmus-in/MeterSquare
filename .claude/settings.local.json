@@ -200,7 +200,8 @@
       "Bash(python tests/stress_test.py:*)",
       "Bash(xargs cat:*)",
       "Bash(npx vite build:*)",
-      "Bash(python migrations/create_catalog_items_tables.py:*)"
+      "Bash(python migrations/create_catalog_items_tables.py:*)",
+      "Bash(for f in controllers/buyer/*.py)"
     ],
     "deny": [],
     "ask": []

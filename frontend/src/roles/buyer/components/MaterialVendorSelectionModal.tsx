@@ -1333,14 +1333,22 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           submissionGroupId
         );
 
-        toast.success(response.message || `Sent to TD for approval!`);
+        toast.success(response.message || 'Purchase orders created! Use "Send for Approval" to notify TD.');
 
         // Show individual PO child IDs created
         if (response.po_children && response.po_children.length > 0) {
-          const poChildrenList = response.po_children.map((po: any) =>
-            `${po.formatted_id} (${po.vendor_name})`
-          ).join(', ');
-          toast.info(`Purchase Orders Created: ${poChildrenList}`, { duration: 5000 });
+          const vendorPOs = response.po_children.filter((po: any) => po.routing_type === 'vendor');
+          const storePOs = response.po_children.filter((po: any) => po.routing_type === 'store');
+          if (vendorPOs.length > 0) {
+            const vendorList = vendorPOs.map((po: any) =>
+              `${po.formatted_id} (${po.vendor_name})`
+            ).join(', ');
+            toast.info(`Vendor POs: ${vendorList} - Click "Send for Approval" to notify TD`, { duration: 6000 });
+          }
+          if (storePOs.length > 0) {
+            const storeList = storePOs.map((po: any) => po.formatted_id).join(', ');
+            toast.info(`Store POs: ${storeList} - Routed to M2 Store`, { duration: 5000 });
+          }
         }
 
         // Wait for parent to refetch data before closing modal
@@ -4266,7 +4274,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                 supplier_notes: undefined,  // No purchase-level notes, only per-material notes
                                 materials: materials
                               }],
-                              submissionGroupId
+                              submissionGroupId,
+                              true  // Auto-send TD notification since buyer already confirmed
                             );
 
                             // After POChild is created, save supplier notes for each material that has notes
